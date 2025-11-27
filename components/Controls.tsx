@@ -168,7 +168,8 @@ const Controls: React.FC<ControlsProps> = ({
       submitBtn: "bg-white/10 text-cyan-400 hover:bg-white/20 hover:text-cyan-300 rounded-full",
       resetBtn: "text-gray-400 hover:text-white mr-2 p-1 rounded-full hover:bg-white/10 transition-colors",
       glow: "absolute inset-0 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full blur opacity-20 group-hover:opacity-40",
-      error: "bg-red-900/80 border border-red-500 text-white text-sm px-4 py-2 rounded-lg backdrop-blur-md flex items-center gap-2"
+      error: "bg-red-900/80 border border-red-500 text-white text-sm px-4 py-2 rounded-lg backdrop-blur-md flex items-center gap-2",
+      copyright: "text-white/40 font-sans"
     },
     'retro-green': {
       btn: "bg-black border border-green-400 text-green-300 hover:bg-green-400 hover:text-black rounded-none font-retro",
@@ -182,7 +183,8 @@ const Controls: React.FC<ControlsProps> = ({
       submitBtn: "bg-green-900/40 text-green-300 border-l border-green-400 hover:bg-green-400 hover:text-black rounded-none font-retro uppercase",
       resetBtn: "text-green-300 hover:text-green-100 mr-2 p-1",
       glow: "hidden",
-      error: "bg-black border border-green-400 text-green-300 font-retro px-4 py-2 uppercase blinking"
+      error: "bg-black border border-green-400 text-green-300 font-retro px-4 py-2 uppercase blinking",
+      copyright: "text-green-400/60 font-retro uppercase tracking-widest"
     },
     'retro-amber': {
       btn: "bg-black border border-amber-400 text-amber-300 hover:bg-amber-400 hover:text-black rounded-none font-retro",
@@ -196,7 +198,8 @@ const Controls: React.FC<ControlsProps> = ({
       submitBtn: "bg-amber-900/40 text-amber-300 border-l border-amber-400 hover:bg-amber-400 hover:text-black rounded-none font-retro uppercase",
       resetBtn: "text-amber-300 hover:text-amber-100 mr-2 p-1",
       glow: "hidden",
-      error: "bg-black border border-amber-400 text-amber-300 font-retro px-4 py-2 uppercase blinking"
+      error: "bg-black border border-amber-400 text-amber-300 font-retro px-4 py-2 uppercase blinking",
+      copyright: "text-amber-400/60 font-retro uppercase tracking-widest"
     }
   };
 
@@ -206,7 +209,7 @@ const Controls: React.FC<ControlsProps> = ({
   const displayPlaceholder = skin === 'modern' ? placeholder : placeholder.toUpperCase();
 
   return (
-    <div className="absolute bottom-8 left-0 right-0 z-20 flex flex-col items-center gap-4 pointer-events-none px-4">
+    <div className="absolute bottom-6 left-0 right-0 z-20 flex flex-col items-center gap-4 pointer-events-none px-4">
       {/* Error Message */}
       {searchError && (
         <div className={`pointer-events-auto animate-bounce ${theme.error}`}>
@@ -277,6 +280,11 @@ const Controls: React.FC<ControlsProps> = ({
           </button>
         </div>
       </form>
+      
+      {/* Copyright Text */}
+      <div className={`text-[10px] md:text-xs text-center -mt-1 ${theme.copyright}`}>
+        Terra Explorer by Chris Adkins
+      </div>
     </div>
   );
 };
