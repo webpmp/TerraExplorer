@@ -1,0 +1,5 @@
+{
+  "name": "TerraExplorer AI",
+  "description": "An interactive 3D Earth visualization powered by Gemini. Explore the globe, zoom into locations, and learn detailed information about continents, countries, and cities via AI-generated insights.",
+  "requestFramePermissions": []
+}
