@@ -1,20 +1,50 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# TerraExplorer AI
 
-# Run and deploy your AI Studio app
+TerraExplorer AI is an immersive, interactive 3D Earth visualization application powered by Google's Gemini API. It allows users to explore the globe, discover detailed information about any location, and view real-time news updates, all wrapped in a customizable interface featuring modern and retro aesthetics.
 
-This contains everything you need to run your app locally.
+## Features
 
-View your app in AI Studio: https://ai.studio/apps/drive/1lHb3vdxN9oNdzops7eqGAhZ1lSe5ZAuv
+- **Interactive 3D Globe**: Seamlessly rotate, zoom, and explore a high-fidelity 3D model of the Earth.
+- **AI-Powered Insights**: Click anywhere or search for a location to receive instant, AI-generated encyclopedic summaries, population data, climate info, and fun facts using the Gemini 2.5 Flash model.
+- **Real-Time News**: Fetches live news headlines relevant to the selected location using Google Search Grounding.
+- **Visual Themes (Skins)**:
+  - **Modern**: Sleek, glassmorphism UI with high-resolution textures.
+  - **CRT Green**: Retro monochrome monitor effect with scanlines and pixelated fonts.
+  - **CRT Amber**: Amber monochrome variation for a different retro feel.
+- **Favorites System**: Bookmark interesting locations to revisit them later.
+- **Personal Notes**: Add and save personal notes for specific locations (persisted locally).
+- **Smart Search**: Natural language processing to resolve queries like "Where did the Titanic sink?" to specific geographic coordinates.
 
-## Run Locally
+## Technologies Used
 
-**Prerequisites:**  Node.js
+- **Frontend Framework**: React 19
+- **3D Engine**: Three.js / React Three Fiber (@react-three/fiber, @react-three/drei)
+- **Styling**: Tailwind CSS
+- **AI & Data**: Google GenAI SDK (`@google/genai`)
+- **Icons**: Lucide React
 
+## Setup
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+1. **Environment Variables**:
+   This application requires a Google Gemini API key.
+   Ensure `process.env.API_KEY` is available in your environment configuration.
+
+2. **Installation**:
+   ```bash
+   npm install
+   npm start
+   ```
+
+## Key Components
+
+- **`Earth.tsx`**: Renders the 3D globe, handles interaction events, shaders for retro effects, and marker rendering.
+- **`geminiService.ts`**: Handles all communication with the Google Gemini API, including robust error handling for rate limits (429) and JSON parsing.
+- **`InfoPanel.tsx`**: The main UI overlay displaying location details, news, notable people, and user notes.
+- **`Controls.tsx`**: The HUD for search, zoom controls, and theme toggling.
+
+## Usage
+
+1. **Explore**: Drag to rotate the earth. Scroll to zoom.
+2. **Interact**: Click on any landmass to identify it, or click on specific markers (dots) to see details.
+3. **Search**: Use the search bar to find cities, landmarks, or historical events.
+4. **Customize**: Toggle between Modern and Retro skins using the buttons in the top right.
