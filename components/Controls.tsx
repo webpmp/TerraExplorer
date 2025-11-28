@@ -283,7 +283,7 @@ const Controls: React.FC<ControlsProps> = ({
       
       {/* Copyright Text */}
       <div className={`text-[10px] md:text-xs text-center -mt-1 ${theme.copyright}`}>
-        Terra Explorer by Chris Adkins
+        TerraExplorer by Chris Adkins
       </div>
     </div>
   );

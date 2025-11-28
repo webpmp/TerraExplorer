@@ -1,4 +1,4 @@
-<img src="https://github.com/webpmp/webpmp.github.io/blob/master/terra_explorer_cover.png" alt="Terra Explorer screenshot" width="757" height="676">
+<img src="https://github.com/webpmp/webpmp.github.io/blob/master/TerraExplorer_Modern.png" alt="Terra Explorer Modern screenshot" width="600" height="527">
 
 # TerraExplorer
 
@@ -16,6 +16,9 @@ TerraExplorer is an immersive, interactive 3D Earth visualization application po
 - **Favorites System**: Bookmark interesting locations to revisit them later.
 - **Personal Notes**: Add and save personal notes for specific locations (persisted locally).
 - **Smart Search**: Natural language processing to resolve queries like "Where did the Titanic sink?" to specific geographic coordinates.
+
+<img src="https://github.com/webpmp/webpmp.github.io/blob/master/TerraExplorer_CRT_G.png" alt="Terra Explorer CRT-G screenshot" width="300" height="262">
+<img src="https://github.com/webpmp/webpmp.github.io/blob/master/TerraExplorer_CRT_A.png" alt="Terra Explorer CRT-A screenshot" width="300" height="263">
 
 ## Technologies Used
 
