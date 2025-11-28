@@ -1,6 +1,6 @@
-# TerraExplorer
-
 <img src="https://github.com/webpmp/webpmp.github.io/blob/master/terra_explorer_cover.png" alt="Terra Explorer screenshot" width="757" height="676">
+
+# TerraExplorer
 
 TerraExplorer is an immersive, interactive 3D Earth visualization application powered by Google's Gemini API. It allows users to explore the globe, discover detailed information about any location, and view real-time news updates, all wrapped in a customizable interface featuring modern and retro aesthetics.
 
