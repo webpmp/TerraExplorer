@@ -8,7 +8,54 @@ import Earth from './components/Earth';
 import InfoPanel from './components/InfoPanel';
 import Controls from './components/Controls';
 import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType } from './types';
-import { resolveLocationQuery, getInfoFromCoordinates, getNearbyPlaces, getMoreNews } from './services/geminiService';
+import { resolveLocationQuery, getInfoFromCoordinates, getNearbyPlaces, getMoreNews, fetchLiveNews } from './services/geminiService';
+
+// Fix for React Three Fiber elements not being recognized in JSX
+declare global {
+  namespace JSX {
+    interface IntrinsicElements {
+      group: any;
+      mesh: any;
+      sphereGeometry: any;
+      meshBasicMaterial: any;
+      meshPhongMaterial: any;
+      meshStandardMaterial: any;
+      primitive: any;
+      directionalLight: any;
+      ambientLight: any;
+      pointLight: any;
+      object3D: any;
+    }
+  }
+}
+
+declare module 'react' {
+  namespace JSX {
+    interface IntrinsicElements {
+      group: any;
+      mesh: any;
+      sphereGeometry: any;
+      meshBasicMaterial: any;
+      meshPhongMaterial: any;
+      meshStandardMaterial: any;
+      primitive: any;
+      directionalLight: any;
+      ambientLight: any;
+      pointLight: any;
+      object3D: any;
+    }
+  }
+}
+
+// Helper to convert Lat/Lng to 3D Cartesian coordinates (Local Space)
+const latLngToVector3 = (lat: number, lng: number, radius: number = 1) => {
+  const phi = (90 - lat) * (Math.PI / 180);
+  const theta = (lng + 180) * (Math.PI / 180);
+  const x = -(radius * Math.sin(phi) * Math.cos(theta));
+  const z = (radius * Math.sin(phi) * Math.sin(theta));
+  const y = (radius * Math.cos(phi));
+  return new THREE.Vector3(x, y, z);
+};
 
 // Component to position the sun (directional light) at the camera's position
 // ensuring the user always sees the "day" side of the earth.
@@ -54,6 +101,32 @@ const RotationManager: React.FC<{
   return null;
 };
 
+// Visibility Tracker: checks if the current selected location is visible to the camera
+const VisibilityTracker: React.FC<{ 
+  location: LocationInfo | null, 
+  onVisibilityChange: (visible: boolean) => void 
+}> = ({ location, onVisibilityChange }) => {
+  useFrame(({ camera }) => {
+    if (!location || !location.coordinates) {
+        return;
+    }
+
+    // Calculate Visibility
+    const vec = latLngToVector3(location.coordinates.lat, location.coordinates.lng);
+    const cameraDir = camera.position.clone().normalize();
+    const dot = vec.clone().normalize().dot(cameraDir);
+    
+    // Horizon culling approximation
+    // Point visible if dot > 1/dist approximately (for sphere R=1)
+    const dist = camera.position.length();
+    // Safety buffer of 0.05 to ensure it's not flickering on the exact edge
+    const limit = (1 / dist) - 0.05; 
+    
+    onVisibilityChange(dot > limit);
+  });
+  return null;
+};
+
 const App: React.FC = () => {
   const [locationInfo, setLocationInfo] = useState<LocationInfo | null>(null);
   const [markers, setMarkers] = useState<MapMarker[]>([]);
@@ -61,12 +134,24 @@ const App: React.FC = () => {
   const [showFavorites, setShowFavorites] = useState(false);
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isNewsFetching, setIsNewsFetching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isInteracting, setIsInteracting] = useState(false); // Interaction with Earth mesh
   const [isDragging, setIsDragging] = useState(false); // Interaction with Camera Controls
   const [autoRotate, setAutoRotate] = useState(true);
   const [skin, setSkin] = useState<SkinType>('modern');
   
+  // Track visibility of selected marker to pause/resume suggestions
+  const [isMarkerVisible, setIsMarkerVisible] = useState(true);
+  const isMarkerVisibleRef = useRef(true);
+  
+  const handleVisibilityChange = useCallback((visible: boolean) => {
+    if (isMarkerVisibleRef.current !== visible) {
+      isMarkerVisibleRef.current = visible;
+      setIsMarkerVisible(visible);
+    }
+  }, []);
+
   const cameraControlsRef = useRef<CameraControls>(null);
   const earthRef = useRef<THREE.Mesh>(null);
 
@@ -91,16 +176,6 @@ const App: React.FC = () => {
     localStorage.setItem('terraexplorer_favorites', JSON.stringify(favorites));
   }, [favorites]);
 
-  // Helper to convert Lat/Lng to 3D Cartesian coordinates (Local Space)
-  const latLngToVector3 = (lat: number, lng: number, radius: number = 1) => {
-    const phi = (90 - lat) * (Math.PI / 180);
-    const theta = (lng + 180) * (Math.PI / 180);
-    const x = -(radius * Math.sin(phi) * Math.cos(theta));
-    const z = (radius * Math.sin(phi) * Math.sin(theta));
-    const y = (radius * Math.cos(phi));
-    return new THREE.Vector3(x, y, z);
-  };
-
   const handleGlobeClick = useCallback(async (lat: number, lng: number, point: THREE.Vector3) => {
     // When clicking empty space on the globe, fetch nearby markers but don't show full details yet
     setIsLoading(true);
@@ -122,7 +197,20 @@ const App: React.FC = () => {
       );
     }
 
-    const newMarkers = await getNearbyPlaces(lat, lng);
+    let newMarkers = await getNearbyPlaces(lat, lng);
+    
+    // Fallback if no nearby places found (e.g. remote area, ocean, or API quota)
+    // Ensures the user always sees a marker at the clicked location
+    if (newMarkers.length === 0) {
+       newMarkers = [{
+         id: `fallback-${Date.now()}`,
+         name: "Analyzed Location", // Generic name, will be resolved to real name upon click/load
+         lat: lat,
+         lng: lng,
+         populationClass: 'medium'
+       }];
+    }
+    
     setMarkers(newMarkers); // Replace with new markers
     setIsLoading(false);
   }, []);
@@ -148,6 +236,7 @@ const App: React.FC = () => {
     });
 
     setIsLoading(true);
+    setIsNewsFetching(false);
 
     // Zoom in closer to the marker
     if (cameraControlsRef.current) {
@@ -159,19 +248,35 @@ const App: React.FC = () => {
         );
     }
 
+    // Step 1: Get Main Info (Fast)
     const data = await getInfoFromCoordinates(marker.lat, marker.lng);
+    
+    // Update State with Main Info
     setLocationInfo(data);
     setIsLoading(false);
+
+    // Step 2: Fetch News (Progressive)
+    if (data && data.name) {
+       setIsNewsFetching(true);
+       const news = await fetchLiveNews(data.name);
+       setLocationInfo(prev => {
+         if (!prev || prev.name !== data.name) return prev; // Guard against stale updates
+         return { ...prev, news };
+       });
+       setIsNewsFetching(false);
+    }
   }, []);
 
   const handleSearch = async (query: string) => {
     setIsLoading(true);
+    setIsNewsFetching(false);
     setLocationInfo(null);
     setSearchError(null);
     setAutoRotate(false); // Stop rotation
     setMarkers([]); // Clear markers on new search
     setSelectedMarkerId(null);
 
+    // Step 1: Resolve Location (Fast - No News)
     const result = await resolveLocationQuery(query);
     
     if (result && result.locationInfo && result.locationInfo.coordinates) {
@@ -188,6 +293,7 @@ const App: React.FC = () => {
       setMarkers([searchMarker]);
       setSelectedMarkerId(searchMarker.id);
       setLocationInfo(result.locationInfo);
+      setIsLoading(false); // Show info immediately
 
       // 2. Calculate Positions
       // Ensure target distance doesn't get too close to minDistance (1.2)
@@ -210,11 +316,23 @@ const App: React.FC = () => {
           );
         }
       }
+
+      // Step 3: Fetch News (Progressive)
+      if (result.locationInfo.name) {
+        setIsNewsFetching(true);
+        const news = await fetchLiveNews(result.locationInfo.name);
+        setLocationInfo(prev => {
+          if (!prev || prev.name !== result.locationInfo.name) return prev;
+          return { ...prev, news };
+        });
+        setIsNewsFetching(false);
+      }
+
     } else {
       // Handle failed search
       setSearchError(`Could not find location: "${query}"`);
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   const handleZoomIn = () => {
@@ -233,6 +351,7 @@ const App: React.FC = () => {
   const handleClosePanel = () => {
     setLocationInfo(null);
     setSelectedMarkerId(null);
+    setIsNewsFetching(false);
   };
 
   const handleToggleFavorite = () => {
@@ -293,6 +412,10 @@ const App: React.FC = () => {
     }
   };
 
+  // Determine if we should pause search suggestions
+  // Paused if a location is selected AND it is currently visible
+  const shouldPauseSuggestions = !!locationInfo && isMarkerVisible;
+
   return (
     <div className={`relative w-full h-screen bg-black overflow-hidden`}>
       {/* 3D Scene */}
@@ -324,6 +447,11 @@ const App: React.FC = () => {
           selectedMarkerId={selectedMarkerId}
         />
         
+        <VisibilityTracker 
+            location={locationInfo} 
+            onVisibilityChange={handleVisibilityChange} 
+        />
+
         <CameraControls 
           ref={cameraControlsRef} 
           minDistance={1.2} 
@@ -388,7 +516,8 @@ const App: React.FC = () => {
 
       <InfoPanel 
         info={locationInfo} 
-        isLoading={isLoading} 
+        isLoading={isLoading}
+        isNewsFetching={isNewsFetching}
         onClose={handleClosePanel} 
         skin={skin}
         isFavorite={isCurrentLocationFavorite}
@@ -405,6 +534,7 @@ const App: React.FC = () => {
         skin={skin}
         showFavorites={showFavorites}
         onToggleShowFavorites={() => setShowFavorites(!showFavorites)}
+        paused={shouldPauseSuggestions}
       />
     </div>
   );

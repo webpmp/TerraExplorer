@@ -11,6 +11,7 @@ interface InfoPanelProps {
   info: LocationInfo | null;
   onClose: () => void;
   isLoading: boolean;
+  isNewsFetching: boolean;
   skin: SkinType;
   isFavorite: boolean;
   onToggleFavorite: () => void;
@@ -142,7 +143,7 @@ const NotablePersonCard: React.FC<{
           >
               {item.name}
           </a>
-          <p className={`${subtextSize} mt-0.5 ${theme.bodyText} line-clamp-2`}>{item.significance}</p>
+          <p className={`${subtextSize} mt-0.5 ${theme.bodyText} line-clamp-4`}>{item.significance}</p>
       </div>
       <div className="opacity-0 group-hover/item:opacity-100 transition-opacity shrink-0 flex items-start">
          <CopyButton text={`${item.name} - ${item.significance}`} skin={skin} />
@@ -151,9 +152,9 @@ const NotablePersonCard: React.FC<{
   );
 };
 
-const InfoPanel: React.FC<InfoPanelProps> = ({ info, onClose, isLoading, skin, isFavorite, onToggleFavorite, onLoadMoreNews }) => {
+const InfoPanel: React.FC<InfoPanelProps> = ({ info, onClose, isLoading, isNewsFetching, skin, isFavorite, onToggleFavorite, onLoadMoreNews }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'news' | 'notable'>('overview');
-  const [isNewsLoading, setIsNewsLoading] = useState(false);
+  const [isMoreNewsLoading, setIsMoreNewsLoading] = useState(false);
   const [wikiImage, setWikiImage] = useState<string | null>(null);
   const [expandedImage, setExpandedImage] = useState(false);
 
@@ -166,6 +167,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ info, onClose, isLoading, skin, i
   
   // Ref to track if we've initialized the expanded state for the current location
   const locationInitializedRef = useRef<string | null>(null);
+
+  // Clean up wiki image when location changes to prevent stale images
+  useEffect(() => {
+    setWikiImage(null);
+  }, [info?.name]);
 
   // Load Notes
   useEffect(() => {
@@ -272,9 +278,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ info, onClose, isLoading, skin, i
   }, [info?.name, info?.population]);
 
   const handleLoadMore = async () => {
-    setIsNewsLoading(true);
+    setIsMoreNewsLoading(true);
     await onLoadMoreNews();
-    setIsNewsLoading(false);
+    setIsMoreNewsLoading(false);
   };
 
   // Theme configuration
@@ -436,10 +442,10 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ info, onClose, isLoading, skin, i
                 <div className="space-y-5 animate-in fade-in duration-300">
                     <div className="relative group/desc">
                       <p className={`leading-relaxed ${bodySize} font-medium ${theme.bodyText} pr-8`}>
-                      {info.description}
+                      {info.description || "Description unavailable."}
                       </p>
                       <div className="absolute top-0 right-0 opacity-0 group-hover/desc:opacity-100 transition-opacity">
-                        <CopyButton text={info.description} skin={skin} />
+                        <CopyButton text={info.description || ""} skin={skin} />
                       </div>
                     </div>
 
@@ -515,38 +521,47 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ info, onClose, isLoading, skin, i
                 )}
 
                 {activeTab === 'news' && (
-                <div className="space-y-4 animate-in fade-in duration-300">
-                    {info.news && info.news.length > 0 ? (
-                    info.news.map((item, idx) => {
-                        // Safety check for news item
-                        if (!item) return null;
-                        const linkUrl = item.url || `https://www.google.com/search?q=${encodeURIComponent((item.headline || "") + " " + info.name)}`;
-                        return (
-                            <div key={idx} className={`p-3 ${theme.card} group/news relative`}>
-                                <div className="pr-6">
-                                    <a href={linkUrl} target="_blank" rel="noopener noreferrer" className="block">
-                                        <div className="flex justify-between items-start gap-2">
-                                            <h4 className={`${bodySize} font-bold mb-1 ${theme.bodyText} group-hover/news:underline`}>{item.headline || "Untitled"}</h4>
-                                            <ExternalLink size={isRetro ? 14 : 12} className={`opacity-50 shrink-0 ${theme.icon}`} />
-                                        </div>
-                                        <span className={`${smallTextSize} uppercase opacity-70 ${theme.subtext}`}>Source: {item.source || "Unknown"}</span>
-                                    </a>
-                                </div>
-                                <div className="absolute top-2 right-2 opacity-0 group-hover/news:opacity-100 transition-opacity z-10">
-                                    <CopyButton text={`${item.headline} - ${item.url || "Source: " + item.source}`} skin={skin} />
-                                </div>
+                  <div className="space-y-4 animate-in fade-in duration-300">
+                    {isNewsFetching && !isMoreNewsLoading && info.news.length === 0 ? (
+                       <div className="flex flex-col items-center justify-center py-8 opacity-50 animate-pulse">
+                          <Loader2 size={24} className="animate-spin mb-2 text-current" />
+                          <p className={smallTextSize}>Intercepting live signals...</p>
+                       </div>
+                    ) : info.news && info.news.length > 0 ? (
+                       <>
+                         {info.news.map((item, idx) => (
+                            <div key={idx} className={`p-4 ${theme.card} flex flex-col gap-2 group/news`}>
+                               <div className="flex justify-between items-start gap-2">
+                                 <span className={`text-[10px] uppercase tracking-wider opacity-70 ${theme.subtext}`}>{item.source}</span>
+                                 <a href={item.url} target="_blank" rel="noopener noreferrer" className="opacity-0 group-hover/news:opacity-100 transition-opacity p-1 hover:bg-white/10 rounded">
+                                    <ExternalLink size={14} className={theme.icon} />
+                                 </a>
+                               </div>
+                               <a href={item.url} target="_blank" rel="noopener noreferrer" className={`${bodySize} font-bold leading-tight ${theme.headerTitle} hover:underline decoration-1 underline-offset-2`}>
+                                 {item.headline}
+                               </a>
+                               {item.summary && (
+                                  <p className={`${subtextSize} ${theme.bodyText} opacity-90 leading-relaxed`}>
+                                    {item.summary}
+                                  </p>
+                               )}
                             </div>
-                        );
-                    })
+                         ))}
+                         <button 
+                           onClick={handleLoadMore} 
+                           disabled={isMoreNewsLoading}
+                           className={`w-full py-3 mt-2 transition-colors ${theme.loadMoreBtn}`}
+                         >
+                           {isMoreNewsLoading ? "Scanning..." : "Load More Signals"}
+                         </button>
+                       </>
                     ) : (
-                    <p className={`${bodySize} italic ${theme.bodyText}`}>No recent news for {info.name}.</p>
+                       <div className="text-center py-10 opacity-60">
+                          <Newspaper size={32} className="mx-auto mb-2 opacity-50" />
+                          <p className={theme.bodyText}>No recent transmissions found.</p>
+                       </div>
                     )}
-                    {info.news && info.news.length > 0 && (
-                        <button onClick={handleLoadMore} disabled={isNewsLoading} className={`w-full py-3 flex items-center justify-center gap-2 transition-all disabled:opacity-50 ${theme.loadMoreBtn}`}>
-                            {isNewsLoading ? <Loader2 size={16} className="animate-spin" /> : "MORE NEWS"}
-                        </button>
-                    )}
-                </div>
+                  </div>
                 )}
 
                 {activeTab === 'notable' && (

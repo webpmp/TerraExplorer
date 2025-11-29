@@ -17,6 +17,7 @@ export interface NewsItem {
   headline: string;
   source: string;
   url?: string;
+  summary?: string;
 }
 
 export interface NotableItem {
@@ -59,3 +60,40 @@ export interface FavoriteLocation {
 }
 
 export type SkinType = 'modern' | 'retro-green' | 'retro-amber';
+
+// Fix for React Three Fiber elements not being recognized in JSX
+declare global {
+  namespace JSX {
+    interface IntrinsicElements {
+      group: any;
+      mesh: any;
+      sphereGeometry: any;
+      meshBasicMaterial: any;
+      meshPhongMaterial: any;
+      meshStandardMaterial: any;
+      primitive: any;
+      directionalLight: any;
+      ambientLight: any;
+      pointLight: any;
+      object3D: any;
+    }
+  }
+}
+
+declare module 'react' {
+  namespace JSX {
+    interface IntrinsicElements {
+      group: any;
+      mesh: any;
+      sphereGeometry: any;
+      meshBasicMaterial: any;
+      meshPhongMaterial: any;
+      meshStandardMaterial: any;
+      primitive: any;
+      directionalLight: any;
+      ambientLight: any;
+      pointLight: any;
+      object3D: any;
+    }
+  }
+}

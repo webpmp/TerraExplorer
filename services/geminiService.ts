@@ -51,7 +51,8 @@ const mainInfoSchemaConfig = {
       properties: {
         lat: { type: Type.NUMBER },
         lng: { type: Type.NUMBER },
-      }
+      },
+      required: ["lat", "lng"]
     },
     description: { type: Type.STRING },
     population: { type: Type.STRING },
@@ -69,22 +70,32 @@ const mainInfoSchemaConfig = {
           name: { type: Type.STRING },
           significance: { type: Type.STRING },
           category: { type: Type.STRING }
-        }
+        },
+        required: ["name", "significance"]
       }
     }
-  }
+  },
+  required: ["name", "type", "coordinates", "description", "population", "climate", "funFacts", "notable"]
 };
 
 // Helper to cleanup JSON string before parsing
 const cleanJsonString = (str: string): string => {
   if (!str) return "";
-  // Remove markdown code blocks if they are wrapping the whole string
-  let cleaned = str.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
+  let cleaned = str;
+  
+  // Aggressively remove markdown code blocks markers anywhere in the string
+  // This helps if the model puts text before the block and we extracted the whole thing
+  cleaned = cleaned.replace(/```json/gi, '');
+  cleaned = cleaned.replace(/```/g, '');
+  
+  // Remove literal ellipses "..." which models sometimes use to indicate "more items"
+  // This causes invalid JSON.
+  cleaned = cleaned.replace(/\.\.\./g, '');
   
   // Remove trailing commas before closing braces/brackets (common model error)
   cleaned = cleaned.replace(/,(\s*[\]}])/g, '$1');
   
-  return cleaned;
+  return cleaned.trim();
 };
 
 // Helper to attempt repairing truncated JSON
@@ -98,7 +109,6 @@ const repairTruncatedJson = (jsonStr: string): string => {
   fixed = fixed.replace(/,\s*$/, '');
   
   // Check if we are inside a string (odd number of non-escaped quotes)
-  // This is a naive check but works for most simple JSON interruptions
   const quoteCount = (fixed.match(/"/g) || []).length - (fixed.match(/\\"/g) || []).length;
   if (quoteCount % 2 !== 0) {
       // Close the string
@@ -111,11 +121,10 @@ const repairTruncatedJson = (jsonStr: string): string => {
   const openBrackets = (fixed.match(/\[/g) || []).length;
   const closeBrackets = (fixed.match(/\]/g) || []).length;
 
-  // Append missing closing tokens in correct order (naive assumption: just close them all)
-  // Usually prompt output is roughly balanced so we just need to close the stack.
-  
-  for (let i = 0; i < (openBrackets - closeBrackets); i++) fixed += ']';
+  // Append missing closing tokens. 
+  // Heuristic: Close objects '}' before arrays ']' because usually we are deeper in an object.
   for (let i = 0; i < (openBraces - closeBraces); i++) fixed += '}';
+  for (let i = 0; i < (openBrackets - closeBrackets); i++) fixed += ']';
   
   return fixed;
 };
@@ -123,40 +132,26 @@ const repairTruncatedJson = (jsonStr: string): string => {
 // Helper to safely parse JSON that might be wrapped in markdown or truncated
 const safeJsonParse = (text: string) => {
   if (!text) return null;
-  const cleaned = cleanJsonString(text);
 
-  // 1. Try parsing directly
-  try {
-    return JSON.parse(cleaned);
-  } catch (e) {
-    // Continue
-  }
-
-  // 2. Try extracting from markdown code blocks using regex
-  const match = text.match(/```(?:json)?([\s\S]*?)```/);
-  if (match) {
+  // 1. Try extracting from markdown code blocks using regex first (most reliable if present)
+  // We use [\s\S]*? to match across newlines
+  const markdownMatch = text.match(/```(?:json)?([\s\S]*?)```/);
+  if (markdownMatch) {
     try {
-      const innerCleaned = cleanJsonString(match[1]);
+      const innerCleaned = cleanJsonString(markdownMatch[1]);
       return JSON.parse(innerCleaned);
-    } catch (e2) {
+    } catch (e) {
        // Try repairing the inner content
        try {
-         return JSON.parse(repairTruncatedJson(cleanJsonString(match[1])));
-       } catch (e2b) {
-         // Continue
+         return JSON.parse(repairTruncatedJson(cleanJsonString(markdownMatch[1])));
+       } catch (e2) {
+         // Continue to other methods
        }
     }
   }
 
-  // 3. Try repairing the main string
-  try {
-    const repaired = repairTruncatedJson(cleaned);
-    return JSON.parse(repaired);
-  } catch (e3) {
-    // Continue
-  }
-
-  // 4. Brute force: find the first '{' or '[' and the last '}' or ']'
+  // 2. Brute force: find the first '{' or '[' and the last '}' or ']'
+  // This handles cases where there is conversational text BEFORE the JSON but no markdown blocks
   const firstOpenBrace = text.indexOf('{');
   const firstOpenBracket = text.indexOf('[');
   let startIdx = -1;
@@ -178,20 +173,27 @@ const safeJsonParse = (text: string) => {
     
     try {
       return JSON.parse(cleanJsonString(jsonStr));
-    } catch (e4) {
+    } catch (e) {
        // Try repairing this substring
        try {
          return JSON.parse(repairTruncatedJson(cleanJsonString(jsonStr)));
-       } catch (e4b) {
+       } catch (e2) {
          // Fail silently
        }
     }
   }
-  
-  // 5. Heuristic: If text is a conversational refusal, explanation, or just doesn't look like JSON, suppress error.
+
+  // 3. Last resort: Try parsing the whole cleaned string
+  const cleaned = cleanJsonString(text);
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {
+    // Continue
+  }
+
+  // 4. Heuristic: If text is a conversational refusal, suppress error.
   const lower = text.toLowerCase().trim();
   if (
-      startIdx === -1 || // No braces/brackets found at all
       lower.startsWith("i am") || 
       lower.startsWith("i cannot") || 
       lower.startsWith("sorry") || 
@@ -209,7 +211,7 @@ const safeJsonParse = (text: string) => {
 };
 
 // Separate function to fetch news using Google Search Grounding
-const fetchLiveNews = async (query: string, exclude: string[] = []): Promise<NewsItem[]> => {
+export const fetchLiveNews = async (query: string, exclude: string[] = []): Promise<NewsItem[]> => {
   try {
     const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
     
@@ -221,34 +223,33 @@ const fetchLiveNews = async (query: string, exclude: string[] = []): Promise<New
 
     const prompt = `
       Current Date: ${currentDate}
-      Task: Find ${count} distinct news headlines related to: "${query}".
+      Task: Find ${count} distinct news articles related to: "${query}".
       
       Priority: 
       1. Live/Recent news (last 48 hours).
-      2. If no recent news is found, find relevant stories from the last month.
-      3. If no stories exist at all, return an empty array [].
+      2. If no breaking news is found, find interesting recent feature stories, travel updates, or cultural articles about this location from the last few months.
+      3. If absolutely no stories exist, return an empty array [].
       
-      ${exclude.length > 0 ? `IMPORTANT: The user has already seen stories with these headlines: [${excludeList}]. You MUST find DIFFERENT stories or different angles.` : ''}
+      ${exclude.length > 0 ? `IMPORTANT: The user has already seen stories with these headlines: [${excludeList}]. You MUST find DIFFERENT stories.` : ''}
       
       Instructions:
-      1. Use the Google Search tool to find real, live articles. Search for "${query} news".
+      1. Use the Google Search tool to find real articles. Search for "${query} news" or "${query} recent stories".
       2. Return a strict JSON array of objects.
       3. For 'url', use the actual link found in the search results.
-      4. Ensure all string values are properly escaped.
-      5. Do NOT use trailing commas.
-      6. IF NO NEWS IS FOUND, OR IF THE SEARCH FAILS, return exactly: [].
-      7. DO NOT provide explanations, apologies, or conversational text.
+      4. **If the headline is in a foreign language, TRANSLATE it into English.**
+      5. 'summary': A short, engaging 1-2 sentence summary of what the article is about.
+      6. Ensure all string values are properly escaped.
+      7. Output ONLY the JSON array.
       
       Format:
       [
         {
           "headline": "Headline text",
+          "summary": "Short summary of the article.",
           "source": "News Source Name",
           "url": "Full URL to the article"
         }
       ]
-      
-      Do not use markdown. Just the raw JSON array.
     `;
 
     const response = await generateContentWithRetry({
@@ -273,6 +274,7 @@ const fetchLiveNews = async (query: string, exclude: string[] = []): Promise<New
 
     return items.map((n: any) => ({
       headline: n.headline || "News Update",
+      summary: n.summary || "",
       source: n.source || "Unknown",
       url: n.url || ""
     }));
@@ -292,7 +294,8 @@ const fetchLiveNews = async (query: string, exclude: string[] = []): Promise<New
         return [{
             headline: "News unavailable due to high traffic.",
             source: "System",
-            url: "#"
+            url: "#",
+            summary: "Please try again in a few moments."
         }];
     }
       
@@ -315,10 +318,13 @@ export const resolveLocationQuery = async (query: string): Promise<SearchResult 
       2. Return a JSON object containing the location details.
       3. 'suggestedZoom': 0-10 scale. 8-10 for specific landmarks/cities, 4-6 for countries.
       4. 'description': Explain specifically WHY this location answers their question, then provide context. Keep it under 100 words.
-      5. 'coordinates': Precise decimal lat/lng.
-      6. 'notable': List 3 notable people associated with this place.
-      7. 'type': Choose ONE from: Continent, Country, State, City, Ocean, Point of Interest. Do not use random numbers.
-      8. Do NOT include any conversational text or markdown. Output ONLY valid JSON.
+      5. 'population': Recent population estimate (e.g. "8.4 million").
+      6. 'climate': Köppen climate classification (e.g. "Tropical Rainforest").
+      7. 'funFacts': List 3 interesting facts about the location.
+      8. 'coordinates': Precise decimal lat/lng.
+      9. 'notable': List 3 notable people associated with this place. For 'significance', provide a descriptive sentence (approx 100-120 chars).
+      10. 'type': Choose ONE from: Continent, Country, State, City, Ocean, Point of Interest. Do not use random numbers.
+      11. CRITICAL: Do NOT include any conversational text, pleasantries, or markdown. Output ONLY valid JSON.
       
       Output strictly valid JSON. Escape all double quotes.
     `;
@@ -345,8 +351,14 @@ export const resolveLocationQuery = async (query: string): Promise<SearchResult 
         console.warn("Resolved location missing valid coordinates");
     }
 
-    const newsItems = await fetchLiveNews(data.name);
-    data.news = newsItems;
+    // Default values if missing
+    if (!data.description) data.description = "Detailed description unavailable for this location.";
+    if (!data.funFacts) data.funFacts = [];
+    if (!data.notable) data.notable = [];
+    if (!data.type) data.type = LocationType.POI;
+
+    // Decoupled: Return data without news first for progressive loading
+    data.news = [];
 
     return {
       locationInfo: data,
@@ -375,10 +387,10 @@ export const getInfoFromCoordinates = async (lat: number, lng: number): Promise<
       - climate: Köppen climate classification.
       - funFacts: 3 interesting facts.
       - coordinates: The exact input coordinates {lat: ${lat}, lng: ${lng}}
-      - notable: 3 notable people.
+      - notable: 3 notable people. For 'significance', provide a descriptive sentence (approx 100-120 chars).
       
-      Strictly conform to JSON syntax. Do not hallucinate repeating strings of numbers.
-      Do not include any text outside the JSON object.
+      CRITICAL: Strictly conform to JSON syntax. Do not hallucinate repeating strings of numbers.
+      Do NOT include any conversational text (e.g. "Here is the JSON"). Output ONLY the JSON object.
     `;
 
     const mainRequest = generateContentWithRetry({
@@ -416,14 +428,15 @@ export const getInfoFromCoordinates = async (lat: number, lng: number): Promise<
     if (!data.coordinates || typeof data.coordinates.lat !== 'number') {
         data.coordinates = { lat, lng };
     }
+    
+    // Ensure text fields are populated
+    if (!data.description) data.description = "Detailed description unavailable for this location.";
+    if (!data.funFacts) data.funFacts = [];
+    if (!data.notable) data.notable = [];
+    if (!data.type) data.type = LocationType.POI;
 
-    // Step 2: Fetch Live News
-    if (data.name && data.name !== "Unknown Location") {
-        const newsItems = await fetchLiveNews(data.name);
-        data.news = newsItems;
-    } else {
-        data.news = [];
-    }
+    // Decoupled: Return data without news first for progressive loading
+    data.news = [];
 
     return data;
 
@@ -460,16 +473,20 @@ export const getNearbyPlaces = async (lat: number, lng: number): Promise<MapMark
       I am looking at a globe at coordinates ${lat}, ${lng}.
       Identify 5-8 major cities, landmarks, or significant places within a 500km radius of this point.
       
+      Important:
+      - If the area is remote (e.g. desert, ocean, tundra), return the single nearest geographic feature or settlement, or the region name itself as a result.
+      - Ensure at least one result is returned if possible.
+
       Return a strict JSON array of objects with this schema:
       {
         "id": "unique-string",
-        "name": "City Name",
+        "name": "Place Name",
         "lat": number,
         "lng": number,
         "populationClass": "large" | "medium" | "small"
       }
 
-      Do not wrap in markdown. No extra whitespace. Just the raw JSON array.
+      CRITICAL: Do not wrap in markdown. No extra whitespace. Just the raw JSON array.
     `;
 
     const response = await generateContentWithRetry({

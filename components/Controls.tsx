@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Search, ZoomIn, ZoomOut, Loader2, Star, AlertTriangle, X } from 'lucide-react';
 import { SkinType } from '../types';
 
@@ -12,6 +12,7 @@ interface ControlsProps {
   skin: SkinType;
   showFavorites: boolean;
   onToggleShowFavorites: () => void;
+  paused: boolean;
 }
 
 // Significantly expanded data for suggestions
@@ -118,27 +119,38 @@ const Controls: React.FC<ControlsProps> = ({
   searchError,
   skin, 
   showFavorites, 
-  onToggleShowFavorites 
+  onToggleShowFavorites,
+  paused
 }) => {
   const [query, setQuery] = useState("");
   const [placeholder, setPlaceholder] = useState("Search location...");
   const [isFocused, setIsFocused] = useState(false);
+  const prevPausedRef = useRef(paused);
 
   // Initialize placeholder on mount
   useEffect(() => {
     setPlaceholder(generateSuggestion());
   }, []);
 
-  // Dynamic Suggestion Logic - Pauses when focused
+  // Handle immediate refresh when unpausing
   useEffect(() => {
-    if (isFocused) return;
+    if (prevPausedRef.current && !paused && !isFocused) {
+       // If we were paused and now we are not, refresh immediately
+       setPlaceholder(generateSuggestion());
+    }
+    prevPausedRef.current = paused;
+  }, [paused, isFocused]);
+
+  // Dynamic Suggestion Logic - Pauses when focused or explicitly paused by parent
+  useEffect(() => {
+    if (isFocused || paused) return;
 
     const interval = setInterval(() => {
       setPlaceholder(generateSuggestion());
     }, 8000); // Change every 8 seconds
 
     return () => clearInterval(interval);
-  }, [isFocused]);
+  }, [isFocused, paused]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
