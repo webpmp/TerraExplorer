@@ -1,6 +1,6 @@
 <img src="https://github.com/webpmp/webpmp.github.io/blob/master/TerraExplorer_Modern_v2.png" alt="Terra Explorer Modern screenshot" width="768" height="616">
 
-<img src="https://github.com/webpmp/webpmp.github.io/blob/master/TerraExplorer_Modern_small.png" alt="Terra Explorer CRT-G screenshot" width="200" height="176">&nbsp;<img src="https://github.com/webpmp/webpmp.github.io/blob/master/TerraExplorer_CRT_G.png" alt="Terra Explorer CRT-G screenshot" width="200" height="175">&nbsp;<img src="https://github.com/webpmp/webpmp.github.io/blob/master/TerraExplorer_CRT_A.png" alt="Terra Explorer CRT-A screenshot" width="200" height="175">
+<img src="https://github.com/webpmp/webpmp.github.io/blob/master/TerraExplorer_Modern_v2_small.jpg" alt="Terra Explorer CRT-G screenshot" width="200" height="160">&nbsp;<img src="https://github.com/webpmp/webpmp.github.io/blob/master/TerraExplorer_CRT_G.png" alt="Terra Explorer CRT-G screenshot" width="200" height="175">&nbsp;<img src="https://github.com/webpmp/webpmp.github.io/blob/master/TerraExplorer_CRT_A.png" alt="Terra Explorer CRT-A screenshot" width="200" height="175">
 
 # TerraExplorer
 
