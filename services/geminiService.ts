@@ -472,11 +472,18 @@ export const generateRoute = async (text: string): Promise<Waypoint[]> => {
       ${isUrl ? `URL: "${text}". Trace locations mentioned in the page content.` : `Text: "${text}"`}
 
       Instructions:
-      1. Extract every significant physical location (City, Country, Landmark) in narrative order.
-      2. If vague, use nearest major city.
-      3. Schema: {"name": "Location Name", "lat": 0.0, "lng": 0.0, "context": "Very brief reason (max 10 words)"}
-      4. Remove consecutive duplicates.
-      5. Output a strict JSON Array.
+      1. Identify a name for this route/expedition (e.g. "Lewis and Clark Expedition", "Magellan's Circumnavigation", "The Silk Road"). If no specific name exists, create a short descriptive title.
+      2. Extract every significant physical location (City, Country, Landmark) in narrative order.
+      3. If vague, use nearest major city.
+      4. Schema: 
+      {
+        "title": "Name of Route",
+        "route": [
+          {"name": "Location Name", "lat": 0.0, "lng": 0.0, "context": "Very brief reason (max 10 words)"}
+        ]
+      }
+      5. Remove consecutive duplicates.
+      6. Output a strict JSON Object.
     `;
     
     const tools = isUrl ? [{ googleSearch: {} }] : undefined;
@@ -493,16 +500,27 @@ export const generateRoute = async (text: string): Promise<Waypoint[]> => {
     const data = safeJsonParse(response.text);
     
     let items: any[] = [];
-    if (Array.isArray(data)) items = data;
-    else if (data && data.route && Array.isArray(data.route)) items = data.route;
-    else if (data && data.locations && Array.isArray(data.locations)) items = data.locations;
+    let title: string | undefined = undefined;
+
+    // Robust parsing for different possible JSON structures
+    if (data && typeof data === 'object') {
+        if (data.title) title = data.title;
+        
+        if (data.route && Array.isArray(data.route)) items = data.route;
+        else if (data.locations && Array.isArray(data.locations)) items = data.locations;
+        else if (data.waypoints && Array.isArray(data.waypoints)) items = data.waypoints;
+        else if (Array.isArray(data)) items = data; // Fallback if just an array in root
+    } else if (Array.isArray(data)) {
+        items = data;
+    }
 
     return items.map((item, i) => ({
       id: `wp-${i}-${Date.now()}`,
       name: item.name || "Unknown Waypoint",
       lat: item.lat || 0,
       lng: item.lng || 0,
-      context: item.context || ""
+      context: item.context || "",
+      routeTitle: title // Include title in Waypoint
     })).filter(w => w.lat !== 0 || w.lng !== 0);
 
   } catch (error) {

@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import Earth from './components/Earth';
 import InfoPanel from './components/InfoPanel';
 import Controls from './components/Controls';
+import FavoritesPanel from './components/FavoritesPanel';
 import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint } from './types';
 import { resolveLocationQuery, getInfoFromCoordinates, getNearbyPlaces, getMoreNews, fetchLiveNews, generateRoute } from './services/geminiService';
 
@@ -78,6 +79,8 @@ const VisibilityTracker: React.FC<{
   location: LocationInfo | null, 
   onVisibilityChange: (visible: boolean) => void 
 }> = ({ location, onVisibilityChange }) => {
+  const wasVisible = useRef<boolean | null>(null);
+
   useFrame(({ camera }) => {
     if (!location || !location.coordinates) {
         return;
@@ -94,7 +97,12 @@ const VisibilityTracker: React.FC<{
     // Safety buffer of 0.05 to ensure it's not flickering on the exact edge
     const limit = (1 / dist) - 0.05; 
     
-    onVisibilityChange(dot > limit);
+    const isVisible = dot > limit;
+    
+    if (wasVisible.current !== isVisible) {
+        wasVisible.current = isVisible;
+        onVisibilityChange(isVisible);
+    }
   });
   return null;
 };
@@ -103,7 +111,12 @@ const App: React.FC = () => {
   const [locationInfo, setLocationInfo] = useState<LocationInfo | null>(null);
   const [markers, setMarkers] = useState<MapMarker[]>([]);
   const [favorites, setFavorites] = useState<FavoriteLocation[]>([]);
-  const [showFavorites, setShowFavorites] = useState(false);
+  
+  // Favorites UI State
+  const [isFavoritesPanelOpen, setIsFavoritesPanelOpen] = useState(false);
+  const [visibleFavoriteIds, setVisibleFavoriteIds] = useState<string[]>([]);
+  const [activeRouteId, setActiveRouteId] = useState<string | null>(null);
+
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isNewsFetching, setIsNewsFetching] = useState(false);
@@ -113,6 +126,7 @@ const App: React.FC = () => {
   const [autoRotate, setAutoRotate] = useState(true);
   const [skin, setSkin] = useState<SkinType>('modern');
   const [isZoomedOut, setIsZoomedOut] = useState(true);
+  const [isLocationVisible, setIsLocationVisible] = useState(true);
   
   // Route State
   const [routeWaypoints, setRouteWaypoints] = useState<Waypoint[]>([]);
@@ -121,17 +135,6 @@ const App: React.FC = () => {
   // Track focus state to manage suggestions pausing
   const [isFocused, setIsFocused] = useState(false);
   
-  // Track visibility of selected marker (optional for other logic, but removed from paused suggestions logic per request)
-  const [isMarkerVisible, setIsMarkerVisible] = useState(true);
-  const isMarkerVisibleRef = useRef(true);
-  
-  const handleVisibilityChange = useCallback((visible: boolean) => {
-    if (isMarkerVisibleRef.current !== visible) {
-      isMarkerVisibleRef.current = visible;
-      setIsMarkerVisible(visible);
-    }
-  }, []);
-
   const cameraControlsRef = useRef<CameraControls>(null);
   const earthRef = useRef<THREE.Mesh>(null);
 
@@ -141,20 +144,116 @@ const App: React.FC = () => {
     if (savedFavorites) {
       try {
         const parsed = JSON.parse(savedFavorites);
-        if (Array.isArray(parsed)) {
+        if (Array.isArray(parsed) && parsed.length > 0) {
             // Robustly filter favorites to ensure no corrupt data crashes the app
             setFavorites(parsed.filter((f: any) => f && typeof f.lat === 'number' && typeof f.lng === 'number' && f.name));
+            return;
         }
       } catch (e) {
         console.error("Failed to parse favorites", e);
       }
     }
+
+    // Default route if nothing in local storage
+    const defaultRoute: FavoriteLocation = {
+        id: 'default-shackleton',
+        name: "Ernest Shackleton's Endurance Expedition",
+        lat: 50.3755,
+        lng: -4.1427,
+        type: 'route',
+        waypoints: [
+            { 
+                id: 'wp-shackleton-1', 
+                name: "Plymouth, England", 
+                lat: 50.3755, 
+                lng: -4.1427, 
+                context: "August 8, 1914: The Endurance departs for Buenos Aires.", 
+                routeTitle: "Endurance Expedition" 
+            },
+            { 
+                id: 'wp-shackleton-2', 
+                name: "Buenos Aires, Argentina", 
+                lat: -34.6037, 
+                lng: -58.3816, 
+                context: "October 9, 1914: The ship arrives to pick up supplies and crew.", 
+                routeTitle: "Endurance Expedition" 
+            },
+            { 
+                id: 'wp-shackleton-3', 
+                name: "Grytviken, South Georgia", 
+                lat: -54.2811, 
+                lng: -36.5092, 
+                context: "December 5, 1914: The expedition departs the whaling station for the Weddell Sea.", 
+                routeTitle: "Endurance Expedition" 
+            },
+            { 
+                id: 'wp-shackleton-4', 
+                name: "Weddell Sea (Ice Trap)", 
+                lat: -76.5, 
+                lng: -35.0, 
+                context: "January 1915: The Endurance becomes frozen fast in the pack ice.", 
+                routeTitle: "Endurance Expedition" 
+            },
+            { 
+                id: 'wp-shackleton-5', 
+                name: "Endurance Sinks", 
+                lat: -69.08, 
+                lng: -51.5, 
+                context: "November 21, 1915: Crushed by ice, the ship sinks, stranding the crew.", 
+                routeTitle: "Endurance Expedition" 
+            },
+            { 
+                id: 'wp-shackleton-6', 
+                name: "Elephant Island", 
+                lat: -61.1417, 
+                lng: -55.2333, 
+                context: "April 1916: The crew reaches solid land for the first time in 497 days.", 
+                routeTitle: "Endurance Expedition" 
+            },
+            { 
+                id: 'wp-shackleton-7', 
+                name: "King Haakon Bay", 
+                lat: -54.1500, 
+                lng: -37.2333, 
+                context: "May 1916: Shackleton and five men land after the perilous voyage of the James Caird.", 
+                routeTitle: "Endurance Expedition" 
+            },
+            { 
+                id: 'wp-shackleton-8', 
+                name: "Stromness Whaling Station", 
+                lat: -54.1600, 
+                lng: -36.7110, 
+                context: "May 20, 1916: Shackleton, Worsley, and Crean reach safety after crossing the mountains.", 
+                routeTitle: "Endurance Expedition" 
+            },
+             { 
+                id: 'wp-shackleton-9', 
+                name: "Punta Arenas, Chile", 
+                lat: -53.1638, 
+                lng: -70.9171, 
+                context: "August 30, 1916: The tug Yelcho, commanded by Luis Pardo, finally rescues the remaining crew from Elephant Island.", 
+                routeTitle: "Endurance Expedition" 
+            }
+        ]
+    };
+    setFavorites([defaultRoute]);
   }, []);
 
   // Save favorites to local storage whenever they change
   useEffect(() => {
     localStorage.setItem('terraexplorer_favorites', JSON.stringify(favorites));
   }, [favorites]);
+
+  // Sync activeRouteId with routeWaypoints if route is cleared externally
+  useEffect(() => {
+    if (routeWaypoints.length === 0 && activeRouteId) {
+        setActiveRouteId(null);
+    }
+  }, [routeWaypoints, activeRouteId]);
+
+  const handleVisibilityChange = useCallback((visible: boolean) => {
+    setIsLocationVisible(visible);
+  }, []);
 
   const loadWaypointData = useCallback(async (wp: Waypoint) => {
      setIsLoading(true);
@@ -177,19 +276,16 @@ const App: React.FC = () => {
      }
 
      // Fetch full info
-     // Use the waypoint context as a preliminary description or prepend it?
-     // For now, we fetch the standard encyclopedia data but we could use the context as a "special" description
      const data = await getInfoFromCoordinates(wp.lat, wp.lng);
      
      if (data) {
-        // Prepend context to description if available
         if (wp.context) {
-            data.description = `[From Route]: ${wp.context}\n\n${data.description}`;
+            const routeLabel = wp.routeTitle || "From Route";
+            data.description = `[${routeLabel}]: ${wp.context}\n\n${data.description}`;
         }
         setLocationInfo(data);
         setIsLoading(false);
 
-        // Fetch news for this specific location
         if (data.name) {
             setIsNewsFetching(true);
             const news = await fetchLiveNews(data.name);
@@ -205,22 +301,31 @@ const App: React.FC = () => {
   }, []);
 
   const handleGlobeClick = useCallback(async (lat: number, lng: number, point: THREE.Vector3) => {
-    // When clicking empty space on the globe, fetch nearby markers but don't show full details yet
     setIsLoading(true);
     setLocationInfo(null);
     setSearchError(null);
     setAutoRotate(false); 
-    setMarkers([]); // Clear previous markers immediately
+    setMarkers([]); // Clear transient markers
     
-    // If we are in route mode, clicking the globe exits route mode? 
-    // Or just deselects? Let's clear route for simplicity if user explores elsewhere manually
-    setRouteWaypoints([]);
-    setCurrentWaypointIndex(-1);
+    // Clicking globe clears active route ONLY if it's not a saved "Checked" route?
+    // Actually, usually map click deselects everything. But if a layer is "On", it should stay on.
+    // However, if we click empty space, we probably want to inspect that space.
+    // Let's keep the route visible but deselect the specific waypoint.
+    // BUT: Current logic is handleGlobeClick calls setRouteWaypoints([]) below.
+    // To support "Turn On Route", we should probably NOT clear routeWaypoints if activeRouteId is set?
+    // The prompt says "turn on... to view". If I view it, clicking elsewhere shouldn't turn it off.
+    
+    if (!activeRouteId) {
+        setRouteWaypoints([]);
+        setCurrentWaypointIndex(-1);
+    } else {
+        // Just deselect waypoint
+        setCurrentWaypointIndex(-1);
+    }
     
     setSelectedMarkerId(null);
     setIsFocused(true);
 
-    // Move camera to look at area
     if (cameraControlsRef.current) {
       const direction = point.clone().normalize();
       const camPos = direction.multiplyScalar(2.2); 
@@ -246,7 +351,7 @@ const App: React.FC = () => {
     
     setMarkers(newMarkers);
     setIsLoading(false);
-  }, []);
+  }, [activeRouteId]);
 
   const handleMarkerClick = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint, point: THREE.Vector3) => {
     setSearchError(null);
@@ -254,12 +359,22 @@ const App: React.FC = () => {
     setSelectedMarkerId(marker.id);
     setIsFocused(true);
     
-    // Check if this marker is part of the current route
-    // The type guard 'context' in marker distinguishes a Waypoint, but we cast it safely below
+    // Check if this is a Route Favorite
+    const fav = marker as FavoriteLocation;
+    if (fav.type === 'route' && fav.waypoints) {
+        // Load the saved route
+        setRouteWaypoints(fav.waypoints);
+        setActiveRouteId(fav.id); // Mark as active
+        setCurrentWaypointIndex(0);
+        if (fav.waypoints.length > 0) {
+            loadWaypointData(fav.waypoints[0]);
+        }
+        return;
+    }
+
     const isRoutePoint = (marker as Waypoint).context !== undefined;
 
     if (isRoutePoint) {
-        // If clicking a waypoint, set it as active index
         const wp = marker as Waypoint;
         const idx = routeWaypoints.findIndex(w => w.id === wp.id);
         if (idx !== -1) {
@@ -268,12 +383,15 @@ const App: React.FC = () => {
             return;
         }
     } else {
-        // If clicking a normal marker, clear route
-        setRouteWaypoints([]);
-        setCurrentWaypointIndex(-1);
+        // If clicking a normal marker, only clear route if it wasn't a "checked" route
+        if (!activeRouteId) {
+            setRouteWaypoints([]);
+            setCurrentWaypointIndex(-1);
+        } else {
+             setCurrentWaypointIndex(-1);
+        }
     }
     
-    // Set partial data so the panel title appears immediately
     setLocationInfo({
         name: marker.name,
         type: LocationType.POI, 
@@ -289,7 +407,6 @@ const App: React.FC = () => {
     setIsLoading(true);
     setIsNewsFetching(false);
 
-    // Zoom in closer to the marker
     if (cameraControlsRef.current) {
         const worldCamPos = point.clone().normalize().multiplyScalar(1.5);
         cameraControlsRef.current.setLookAt(
@@ -312,7 +429,7 @@ const App: React.FC = () => {
        });
        setIsNewsFetching(false);
     }
-  }, [routeWaypoints, loadWaypointData]);
+  }, [routeWaypoints, loadWaypointData, activeRouteId]);
 
   const handleSearch = async (query: string) => {
     setIsLoading(true);
@@ -321,7 +438,12 @@ const App: React.FC = () => {
     setSearchError(null);
     setAutoRotate(false);
     setMarkers([]); 
-    setRouteWaypoints([]); // Clear route on search
+    
+    // Search clears route unless locked? Usually search implies a new context.
+    // Let's clear active route on search to be safe.
+    setRouteWaypoints([]); 
+    setActiveRouteId(null);
+    
     setCurrentWaypointIndex(-1);
     setSelectedMarkerId(null);
     setIsFocused(true);
@@ -378,8 +500,11 @@ const App: React.FC = () => {
       setSearchError(null);
       setLocationInfo(null);
       setAutoRotate(false);
-      setMarkers([]); // Clear normal markers
+      setMarkers([]); 
       setIsFocused(true);
+      
+      // Clear current active route when generating new one
+      setActiveRouteId(null);
       
       const waypoints = await generateRoute(text);
       
@@ -426,25 +551,144 @@ const App: React.FC = () => {
     setSelectedMarkerId(null);
     setIsNewsFetching(false);
     setIsFocused(false);
-    // Do not clear route here, just close panel. Route stays visible on globe.
   };
 
-  const handleToggleFavorite = () => {
-    if (!locationInfo || !locationInfo.coordinates) return;
-
-    const exists = favorites.find(f => f.name === locationInfo.name && Math.abs(f.lat - locationInfo.coordinates.lat) < 0.01);
-    
-    if (exists) {
-      setFavorites(prev => prev.filter(f => f.id !== exists.id));
-    } else {
-      const newFav: FavoriteLocation = {
-        id: `fav-${Date.now()}`,
-        name: locationInfo.name,
-        lat: locationInfo.coordinates.lat,
-        lng: locationInfo.coordinates.lng
-      };
-      setFavorites(prev => [...prev, newFav]);
+  const getCurrentFavorite = () => {
+    if (routeWaypoints.length > 0) {
+        // If we have an activeRouteId, use that
+        if (activeRouteId) {
+            return favorites.find(f => f.id === activeRouteId);
+        }
+        
+        // Otherwise try to match
+        const start = routeWaypoints[0];
+        return favorites.find(f => 
+            f.type === 'route' && 
+            f.waypoints && 
+            f.waypoints.length === routeWaypoints.length &&
+            f.waypoints[0].name === start.name &&
+            Math.abs(f.waypoints[0].lat - start.lat) < 0.001
+        );
+    } else if (locationInfo && locationInfo.coordinates) {
+        return favorites.find(f => 
+            (f.type === 'location' || !f.type) && 
+            f.name === locationInfo.name && 
+            Math.abs(f.lat - locationInfo.coordinates.lat) < 0.01
+        );
     }
+    return undefined;
+  };
+
+  const currentFavorite = getCurrentFavorite();
+  const isCurrentLocationFavorite = !!currentFavorite;
+
+  const handleSaveFavorite = (name: string) => {
+    if (currentFavorite) {
+        // Edit existing
+        setFavorites(prev => prev.map(f => f.id === currentFavorite.id ? { ...f, name: name } : f));
+    } else {
+        // Create new
+        if (routeWaypoints.length > 0) {
+            const start = routeWaypoints[0];
+            const newFav: FavoriteLocation = {
+                id: `fav-route-${Date.now()}`,
+                name: name,
+                lat: start.lat,
+                lng: start.lng,
+                type: 'route',
+                waypoints: routeWaypoints
+            };
+            setFavorites(prev => [...prev, newFav]);
+            setActiveRouteId(newFav.id); // Automatically set as active
+        } else if (locationInfo) {
+            const newFav: FavoriteLocation = {
+                id: `fav-loc-${Date.now()}`,
+                name: name,
+                lat: locationInfo.coordinates.lat,
+                lng: locationInfo.coordinates.lng,
+                type: 'location'
+            };
+            setFavorites(prev => [...prev, newFav]);
+            // Automatically make visible
+            setVisibleFavoriteIds(prev => [...prev, newFav.id]);
+        }
+    }
+  };
+
+  const handleUpdateFavorite = (updatedFav: FavoriteLocation) => {
+      setFavorites(prev => prev.map(f => f.id === updatedFav.id ? updatedFav : f));
+      
+      // If this route is currently active, update the map immediately
+      if (activeRouteId === updatedFav.id && updatedFav.type === 'route' && updatedFav.waypoints) {
+          setRouteWaypoints(updatedFav.waypoints);
+          if (updatedFav.waypoints.length === 0) {
+             setCurrentWaypointIndex(-1);
+          } else if (currentWaypointIndex >= updatedFav.waypoints.length) {
+              setCurrentWaypointIndex(updatedFav.waypoints.length - 1);
+          }
+      }
+  };
+
+  const handleRemoveFavorite = (id?: string) => {
+    const targetId = id || currentFavorite?.id;
+    if (targetId) {
+        setFavorites(prev => prev.filter(f => f.id !== targetId));
+        setVisibleFavoriteIds(prev => prev.filter(vid => vid !== targetId));
+        if (targetId === activeRouteId) {
+            setActiveRouteId(null);
+            setRouteWaypoints([]);
+        }
+    }
+  };
+
+  const handleToggleFavoriteVisibility = (fav: FavoriteLocation) => {
+    if (fav.type === 'route') {
+        if (activeRouteId === fav.id) {
+            // Toggle Off
+            setActiveRouteId(null);
+            setRouteWaypoints([]);
+        } else {
+            // Toggle On
+            if (fav.waypoints) {
+                setRouteWaypoints(fav.waypoints);
+                setActiveRouteId(fav.id);
+                // Optionally fly to start
+                if(fav.waypoints[0]) {
+                     loadWaypointData(fav.waypoints[0]);
+                }
+            }
+        }
+    } else {
+        // Location toggle
+        setVisibleFavoriteIds(prev => {
+            if (prev.includes(fav.id)) {
+                return prev.filter(id => id !== fav.id);
+            } else {
+                return [...prev, fav.id];
+            }
+        });
+    }
+  };
+
+  const handleFavoriteFlyTo = (fav: FavoriteLocation) => {
+      // Logic similar to click
+      if (fav.type === 'route') {
+          if (activeRouteId !== fav.id) {
+              handleToggleFavoriteVisibility(fav);
+          } else {
+               // Just look at start
+               if(fav.waypoints && fav.waypoints[0]) {
+                   loadWaypointData(fav.waypoints[0]);
+               }
+          }
+      } else {
+          // If not visible, make visible?
+          if (!visibleFavoriteIds.includes(fav.id)) {
+              setVisibleFavoriteIds(prev => [...prev, fav.id]);
+          }
+          // Simulate marker click
+          handleMarkerClick(fav, latLngToVector3(fav.lat, fav.lng, 1.0)); // vector radius doesn't matter much here as handleMarkerClick recalculates
+      }
   };
 
   const handleLoadMoreNews = useCallback(async () => {
@@ -463,10 +707,6 @@ const App: React.FC = () => {
     });
   }, [locationInfo]);
 
-  const isCurrentLocationFavorite = locationInfo && locationInfo.coordinates 
-    ? favorites.some(f => f && typeof f.lat === 'number' && f.name === locationInfo.name && Math.abs(f.lat - locationInfo.coordinates.lat) < 0.01) 
-    : false;
-
   const getHeaderStyle = () => {
     switch (skin) {
       case 'retro-green': return 'text-green-300 font-retro tracking-widest';
@@ -484,6 +724,9 @@ const App: React.FC = () => {
   };
 
   const shouldPauseSuggestions = isFocused && !isZoomedOut;
+
+  // Filter favorites for Earth component
+  const earthFavorites = favorites.filter(f => visibleFavoriteIds.includes(f.id));
 
   return (
     <div className={`relative w-full h-screen bg-black overflow-hidden`}>
@@ -506,8 +749,8 @@ const App: React.FC = () => {
           skin={skin}
           boundary={locationInfo?.boundary}
           markers={markers}
-          favorites={favorites}
-          showFavorites={showFavorites}
+          favorites={earthFavorites}
+          showFavorites={true}
           selectedMarkerId={selectedMarkerId}
           routeWaypoints={routeWaypoints}
           currentWaypointIndex={currentWaypointIndex}
@@ -585,6 +828,20 @@ const App: React.FC = () => {
         </button>
       </div>
 
+      {isFavoritesPanelOpen && (
+        <FavoritesPanel 
+            favorites={favorites}
+            onClose={() => setIsFavoritesPanelOpen(false)}
+            visibleFavoriteIds={visibleFavoriteIds}
+            activeRouteId={activeRouteId}
+            onToggleVisibility={handleToggleFavoriteVisibility}
+            onUpdate={handleUpdateFavorite}
+            onDelete={handleRemoveFavorite}
+            onFlyTo={handleFavoriteFlyTo}
+            skin={skin}
+        />
+      )}
+
       <InfoPanel 
         info={locationInfo} 
         isLoading={isLoading}
@@ -592,7 +849,9 @@ const App: React.FC = () => {
         onClose={handleClosePanel} 
         skin={skin}
         isFavorite={isCurrentLocationFavorite}
-        onToggleFavorite={handleToggleFavorite}
+        onSaveFavorite={handleSaveFavorite}
+        onRemoveFavorite={() => handleRemoveFavorite()}
+        currentFavoriteName={currentFavorite?.name}
         onLoadMoreNews={handleLoadMoreNews}
         routeNav={routeWaypoints.length > 0 ? {
             current: currentWaypointIndex + 1,
@@ -610,8 +869,8 @@ const App: React.FC = () => {
         isSearching={isLoading}
         searchError={searchError}
         skin={skin}
-        showFavorites={showFavorites}
-        onToggleShowFavorites={() => setShowFavorites(!showFavorites)}
+        showFavorites={isFavoritesPanelOpen}
+        onToggleShowFavorites={() => setIsFavoritesPanelOpen(!isFavoritesPanelOpen)}
         paused={shouldPauseSuggestions}
       />
     </div>

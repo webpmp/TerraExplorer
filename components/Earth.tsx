@@ -2,7 +2,7 @@
 import React, { useRef, useImperativeHandle, forwardRef, useMemo, useEffect, useState, Suspense } from 'react';
 import { useFrame, useLoader } from '@react-three/fiber';
 import { TextureLoader } from 'three';
-import { Decal, useTexture, Line } from '@react-three/drei';
+import { Decal, useTexture, Line, Text, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
 import { SkinType, GeoCoordinates, MapMarker, FavoriteLocation, Waypoint } from '../types';
 
@@ -175,7 +175,7 @@ const UniversalMarker: React.FC<{
           color={color} 
           toneMapped={false} 
           transparent={true}
-          opacity={isWaypoint ? 1 : 0.5} 
+          opacity={0.5} 
         />
       </mesh>
       
@@ -190,6 +190,24 @@ const UniversalMarker: React.FC<{
               opacity={isRetro ? 1.0 : 0.8}
            />
       </mesh>
+
+      {/* Waypoint Number */}
+      {isWaypoint && waypointIndex !== undefined && (
+         <Billboard follow={true}>
+            <Text
+              fontSize={size * 1.6}
+              color="white"
+              anchorX="center"
+              anchorY="middle"
+              outlineWidth="5%"
+              outlineColor="black"
+              fontWeight="bold"
+              position={[0, 0, 0]}
+            >
+              {waypointIndex + 1}
+            </Text>
+         </Billboard>
+      )}
     </group>
   );
 };

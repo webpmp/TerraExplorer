@@ -52,19 +52,22 @@ export interface SearchResult {
   suggestedZoom: number;
 }
 
-export interface FavoriteLocation {
-  id: string;
-  name: string;
-  lat: number;
-  lng: number;
-}
-
 export interface Waypoint {
   id: string;
   name: string;
   lat: number;
   lng: number;
   context: string;
+  routeTitle?: string;
+}
+
+export interface FavoriteLocation {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  type: 'location' | 'route';
+  waypoints?: Waypoint[];
 }
 
 export type SkinType = 'modern' | 'retro-green' | 'retro-amber';

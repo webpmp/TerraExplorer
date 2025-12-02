@@ -4,7 +4,8 @@ import { LocationInfo, SkinType, NotableItem } from '../types';
 import { 
   X, Users, Thermometer, Info, Newspaper, Crown, Map, Pin, ExternalLink, Loader2,
   BookOpen, Rocket, Trophy, Music, FlaskConical, Palette, Clapperboard, Image as ImageIcon,
-  Copy, Check, ChevronDown, ChevronUp, Plus, Trash2, Edit2, Save, StickyNote, ChevronLeft, ChevronRight
+  Copy, Check, ChevronDown, ChevronUp, Plus, Trash2, Edit2, Save, StickyNote, ChevronLeft, ChevronRight,
+  MapPin, Route as RouteIcon
 } from 'lucide-react';
 
 interface InfoPanelProps {
@@ -14,7 +15,9 @@ interface InfoPanelProps {
   isNewsFetching: boolean;
   skin: SkinType;
   isFavorite: boolean;
-  onToggleFavorite: () => void;
+  onSaveFavorite: (name: string) => void;
+  onRemoveFavorite: () => void;
+  currentFavoriteName?: string;
   onLoadMoreNews: () => Promise<void>;
   routeNav?: {
     current: number;
@@ -158,11 +161,19 @@ const NotablePersonCard: React.FC<{
   );
 };
 
-const InfoPanel: React.FC<InfoPanelProps> = ({ info, onClose, isLoading, isNewsFetching, skin, isFavorite, onToggleFavorite, onLoadMoreNews, routeNav }) => {
+const InfoPanel: React.FC<InfoPanelProps> = ({ 
+  info, onClose, isLoading, isNewsFetching, skin, 
+  isFavorite, onSaveFavorite, onRemoveFavorite, currentFavoriteName,
+  onLoadMoreNews, routeNav 
+}) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'news' | 'notable'>('overview');
   const [isMoreNewsLoading, setIsMoreNewsLoading] = useState(false);
   const [wikiImage, setWikiImage] = useState<string | null>(null);
   const [expandedImage, setExpandedImage] = useState(false);
+
+  // Favorite Dialog State
+  const [showFavoriteDialog, setShowFavoriteDialog] = useState(false);
+  const [favoriteNameInput, setFavoriteNameInput] = useState("");
 
   // Notes State
   const [notes, setNotes] = useState<Note[]>([]);
@@ -178,6 +189,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ info, onClose, isLoading, isNewsF
   useEffect(() => {
     setWikiImage(null);
     setActiveTab('overview');
+    setShowFavoriteDialog(false);
   }, [info?.name]);
 
   // Load Notes
@@ -254,6 +266,44 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ info, onClose, isLoading, isNewsF
     setEditNoteText("");
   };
 
+  // Handle Favorite Click
+  const handleFavoriteClick = () => {
+    if (showFavoriteDialog) {
+        setShowFavoriteDialog(false);
+        return;
+    }
+    
+    // Initial name suggestion
+    if (isFavorite && currentFavoriteName) {
+        setFavoriteNameInput(currentFavoriteName);
+    } else {
+        // For route: Use route title or just info name
+        // info.name usually has the waypoint name. 
+        // If routeNav exists, we should probably try to get the route title from context if possible, 
+        // but for now let's default to "Route: [CurrentLocation]" or leave blank
+        // Wait, info.description often starts with [Route Title]. Let's try to extract it.
+        if (routeNav && info?.description?.startsWith('[')) {
+            const endIdx = info.description.indexOf(']');
+            if (endIdx > 1) {
+                setFavoriteNameInput(info.description.substring(1, endIdx));
+            } else {
+                setFavoriteNameInput(info?.name || "My Route");
+            }
+        } else {
+            setFavoriteNameInput(info?.name || "");
+        }
+    }
+    setShowFavoriteDialog(true);
+  };
+
+  const submitFavorite = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (favoriteNameInput.trim()) {
+        onSaveFavorite(favoriteNameInput.trim());
+        setShowFavoriteDialog(false);
+    }
+  };
+
   // Fetch image if population is missing
   useEffect(() => {
     const hasPopulation = isValidData(info?.population);
@@ -309,7 +359,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ info, onClose, isLoading, isNewsF
       loadMoreBtn: "bg-white/5 border border-white/20 hover:bg-white/10 text-cyan-300 rounded-lg text-xs tracking-widest uppercase font-bold",
       notesInput: "bg-black/40 border border-white/20 text-white placeholder-gray-400 focus:border-cyan-400 rounded-lg",
       noteCard: "bg-black/40 border border-white/10 rounded-lg",
-      navBtn: "bg-white/10 hover:bg-white/20 text-white border border-white/10"
+      navBtn: "bg-white/10 hover:bg-white/20 text-white border border-white/10",
+      popover: "bg-slate-900 border border-cyan-500/50 rounded-lg shadow-xl"
     },
     'retro-green': {
       container: "bg-black border-2 border-green-400 shadow-[0_0_20px_rgba(74,222,128,0.2)] text-green-300 font-retro tracking-widest",
@@ -328,7 +379,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ info, onClose, isLoading, isNewsF
       loadMoreBtn: "bg-green-900/30 border border-green-400 hover:bg-green-400 hover:text-black text-green-300 rounded-none text-sm tracking-widest uppercase font-bold font-retro",
       notesInput: "bg-black border border-green-400 text-green-300 placeholder-green-400/50 focus:bg-green-900/20 rounded-none font-retro",
       noteCard: "bg-black border border-green-400 rounded-none",
-      navBtn: "bg-black border border-green-400 hover:bg-green-400 hover:text-black text-green-300"
+      navBtn: "bg-black border border-green-400 hover:bg-green-400 hover:text-black text-green-300",
+      popover: "bg-black border-2 border-green-400 rounded-none shadow-[0_0_10px_rgba(74,222,128,0.4)]"
     },
     'retro-amber': {
       container: "bg-black border-2 border-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.2)] text-amber-300 font-retro tracking-widest",
@@ -347,7 +399,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ info, onClose, isLoading, isNewsF
       loadMoreBtn: "bg-amber-900/30 border border-amber-400 hover:bg-amber-400 hover:text-black text-amber-300 rounded-none text-sm tracking-widest uppercase font-bold font-retro",
       notesInput: "bg-black border border-amber-400 text-amber-300 placeholder-amber-400/50 focus:bg-amber-900/20 rounded-none font-retro",
       noteCard: "bg-black border border-amber-400 rounded-none",
-      navBtn: "bg-black border border-amber-400 hover:bg-amber-400 hover:text-black text-amber-300"
+      navBtn: "bg-black border border-amber-400 hover:bg-amber-400 hover:text-black text-amber-300",
+      popover: "bg-black border-2 border-amber-400 rounded-none shadow-[0_0_10px_rgba(251,191,36,0.4)]"
     }
   };
 
@@ -403,9 +456,61 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ info, onClose, isLoading, isNewsF
           {/* Header */}
           <div className={`relative p-5 shrink-0 ${theme.header}`}>
             <div className="absolute top-3 right-3 flex gap-2">
-              <button onClick={onToggleFavorite} className={`p-1 transition-colors ${theme.actionBtn}`} title={isFavorite ? "Remove from Favorites" : "Add to Favorites"}>
-                <Pin size={20} className={isFavorite ? "fill-current" : ""} />
-              </button>
+              <div className="relative">
+                <button 
+                  onClick={handleFavoriteClick} 
+                  className={`p-1 transition-colors ${theme.actionBtn}`} 
+                  title={isFavorite ? "Edit Favorite" : (routeNav ? "Save Route" : "Save Location")}
+                >
+                  <Pin size={20} className={isFavorite ? "fill-current" : ""} />
+                </button>
+                
+                {/* Favorite Dialog Popover */}
+                {showFavoriteDialog && (
+                   <div className={`absolute top-full right-0 mt-2 w-64 p-3 z-50 flex flex-col gap-3 ${theme.popover}`}>
+                      <h3 className={`text-xs font-bold uppercase opacity-80 ${isRetro ? 'text-current' : 'text-white'}`}>
+                        {isFavorite ? 'Edit Favorite' : (routeNav ? 'Save Route' : 'Save Location')}
+                      </h3>
+                      <form onSubmit={submitFavorite} className="flex flex-col gap-2">
+                         <input 
+                           type="text" 
+                           value={favoriteNameInput}
+                           onChange={(e) => setFavoriteNameInput(e.target.value)}
+                           placeholder="Enter name..."
+                           className={`w-full p-2 text-sm bg-transparent border outline-none ${theme.notesInput}`}
+                           autoFocus
+                         />
+                         <div className="flex gap-2 justify-end">
+                            {isFavorite && (
+                                <button 
+                                  type="button" 
+                                  onClick={() => { onRemoveFavorite(); setShowFavoriteDialog(false); }}
+                                  className="p-1.5 hover:text-red-400 transition-colors"
+                                  title="Remove"
+                                >
+                                    <Trash2 size={16} />
+                                </button>
+                            )}
+                            <button 
+                              type="button" 
+                              onClick={() => setShowFavoriteDialog(false)}
+                              className="px-2 py-1 text-xs opacity-70 hover:opacity-100 hover:bg-white/10 rounded"
+                            >
+                                Cancel
+                            </button>
+                            <button 
+                              type="submit"
+                              disabled={!favoriteNameInput.trim()}
+                              className={`px-3 py-1 text-xs font-bold uppercase transition-colors disabled:opacity-50 ${isRetro ? 'bg-current text-black hover:opacity-80' : 'bg-cyan-600 hover:bg-cyan-500 text-white rounded'}`}
+                            >
+                                Save
+                            </button>
+                         </div>
+                      </form>
+                   </div>
+                )}
+              </div>
+              
               <button onClick={onClose} className={`p-1 transition-colors ${theme.closeBtn}`}>
                 <X size={20} />
               </button>
@@ -429,9 +534,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ info, onClose, isLoading, isNewsF
                 <button onClick={routeNav.onPrev} className={`p-1.5 rounded-full ${theme.navBtn}`}>
                     <ChevronLeft size={16} />
                 </button>
-                <span className={`text-xs font-bold uppercase tracking-widest ${theme.subtext}`}>
-                    Waypoint {routeNav.current} of {routeNav.total}
-                </span>
+                <div className="flex flex-col items-center">
+                   <span className={`text-xs font-bold uppercase tracking-widest ${theme.subtext}`}>
+                       Waypoint {routeNav.current} of {routeNav.total}
+                   </span>
+                </div>
                 <button onClick={routeNav.onNext} className={`p-1.5 rounded-full ${theme.navBtn}`}>
                     <ChevronRight size={16} />
                 </button>
