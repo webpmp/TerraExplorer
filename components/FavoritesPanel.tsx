@@ -13,6 +13,7 @@ interface FavoritesPanelProps {
   onUpdate: (fav: FavoriteLocation) => void;
   onFlyTo: (fav: FavoriteLocation) => void;
   skin: SkinType;
+  dimmed?: boolean;
 }
 
 const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
@@ -24,7 +25,8 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
   onDelete,
   onUpdate,
   onFlyTo,
-  skin
+  skin,
+  dimmed = false
 }) => {
   const [editingRoute, setEditingRoute] = useState<FavoriteLocation | null>(null);
   const isRetro = skin !== 'modern';
@@ -202,7 +204,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
 
   return (
     <>
-      <div className="absolute top-24 left-8 z-30 w-72 md:w-80 max-h-[calc(100vh-160px)] flex flex-col animate-in slide-in-from-left-8 fade-in duration-300">
+      <div className={`absolute top-24 left-8 z-30 w-72 md:w-80 max-h-[calc(100vh-160px)] flex flex-col animate-in slide-in-from-left-8 fade-in duration-300 transition-opacity duration-300 ${dimmed ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}>
           <div className={`${theme.container} flex flex-col shrink min-h-0 overflow-hidden`}>
               <div className={`p-4 flex items-center justify-between shrink-0 ${theme.header}`}>
                   <h2 className={`text-lg font-bold ${theme.headerTitle}`}>SAVED LOCATIONS</h2>

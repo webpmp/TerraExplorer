@@ -131,6 +131,7 @@ const App: React.FC = () => {
   // Route State
   const [routeWaypoints, setRouteWaypoints] = useState<Waypoint[]>([]);
   const [currentWaypointIndex, setCurrentWaypointIndex] = useState<number>(-1);
+  const [isTraceModalOpen, setIsTraceModalOpen] = useState(false);
   
   // Track focus state to manage suggestions pausing
   const [isFocused, setIsFocused] = useState(false);
@@ -551,6 +552,7 @@ const App: React.FC = () => {
     setSelectedMarkerId(null);
     setIsNewsFetching(false);
     setIsFocused(false);
+    setMarkers([]); // Clear markers on close
   };
 
   const getCurrentFavorite = () => {
@@ -727,6 +729,18 @@ const App: React.FC = () => {
 
   // Filter favorites for Earth component
   const earthFavorites = favorites.filter(f => visibleFavoriteIds.includes(f.id));
+  
+  // Logic to show/hide saved items based on panel state
+  // If panel is closed, we hide all saved items (favorites prop handling in Earth relies on showFavorites)
+  // And we must manually hide route markers if they are from a saved route
+  const showSavedItems = isFavoritesPanelOpen;
+  
+  // If activeRouteId is set, it means we are viewing a saved route. 
+  // If so, only show it if the favorites panel (favorites mode) is open.
+  // If activeRouteId is null, it's a transient trace route, so we keep showing it.
+  const displayRouteWaypoints = activeRouteId 
+      ? (showSavedItems ? routeWaypoints : []) 
+      : routeWaypoints;
 
   return (
     <div className={`relative w-full h-screen bg-black overflow-hidden`}>
@@ -750,9 +764,9 @@ const App: React.FC = () => {
           boundary={locationInfo?.boundary}
           markers={markers}
           favorites={earthFavorites}
-          showFavorites={true}
+          showFavorites={showSavedItems}
           selectedMarkerId={selectedMarkerId}
-          routeWaypoints={routeWaypoints}
+          routeWaypoints={displayRouteWaypoints}
           currentWaypointIndex={currentWaypointIndex}
         />
         
@@ -839,6 +853,7 @@ const App: React.FC = () => {
             onDelete={handleRemoveFavorite}
             onFlyTo={handleFavoriteFlyTo}
             skin={skin}
+            dimmed={isTraceModalOpen}
         />
       )}
 
@@ -872,6 +887,8 @@ const App: React.FC = () => {
         showFavorites={isFavoritesPanelOpen}
         onToggleShowFavorites={() => setIsFavoritesPanelOpen(!isFavoritesPanelOpen)}
         paused={shouldPauseSuggestions}
+        isTraceModalOpen={isTraceModalOpen}
+        onToggleTraceModal={setIsTraceModalOpen}
       />
     </div>
   );

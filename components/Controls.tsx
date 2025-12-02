@@ -14,6 +14,8 @@ interface ControlsProps {
   showFavorites: boolean;
   onToggleShowFavorites: () => void;
   paused: boolean;
+  isTraceModalOpen: boolean;
+  onToggleTraceModal: (isOpen: boolean) => void;
 }
 
 // Custom Icon for Trace Route
@@ -131,12 +133,13 @@ const Controls: React.FC<ControlsProps> = ({
   skin, 
   showFavorites, 
   onToggleShowFavorites,
-  paused
+  paused,
+  isTraceModalOpen,
+  onToggleTraceModal
 }) => {
   const [query, setQuery] = useState("");
   const [placeholder, setPlaceholder] = useState("Search location...");
   const [isFocused, setIsFocused] = useState(false);
-  const [showTraceInput, setShowTraceInput] = useState(false);
   const [traceText, setTraceText] = useState("");
   const prevPausedRef = useRef(paused);
 
@@ -180,7 +183,7 @@ const Controls: React.FC<ControlsProps> = ({
       e.preventDefault();
       if (traceText.trim()) {
           onTraceRoute(traceText);
-          setShowTraceInput(false);
+          onToggleTraceModal(false);
           setTraceText("");
       }
   };
@@ -254,10 +257,10 @@ const Controls: React.FC<ControlsProps> = ({
       )}
 
       {/* Trace Route Modal */}
-      {showTraceInput && (
+      {isTraceModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm pointer-events-auto">
               <div className={`w-full max-w-lg p-6 relative flex flex-col gap-4 ${theme.modal}`}>
-                  <button onClick={() => setShowTraceInput(false)} className={`absolute top-4 right-4 p-1 hover:opacity-70`}>
+                  <button onClick={() => onToggleTraceModal(false)} className={`absolute top-4 right-4 p-1 hover:opacity-70`}>
                       <X size={20} />
                   </button>
                   <h2 className="text-xl font-bold uppercase tracking-wide">Trace Route</h2>
@@ -285,7 +288,7 @@ const Controls: React.FC<ControlsProps> = ({
       {/* Zoom & View Controls */}
       <div className="flex gap-2 pointer-events-auto">
         <button 
-          onClick={() => setShowTraceInput(true)}
+          onClick={() => onToggleTraceModal(true)}
           className={`p-3 transition-all active:scale-95 ${theme.btn}`}
           aria-label="Trace Route"
           title="Trace Route from Text"
