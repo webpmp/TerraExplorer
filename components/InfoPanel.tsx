@@ -279,16 +279,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     } else {
         // For route: Use route title or just info name
         // info.name usually has the waypoint name. 
-        // If routeNav exists, we should probably try to get the route title from context if possible, 
-        // but for now let's default to "Route: [CurrentLocation]" or leave blank
-        // Wait, info.description often starts with [Route Title]. Let's try to extract it.
-        if (routeNav && info?.description?.startsWith('[')) {
-            const endIdx = info.description.indexOf(']');
-            if (endIdx > 1) {
-                setFavoriteNameInput(info.description.substring(1, endIdx));
-            } else {
-                setFavoriteNameInput(info?.name || "My Route");
-            }
+        if (routeNav && info?.routeContext?.title) {
+            setFavoriteNameInput(info.routeContext.title);
         } else {
             setFavoriteNameInput(info?.name || "");
         }
@@ -431,7 +423,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   // Render Full Skeleton
   if (!info && isLoading) {
       return (
-        <div className="absolute top-20 right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-140px)] flex flex-col animate-in slide-in-from-right-12 fade-in duration-500">
+        <div className="absolute top-[90px] right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-150px)] flex flex-col animate-in slide-in-from-right-12 fade-in duration-500">
             <div className={`p-6 ${theme.container} ${isRetro ? 'animate-pulse' : ''}`}>
               {/* Skeleton content */}
               <div className={`h-8 w-3/4 ${isRetro ? 'bg-current opacity-40' : 'bg-white/20 rounded'} mb-4`}></div>
@@ -449,7 +441,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const showContentSkeleton = isLoading && (!info?.description || info.description === "");
 
   return (
-    <div className="absolute top-20 right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-140px)] flex flex-col gap-3 animate-in slide-in-from-right-12 fade-in duration-500 pointer-events-none">
+    <div className="absolute top-[90px] right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-150px)] flex flex-col gap-3 animate-in slide-in-from-right-12 fade-in duration-500 pointer-events-none">
         
         {/* Main Info Box */}
         <div className={`${theme.container} flex flex-col shrink min-h-0 overflow-hidden pointer-events-auto`}>
@@ -574,6 +566,17 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                 <>
                 {activeTab === 'overview' && (
                 <div className="space-y-5 animate-in fade-in duration-300">
+                    {info.routeContext && (
+                        <div className="mb-2">
+                             <h3 className={`text-sm font-bold uppercase tracking-widest mb-1 ${isRetro ? 'text-current' : 'text-cyan-400'}`}>
+                                {info.routeContext.title}
+                            </h3>
+                            <p className={`leading-relaxed ${bodySize} font-medium ${theme.bodyText} mb-4 border-b ${isRetro ? 'border-current/30' : 'border-white/10'} pb-4`}>
+                                {info.routeContext.text}
+                            </p>
+                        </div>
+                    )}
+
                     <div className="relative group/desc">
                       <p className={`leading-relaxed ${bodySize} font-medium ${theme.bodyText} pr-8`}>
                       {info.description || "Description unavailable."}

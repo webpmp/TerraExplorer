@@ -1,4 +1,5 @@
 
+
 export interface GeoCoordinates {
   lat: number;
   lng: number;
@@ -37,6 +38,10 @@ export interface LocationInfo {
   boundary?: GeoCoordinates[];
   news: NewsItem[];
   notable: NotableItem[];
+  routeContext?: {
+    title: string;
+    text: string;
+  };
 }
 
 export interface MapMarker {
@@ -87,24 +92,8 @@ declare global {
       ambientLight: any;
       pointLight: any;
       object3D: any;
-    }
-  }
-}
-
-declare module 'react' {
-  namespace JSX {
-    interface IntrinsicElements {
-      group: any;
-      mesh: any;
-      sphereGeometry: any;
-      meshBasicMaterial: any;
-      meshPhongMaterial: any;
-      meshStandardMaterial: any;
-      primitive: any;
-      directionalLight: any;
-      ambientLight: any;
-      pointLight: any;
-      object3D: any;
+      // Allow standard HTML elements
+      [elemName: string]: any;
     }
   }
 }

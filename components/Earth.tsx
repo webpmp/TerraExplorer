@@ -215,8 +215,9 @@ const UniversalMarker: React.FC<{
 const RouteLine: React.FC<{ 
   waypoints: Waypoint[], 
   color: string,
-  isRetro: boolean 
-}> = ({ waypoints, color, isRetro }) => {
+  isRetro: boolean,
+  markerPositions?: Map<string, THREE.Vector3>
+}> = ({ waypoints, color, isRetro, markerPositions }) => {
   const points = useMemo(() => {
     if (waypoints.length < 2) return [];
     
@@ -224,20 +225,24 @@ const RouteLine: React.FC<{
     const radius = 1.01; // Slightly above earth
     
     for (let i = 0; i < waypoints.length - 1; i++) {
-        const start = latLngToVector3(waypoints[i].lat, waypoints[i].lng, radius);
-        const end = latLngToVector3(waypoints[i+1].lat, waypoints[i+1].lng, radius);
+        // Use displaced positions if available, otherwise calculate from lat/lng
+        const start = markerPositions?.get(waypoints[i].id) || latLngToVector3(waypoints[i].lat, waypoints[i].lng, radius);
+        const end = markerPositions?.get(waypoints[i+1].id) || latLngToVector3(waypoints[i+1].lat, waypoints[i+1].lng, radius);
         
+        // Use a slightly safer radius for the line itself so it doesn't clip
+        const lineRadius = 1.045; 
+
         // Generate points along the great circle arc
         const segmentPoints = 30;
         for (let j = 0; j <= segmentPoints; j++) {
             const t = j / segmentPoints;
             // Interpolate vector and re-normalize to sphere surface
-            const v = new THREE.Vector3().copy(start).lerp(end, t).normalize().multiplyScalar(radius);
+            const v = new THREE.Vector3().copy(start).lerp(end, t).normalize().multiplyScalar(lineRadius);
             curvedPoints.push(v);
         }
     }
     return curvedPoints;
-  }, [waypoints]);
+  }, [waypoints, markerPositions]);
 
   if (points.length === 0) return null;
 
@@ -279,8 +284,8 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
   // Marker Outline Colors
   const outlineColor = isModern ? '#ffffff' : isGreen ? '#4ade80' : '#fbbf24';
 
-  // Process and scale markers to avoid overlap
-  const processedMarkers = useMemo(() => {
+  // Memoize positions and declustering logic
+  const { processedMarkers, adjustedPositions } = useMemo(() => {
     const allMarkers: any[] = [];
 
     // 0. Waypoints (High priority)
@@ -331,40 +336,83 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
         });
     }
 
-    // 2. Calculate 3D Positions
+    // 2. Calculate Initial 3D Positions
     const itemsWithPos = allMarkers.map(item => {
-        // Slightly higher radius to avoid clipping with displacement map (max ~0.04)
         const r = 1.045; 
         const pos = latLngToVector3(item.lat, item.lng, r);
+        // Store as a mutable vector for declustering adjustment
         return { ...item, position: pos };
     });
 
-    // 3. Calculate Dynamic Size based on Proximity
-    return itemsWithPos.map((item, i, arr) => {
-        let minDist = Infinity;
-        for (let j = 0; j < arr.length; j++) {
-            if (i === j) continue;
-            const dist = item.position.distanceTo(arr[j].position);
-            if (dist < minDist) minDist = dist;
-        }
+    // 3. De-clustering / Nudging Logic
+    // Detect clusters and arrange them side-by-side
+    const groups: any[][] = [];
+    const visited = new Set<string>();
+    
+    // Simple greedy clustering O(N^2) - fine for small N
+    for(let i=0; i<itemsWithPos.length; i++) {
+        if(visited.has(itemsWithPos[i].id)) continue;
         
-        let visualSize = item.baseSize;
-        const collisionThreshold = item.baseSize * 2.5; // Check neighbors within this range
+        const group = [itemsWithPos[i]];
+        visited.add(itemsWithPos[i].id);
+        
+        for(let j=i+1; j<itemsWithPos.length; j++) {
+            if(visited.has(itemsWithPos[j].id)) continue;
+            // Check distance (threshold depends on visual size, ~0.035 covers overlap)
+            if (itemsWithPos[i].position.distanceTo(itemsWithPos[j].position) < 0.035) {
+                group.push(itemsWithPos[j]);
+                visited.add(itemsWithPos[j].id);
+            }
+        }
+        groups.push(group);
+    }
+    
+    // Map to store final positions for the RouteLine to access
+    const finalPosMap = new Map<string, THREE.Vector3>();
 
-        if (minDist < collisionThreshold) { 
-             // Scale down to fit, with 10% padding
-             const maxAllowed = (minDist / 2) * 0.9; 
-             // Don't shrink below a microscopic visible size (0.002)
-             visualSize = Math.min(item.baseSize, Math.max(0.002, maxAllowed));
+    // Apply displacements
+    groups.forEach(group => {
+        if (group.length > 1) {
+            // Calculate Center of the cluster
+            const center = new THREE.Vector3();
+            group.forEach(item => center.add(item.position));
+            center.divideScalar(group.length).normalize();
+            
+            // Tangent Plane Basis
+            let up = new THREE.Vector3(0, 1, 0);
+            if (Math.abs(up.dot(center)) > 0.99) up = new THREE.Vector3(1, 0, 0);
+            const tanX = new THREE.Vector3().crossVectors(center, up).normalize();
+            const tanY = new THREE.Vector3().crossVectors(center, tanX).normalize();
+            
+            // Layout Radius (expands with count)
+            const layoutRadius = 0.02 + (group.length * 0.006);
+            
+            group.forEach((item, k) => {
+                const angle = (k / group.length) * Math.PI * 2;
+                const offsetX = Math.cos(angle) * layoutRadius;
+                const offsetY = Math.sin(angle) * layoutRadius;
+                
+                const shift = tanX.clone().multiplyScalar(offsetX).add(tanY.clone().multiplyScalar(offsetY));
+                
+                // New position projected back onto sphere radius 1.045
+                const newPos = center.clone().add(shift).normalize().multiplyScalar(1.045);
+                
+                item.position.copy(newPos);
+            });
         }
         
-        return { 
-          ...item, 
-          visualSize,
-          // Keep hitbox at least baseSize, or larger if visual is tiny, to ensure clickability
-          hitSize: Math.max(item.baseSize, 0.015) 
-        };
+        // Store finalized positions
+        group.forEach(item => finalPosMap.set(item.id, item.position));
     });
+
+    // 4. Final Processing (Hitbox Size)
+    const result = itemsWithPos.map(item => ({
+        ...item,
+        visualSize: item.baseSize,
+        hitSize: Math.max(item.baseSize, 0.02) // Ensure clickable
+    }));
+
+    return { processedMarkers: result, adjustedPositions: finalPosMap };
 
   }, [markers, favorites, showFavorites, markerColor, favoriteColor, outlineColor, routeWaypoints, waypointColor]);
 
@@ -494,6 +542,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
             waypoints={routeWaypoints} 
             color={isModern ? "#00ffff" : (isGreen ? "#4ade80" : "#fbbf24")} 
             isRetro={!isModern} 
+            markerPositions={adjustedPositions}
           />
       )}
 

@@ -63,13 +63,17 @@ const RotationManager: React.FC<{
       wasZoomedOutRef.current = isZoomedOut;
     }
 
-    if (isDragging || disabled) return;
+    if (isDragging) return;
     
     // Check if we are at max distance (zoomed all the way out)
-    // If user zooms out to ~5 units, resume rotation
-    if (dist > 4.9 && !autoRotate) {
+    // If user zooms out to ~4.8 units (max is 5), resume rotation
+    // We prioritize this over 'disabled' status if the user intentionally zooms out far enough
+    if (dist > 4.8 && !autoRotate) {
       setAutoRotate(true);
+      return;
     }
+
+    if (disabled) return;
   });
   return null;
 };
@@ -155,8 +159,8 @@ const App: React.FC = () => {
       }
     }
 
-    // Default route if nothing in local storage
-    const defaultRoute: FavoriteLocation = {
+    // Default routes if nothing in local storage
+    const shackletonRoute: FavoriteLocation = {
         id: 'default-shackleton',
         name: "Ernest Shackleton's Endurance Expedition",
         lat: 50.3755,
@@ -237,7 +241,90 @@ const App: React.FC = () => {
             }
         ]
     };
-    setFavorites([defaultRoute]);
+
+    const genghisRoute: FavoriteLocation = {
+        id: 'default-genghis',
+        name: "The Campaigns of Genghis Khan",
+        lat: 48.9, 
+        lng: 109.0,
+        type: 'route',
+        waypoints: [
+            {
+                id: 'wp-genghis-1',
+                name: "Burkhan Khaldun (Mongolia)",
+                lat: 48.9,
+                lng: 109.0,
+                context: "1206: Temüjin unites the Mongol tribes and is proclaimed Genghis Khan.",
+                routeTitle: "Campaigns of Genghis Khan"
+            },
+            {
+                id: 'wp-genghis-2',
+                name: "Yinchuan (Western Xia)",
+                lat: 38.4872,
+                lng: 106.2309,
+                context: "1209: The Mongols force the Western Xia emperor to submit.",
+                routeTitle: "Campaigns of Genghis Khan"
+            },
+            {
+                id: 'wp-genghis-3',
+                name: "Zhongdu (Beijing)",
+                lat: 39.9042,
+                lng: 116.4074,
+                context: "1215: The Jin capital is captured and sacked after a long siege.",
+                routeTitle: "Campaigns of Genghis Khan"
+            },
+            {
+                id: 'wp-genghis-4',
+                name: "Balasagun",
+                lat: 42.746,
+                lng: 75.25,
+                context: "1218: General Jebe conquers the Qara Khitai empire.",
+                routeTitle: "Campaigns of Genghis Khan"
+            },
+            {
+                id: 'wp-genghis-5',
+                name: "Otrar",
+                lat: 42.85,
+                lng: 68.3,
+                context: "1219: The Khwarazmian governor executes Mongol envoys, triggering invasion.",
+                routeTitle: "Campaigns of Genghis Khan"
+            },
+            {
+                id: 'wp-genghis-6',
+                name: "Bukhara",
+                lat: 39.7681,
+                lng: 64.4556,
+                context: "1220: Genghis Khan captures the city and addresses the populace in the mosque.",
+                routeTitle: "Campaigns of Genghis Khan"
+            },
+            {
+                id: 'wp-genghis-7',
+                name: "Samarkand",
+                lat: 39.6542,
+                lng: 66.9597,
+                context: "1220: The capital of the Khwarazmian Empire falls.",
+                routeTitle: "Campaigns of Genghis Khan"
+            },
+             {
+                id: 'wp-genghis-8',
+                name: "Indus River",
+                lat: 33.9,
+                lng: 72.2,
+                context: "1221: Genghis Khan defeats Jalal ad-Din Mingburnu on the banks of the Indus.",
+                routeTitle: "Campaigns of Genghis Khan"
+            },
+            {
+                id: 'wp-genghis-9',
+                name: "Liupan Mountains",
+                lat: 35.6,
+                lng: 106.2,
+                context: "1227: Genghis Khan dies during the final campaign against Western Xia.",
+                routeTitle: "Campaigns of Genghis Khan"
+            }
+        ]
+    };
+
+    setFavorites([shackletonRoute, genghisRoute]);
   }, []);
 
   // Save favorites to local storage whenever they change
@@ -282,7 +369,10 @@ const App: React.FC = () => {
      if (data) {
         if (wp.context) {
             const routeLabel = wp.routeTitle || "From Route";
-            data.description = `[${routeLabel}]: ${wp.context}\n\n${data.description}`;
+            data.routeContext = {
+                title: routeLabel,
+                text: wp.context
+            };
         }
         setLocationInfo(data);
         setIsLoading(false);
@@ -556,7 +646,8 @@ const App: React.FC = () => {
   };
 
   const getCurrentFavorite = () => {
-    if (routeWaypoints.length > 0) {
+    // Only return route favorite if we are actually viewing the route (index != -1)
+    if (routeWaypoints.length > 0 && currentWaypointIndex !== -1) {
         // If we have an activeRouteId, use that
         if (activeRouteId) {
             return favorites.find(f => f.id === activeRouteId);
@@ -575,7 +666,8 @@ const App: React.FC = () => {
         return favorites.find(f => 
             (f.type === 'location' || !f.type) && 
             f.name === locationInfo.name && 
-            Math.abs(f.lat - locationInfo.coordinates.lat) < 0.01
+            Math.abs(f.lat - locationInfo.coordinates.lat) < 0.01 &&
+            Math.abs(f.lng - locationInfo.coordinates.lng) < 0.01
         );
     }
     return undefined;
@@ -590,7 +682,7 @@ const App: React.FC = () => {
         setFavorites(prev => prev.map(f => f.id === currentFavorite.id ? { ...f, name: name } : f));
     } else {
         // Create new
-        if (routeWaypoints.length > 0) {
+        if (routeWaypoints.length > 0 && currentWaypointIndex !== -1) {
             const start = routeWaypoints[0];
             const newFav: FavoriteLocation = {
                 id: `fav-route-${Date.now()}`,
@@ -640,6 +732,12 @@ const App: React.FC = () => {
             setActiveRouteId(null);
             setRouteWaypoints([]);
         }
+
+        // Close panels if removing the currently displayed favorite
+        if (currentFavorite && targetId === currentFavorite.id) {
+            setIsFavoritesPanelOpen(false);
+            handleClosePanel();
+        }
     }
   };
 
@@ -649,11 +747,14 @@ const App: React.FC = () => {
             // Toggle Off
             setActiveRouteId(null);
             setRouteWaypoints([]);
+            setCurrentWaypointIndex(-1);
         } else {
             // Toggle On
+            setAutoRotate(false); // Stop rotation to ensure camera stays centered on waypoint
             if (fav.waypoints) {
                 setRouteWaypoints(fav.waypoints);
                 setActiveRouteId(fav.id);
+                setCurrentWaypointIndex(0); // Explicitly start at beginning
                 // Optionally fly to start
                 if(fav.waypoints[0]) {
                      loadWaypointData(fav.waypoints[0]);
@@ -673,12 +774,15 @@ const App: React.FC = () => {
   };
 
   const handleFavoriteFlyTo = (fav: FavoriteLocation) => {
+      setAutoRotate(false); // Stop rotation to ensure camera stays centered on waypoint
+      
       // Logic similar to click
       if (fav.type === 'route') {
           if (activeRouteId !== fav.id) {
               handleToggleFavoriteVisibility(fav);
           } else {
                // Just look at start
+               setCurrentWaypointIndex(0);
                if(fav.waypoints && fav.waypoints[0]) {
                    loadWaypointData(fav.waypoints[0]);
                }
@@ -868,7 +972,7 @@ const App: React.FC = () => {
         onRemoveFavorite={() => handleRemoveFavorite()}
         currentFavoriteName={currentFavorite?.name}
         onLoadMoreNews={handleLoadMoreNews}
-        routeNav={routeWaypoints.length > 0 ? {
+        routeNav={(routeWaypoints.length > 0 && currentWaypointIndex !== -1) ? {
             current: currentWaypointIndex + 1,
             total: routeWaypoints.length,
             onNext: handleNextWaypoint,
