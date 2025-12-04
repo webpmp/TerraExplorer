@@ -324,7 +324,113 @@ const App: React.FC = () => {
         ]
     };
 
-    setFavorites([shackletonRoute, genghisRoute]);
+    const lewisClarkRoute: FavoriteLocation = {
+        id: 'default-lewisclark',
+        name: "Lewis and Clark Expedition",
+        lat: 38.8027,
+        lng: -90.1012,
+        type: 'route',
+        waypoints: [
+            {
+                id: 'wp-lc-1',
+                name: "Camp Dubois",
+                lat: 38.802722,
+                lng: -90.10125,
+                context: "May 14, 1804: The Corps of Discovery departs their winter camp to begin the journey up the Missouri.",
+                routeTitle: "Lewis and Clark Expedition"
+            },
+            {
+                id: 'wp-lc-2',
+                name: "St. Charles",
+                lat: 38.7758,
+                lng: -90.4851,
+                context: "May 16-21, 1804: The expedition makes final preparations and recruits the last crew members.",
+                routeTitle: "Lewis and Clark Expedition"
+            },
+            {
+                id: 'wp-lc-3',
+                name: "Kaw Point",
+                lat: 39.117,
+                lng: -94.606,
+                context: "June 26, 1804: The explorers reach the confluence of the Kansas and Missouri rivers.",
+                routeTitle: "Lewis and Clark Expedition"
+            },
+            {
+                id: 'wp-lc-4',
+                name: "Sergeant Floyd Monument",
+                lat: 42.4631,
+                lng: -96.3838,
+                context: "August 20, 1804: Sergeant Charles Floyd dies of appendicitis, the expedition's only fatality.",
+                routeTitle: "Lewis and Clark Expedition"
+            },
+            {
+                id: 'wp-lc-5',
+                name: "Council Bluff",
+                lat: 41.434,
+                lng: -96.009,
+                context: "August 3, 1804: Lewis and Clark hold their first formal council with the Oto and Missouri tribes.",
+                routeTitle: "Lewis and Clark Expedition"
+            },
+            {
+                id: 'wp-lc-6',
+                name: "Spirit Mound",
+                lat: 42.8425,
+                lng: -96.942,
+                context: "August 25, 1804: The captains climb this mound to investigate local legends of 'little people'.",
+                routeTitle: "Lewis and Clark Expedition"
+            },
+            {
+                id: 'wp-lc-7',
+                name: "Fort Mandan",
+                lat: 47.297926,
+                lng: -101.08726,
+                context: "Winter 1804-1805: The expedition builds a fort for the winter and meets Sacagawea.",
+                routeTitle: "Lewis and Clark Expedition"
+            },
+            {
+                id: 'wp-lc-8',
+                name: "Knife River Indian Villages",
+                lat: 47.375,
+                lng: -101.405,
+                context: "Major trade hub where the captains gathered vital geographical information from the Hidatsa.",
+                routeTitle: "Lewis and Clark Expedition"
+            },
+            {
+                id: 'wp-lc-9',
+                name: "Great Falls (Lower Portage)",
+                lat: 47.516,
+                lng: -111.378,
+                context: "June 1805: The expedition faces a grueling month-long portage around the massive waterfalls.",
+                routeTitle: "Lewis and Clark Expedition"
+            },
+            {
+                id: 'wp-lc-10',
+                name: "Three Forks of the Missouri",
+                lat: 45.894,
+                lng: -111.927,
+                context: "July 1805: The explorers discover the headwaters of the Missouri River.",
+                routeTitle: "Lewis and Clark Expedition"
+            },
+            {
+                id: 'wp-lc-11',
+                name: "Lemhi Pass",
+                lat: 44.975833,
+                lng: -113.441944,
+                context: "August 12, 1805: Meriwether Lewis crosses the Continental Divide, leaving US territory.",
+                routeTitle: "Lewis and Clark Expedition"
+            },
+            {
+                id: 'wp-lc-12',
+                name: "Fort Clatsop",
+                lat: 46.133611,
+                lng: -123.880278,
+                context: "Winter 1805-1806: The Corps achieves their goal, wintering on the Pacific Coast.",
+                routeTitle: "Lewis and Clark Expedition"
+            }
+        ]
+    };
+
+    setFavorites([shackletonRoute, genghisRoute, lewisClarkRoute]);
   }, []);
 
   // Save favorites to local storage whenever they change
