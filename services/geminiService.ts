@@ -474,16 +474,17 @@ export const generateRoute = async (text: string): Promise<Waypoint[]> => {
       Instructions:
       1. Identify a name for this route/expedition (e.g. "Lewis and Clark Expedition", "Magellan's Circumnavigation", "The Silk Road"). If no specific name exists, create a short descriptive title.
       2. Extract every significant physical location (City, Country, Landmark) in narrative order.
-      3. If vague, use nearest major city.
-      4. Schema: 
+      3. Use HIGH PRECISION coordinates (at least 4 decimal places) to ensure locations (like coastal cities) are mapped accurately on land, not in the ocean.
+      4. If vague, use nearest major city but prioritize accurate coordinates.
+      5. Schema: 
       {
         "title": "Name of Route",
         "route": [
-          {"name": "Location Name", "lat": 0.0, "lng": 0.0, "context": "Very brief reason (max 10 words)"}
+          {"name": "Location Name", "lat": 0.0000, "lng": 0.0000, "context": "Very brief reason (max 10 words)"}
         ]
       }
-      5. Remove consecutive duplicates.
-      6. Output a strict JSON Object.
+      6. Remove consecutive duplicates.
+      7. Output a strict JSON Object.
     `;
     
     const tools = isUrl ? [{ googleSearch: {} }] : undefined;

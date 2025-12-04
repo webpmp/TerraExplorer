@@ -1,4 +1,4 @@
-
+import 'react';
 
 export interface GeoCoordinates {
   lat: number;
@@ -93,8 +93,24 @@ declare global {
       ambientLight: any;
       pointLight: any;
       object3D: any;
-      // Allow standard HTML elements
-      [elemName: string]: any;
+    }
+  }
+}
+
+declare module 'react' {
+  namespace JSX {
+    interface IntrinsicElements {
+      group: any;
+      mesh: any;
+      sphereGeometry: any;
+      meshBasicMaterial: any;
+      meshPhongMaterial: any;
+      meshStandardMaterial: any;
+      primitive: any;
+      directionalLight: any;
+      ambientLight: any;
+      pointLight: any;
+      object3D: any;
     }
   }
 }

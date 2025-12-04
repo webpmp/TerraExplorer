@@ -195,7 +195,7 @@ const UniversalMarker: React.FC<{
       {isWaypoint && waypointIndex !== undefined && (
          <Billboard follow={true}>
             <Text
-              fontSize={size * 1.6}
+              fontSize={size * 1.5} // Increased font size relative to dot for better legibility
               color={isRetro ? "black" : "white"}
               anchorX="center"
               anchorY="middle"
@@ -222,7 +222,7 @@ const RouteLine: React.FC<{
     if (waypoints.length < 2) return [];
     
     const curvedPoints: THREE.Vector3[] = [];
-    const radius = 1.01; // Slightly above earth
+    const radius = 1.015; // Updated to match new marker altitude
     
     for (let i = 0; i < waypoints.length - 1; i++) {
         // Use displaced positions if available, otherwise calculate from lat/lng
@@ -230,7 +230,7 @@ const RouteLine: React.FC<{
         const end = markerPositions?.get(waypoints[i+1].id) || latLngToVector3(waypoints[i+1].lat, waypoints[i+1].lng, radius);
         
         // Use a slightly safer radius for the line itself so it doesn't clip
-        const lineRadius = 1.045; 
+        const lineRadius = 1.018; 
 
         // Generate points along the great circle arc
         const segmentPoints = 30;
@@ -287,6 +287,16 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
   // Memoize positions and declustering logic
   const { processedMarkers, adjustedPositions } = useMemo(() => {
     const allMarkers: any[] = [];
+    
+    // Constants for sizing and clustering
+    const WAYPOINT_SIZE = 0.012; 
+    const MARKER_SIZE_LARGE = 0.012;
+    const MARKER_SIZE_SMALL = 0.008;
+    const CLUSTER_THRESHOLD = 0.04; // Detection radius for overlapping
+
+    // Reduced altitude to minimize parallax error (was 1.045)
+    // 1.015 ensures it is above the base sphere (1.0) but tight enough to the surface
+    const MARKER_ALTITUDE = 1.015;
 
     // 0. Waypoints (High priority)
     if (routeWaypoints && routeWaypoints.length > 0) {
@@ -296,7 +306,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
                 data: wp,
                 lat: wp.lat,
                 lng: wp.lng,
-                baseSize: 0.02, // Larger base size for waypoints
+                baseSize: WAYPOINT_SIZE, 
                 color: waypointColor,
                 id: wp.id,
                 isWaypoint: true,
@@ -313,7 +323,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
             data: m,
             lat: m.lat,
             lng: m.lng,
-            baseSize: m.populationClass === 'large' ? 0.015 : 0.008,
+            baseSize: m.populationClass === 'large' ? MARKER_SIZE_LARGE : MARKER_SIZE_SMALL,
             color: markerColor,
             id: m.id
          });
@@ -328,7 +338,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
                     data: f,
                     lat: f.lat,
                     lng: f.lng,
-                    baseSize: 0.015,
+                    baseSize: MARKER_SIZE_LARGE,
                     color: favoriteColor,
                     id: f.id
                 });
@@ -338,30 +348,43 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
 
     // 2. Calculate Initial 3D Positions
     const itemsWithPos = allMarkers.map(item => {
-        const r = 1.045; 
-        const pos = latLngToVector3(item.lat, item.lng, r);
+        const pos = latLngToVector3(item.lat, item.lng, MARKER_ALTITUDE);
         // Store as a mutable vector for declustering adjustment
         return { ...item, position: pos };
     });
 
-    // 3. De-clustering / Nudging Logic
-    // Detect clusters and arrange them side-by-side
-    const groups: any[][] = [];
-    const visited = new Set<string>();
+    // 3. De-clustering / Nudging Logic using Connected Components
+    // Build Adjacency Graph
+    const adj: number[][] = Array.from({ length: itemsWithPos.length }, () => []);
     
-    // Simple greedy clustering O(N^2) - fine for small N
-    for(let i=0; i<itemsWithPos.length; i++) {
-        if(visited.has(itemsWithPos[i].id)) continue;
+    for (let i = 0; i < itemsWithPos.length; i++) {
+        for (let j = i + 1; j < itemsWithPos.length; j++) {
+             // Check if markers are too close
+             if (itemsWithPos[i].position.distanceTo(itemsWithPos[j].position) < CLUSTER_THRESHOLD) {
+                 adj[i].push(j);
+                 adj[j].push(i);
+             }
+        }
+    }
+
+    const visited = new Set<number>();
+    const groups: any[][] = [];
+    
+    // Find connected components
+    for (let i = 0; i < itemsWithPos.length; i++) {
+        if (visited.has(i)) continue;
+        const group = [];
+        const stack = [i];
+        visited.add(i);
         
-        const group = [itemsWithPos[i]];
-        visited.add(itemsWithPos[i].id);
-        
-        for(let j=i+1; j<itemsWithPos.length; j++) {
-            if(visited.has(itemsWithPos[j].id)) continue;
-            // Check distance (threshold depends on visual size, ~0.035 covers overlap)
-            if (itemsWithPos[i].position.distanceTo(itemsWithPos[j].position) < 0.035) {
-                group.push(itemsWithPos[j]);
-                visited.add(itemsWithPos[j].id);
+        while(stack.length > 0) {
+            const curr = stack.pop()!;
+            group.push(itemsWithPos[curr]);
+            for(const neighbor of adj[curr]) {
+                if(!visited.has(neighbor)) {
+                    visited.add(neighbor);
+                    stack.push(neighbor);
+                }
             }
         }
         groups.push(group);
@@ -384,8 +407,11 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
             const tanX = new THREE.Vector3().crossVectors(center, up).normalize();
             const tanY = new THREE.Vector3().crossVectors(center, tanX).normalize();
             
-            // Layout Radius (expands with count)
-            const layoutRadius = 0.02 + (group.length * 0.006);
+            // Layout Radius 
+            // Ensures adequate spacing based on count. 
+            // Min radius 0.025 prevents overlapping for small clusters.
+            // Expands by 0.008 per item for larger groups.
+            const layoutRadius = Math.max(0.025, group.length * 0.008);
             
             group.forEach((item, k) => {
                 const angle = (k / group.length) * Math.PI * 2;
@@ -394,8 +420,8 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
                 
                 const shift = tanX.clone().multiplyScalar(offsetX).add(tanY.clone().multiplyScalar(offsetY));
                 
-                // New position projected back onto sphere radius 1.045
-                const newPos = center.clone().add(shift).normalize().multiplyScalar(1.045);
+                // New position projected back onto sphere radius MARKER_ALTITUDE
+                const newPos = center.clone().add(shift).normalize().multiplyScalar(MARKER_ALTITUDE);
                 
                 item.position.copy(newPos);
             });
@@ -500,8 +526,9 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
             // Apply exponential curve so it pops in mainly when quite close
             const curvedIntensity = Math.pow(intensity, 2.5);
 
-            // Peak displacement scale
-            mat.displacementScale = curvedIntensity * 0.04;
+            // Peak displacement scale reduced to 0.03 to accommodate lower marker altitude (1.015)
+            // Bias ensures displacement is centered or slightly inward so markers at 1.015 remain visible
+            mat.displacementScale = curvedIntensity * 0.03;
             mat.displacementBias = -mat.displacementScale / 2; // Center the displacement
         }
     }
