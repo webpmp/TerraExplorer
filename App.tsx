@@ -578,16 +578,17 @@ const App: React.FC = () => {
         return;
     }
 
-    const isRoutePoint = (marker as Waypoint).context !== undefined;
+    const isRoutePoint = 'context' in marker || 'routeTitle' in marker;
 
     if (isRoutePoint) {
         const wp = marker as Waypoint;
+        // Even if we don't find it in routeWaypoints, we should still load it!
         const idx = routeWaypoints.findIndex(w => w.id === wp.id);
         if (idx !== -1) {
             setCurrentWaypointIndex(idx);
-            loadWaypointData(wp);
-            return;
         }
+        loadWaypointData(wp);
+        return;
     } else {
         // If clicking a normal marker, only clear route if it wasn't a "checked" route
         if (!activeRouteId) {
