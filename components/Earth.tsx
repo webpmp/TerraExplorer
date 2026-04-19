@@ -2,7 +2,7 @@
 import React, { useRef, useImperativeHandle, forwardRef, useMemo, useEffect, useState, Suspense } from 'react';
 import { useFrame, useLoader } from '@react-three/fiber';
 import { TextureLoader } from 'three';
-import { Decal, useTexture, Line, Text, Billboard } from '@react-three/drei';
+import { Decal, useTexture, Line, Text, Billboard, Instances, Instance } from '@react-three/drei';
 import * as THREE from 'three';
 import { SkinType, GeoCoordinates, MapMarker, FavoriteLocation, Waypoint } from '../types';
 
@@ -218,46 +218,57 @@ const RouteLine: React.FC<{
   isRetro: boolean,
   markerPositions?: Map<string, THREE.Vector3>
 }> = ({ waypoints, color, isRetro, markerPositions }) => {
-  const points = useMemo(() => {
+  const dotPoints = useMemo(() => {
     if (waypoints.length < 2) return [];
     
-    const curvedPoints: THREE.Vector3[] = [];
+    const points: THREE.Vector3[] = [];
     const radius = 1.015; // Updated to match new marker altitude
+    const lineRadius = 1.018; 
     
+    // Spacing between dots (smaller = more dots)
+    const spacing = 0.008; 
+    
+    // Distance to skip at start/end to avoid overlapping with marker
+    const markerClearance = 0.03; 
+
     for (let i = 0; i < waypoints.length - 1; i++) {
-        // Use displaced positions if available, otherwise calculate from lat/lng
         const start = markerPositions?.get(waypoints[i].id) || latLngToVector3(waypoints[i].lat, waypoints[i].lng, radius);
         const end = markerPositions?.get(waypoints[i+1].id) || latLngToVector3(waypoints[i+1].lat, waypoints[i+1].lng, radius);
         
-        // Use a slightly safer radius for the line itself so it doesn't clip
-        const lineRadius = 1.018; 
+        const angle = start.angleTo(end);
+        const arcLength = angle * lineRadius;
 
-        // Generate points along the great circle arc
-        const segmentPoints = 30;
-        for (let j = 0; j <= segmentPoints; j++) {
-            const t = j / segmentPoints;
-            // Interpolate vector and re-normalize to sphere surface
-            const v = new THREE.Vector3().copy(start).lerp(end, t).normalize().multiplyScalar(lineRadius);
-            curvedPoints.push(v);
+        if (arcLength > markerClearance * 2) {
+             const usableLength = arcLength - (markerClearance * 2);
+             const count = Math.floor(usableLength / spacing);
+             
+             if (count > 0) {
+                 for (let j = 0; j <= count; j++) {
+                     // Calculate interpolation factor t based on physical distance along arc
+                     // t maps from [clearance] to [arcLength - clearance]
+                     const currentDist = markerClearance + (j / count) * usableLength;
+                     const t = currentDist / arcLength;
+                     
+                     // Slerp approximation (lerp then normalize)
+                     const v = new THREE.Vector3().copy(start).lerp(end, t).normalize().multiplyScalar(lineRadius);
+                     points.push(v);
+                 }
+             }
         }
     }
-    return curvedPoints;
+    return points;
   }, [waypoints, markerPositions]);
 
-  if (points.length === 0) return null;
+  if (dotPoints.length === 0) return null;
 
   return (
-    <Line
-      points={points}
-      color={color}
-      lineWidth={isRetro ? 2 : 1.5}
-      dashed={true}
-      dashScale={20}
-      dashSize={0.4}
-      gapSize={0.2}
-      transparent
-      opacity={0.8}
-    />
+    <Instances range={dotPoints.length}>
+      <sphereGeometry args={[0.002, 8, 8]} />
+      <meshBasicMaterial color={color} transparent opacity={0.6} />
+      {dotPoints.map((pos, i) => (
+        <Instance key={i} position={pos} />
+      ))}
+    </Instances>
   );
 };
 
@@ -292,10 +303,11 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     const WAYPOINT_SIZE = 0.012; 
     const MARKER_SIZE_LARGE = 0.012;
     const MARKER_SIZE_SMALL = 0.008;
-    const CLUSTER_THRESHOLD = 0.04; // Detection radius for overlapping
+    
+    // Tighter threshold: Only cluster if very close (touching)
+    const CLUSTER_THRESHOLD = 0.02; 
 
-    // Reduced altitude to minimize parallax error (was 1.045)
-    // 1.015 ensures it is above the base sphere (1.0) but tight enough to the surface
+    // Altitude
     const MARKER_ALTITUDE = 1.015;
 
     // 0. Waypoints (High priority)
@@ -396,6 +408,9 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     // Apply displacements
     groups.forEach(group => {
         if (group.length > 1) {
+            // Organize: Sort by Latitude (North to South) for deterministic layout
+            group.sort((a, b) => b.lat - a.lat);
+
             // Calculate Center of the cluster
             const center = new THREE.Vector3();
             group.forEach(item => center.add(item.position));
@@ -407,11 +422,10 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
             const tanX = new THREE.Vector3().crossVectors(center, up).normalize();
             const tanY = new THREE.Vector3().crossVectors(center, tanX).normalize();
             
-            // Layout Radius 
-            // Ensures adequate spacing based on count. 
-            // Min radius 0.025 prevents overlapping for small clusters.
-            // Expands by 0.008 per item for larger groups.
-            const layoutRadius = Math.max(0.025, group.length * 0.008);
+            // Layout Radius: Tighter clustering
+            // 2 items: 0.014 * 2 = 0.028 distance. 
+            // Marker size ~0.024 diameter. They will roughly touch.
+            const layoutRadius = Math.max(0.014, group.length * 0.005);
             
             group.forEach((item, k) => {
                 const angle = (k / group.length) * Math.PI * 2;
@@ -435,7 +449,8 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     const result = itemsWithPos.map(item => ({
         ...item,
         visualSize: item.baseSize,
-        hitSize: Math.max(item.baseSize, 0.02) // Ensure clickable
+        // Reduced hitbox to allow clicking individual items in tight clusters
+        hitSize: Math.max(item.baseSize, 0.015) 
     }));
 
     return { processedMarkers: result, adjustedPositions: finalPosMap };

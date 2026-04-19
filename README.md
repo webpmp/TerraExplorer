@@ -1,4 +1,4 @@
-<img src="https://github.com/webpmp/webpmp.github.io/blob/master/terraexplorer-modern-waypoints.png" alt="Terra Explorer Modern screenshot" width="75%" height="75%">
+<img src="https://github.com/webpmp/webpmp.github.io/blob/master/terra-explorer-rotating.gif" alt="Terra Explorer Modern screenshot" width="100%" height="100%">
 
 # TerraExplorer
 

@@ -321,7 +321,7 @@ const Controls: React.FC<ControlsProps> = ({
       </div>
 
       {/* Search Input */}
-      <form onSubmit={handleSubmit} className="w-full max-w-lg pointer-events-auto relative group">
+      <form onSubmit={handleSubmit} className="w-full max-w-[532px] pointer-events-auto relative group">
         <div className={theme.glow}></div>
         <div className={`relative flex items-center overflow-hidden transition-all ${theme.inputWrapper}`}>
           <Search className={`ml-4 ${theme.inputIcon}`} size={20} />
@@ -351,7 +351,7 @@ const Controls: React.FC<ControlsProps> = ({
             disabled={isSearching}
             className={`mr-2 px-4 py-2 transition-colors disabled:opacity-50 ${theme.submitBtn}`}
           >
-            {isSearching ? <Loader2 size={18} className="animate-spin" /> : "SEARCH"}
+            {isSearching ? <Loader2 size={18} className="animate-spin" /> : "EXPLORE"}
           </button>
         </div>
       </form>

@@ -3,6 +3,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { Stars, CameraControls } from '@react-three/drei';
 import * as THREE from 'three';
+import { ChevronDown } from 'lucide-react';
 
 import Earth from './components/Earth';
 import InfoPanel from './components/InfoPanel';
@@ -55,8 +56,8 @@ const RotationManager: React.FC<{
 
   useFrame(({ camera }) => {
     const dist = camera.position.length();
-    // Max distance is 5. Consider zoomed out when close to max.
-    const isZoomedOut = dist > 4.5;
+    // Max distance is 8. Consider zoomed out when close to max.
+    const isZoomedOut = dist > 7.0;
     
     if (wasZoomedOutRef.current !== isZoomedOut) {
       onZoomChange(isZoomedOut);
@@ -66,9 +67,9 @@ const RotationManager: React.FC<{
     if (isDragging) return;
     
     // Check if we are at max distance (zoomed all the way out)
-    // If user zooms out to ~4.8 units (max is 5), resume rotation
+    // If user zooms out to ~7.5 units (max is 8), resume rotation
     // We prioritize this over 'disabled' status if the user intentionally zooms out far enough
-    if (dist > 4.8 && !autoRotate) {
+    if (dist > 7.5 && !autoRotate) {
       setAutoRotate(true);
       return;
     }
@@ -136,6 +137,8 @@ const App: React.FC = () => {
   const [routeWaypoints, setRouteWaypoints] = useState<Waypoint[]>([]);
   const [currentWaypointIndex, setCurrentWaypointIndex] = useState<number>(-1);
   const [isTraceModalOpen, setIsTraceModalOpen] = useState(false);
+  
+  const [isSkinMenuOpen, setIsSkinMenuOpen] = useState(false);
   
   // Track focus state to manage suggestions pausing
   const [isFocused, setIsFocused] = useState(false);
@@ -668,7 +671,7 @@ const App: React.FC = () => {
       setLocationInfo(result.locationInfo);
       setIsLoading(false);
 
-      const targetDist = Math.max(1.3, 3.0 - ((result.suggestedZoom / 10) * (3.0 - 1.2)));
+      const targetDist = Math.max(1.3, 4.5 - ((result.suggestedZoom / 10) * (4.5 - 1.2)));
       const localCameraVec = latLngToVector3(lat, lng, targetDist);
 
       if (earthRef.current) {
@@ -961,7 +964,7 @@ const App: React.FC = () => {
   return (
     <div className={`relative w-full h-screen bg-black overflow-hidden`}>
       {/* 3D Scene */}
-      <Canvas camera={{ position: [0, 0, 3], fov: 45 }}>
+      <Canvas camera={{ position: [0, 0, 4.5], fov: 45 }}>
         <ambientLight intensity={skin === 'modern' ? 0.4 : 1.5} color={skin === 'modern' ? "#ccccff" : "#ffffff"} />
         <Sun skin={skin} />
         {skin === 'modern' && (
@@ -994,7 +997,7 @@ const App: React.FC = () => {
         <CameraControls 
           ref={cameraControlsRef} 
           minDistance={1.2} 
-          maxDistance={5}
+          maxDistance={8}
           smoothTime={0.8}
           onStart={() => {
             setIsDragging(true);
@@ -1031,31 +1034,41 @@ const App: React.FC = () => {
       </div>
 
       {/* Skin Selector */}
-      <div className="absolute top-8 right-8 z-30 flex gap-2">
+      <div className="absolute top-8 right-8 z-30 flex flex-col items-end">
         <button 
-          onClick={() => setSkin('modern')}
-          className={`px-3 py-1 text-xs rounded-full border transition-all ${
-            skin === 'modern' ? 'bg-cyan-500 text-black border-cyan-500 font-bold' : 'bg-black/50 text-white/50 border-white/20 hover:border-white/50'
+          onClick={() => setIsSkinMenuOpen(!isSkinMenuOpen)}
+          className={`px-3 py-1 flex items-center gap-1 text-xs transition-all ${
+            skin === 'modern' ? 'bg-cyan-500 text-black border border-cyan-500 font-bold rounded-full' : 
+            skin === 'retro-green' ? 'bg-green-400 text-black border border-green-400 font-bold font-mono rounded-none' :
+            'bg-amber-400 text-black border border-amber-400 font-bold font-mono rounded-none'
           }`}
         >
-          MODERN
+          {skin === 'modern' ? 'MODERN' : skin === 'retro-green' ? 'CRT-G' : 'CRT-A'}
+          <ChevronDown size={14} />
         </button>
-        <button 
-          onClick={() => setSkin('retro-green')}
-          className={`px-3 py-1 text-xs rounded-none border transition-all font-mono ${
-            skin === 'retro-green' ? 'bg-green-400 text-black border-green-400 font-bold' : 'bg-black/50 text-green-400/50 border-green-400/20 hover:border-green-400/50'
-          }`}
-        >
-          CRT-G
-        </button>
-         <button 
-          onClick={() => setSkin('retro-amber')}
-          className={`px-3 py-1 text-xs rounded-none border transition-all font-mono ${
-            skin === 'retro-amber' ? 'bg-amber-400 text-black border-amber-400 font-bold' : 'bg-black/50 text-amber-400/50 border-amber-400/20 hover:border-amber-400/50'
-          }`}
-        >
-          CRT-A
-        </button>
+
+        {isSkinMenuOpen && (
+          <div className="mt-2 flex flex-col w-28 bg-black/80 backdrop-blur border border-white/20 rounded shadow-xl overflow-hidden">
+            <button 
+              onClick={() => { setSkin('modern'); setIsSkinMenuOpen(false); }}
+              className={`px-3 py-2 text-xs text-left hover:bg-white/10 ${skin === 'modern' ? 'text-white font-bold bg-white/5' : 'text-gray-400'}`}
+            >
+              MODERN
+            </button>
+            <button 
+              onClick={() => { setSkin('retro-green'); setIsSkinMenuOpen(false); }}
+              className={`px-3 py-2 text-xs text-left font-mono hover:bg-white/10 ${skin === 'retro-green' ? 'text-green-400 font-bold bg-white/5' : 'text-green-400/50'}`}
+            >
+              CRT-G
+            </button>
+            <button 
+              onClick={() => { setSkin('retro-amber'); setIsSkinMenuOpen(false); }}
+              className={`px-3 py-2 text-xs text-left font-mono hover:bg-white/10 ${skin === 'retro-amber' ? 'text-amber-400 font-bold bg-white/5' : 'text-amber-400/50'}`}
+            >
+              CRT-A
+            </button>
+          </div>
+        )}
       </div>
 
       {isFavoritesPanelOpen && (
