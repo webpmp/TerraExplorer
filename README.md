@@ -1,12 +1,8 @@
-<table width="100%">
-  <tr>
-    <td align="center" bgcolor="#000000">
-      <img src="https://raw.githubusercontent.com/webpmp/webpmp.github.io/master/terra-explorer-rotating.gif"
-           alt="Terra Explorer Modern screenshot"
-           width="640" height="480">
-    </td>
-  </tr>
-</table>
+<p align="center" style="background-color:black; padding:20px;">
+  <img src="https://raw.githubusercontent.com/webpmp/webpmp.github.io/master/terra-explorer-rotating.gif" 
+       alt="Terra Explorer Modern screenshot" 
+       width="640" height="480">
+</p>
 # TerraExplorer
 
 Terra Explorer is an interactive 3D globe application that lets users freely navigate the planet or quickly jump to cities, states, landmarks, and unique points of interest through a powerful search experience. It supports rich data layers including shipwrecks, natural wonders, and historical sites, provides overlays with location overviews, current news, and notable people associated with each place, and includes the Trace Route feature that extracts locations from any article, URL, or text block to build a connected journey across them.
