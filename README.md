@@ -1,5 +1,5 @@
 <p align="center" style="background-color:black; padding:20px;">
-  <img src="https://raw.githubusercontent.com/webpmp/webpmp.github.io/master/terra-explorer-rotating.gif" 
+  <img src="https://github.com/webpmp/webpmp.github.io/blob/master/terra-explorer-fast.gif" 
        alt="Terra Explorer Modern screenshot" 
        width="640" height="480">
 </p>
