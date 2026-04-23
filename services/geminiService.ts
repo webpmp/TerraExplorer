@@ -123,6 +123,9 @@ const repairTruncatedJson = (jsonStr: string): string => {
       fixed += '"';
   }
 
+  // Remove any trailing comma at the end of the truncated payload
+  fixed = fixed.replace(/,\s*$/, '');
+
   // 2. Handle missing closing braces/brackets
   // We strip strings temporarily to count structural braces accurately
   const stripped = fixed.replace(/"([^"\\]*(\\.[^"\\]*)*)"/g, '""');
@@ -137,6 +140,9 @@ const repairTruncatedJson = (jsonStr: string): string => {
   for (let i = 0; i < (openBraces - closeBraces); i++) fixed += '}';
   for (let i = 0; i < (openBrackets - closeBrackets); i++) fixed += ']';
   
+  // Final cleanup for commas right before brackets that might have appeared
+  fixed = fixed.replace(/,(\s*[\]}])/g, '$1');
+
   return fixed;
 };
 
