@@ -17,6 +17,7 @@ Terra Explorer is an interactive 3D globe application that lets users freely nav
   - **Modern**: Sleek, glassmorphism UI with high-resolution textures.
   - **CRT Green**: Retro monochrome monitor effect with scanlines and pixelated fonts.
   - **CRT Amber**: Amber monochrome variation for a different retro feel.
+  - **Parchment**: Antique cartographic theme using a parchment-style interface with a 16th-century world map background.
 - **Favorites System**: Bookmark interesting locations to revisit them later.
 - **Personal Notes**: Add and save personal notes for specific locations (persisted locally).
 - **Smart Search**: Natural language processing to resolve queries like "Where did the Titanic sink?" to specific geographic coordinates.
