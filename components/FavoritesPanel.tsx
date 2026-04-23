@@ -79,6 +79,22 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
       emptyState: "text-amber-400/50",
       modal: "bg-black border-2 border-amber-400 text-amber-300 font-retro shadow-none rounded-none",
       input: "bg-black border border-amber-400 text-amber-300 rounded-none p-2 text-sm focus:bg-amber-900/20 outline-none font-retro"
+    },
+    'parchment': {
+      container: "bg-[#f4ead5] border border-[#8b5a2b] shadow-[4px_4px_10px_rgba(0,0,0,0.3)] text-[#3e2723] font-sans",
+      header: "bg-[#e8d5b5]/30 border-b border-[#8b5a2b]",
+      headerTitle: "text-[#5c3a21] font-bold uppercase tracking-wider brand-font",
+      item: "bg-[#f4ead5] border border-[#8b5a2b]/60 hover:bg-[#e8d5b5] rounded-sm transition-colors",
+      itemActive: "bg-[#d2b48c]/30 border-[#5c3a21]",
+      text: "text-[#5c3a21]",
+      textActive: "text-[#3e2723] font-bold",
+      icon: "text-[#8b5a2b]",
+      actionBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] rounded-sm p-1.5 transition-colors",
+      deleteBtn: "hover:bg-[#8b0000]/20 hover:text-[#8b0000] text-[#8b5a2b] rounded-sm p-1.5 transition-colors",
+      closeBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] rounded p-1",
+      emptyState: "text-[#8b5a2b]/70",
+      modal: "bg-[#f4ead5] border-2 border-[#8b5a2b] text-[#3e2723] font-sans shadow-[0_4px_15px_rgba(0,0,0,0.4)] rounded-sm",
+      input: "bg-[#f4ead5] border border-[#8b5a2b] text-[#522B07] placeholder-[#522B07] shadow-[inset_1px_1px_3px_rgba(0,0,0,0.1)] rounded-sm p-2 text-sm focus:border-[#5c3a21] outline-none"
     }
   };
 
@@ -207,7 +223,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
       <div className={`absolute top-[106px] left-8 z-30 w-72 md:w-80 max-h-[calc(100vh-170px)] flex flex-col animate-in slide-in-from-left-8 fade-in duration-300 transition-opacity duration-300 ${dimmed ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}>
           <div className={`${theme.container} flex flex-col shrink min-h-0 overflow-hidden`}>
               <div className={`p-4 flex items-center justify-between shrink-0 ${theme.header}`}>
-                  <h2 className={`text-lg font-bold ${theme.headerTitle}`}>SAVED LOCATIONS</h2>
+                  <h2 className={`text-lg font-bold ${theme.headerTitle}`}>EXPLORATIONS</h2>
                   <button onClick={onClose} className={theme.closeBtn}>
                       <X size={18} />
                   </button>

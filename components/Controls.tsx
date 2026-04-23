@@ -238,6 +238,21 @@ const Controls: React.FC<ControlsProps> = ({
       error: "bg-black border border-amber-400 text-amber-300 font-retro px-4 py-2 uppercase blinking",
       copyright: "text-amber-400/60 font-retro uppercase tracking-widest",
       modal: "bg-black border-2 border-amber-400 text-amber-300 font-retro shadow-[0_0_20px_rgba(251,191,36,0.2)] rounded-none"
+    },
+    'parchment': {
+      btn: "bg-[#f4ead5] border border-[#8b5a2b] text-[#5c3a21] hover:bg-[#e8d5b5] hover:text-[#3e2723] rounded shadow-[2px_2px_4px_rgba(0,0,0,0.2)] font-sans",
+      btnActive: "bg-[#d2b48c] text-[#3e2723] border-[#5c3a21] shadow-[inset_1px_1px_3px_rgba(0,0,0,0.3)]",
+      favActive: "bg-[#e8d5b5] text-[#b8860b] border-[#b8860b] shadow-[0_0_10px_rgba(184,134,11,0.3)] hover:bg-[#d2b48c] hover:text-[#8b6508]",
+      
+      inputWrapper: "bg-[#f4ead5]/95 backdrop-blur-md border border-[#8b5a2b]/60 rounded shadow-[inset_0_1px_4px_rgba(0,0,0,0.1)]",
+      inputIcon: "text-[#8b5a2b]",
+      inputField: "text-[#522B07] placeholder-[#522B07] font-mono text-sm",
+      submitBtn: "bg-[#e8d5b5] text-[#5c3a21] border-l border-[#8b5a2b]/60 hover:bg-[#d2b48c]/80 rounded-[0_3px_3px_0] font-sans font-bold uppercase",
+      resetBtn: "text-[#8b5a2b] hover:text-[#3e2723] mr-2 p-1",
+      glow: "hidden",
+      error: "bg-[#f4ead5] border border-[#8b5a2b] text-[#8b0000] font-sans px-4 py-2 shadow-md",
+      copyright: "text-[#5c3a21]/80 font-sans",
+      modal: "bg-[#f4ead5] border-2 border-[#8b5a2b] text-[#3e2723] font-sans shadow-[0_4px_20px_rgba(0,0,0,0.4)] rounded-sm"
     }
   };
 

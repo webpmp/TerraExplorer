@@ -76,7 +76,7 @@ export interface FavoriteLocation {
   waypoints?: Waypoint[];
 }
 
-export type SkinType = 'modern' | 'retro-green' | 'retro-amber';
+export type SkinType = 'modern' | 'retro-green' | 'retro-amber' | 'parchment';
 
 // Fix for React Three Fiber elements not being recognized in JSX
 declare global {

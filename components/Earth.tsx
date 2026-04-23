@@ -283,17 +283,18 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     }
   });
 
-  const isModern = skin === 'modern';
+  const isParchment = skin === 'parchment';
+  const isModern = skin === 'modern' || isParchment;
   const isGreen = skin === 'retro-green';
   const isAmber = skin === 'retro-amber';
 
   // Marker Colors
-  const markerColor = isModern ? '#ff3333' : isGreen ? '#a3e635' : '#fcd34d';
-  const favoriteColor = isModern ? '#d946ef' : '#ffffff'; 
-  const waypointColor = isModern ? '#00e5ff' : isGreen ? '#4ade80' : '#fbbf24'; 
+  const markerColor = isParchment ? '#8b5a2b' : isModern ? '#ff3333' : isGreen ? '#a3e635' : '#fcd34d';
+  const favoriteColor = isParchment ? '#8b0000' : isModern ? '#d946ef' : '#ffffff'; 
+  const waypointColor = isParchment ? '#5c3a21' : isModern ? '#00e5ff' : isGreen ? '#4ade80' : '#fbbf24'; 
   
   // Marker Outline Colors
-  const outlineColor = isModern ? '#ffffff' : isGreen ? '#4ade80' : '#fbbf24';
+  const outlineColor = isParchment ? '#e8d5b5' : isModern ? '#ffffff' : isGreen ? '#4ade80' : '#fbbf24';
 
   // Memoize positions and declustering logic
   const { processedMarkers, adjustedPositions } = useMemo(() => {
@@ -487,9 +488,9 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     const mat = new THREE.ShaderMaterial({
       uniforms: THREE.UniformsUtils.clone(RetroShader.uniforms),
       vertexShader: RetroShader.vertexShader,
-      fragmentShader: RetroShader.fragmentShader,
-      flatShading: isGreen 
-    });
+      fragmentShader: RetroShader.fragmentShader
+    }) as any;
+    mat.flatShading = isGreen;
     mat.uniforms.map.value = colorMap;
     return mat;
   }, [colorMap, isGreen]);
@@ -664,8 +665,8 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
         </mesh>
       )}
 
-      {/* Atmosphere Glow - Hide for Green */}
-      {!isGreen && (
+      {/* Atmosphere Glow - Hide for Green and Parchment */}
+      {(!isGreen && !isParchment) && (
         <mesh scale={[1.2, 1.2, 1.2]}>
             <sphereGeometry args={[1, 64, 64]} />
             <primitive object={atmosphereMaterial} attach="material" />

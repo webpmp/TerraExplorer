@@ -37,7 +37,7 @@ const Sun: React.FC<{ skin: SkinType }> = ({ skin }) => {
   return (
     <directionalLight 
       ref={lightRef} 
-      intensity={skin === 'modern' ? 2.5 : 3.0} 
+      intensity={skin === 'modern' || skin === 'parchment' ? 2.5 : 3.0} 
       castShadow 
       color="#ffffff"
     />
@@ -112,6 +112,33 @@ const VisibilityTracker: React.FC<{
   return null;
 };
 
+// Component to conditionally initialize zoom for parchment theme
+const ThemeZoomInitializer: React.FC<{
+  skin: SkinType;
+  cameraControlsRef: React.RefObject<any>;
+  userModifiedZoomRef: React.MutableRefObject<boolean>;
+  onZoom: () => void;
+}> = ({ skin, cameraControlsRef, userModifiedZoomRef, onZoom }) => {
+  const hasAppliedRef = useRef(false);
+
+  useFrame(() => {
+    if (skin === 'parchment') {
+      if (!hasAppliedRef.current) {
+        if (cameraControlsRef.current) {
+          if (!userModifiedZoomRef.current) {
+            onZoom();
+          }
+          hasAppliedRef.current = true;
+        }
+      }
+    } else {
+      hasAppliedRef.current = false;
+    }
+  });
+
+  return null;
+};
+
 const App: React.FC = () => {
   const [locationInfo, setLocationInfo] = useState<LocationInfo | null>(null);
   const [markers, setMarkers] = useState<MapMarker[]>([]);
@@ -143,8 +170,9 @@ const App: React.FC = () => {
   // Track focus state to manage suggestions pausing
   const [isFocused, setIsFocused] = useState(false);
   
-  const cameraControlsRef = useRef<CameraControls>(null);
+  const cameraControlsRef = useRef<any>(null);
   const earthRef = useRef<THREE.Mesh>(null);
+  const userModifiedZoomRef = useRef(false);
 
   // Load favorites from local storage on mount
   useEffect(() => {
@@ -741,17 +769,29 @@ const App: React.FC = () => {
       }
   };
 
-  const handleZoomIn = () => {
+  const handleZoomIn = useCallback(() => {
     if (cameraControlsRef.current) {
       cameraControlsRef.current.dolly(1, true);
     }
-  };
+  }, []);
 
-  const handleZoomOut = () => {
+  const handleThemeZoomIn = useCallback(() => {
+    if (cameraControlsRef.current) {
+      cameraControlsRef.current.dolly(1.5, true);
+    }
+  }, []);
+
+  const handleUserZoomIn = useCallback(() => {
+    userModifiedZoomRef.current = true;
+    handleZoomIn();
+  }, [handleZoomIn]);
+
+  const handleZoomOut = useCallback(() => {
+    userModifiedZoomRef.current = true;
     if (cameraControlsRef.current) {
       cameraControlsRef.current.dolly(-1, true);
     }
-  };
+  }, []);
 
   const handleClosePanel = () => {
     setLocationInfo(null);
@@ -963,12 +1003,21 @@ const App: React.FC = () => {
       : routeWaypoints;
 
   return (
-    <div className={`relative w-full h-screen bg-black overflow-hidden`}>
+    <div 
+      className={`relative w-full h-screen bg-black overflow-hidden bg-cover bg-center bg-no-repeat`}
+      style={skin === 'parchment' ? { backgroundImage: 'url(https://raw.githubusercontent.com/webpmp/webpmp.github.io/master/terra-explorer-bg.png)' } : {}}
+    >
+      {/* Background Gradient for Parchment Theme Contrast */}
+      {skin === 'parchment' && (
+         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none z-0"></div>
+      )}
+
       {/* 3D Scene */}
-      <Canvas camera={{ position: [0, 0, 4.5], fov: 45 }}>
-        <ambientLight intensity={skin === 'modern' ? 0.4 : 1.5} color={skin === 'modern' ? "#ccccff" : "#ffffff"} />
+      <div className="absolute inset-0 z-0">
+        <Canvas camera={{ position: [0, 0, 4.5], fov: 45 }}>
+        <ambientLight intensity={skin === 'modern' || skin === 'parchment' ? 0.4 : 1.5} color={skin === 'modern' || skin === 'parchment' ? "#ccccff" : "#ffffff"} />
         <Sun skin={skin} />
-        {skin === 'modern' && (
+        {(skin === 'modern' || skin === 'parchment') && (
            <pointLight position={[-10, 0, -5]} intensity={1.0} color="#0044ff" distance={20} />
         )}
         <Stars radius={300} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
@@ -1003,12 +1052,20 @@ const App: React.FC = () => {
           onStart={() => {
             setIsDragging(true);
             setAutoRotate(false);
+            userModifiedZoomRef.current = true;
           }}
           onEnd={() => {
             setIsDragging(false);
           }}
         />
 
+        <ThemeZoomInitializer
+          skin={skin}
+          cameraControlsRef={cameraControlsRef}
+          userModifiedZoomRef={userModifiedZoomRef}
+          onZoom={handleThemeZoomIn}
+        />
+        
         <RotationManager 
           isDragging={isDragging} 
           autoRotate={autoRotate} 
@@ -1020,12 +1077,13 @@ const App: React.FC = () => {
           disabled={isLoading || routeWaypoints.length > 0 || !!locationInfo || markers.length > 0}
         />
       </Canvas>
+      </div>
 
       {/* Retro Effect Overlay */}
-      {skin !== 'modern' && <div className="scanlines"></div>}
+      {(skin === 'retro-green' || skin === 'retro-amber') && <div className="scanlines"></div>}
 
       {/* UI Overlay */}
-      <div className="absolute top-8 left-8 z-10 pointer-events-none">
+      <div className={`absolute top-8 left-8 z-10 pointer-events-none ${skin === 'parchment' ? 'hidden' : ''}`}>
         <h1 className={`text-4xl font-bold drop-shadow-lg ${getHeaderStyle()}`}>
           TERRA<span className={skin === 'modern' ? 'text-cyan-400' : ''}>EXPLORER</span>
         </h1>
@@ -1041,10 +1099,11 @@ const App: React.FC = () => {
           className={`px-3 py-1 flex items-center gap-1 text-xs transition-all ${
             skin === 'modern' ? 'bg-cyan-500 text-black border border-cyan-500 font-bold rounded-full' : 
             skin === 'retro-green' ? 'bg-green-400 text-black border border-green-400 font-bold font-mono rounded-none' :
+            skin === 'parchment' ? 'bg-[#D2B48C] text-[#3e2723] border border-[#3e2723] font-bold rounded shadow-sm' :
             'bg-amber-400 text-black border border-amber-400 font-bold font-mono rounded-none'
           }`}
         >
-          {skin === 'modern' ? 'MODERN' : skin === 'retro-green' ? 'CRT-G' : 'CRT-A'}
+          {skin === 'modern' ? 'MODERN' : skin === 'retro-green' ? 'CRT-G' : skin === 'parchment' ? 'PARCHMENT' : 'CRT-A'}
           <ChevronDown size={14} />
         </button>
 
@@ -1067,6 +1126,12 @@ const App: React.FC = () => {
               className={`px-3 py-2 text-xs text-left font-mono hover:bg-white/10 ${skin === 'retro-amber' ? 'text-amber-400 font-bold bg-white/5' : 'text-amber-400/50'}`}
             >
               CRT-A
+            </button>
+            <button 
+              onClick={() => { setSkin('parchment'); setIsSkinMenuOpen(false); }}
+              className={`px-3 py-2 text-xs text-left hover:bg-white/10 ${skin === 'parchment' ? 'text-[#D2B48C] font-bold bg-white/5' : 'text-[#D2B48C]/50'}`}
+            >
+              PARCHMENT
             </button>
           </div>
         )}
@@ -1109,7 +1174,7 @@ const App: React.FC = () => {
       <Controls 
         onSearch={handleSearch} 
         onTraceRoute={handleTraceRoute}
-        onZoomIn={handleZoomIn} 
+        onZoomIn={handleUserZoomIn} 
         onZoomOut={handleZoomOut}
         isSearching={isLoading}
         searchError={searchError}

@@ -53,8 +53,10 @@ const isValidData = (val: string | undefined) => {
   ].includes(v);
 };
 
-const CopyButton: React.FC<{ text: string; className?: string; skin: SkinType }> = ({ text, className = "", skin }) => {
+  const CopyButton: React.FC<{ text: string; className?: string; skin: SkinType }> = ({ text, className = "", skin }) => {
   const [copied, setCopied] = useState(false);
+  const isRetro = skin === 'retro-green' || skin === 'retro-amber';
+  const isParchment = skin === 'parchment';
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -63,9 +65,10 @@ const CopyButton: React.FC<{ text: string; className?: string; skin: SkinType }>
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const isRetro = skin !== 'modern';
   const themeClass = isRetro 
     ? "hover:text-black hover:bg-current border border-transparent hover:border-current rounded-none" 
+    : isParchment
+    ? "hover:bg-[#d2b48c]/50 hover:text-[#3e2723] border border-transparent rounded-sm"
     : "hover:bg-white/10 rounded-full";
 
   return (
@@ -100,6 +103,8 @@ const NotablePersonCard: React.FC<{
   subtextSize: string 
 }> = ({ item, theme, skin, bodySize, subtextSize }) => {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const isRetro = skin === 'retro-green' || skin === 'retro-amber';
+  const isParchment = skin === 'parchment';
 
   useEffect(() => {
     // Safety check if item or name is missing
@@ -404,11 +409,32 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       noteCard: "bg-black border border-amber-400 rounded-none",
       navBtn: "bg-black border border-amber-400 hover:bg-amber-400 hover:text-black text-amber-300",
       popover: "bg-black border-2 border-amber-400 rounded-none shadow-[0_0_10px_rgba(251,191,36,0.4)]"
+    },
+    'parchment': {
+      container: "bg-[#f4ead5] border border-[#8b5a2b] shadow-[4px_4px_10px_rgba(0,0,0,0.3)] text-[#3e2723] font-sans",
+      header: "bg-[#e8d5b5]/30 border-b border-[#8b5a2b]",
+      headerTitle: "text-[#5c3a21] font-bold uppercase tracking-wider brand-font",
+      tag: "text-[#3e2723] bg-[#d2b48c] border border-[#8b5a2b] rounded-sm font-bold shadow-sm",
+      subtext: "text-[#8b5a2b]",
+      bodyText: "text-[#5c3a21]",
+      card: "bg-[#f4ead5] border border-[#8b5a2b]/60 shadow-[inset_1px_1px_4px_rgba(255,255,255,0.4)] rounded-sm hover:bg-[#e8d5b5] transition-colors block relative group",
+      icon: "text-[#8b5a2b]",
+      tabActive: "bg-[#d2b48c]/30 text-[#3e2723] border-b-2 border-[#5c3a21]",
+      tabInactive: "text-[#8b5a2b] border-b-2 border-transparent hover:border-[#8b5a2b]/50 hover:bg-[#e8d5b5]/50",
+      listDot: "bg-[#8b5a2b] rounded-sm",
+      closeBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] border border-transparent rounded",
+      actionBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] border border-transparent rounded",
+      loadMoreBtn: "bg-[#e8d5b5]/50 border border-[#8b5a2b] hover:bg-[#d2b48c] text-[#5c3a21] rounded-sm text-sm tracking-widest uppercase font-bold",
+      notesInput: "bg-[#f4ead5] border border-[#8b5a2b] text-[#522B07] placeholder-[#522B07] shadow-[inset_1px_1px_3px_rgba(0,0,0,0.1)] rounded-sm focus:border-[#5c3a21]",
+      noteCard: "bg-[#f4ead5] border border-[#8b5a2b]/50 rounded-sm shadow-[inset_1px_1px_2px_rgba(255,255,255,0.4)]",
+      navBtn: "bg-[#e8d5b5] border border-[#8b5a2b]/40 hover:bg-[#d2b48c] hover:text-[#3e2723] text-[#5c3a21]",
+      popover: "bg-[#f4ead5] border-2 border-[#8b5a2b] rounded-sm shadow-[0_4px_15px_rgba(0,0,0,0.4)]"
     }
   };
 
   const theme = themes[skin];
-  const isRetro = skin !== 'modern';
+  const isRetro = skin === 'retro-green' || skin === 'retro-amber';
+  const isParchment = skin === 'parchment';
 
   // Reduced font size for retro to avoid wrapping issues (matches modern size 2xl instead of 3xl)
   const titleSize = isRetro ? 'text-2xl' : 'text-2xl';
@@ -444,7 +470,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       return (
           <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setExpandedImage(false)}>
               <div className="relative max-w-full max-h-full">
-                  <img src={wikiImage} alt={info?.name} className={`max-w-full max-h-[90vh] object-contain ${isRetro ? 'grayscale contrast-125' : ''}`} />
+                  <img src={wikiImage} alt={info?.name} className={`max-w-full max-h-[90vh] object-contain ${isRetro ? 'grayscale contrast-125' : (isParchment ? 'sepia brightness-90 contrast-110' : '')}`} />
                   <button className={`absolute top-4 right-4 p-2 bg-black/50 text-white rounded-full hover:bg-white/20`}>
                       <X size={24} />
                   </button>
