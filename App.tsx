@@ -1005,7 +1005,7 @@ const App: React.FC = () => {
   return (
     <div 
       className={`relative w-full h-screen bg-black overflow-hidden bg-cover bg-center bg-no-repeat`}
-      style={skin === 'parchment' ? { backgroundImage: 'url(https://raw.githubusercontent.com/webpmp/webpmp.github.io/master/terra-explorer-bg.png)' } : {}}
+      style={skin === 'parchment' ? { backgroundImage: 'url(https://raw.githubusercontent.com/webpmp/webpmp.github.io/master/terra-explorer-noglobe.png)' } : {}}
     >
       {/* Background Gradient for Parchment Theme Contrast */}
       {skin === 'parchment' && (
