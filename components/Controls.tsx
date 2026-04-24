@@ -289,7 +289,7 @@ const Controls: React.FC<ControlsProps> = ({
                         value={traceText}
                         onChange={(e) => setTraceText(e.target.value)}
                         placeholder="Paste text here..."
-                        className={`w-full h-32 p-3 bg-transparent border ${skin === 'modern' ? 'border-white/20 rounded-lg' : 'border-current rounded-none'} outline-none resize-none focus:border-opacity-100 transition-colors`}
+                        className={`w-full h-32 p-3 bg-transparent border ${skin === 'modern' ? 'border-white/20 rounded-lg' : 'border-current rounded-none'} ${skin === 'parchment' ? 'placeholder-[#522B07]' : ''} outline-none resize-none focus:border-opacity-100 transition-colors`}
                         autoFocus
                       />
                       <button 

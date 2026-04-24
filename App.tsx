@@ -159,14 +159,7 @@ const App: React.FC = () => {
   const [skin, setSkin] = useState<SkinType>('modern');
   const [isZoomedOut, setIsZoomedOut] = useState(true);
   const [isLocationVisible, setIsLocationVisible] = useState(true);
-  const [isZoomLocked, setIsZoomLocked] = useState(() => {
-    const saved = sessionStorage.getItem('terraexplorer_zoom_locked');
-    return saved ? JSON.parse(saved) : false;
-  });
-
-  useEffect(() => {
-    sessionStorage.setItem('terraexplorer_zoom_locked', JSON.stringify(isZoomLocked));
-  }, [isZoomLocked]);
+  const [isZoomLocked, setIsZoomLocked] = useState(false);
   
   // Route State
   const [routeWaypoints, setRouteWaypoints] = useState<Waypoint[]>([]);

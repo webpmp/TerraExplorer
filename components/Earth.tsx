@@ -291,7 +291,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
   // Marker Colors
   const markerColor = isParchment ? '#8b5a2b' : isModern ? '#ff3333' : isGreen ? '#a3e635' : '#fcd34d';
   const favoriteColor = isParchment ? '#8b0000' : isModern ? '#d946ef' : '#ffffff'; 
-  const waypointColor = isParchment ? '#5c3a21' : isModern ? '#00e5ff' : isGreen ? '#4ade80' : '#fbbf24'; 
+  const waypointColor = isParchment ? '#d2b48c' : isModern ? '#00e5ff' : isGreen ? '#4ade80' : '#fbbf24'; 
   
   // Marker Outline Colors
   const outlineColor = isParchment ? '#e8d5b5' : isModern ? '#ffffff' : isGreen ? '#4ade80' : '#fbbf24';
@@ -583,7 +583,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
       {routeWaypoints && routeWaypoints.length > 0 && (
           <RouteLine 
             waypoints={routeWaypoints} 
-            color={isModern ? "#00ffff" : (isGreen ? "#4ade80" : "#fbbf24")} 
+            color={waypointColor} 
             isRetro={!isModern} 
             markerPositions={adjustedPositions}
           />
