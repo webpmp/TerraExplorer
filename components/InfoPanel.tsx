@@ -837,7 +837,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                     <StickyNote size={16} className={theme.icon} />
                     <span className={`font-bold uppercase ${isRetro ? 'text-lg' : 'text-sm'} ${theme.headerTitle}`}>My Notes</span>
                     {notes.length > 0 && (
-                        <span className={`text-xs px-1.5 py-0.5 rounded-full ${isRetro ? 'bg-green-400 text-black' : 'bg-cyan-900 text-cyan-300'}`}>
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full ${isRetro ? 'bg-green-400 text-black' : isParchment ? 'bg-[#d2b48c] text-[#3e2723] border border-[#8b5a2b]' : 'bg-cyan-900 text-cyan-300'}`}>
                             {notes.length}
                         </span>
                     )}

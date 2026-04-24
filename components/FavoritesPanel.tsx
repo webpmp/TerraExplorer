@@ -166,7 +166,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
         </div>
         
         <div className="flex-1 min-w-0 cursor-pointer group" onClick={() => onFlyTo(fav)}>
-            <p className={`truncate text-sm ${isVisible ? theme.textActive : theme.text} group-hover:underline decoration-1 underline-offset-2`}>
+            <p className={`truncate text-sm ${isVisible ? theme.textActive : theme.text} group-hover:underline decoration-1 underline-offset-2`} title={fav.name}>
                 {fav.name}
             </p>
             {isRoute && fav.waypoints && (
@@ -256,7 +256,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
               </div>
               
               <div className={`p-3 text-[10px] opacity-50 text-center border-t ${isRetro ? 'border-current' : 'border-white/10'}`}>
-                  {activeRouteId ? "Route Active" : "No Active Route"} • {visibleFavoriteIds.length} POIs Visible
+                  {activeRouteId ? `Route Active (${favorites.find(f => f.id === activeRouteId)?.waypoints?.length || 0} waypoints)` : "No Active Route"} • {visibleFavoriteIds.length} POIs Visible
               </div>
           </div>
       </div>
@@ -362,7 +362,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
                    <button onClick={() => setEditingRoute(null)} className="px-4 py-2 text-sm opacity-70 hover:opacity-100">Cancel</button>
                    <button 
                        onClick={saveEditedRoute} 
-                       className={`px-6 py-2 font-bold uppercase flex items-center gap-2 ${isRetro ? 'bg-green-400 text-black hover:opacity-90' : 'bg-cyan-600 hover:bg-cyan-500 rounded-lg shadow-lg shadow-cyan-900/50'}`}
+                       className={`px-6 py-2 font-bold uppercase flex items-center gap-2 ${skin === 'parchment' ? 'bg-[#d2b48c] text-[#3e2723] hover:bg-[#e8d5b5] border border-[#8b5a2b]' : isRetro ? 'bg-green-400 text-black hover:opacity-90' : 'bg-cyan-600 hover:bg-cyan-500 rounded-lg shadow-lg shadow-cyan-900/50'}`}
                    >
                        <Save size={16} /> Save Changes
                    </button>

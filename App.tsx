@@ -159,6 +159,14 @@ const App: React.FC = () => {
   const [skin, setSkin] = useState<SkinType>('modern');
   const [isZoomedOut, setIsZoomedOut] = useState(true);
   const [isLocationVisible, setIsLocationVisible] = useState(true);
+  const [isZoomLocked, setIsZoomLocked] = useState(() => {
+    const saved = sessionStorage.getItem('terraexplorer_zoom_locked');
+    return saved ? JSON.parse(saved) : false;
+  });
+
+  useEffect(() => {
+    sessionStorage.setItem('terraexplorer_zoom_locked', JSON.stringify(isZoomLocked));
+  }, [isZoomLocked]);
   
   // Route State
   const [routeWaypoints, setRouteWaypoints] = useState<Waypoint[]>([]);
@@ -489,7 +497,7 @@ const App: React.FC = () => {
 
      // Move camera
      if (earthRef.current && cameraControlsRef.current) {
-        const targetDist = 2.0; 
+        const targetDist = isZoomLocked ? cameraControlsRef.current.distance : 2.0; 
         const localCameraVec = latLngToVector3(wp.lat, wp.lng, targetDist);
         const worldCameraPos = localCameraVec.clone().applyMatrix4(earthRef.current.matrixWorld);
         
@@ -532,7 +540,7 @@ const App: React.FC = () => {
      } else {
          setIsLoading(false);
      }
-  }, []);
+  }, [isZoomLocked]);
 
   const handleGlobeClick = useCallback(async (lat: number, lng: number, point: THREE.Vector3) => {
     setIsLoading(true);
@@ -562,7 +570,8 @@ const App: React.FC = () => {
 
     if (cameraControlsRef.current) {
       const direction = point.clone().normalize();
-      const camPos = direction.multiplyScalar(2.2); 
+      const targetDist = isZoomLocked ? cameraControlsRef.current.distance : 2.2;
+      const camPos = direction.multiplyScalar(targetDist); 
       
       cameraControlsRef.current.setLookAt(
         camPos.x, camPos.y, camPos.z,
@@ -585,7 +594,7 @@ const App: React.FC = () => {
     
     setMarkers(newMarkers);
     setIsLoading(false);
-  }, [activeRouteId]);
+  }, [activeRouteId, isZoomLocked]);
 
   const handleMarkerClick = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint, point: THREE.Vector3) => {
     setSearchError(null);
@@ -643,7 +652,8 @@ const App: React.FC = () => {
     setIsNewsFetching(false);
 
     if (cameraControlsRef.current) {
-        const worldCamPos = point.clone().normalize().multiplyScalar(1.5);
+        const targetDist = isZoomLocked ? cameraControlsRef.current.distance : 1.5;
+        const worldCamPos = point.clone().normalize().multiplyScalar(targetDist);
         cameraControlsRef.current.setLookAt(
             worldCamPos.x, worldCamPos.y, worldCamPos.z,
             0, 0, 0,
@@ -664,7 +674,7 @@ const App: React.FC = () => {
        });
        setIsNewsFetching(false);
     }
-  }, [routeWaypoints, loadWaypointData, activeRouteId]);
+  }, [routeWaypoints, loadWaypointData, activeRouteId, isZoomLocked]);
 
   const handleSearch = async (query: string) => {
     setIsLoading(true);
@@ -700,7 +710,10 @@ const App: React.FC = () => {
       setLocationInfo(result.locationInfo);
       setIsLoading(false);
 
-      const targetDist = Math.max(1.3, 4.5 - ((result.suggestedZoom / 10) * (4.5 - 1.2)));
+      let targetDist = Math.max(1.3, 4.5 - ((result.suggestedZoom / 10) * (4.5 - 1.2)));
+      if (isZoomLocked && cameraControlsRef.current) {
+         targetDist = cameraControlsRef.current.distance;
+      }
       const localCameraVec = latLngToVector3(lat, lng, targetDist);
 
       if (earthRef.current) {
@@ -770,16 +783,16 @@ const App: React.FC = () => {
   };
 
   const handleZoomIn = useCallback(() => {
-    if (cameraControlsRef.current) {
+    if (!isZoomLocked && cameraControlsRef.current) {
       cameraControlsRef.current.dolly(1, true);
     }
-  }, []);
+  }, [isZoomLocked]);
 
   const handleThemeZoomIn = useCallback(() => {
-    if (cameraControlsRef.current) {
+    if (!isZoomLocked && cameraControlsRef.current) {
       cameraControlsRef.current.dolly(1.5, true);
     }
-  }, []);
+  }, [isZoomLocked]);
 
   const handleUserZoomIn = useCallback(() => {
     userModifiedZoomRef.current = true;
@@ -788,10 +801,10 @@ const App: React.FC = () => {
 
   const handleZoomOut = useCallback(() => {
     userModifiedZoomRef.current = true;
-    if (cameraControlsRef.current) {
+    if (!isZoomLocked && cameraControlsRef.current) {
       cameraControlsRef.current.dolly(-1, true);
     }
-  }, []);
+  }, [isZoomLocked]);
 
   const handleClosePanel = () => {
     setLocationInfo(null);
@@ -1049,6 +1062,7 @@ const App: React.FC = () => {
           minDistance={1.2} 
           maxDistance={8}
           smoothTime={0.8}
+          dollySpeed={isZoomLocked ? 0 : 1}
           onStart={() => {
             setIsDragging(true);
             setAutoRotate(false);
@@ -1184,6 +1198,8 @@ const App: React.FC = () => {
         paused={shouldPauseSuggestions}
         isTraceModalOpen={isTraceModalOpen}
         onToggleTraceModal={setIsTraceModalOpen}
+        isZoomLocked={isZoomLocked}
+        onToggleZoomLock={() => setIsZoomLocked(prev => !prev)}
       />
     </div>
   );

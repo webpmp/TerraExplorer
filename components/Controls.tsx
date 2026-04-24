@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, ZoomIn, ZoomOut, Loader2, Star, AlertTriangle, X } from 'lucide-react';
+import { Search, ZoomIn, ZoomOut, Loader2, Star, AlertTriangle, X, Lock, Unlock } from 'lucide-react';
 import { SkinType } from '../types';
 
 interface ControlsProps {
@@ -16,6 +16,8 @@ interface ControlsProps {
   paused: boolean;
   isTraceModalOpen: boolean;
   onToggleTraceModal: (isOpen: boolean) => void;
+  isZoomLocked: boolean;
+  onToggleZoomLock: () => void;
 }
 
 // Custom Icon for Trace Route
@@ -135,7 +137,9 @@ const Controls: React.FC<ControlsProps> = ({
   onToggleShowFavorites,
   paused,
   isTraceModalOpen,
-  onToggleTraceModal
+  onToggleTraceModal,
+  isZoomLocked,
+  onToggleZoomLock
 }) => {
   const [query, setQuery] = useState("");
   const [placeholder, setPlaceholder] = useState("Search location...");
@@ -332,6 +336,14 @@ const Controls: React.FC<ControlsProps> = ({
           aria-label="Zoom In"
         >
           <ZoomIn size={20} />
+        </button>
+        <button 
+          onClick={onToggleZoomLock}
+          className={`p-3 transition-all active:scale-95 ${theme.btn} ${isZoomLocked ? theme.favActive : ''}`}
+          aria-label={isZoomLocked ? "Zoom locked" : "Zoom enabled"}
+          title={isZoomLocked ? "Zoom locked" : "Zoom enabled"}
+        >
+          {isZoomLocked ? <Lock size={20} /> : <Unlock size={20} />}
         </button>
       </div>
 
