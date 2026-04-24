@@ -413,14 +413,14 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     'parchment': {
       container: "bg-[#f4ead5] border border-[#8b5a2b] shadow-[4px_4px_10px_rgba(0,0,0,0.3)] text-[#3e2723] font-sans",
       header: "bg-[#e8d5b5]/30 border-b border-[#8b5a2b]",
-      headerTitle: "text-[#5c3a21] font-bold uppercase tracking-wider brand-font",
+      headerTitle: "text-[#8b5a2b] font-bold uppercase tracking-wider brand-font",
       tag: "text-[#3e2723] bg-[#d2b48c] border border-[#8b5a2b] rounded-sm font-bold shadow-sm",
       subtext: "text-[#8b5a2b]",
       bodyText: "text-[#5c3a21]",
       card: "bg-[#f4ead5] border border-[#8b5a2b]/60 shadow-[inset_1px_1px_4px_rgba(255,255,255,0.4)] rounded-sm hover:bg-[#e8d5b5] transition-colors block relative group",
       icon: "text-[#8b5a2b]",
-      tabActive: "bg-[#d2b48c]/30 text-[#3e2723] border-b-2 border-[#5c3a21]",
-      tabInactive: "text-[#8b5a2b] border-b-2 border-transparent hover:border-[#8b5a2b]/50 hover:bg-[#e8d5b5]/50",
+      tabActive: "text-[#3e2723] border border-[#8b5a2b] border-b-transparent",
+      tabInactive: "text-[#8b5a2b] border border-transparent border-b-[#8b5a2b] hover:bg-[#e8d5b5]/50 hover:text-[#5c3a21]",
       listDot: "bg-[#8b5a2b] rounded-sm",
       closeBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] border border-transparent rounded",
       actionBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] border border-transparent rounded",
@@ -455,7 +455,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             href={part} 
             target="_blank" 
             rel="noopener noreferrer" 
-            className={`underline decoration-1 underline-offset-2 break-all ${isRetro ? 'hover:text-current font-bold' : 'text-cyan-400 hover:text-cyan-300'}`}
+            className={`underline decoration-1 underline-offset-2 break-all ${isRetro ? 'hover:text-current font-bold' : isParchment ? 'text-[#8b5a2b] hover:text-[#5c3a21] font-bold' : 'text-cyan-400 hover:text-cyan-300'}`}
             onClick={(e) => e.stopPropagation()}
           >
             {part}
@@ -482,13 +482,56 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   // Render Full Skeleton
   if (!info && isLoading) {
       return (
-        <div className="absolute top-[90px] right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-150px)] flex flex-col animate-in slide-in-from-right-12 fade-in duration-500">
-            <div className={`p-6 ${theme.container} ${isRetro ? 'animate-pulse' : ''}`}>
-              {/* Skeleton content */}
-              <div className={`h-8 w-3/4 ${isRetro ? 'bg-current opacity-40' : 'bg-white/20 rounded'} mb-4`}></div>
-              <div className={`h-4 w-full ${isRetro ? 'bg-current opacity-30' : 'bg-white/10 rounded'} mb-2`}></div>
-              <div className={`h-4 w-full ${isRetro ? 'bg-current opacity-30' : 'bg-white/10 rounded'} mb-2`}></div>
-              <div className={`h-4 w-2/3 ${isRetro ? 'bg-current opacity-30' : 'bg-white/10 rounded'} mb-2`}></div>
+        <div className="absolute top-[90px] right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-150px)] flex flex-col animate-in slide-in-from-right-12 fade-in duration-200 pointer-events-auto h-[600px]">
+            <div className={`${theme.container} flex flex-col shrink min-h-0 overflow-hidden shadow-2xl h-full`}>
+               
+               {/* 1. Title Bar Skeleton */}
+               <div className={`relative p-5 shrink-0 ${theme.header} animate-pulse`}>
+                 <div className="flex flex-col gap-1 pr-12">
+                   <div className="flex items-center gap-2 mb-1">
+                     <div className={`h-8 w-2/3 ${isRetro ? 'bg-current opacity-40' : isParchment ? 'bg-[#8b5a2b]/30' : 'bg-white/20'} rounded`}></div>
+                     <div className={`h-5 w-16 ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded-sm`}></div>
+                   </div>
+                   <div className={`h-4 w-1/2 ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded mt-1`}></div>
+                 </div>
+                 {/* Action buttons placeholder */}
+                 <div className="absolute top-4 right-4 flex gap-2">
+                    <div className={`h-6 w-6 rounded-full ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'}`}></div>
+                    <div className={`h-6 w-6 rounded-full ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'}`}></div>
+                 </div>
+               </div>
+
+               {/* 2. Tabs Skeleton */}
+               <div className={`flex animate-pulse ${isRetro ? 'border-b border-current opacity-60' : isParchment ? 'border-b-0' : 'border-b border-white/10'}`}>
+                 <div className={`flex-1 py-3 border-b-2 border-transparent flex justify-center`}>
+                    <div className={`h-4 w-16 ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
+                 </div>
+                 <div className={`flex-1 py-3 border-b-2 border-transparent flex justify-center`}>
+                    <div className={`h-4 w-12 ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
+                 </div>
+                 <div className={`flex-1 py-3 border-b-2 border-transparent flex justify-center`}>
+                    <div className={`h-4 w-16 ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
+                 </div>
+               </div>
+
+               {/* 3. Section Blocks Skeleton (Scrollable Content) */}
+               <div className="p-5 flex-1 space-y-6 animate-pulse">
+                 {/* Body lines */}
+                 <div className="space-y-3">
+                    <div className={`h-4 w-full ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
+                    <div className={`h-4 w-[90%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
+                    <div className={`h-4 w-[85%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
+                    <div className={`h-4 w-[60%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
+                 </div>
+
+                 {/* Grid blocks */}
+                 <div className="grid grid-cols-2 gap-3">
+                    <div className={`h-24 ${isRetro ? 'bg-current opacity-20' : isParchment ? 'bg-[#8b5a2b]/10' : 'bg-white/5'} rounded-sm`}></div>
+                    <div className={`h-24 ${isRetro ? 'bg-current opacity-20' : isParchment ? 'bg-[#8b5a2b]/10' : 'bg-white/5'} rounded-sm`}></div>
+                    <div className={`h-24 ${isRetro ? 'bg-current opacity-20' : isParchment ? 'bg-[#8b5a2b]/10' : 'bg-white/5'} rounded-sm`}></div>
+                    <div className={`h-24 ${isRetro ? 'bg-current opacity-20' : isParchment ? 'bg-[#8b5a2b]/10' : 'bg-white/5'} rounded-sm`}></div>
+                 </div>
+               </div>
             </div>
         </div>
       );
@@ -597,7 +640,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           )}
 
           {/* Tabs */}
-          <div className={`flex border-b ${isRetro ? 'border-current opacity-60' : 'border-white/10'}`}>
+          <div className={`flex ${isRetro ? 'border-b border-current opacity-60' : isParchment ? '' : 'border-b border-white/10'}`}>
             <button onClick={() => setActiveTab('overview')} className={`flex-1 py-2 ${tabTextSize} font-bold uppercase transition-colors flex items-center justify-center gap-1 ${activeTab === 'overview' ? theme.tabActive : theme.tabInactive}`}>
               <Map size={tabIconSize} /> Overview
             </button>
@@ -612,14 +655,22 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           {/* Scrollable Content */}
           <div className="p-5 overflow-y-auto custom-scrollbar flex-1 relative">
             {showContentSkeleton ? (
-               <div className={`space-y-4 ${isRetro ? 'animate-pulse' : 'animate-pulse'}`}>
-                  <div className={`h-4 w-full ${isRetro ? 'bg-current opacity-30' : 'bg-white/10 rounded'}`}></div>
-                  <div className={`h-4 w-5/6 ${isRetro ? 'bg-current opacity-30' : 'bg-white/10 rounded'}`}></div>
-                  <div className={`h-4 w-4/6 ${isRetro ? 'bg-current opacity-30' : 'bg-white/10 rounded'}`}></div>
-                  <div className="grid grid-cols-2 gap-3 mt-4">
-                     <div className={`h-16 ${theme.card}`}></div>
-                     <div className={`h-16 ${theme.card}`}></div>
-                  </div>
+               <div className="space-y-6 animate-pulse mt-2">
+                 {/* Body lines */}
+                 <div className="space-y-3">
+                    <div className={`h-4 w-full ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
+                    <div className={`h-4 w-[90%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
+                    <div className={`h-4 w-[85%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
+                    <div className={`h-4 w-[60%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
+                 </div>
+
+                 {/* Grid blocks */}
+                 <div className="grid grid-cols-2 gap-3">
+                    <div className={`h-24 ${isRetro ? 'bg-current opacity-20' : isParchment ? 'bg-[#8b5a2b]/10' : 'bg-white/5'} rounded-sm`}></div>
+                    <div className={`h-24 ${isRetro ? 'bg-current opacity-20' : isParchment ? 'bg-[#8b5a2b]/10' : 'bg-white/5'} rounded-sm`}></div>
+                    <div className={`h-24 ${isRetro ? 'bg-current opacity-20' : isParchment ? 'bg-[#8b5a2b]/10' : 'bg-white/5'} rounded-sm`}></div>
+                    <div className={`h-24 ${isRetro ? 'bg-current opacity-20' : isParchment ? 'bg-[#8b5a2b]/10' : 'bg-white/5'} rounded-sm`}></div>
+                 </div>
                </div>
             ) : (
                 <>
@@ -627,7 +678,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                 <div className="space-y-5 animate-in fade-in duration-300">
                     {info.routeContext && (
                         <div className="mb-2">
-                             <h3 className={`text-sm font-bold uppercase tracking-widest mb-1 ${isRetro ? 'text-current' : 'text-cyan-400'}`}>
+                             <h3 className={`text-sm font-bold uppercase tracking-widest mb-1 ${isRetro ? 'text-current' : isParchment ? 'text-[#8b5a2b]' : 'text-cyan-400'}`}>
                                 {info.routeContext.title}
                             </h3>
                             <p className={`leading-relaxed ${bodySize} font-medium ${theme.bodyText} mb-4 border-b ${isRetro ? 'border-current/30' : 'border-white/10'} pb-4`}>

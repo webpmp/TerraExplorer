@@ -247,7 +247,7 @@ const Controls: React.FC<ControlsProps> = ({
       inputWrapper: "bg-[#f4ead5]/95 backdrop-blur-md border border-[#8b5a2b]/60 rounded shadow-[inset_0_1px_4px_rgba(0,0,0,0.1)]",
       inputIcon: "text-[#8b5a2b]",
       inputField: "text-[#522B07] placeholder-[#522B07] font-mono text-sm",
-      submitBtn: "bg-[#e8d5b5] text-[#5c3a21] border-l border-[#8b5a2b]/60 hover:bg-[#d2b48c]/80 rounded-[0_3px_3px_0] font-sans font-bold uppercase",
+      submitBtn: "bg-[#e8d5b5] text-[#5c3a21] hover:bg-[#d2b48c]/80 rounded-[0_3px_3px_0] font-sans font-bold uppercase",
       resetBtn: "text-[#8b5a2b] hover:text-[#3e2723] mr-2 p-1",
       glow: "hidden",
       error: "bg-[#f4ead5] border border-[#8b5a2b] text-[#8b0000] font-sans px-4 py-2 shadow-md",
