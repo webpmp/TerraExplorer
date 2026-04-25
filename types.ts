@@ -74,6 +74,7 @@ export interface FavoriteLocation {
   lng: number;
   type: 'location' | 'route';
   waypoints?: Waypoint[];
+  notes?: string;
 }
 
 export type SkinType = 'modern' | 'retro-green' | 'retro-amber' | 'parchment';

@@ -220,7 +220,7 @@ const Controls: React.FC<ControlsProps> = ({
       inputWrapper: "bg-black border-2 border-green-400 rounded-none shadow-none",
       inputIcon: "text-green-300",
       inputField: "text-green-300 placeholder-green-400/50 font-retro tracking-wider uppercase text-lg",
-      submitBtn: "bg-green-900/40 text-green-300 border-l border-green-400 hover:bg-green-400 hover:text-black rounded-none font-retro uppercase",
+      submitBtn: "bg-green-900/40 text-green-300 hover:bg-green-400 hover:text-black rounded-none font-retro uppercase",
       resetBtn: "text-green-300 hover:text-green-100 mr-2 p-1",
       glow: "hidden",
       error: "bg-black border border-green-400 text-green-300 font-retro px-4 py-2 uppercase blinking",
@@ -236,7 +236,7 @@ const Controls: React.FC<ControlsProps> = ({
       inputWrapper: "bg-black border-2 border-amber-400 rounded-none shadow-none",
       inputIcon: "text-amber-300",
       inputField: "text-amber-300 placeholder-amber-400/50 font-retro tracking-wider uppercase text-lg",
-      submitBtn: "bg-amber-900/40 text-amber-300 border-l border-amber-400 hover:bg-amber-400 hover:text-black rounded-none font-retro uppercase",
+      submitBtn: "bg-amber-900/40 text-amber-300 hover:bg-amber-400 hover:text-black rounded-none font-retro uppercase",
       resetBtn: "text-amber-300 hover:text-amber-100 mr-2 p-1",
       glow: "hidden",
       error: "bg-black border border-amber-400 text-amber-300 font-retro px-4 py-2 uppercase blinking",
@@ -255,7 +255,7 @@ const Controls: React.FC<ControlsProps> = ({
       resetBtn: "text-[#8b5a2b] hover:text-[#3e2723] mr-2 p-1",
       glow: "hidden",
       error: "bg-[#f4ead5] border border-[#8b5a2b] text-[#8b0000] font-sans px-4 py-2 shadow-md",
-      copyright: "text-[#5c3a21]/80 font-sans",
+      copyright: "text-[#8b5a2b] font-sans",
       modal: "bg-[#f4ead5] border-2 border-[#8b5a2b] text-[#3e2723] font-sans shadow-[0_4px_20px_rgba(0,0,0,0.4)] rounded-sm"
     }
   };

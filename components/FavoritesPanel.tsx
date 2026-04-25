@@ -277,7 +277,15 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
                           type="text" 
                           value={editingRoute.name} 
                           onChange={(e) => setEditingRoute({ ...editingRoute, name: e.target.value })}
-                          className={`w-full ${theme.input} text-lg font-bold`}
+                          className={`w-full ${theme.input} text-lg font-bold mb-3`}
+                       />
+                       <label className={`block text-xs uppercase font-bold mb-2 opacity-70 ${theme.text}`}>Notes / Source</label>
+                       <input 
+                          type="text" 
+                          value={editingRoute.notes || ''} 
+                          onChange={(e) => setEditingRoute({ ...editingRoute, notes: e.target.value })}
+                          className={`w-full ${theme.input} text-sm`}
+                          placeholder="Optional notes or source URL"
                        />
                    </div>
 

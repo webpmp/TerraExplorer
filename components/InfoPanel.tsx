@@ -641,13 +641,13 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
           {/* Tabs */}
           <div className={`flex ${isRetro ? 'border-b border-current opacity-60' : isParchment ? '' : 'border-b border-white/10'}`}>
-            <button onClick={() => setActiveTab('overview')} className={`flex-1 py-2 ${tabTextSize} font-bold uppercase transition-colors flex items-center justify-center gap-1 ${activeTab === 'overview' ? theme.tabActive : theme.tabInactive}`}>
+            <button onClick={() => setActiveTab('overview')} className={`flex-1 py-2 ${tabTextSize} font-bold uppercase transition-colors flex items-center justify-center gap-1 ${activeTab === 'overview' ? `${theme.tabActive} border-l-0` : theme.tabInactive}`}>
               <Map size={tabIconSize} /> Overview
             </button>
             <button onClick={() => setActiveTab('news')} className={`flex-1 py-2 ${tabTextSize} font-bold uppercase transition-colors flex items-center justify-center gap-1 ${activeTab === 'news' ? theme.tabActive : theme.tabInactive}`}>
               <Newspaper size={tabIconSize} /> News
             </button>
-            <button onClick={() => setActiveTab('notable')} className={`flex-1 py-2 ${tabTextSize} font-bold uppercase transition-colors flex items-center justify-center gap-1 ${activeTab === 'notable' ? theme.tabActive : theme.tabInactive}`}>
+            <button onClick={() => setActiveTab('notable')} className={`flex-1 py-2 ${tabTextSize} font-bold uppercase transition-colors flex items-center justify-center gap-1 ${activeTab === 'notable' ? `${theme.tabActive} border-r-0` : theme.tabInactive}`}>
               <Crown size={tabIconSize} /> Notable
             </button>
           </div>

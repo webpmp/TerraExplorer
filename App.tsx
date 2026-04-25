@@ -116,23 +116,76 @@ const VisibilityTracker: React.FC<{
 const ThemeZoomInitializer: React.FC<{
   skin: SkinType;
   cameraControlsRef: React.RefObject<any>;
-  userModifiedZoomRef: React.MutableRefObject<boolean>;
-  onZoom: () => void;
-}> = ({ skin, cameraControlsRef, userModifiedZoomRef, onZoom }) => {
+}> = ({ skin, cameraControlsRef }) => {
   const hasAppliedRef = useRef(false);
+  const animationState = useRef<{
+    active: boolean;
+    startTime: number;
+    startZoom: number;
+    targetZoom: number;
+    duration: number;
+  }>({
+    active: false,
+    startTime: 0,
+    startZoom: 0,
+    targetZoom: 0,
+    duration: 1000, // ms
+  });
+
+  const easeInOutCubic = (t: number) => {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  };
 
   useFrame(() => {
     if (skin === 'parchment') {
       if (!hasAppliedRef.current) {
         if (cameraControlsRef.current) {
-          if (!userModifiedZoomRef.current) {
-            onZoom();
-          }
+          const defaultDistance = 4.5;
+          // Current zoom is inversely proportional to distance. Higher zoom -> lower distance.
+          const currentZoom = defaultDistance / cameraControlsRef.current.distance;
+          const defaultZoom = 1.0;
+          
+          let targetZoom = defaultZoom * 1.5;
+          
+          // Clamp target zoom based on distance limits (minDistance: 1.2, maxDistance: 8)
+          targetZoom = Math.max(defaultDistance / 8, Math.min(defaultDistance / 1.2, targetZoom));
+
+          animationState.current = {
+            active: true,
+            startTime: performance.now(),
+            startZoom: currentZoom,
+            targetZoom: targetZoom,
+            duration: 1000,
+          };
           hasAppliedRef.current = true;
         }
       }
     } else {
       hasAppliedRef.current = false;
+      if (animationState.current.active) {
+        animationState.current.active = false; // Cancel animation on theme switch
+      }
+    }
+
+    if (animationState.current.active && cameraControlsRef.current) {
+      const now = performance.now();
+      let t = (now - animationState.current.startTime) / animationState.current.duration;
+      
+      if (t >= 1) {
+        t = 1;
+        animationState.current.active = false;
+      }
+      
+      const easedT = easeInOutCubic(t);
+      const newZoom = THREE.MathUtils.lerp(
+        animationState.current.startZoom,
+        animationState.current.targetZoom,
+        easedT
+      );
+      
+      const baselineDistance = 4.5;
+      const newDistance = baselineDistance / newZoom;
+      cameraControlsRef.current.dollyTo(newDistance, false);
     }
   });
 
@@ -462,7 +515,98 @@ const App: React.FC = () => {
         ]
     };
 
-    setFavorites([shackletonRoute, genghisRoute, lewisClarkRoute]);
+    const franklinRoute: FavoriteLocation = {
+        id: 'default-franklin',
+        name: "Franklin Expedition Route",
+        lat: 74.716,
+        lng: -91.833,
+        type: 'route',
+        notes: "Waypoints from https://www.coolantarctica.com/Antarctica%20fact%20file/History/antarctic_ships/Franklin-north-west-passage-map.php",
+        waypoints: [
+            {
+                id: 'wp-fr-1',
+                name: "Greenhithe, England",
+                lat: 51.448,
+                lng: 0.283,
+                context: "May 19, 1845: The HMS Erebus and HMS Terror depart England.",
+                routeTitle: "Franklin Expedition Route"
+            },
+            {
+                id: 'wp-fr-2',
+                name: "Stromness, Orkney",
+                lat: 58.965,
+                lng: -3.296,
+                context: "Final port of call in the UK.",
+                routeTitle: "Franklin Expedition Route"
+            },
+            {
+                id: 'wp-fr-3',
+                name: "Whalefish Islands, Greenland",
+                lat: 69.25,
+                lng: -53.53,
+                context: "July 1845: Five men sent home, provisions loaded. Last letters sent.",
+                routeTitle: "Franklin Expedition Route"
+            },
+            {
+                id: 'wp-fr-4',
+                name: "Lancaster Sound",
+                lat: 74.25,
+                lng: -84.0,
+                context: "Late July 1845: Last spotted by European whalers waiting for ice to clear.",
+                routeTitle: "Franklin Expedition Route"
+            },
+            {
+                id: 'wp-fr-5',
+                name: "Beechey Island",
+                lat: 74.716,
+                lng: -91.833,
+                context: "Winter 1845-1846: Expedition camps here. Three crewmen die and are buried.",
+                routeTitle: "Franklin Expedition Route"
+            },
+            {
+                id: 'wp-fr-6',
+                name: "Cornwallis Island",
+                lat: 75.15,
+                lng: -95.0,
+                context: "1846: The ships circumnavigated this island before heading south.",
+                routeTitle: "Franklin Expedition Route"
+            },
+            {
+                id: 'wp-fr-7',
+                name: "Peel Sound",
+                lat: 73.0,
+                lng: -96.5,
+                context: "Summer 1846: Sailed south towards King William Island.",
+                routeTitle: "Franklin Expedition Route"
+            },
+            {
+                id: 'wp-fr-8',
+                name: "Point Victory",
+                lat: 69.63,
+                lng: -98.81,
+                context: "Sept 1846: Ships beset in ice. April 1848: Ships abandoned by survivors.",
+                routeTitle: "Franklin Expedition Route"
+            },
+            {
+                id: 'wp-fr-9',
+                name: "Terror Bay",
+                lat: 68.89,
+                lng: -98.94,
+                context: "Resting place of the HMS Terror, discovered in 2016.",
+                routeTitle: "Franklin Expedition Route"
+            },
+            {
+                id: 'wp-fr-10',
+                name: "Queen Maud Gulf",
+                lat: 68.25,
+                lng: -98.9,
+                context: "Resting place of the HMS Erebus, discovered in 2014.",
+                routeTitle: "Franklin Expedition Route"
+            }
+        ]
+    };
+
+    setFavorites([shackletonRoute, genghisRoute, lewisClarkRoute, franklinRoute]);
   }, []);
 
   // Save favorites to local storage whenever they change
@@ -781,12 +925,6 @@ const App: React.FC = () => {
     }
   }, [isZoomLocked]);
 
-  const handleThemeZoomIn = useCallback(() => {
-    if (!isZoomLocked && cameraControlsRef.current) {
-      cameraControlsRef.current.dolly(1.5, true);
-    }
-  }, [isZoomLocked]);
-
   const handleUserZoomIn = useCallback(() => {
     userModifiedZoomRef.current = true;
     handleZoomIn();
@@ -1069,8 +1207,6 @@ const App: React.FC = () => {
         <ThemeZoomInitializer
           skin={skin}
           cameraControlsRef={cameraControlsRef}
-          userModifiedZoomRef={userModifiedZoomRef}
-          onZoom={handleThemeZoomIn}
         />
         
         <RotationManager 
