@@ -22,6 +22,19 @@ const latLngToVector3 = (lat: number, lng: number, radius: number = 1) => {
   return new THREE.Vector3(x, y, z);
 };
 
+// Helper for distance measurement (Haversine formula in km)
+const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+  const R = 6371; // Radius of the earth in km
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+  return R * c; 
+};
+
 // Component to position the sun (directional light) at the camera's position
 // ensuring the user always sees the "day" side of the earth.
 const Sun: React.FC<{ skin: SkinType }> = ({ skin }) => {
@@ -719,17 +732,44 @@ const App: React.FC = () => {
 
     let newMarkers = await getNearbyPlaces(lat, lng);
     
-    if (newMarkers.length === 0) {
-       newMarkers = [{
-         id: `fallback-${Date.now()}`,
-         name: "Loading Data",
-         lat: lat,
-         lng: lng,
-         populationClass: 'medium'
-       }];
-    }
+    // Compute distance and rank
+    const markersWithDist = newMarkers.map(m => {
+        const d = calculateDistance(lat, lng, m.lat, m.lng);
+        return { ...m, _dist: d };
+    });
+    markersWithDist.sort((a, b) => a._dist - b._dist);
     
+    // Sort actual markers list
+    newMarkers = markersWithDist.map(m => ({
+       id: m.id,
+       name: m.name,
+       lat: m.lat,
+       lng: m.lng,
+       populationClass: m.populationClass
+    }));
+
     setMarkers(newMarkers);
+    
+    setLocationInfo({
+        name: markersWithDist.length > 0 ? "Nearby Points of Interest" : "Uncharted Region",
+        type: LocationType.POI,
+        description: markersWithDist.length > 0
+            ? `Identified ${markersWithDist.length} location${markersWithDist.length > 1 ? 's' : ''} within the vicinity of the selected coordinates.`
+            : `No nearby results found for these coordinates. Try searching or clicking elsewhere on the globe.`,
+        population: 'Not Applicable',
+        climate: 'Not applicable',
+        funFacts: markersWithDist.length > 0 
+           ? ['Select a pin on the globe for detailed information.', ...markersWithDist.map(m => `${m.name} (${(m._dist ?? 0).toFixed(1)} km away)`)]
+           : ['No distinct landmarks or regions identified nearby.'],
+        coordinates: { lat, lng },
+        news: [],
+        notable: markersWithDist.map(m => ({
+            name: m.name,
+            significance: `Approx ${(m._dist ?? 0).toFixed(1)} km away at ${(m.lat ?? 0).toFixed(2)}°, ${(m.lng ?? 0).toFixed(2)}°`,
+            category: 'Location'
+        }))
+    });
+    
     setIsLoading(false);
   }, [activeRouteId, isZoomLocked]);
 

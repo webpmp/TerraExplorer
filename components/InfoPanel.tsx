@@ -204,7 +204,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         return;
     }
 
-    const locationKey = `notes_${info.name}_${info.coordinates.lat.toFixed(4)}_${info.coordinates.lng.toFixed(4)}`;
+    const locationKey = `notes_${info.name}_${(info.coordinates?.lat || 0).toFixed(4)}_${(info.coordinates?.lng || 0).toFixed(4)}`;
     
     // Check if we already initialized this location to prevent overriding user toggle
     // If it's a new location, we set default expanded state
@@ -245,7 +245,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   // Save Notes Helper
   const saveNotesToStorage = (updatedNotes: Note[]) => {
     if (!info) return;
-    const locationKey = `notes_${info.name}_${info.coordinates.lat.toFixed(4)}_${info.coordinates.lng.toFixed(4)}`;
+    const locationKey = `notes_${info.name}_${(info.coordinates?.lat || 0).toFixed(4)}_${(info.coordinates?.lng || 0).toFixed(4)}`;
     localStorage.setItem(locationKey, JSON.stringify(updatedNotes));
     setNotes(updatedNotes);
   };
@@ -616,8 +616,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                  <span className={`${smallTextSize} uppercase px-1.5 py-0.5 ${theme.tag}`}>{info.type}</span>
               </div>
               <p className={`${subtextSize} font-mono ${theme.subtext}`}>
-                {info.coordinates?.lat ? info.coordinates.lat.toFixed(2) : '0.00'}° N, 
-                {info.coordinates?.lng ? info.coordinates.lng.toFixed(2) : '0.00'}° E
+                {info.coordinates?.lat != null ? info.coordinates.lat.toFixed(2) : '0.00'}° N, 
+                {info.coordinates?.lng != null ? info.coordinates.lng.toFixed(2) : '0.00'}° E
               </p>
             </div>
           </div>

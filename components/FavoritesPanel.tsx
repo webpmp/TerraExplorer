@@ -176,7 +176,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
             )}
             {!isRoute && (
                 <p className="text-[10px] opacity-60 truncate">
-                    {fav.lat.toFixed(2)}, {fav.lng.toFixed(2)}
+                    {(fav.lat || 0).toFixed(2)}, {(fav.lng || 0).toFixed(2)}
                 </p>
             )}
         </div>

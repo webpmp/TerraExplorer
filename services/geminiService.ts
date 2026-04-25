@@ -143,6 +143,14 @@ const repairTruncatedJson = (jsonStr: string): string => {
   // Final cleanup for commas right before brackets that might have appeared
   fixed = fixed.replace(/,(\s*[\]}])/g, '$1');
 
+  // 3. Fix hanging values due to truncation
+  // Fix dangling colons, e.g. "key":} -> "key":null}
+  fixed = fixed.replace(/:\s*([\]}])/g, ':null$1');
+  // Fix dangling decimals, e.g. 36.} -> 36.0}
+  fixed = fixed.replace(/(\d+\.)\s*([\]}])/g, '$10$2'); 
+  // Fix dangling minus signs, e.g. "lat": -} -> "lat": -0}
+  fixed = fixed.replace(/(:\s*-)\s*([\]}])/g, '$10$2');
+
   return fixed;
 };
 
@@ -438,12 +446,13 @@ export const getInfoFromCoordinates = async (lat: number, lng: number): Promise<
   }
 };
 
-export const getNearbyPlaces = async (lat: number, lng: number): Promise<MapMarker[]> => {
+export const getNearbyPlaces = async (lat: number, lng: number, radius: number = 25): Promise<MapMarker[]> => {
   try {
     const prompt = `
       I am looking at a globe at coordinates ${lat}, ${lng}.
-      Identify 5-8 major cities, landmarks, or significant places within a 500km radius.
+      Identify 5-8 major cities, towns, landmarks, notable features, or significant points of interest within an approximate ${radius}km radius.
       Return a strict JSON array: [{"id": "uuid", "name": "Name", "lat": 0.0, "lng": 0.0, "populationClass": "medium"}]
+      Do not repeat places. Stop after 8 places. Output ONLY the JSON payload.
     `;
 
     const response = await generateContentWithRetry({
@@ -451,7 +460,7 @@ export const getNearbyPlaces = async (lat: number, lng: number): Promise<MapMark
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        maxOutputTokens: 2000,
+        maxOutputTokens: 4000,
       }
     });
 
