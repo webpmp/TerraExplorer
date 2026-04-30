@@ -479,65 +479,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       )
   }
 
-  // Render Full Skeleton
-  if (!info && isLoading) {
-      return (
-        <div className="absolute top-[90px] right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-150px)] flex flex-col animate-in slide-in-from-right-12 fade-in duration-200 pointer-events-auto h-[600px]">
-            <div className={`${theme.container} flex flex-col shrink min-h-0 overflow-hidden shadow-2xl h-full`}>
-               
-               {/* 1. Title Bar Skeleton */}
-               <div className={`relative p-5 shrink-0 ${theme.header} animate-pulse`}>
-                 <div className="flex flex-col gap-1 pr-12">
-                   <div className="flex items-center gap-2 mb-1">
-                     <div className={`h-8 w-2/3 ${isRetro ? 'bg-current opacity-40' : isParchment ? 'bg-[#8b5a2b]/30' : 'bg-white/20'} rounded`}></div>
-                     <div className={`h-5 w-16 ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded-sm`}></div>
-                   </div>
-                   <div className={`h-4 w-1/2 ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded mt-1`}></div>
-                 </div>
-                 {/* Action buttons placeholder */}
-                 <div className="absolute top-4 right-4 flex gap-2">
-                    <div className={`h-6 w-6 rounded-full ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'}`}></div>
-                    <div className={`h-6 w-6 rounded-full ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'}`}></div>
-                 </div>
-               </div>
+  // Removed Full Skeleton for Sidebar during initial load
 
-               {/* 2. Tabs Skeleton */}
-               <div className={`flex animate-pulse ${isRetro ? 'border-b border-current opacity-60' : isParchment ? 'border-b-0' : 'border-b border-white/10'}`}>
-                 <div className={`flex-1 py-3 border-b-2 border-transparent flex justify-center`}>
-                    <div className={`h-4 w-16 ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
-                 </div>
-                 <div className={`flex-1 py-3 border-b-2 border-transparent flex justify-center`}>
-                    <div className={`h-4 w-12 ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
-                 </div>
-                 <div className={`flex-1 py-3 border-b-2 border-transparent flex justify-center`}>
-                    <div className={`h-4 w-16 ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
-                 </div>
-               </div>
-
-               {/* 3. Section Blocks Skeleton (Scrollable Content) */}
-               <div className="p-5 flex-1 space-y-6 animate-pulse">
-                 {/* Body lines */}
-                 <div className="space-y-3">
-                    <div className={`h-4 w-full ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
-                    <div className={`h-4 w-[90%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
-                    <div className={`h-4 w-[85%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
-                    <div className={`h-4 w-[60%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
-                 </div>
-
-                 {/* Grid blocks */}
-                 <div className="grid grid-cols-2 gap-3">
-                    <div className={`h-24 ${isRetro ? 'bg-current opacity-20' : isParchment ? 'bg-[#8b5a2b]/10' : 'bg-white/5'} rounded-sm`}></div>
-                    <div className={`h-24 ${isRetro ? 'bg-current opacity-20' : isParchment ? 'bg-[#8b5a2b]/10' : 'bg-white/5'} rounded-sm`}></div>
-                    <div className={`h-24 ${isRetro ? 'bg-current opacity-20' : isParchment ? 'bg-[#8b5a2b]/10' : 'bg-white/5'} rounded-sm`}></div>
-                    <div className={`h-24 ${isRetro ? 'bg-current opacity-20' : isParchment ? 'bg-[#8b5a2b]/10' : 'bg-white/5'} rounded-sm`}></div>
-                 </div>
-               </div>
-            </div>
-        </div>
-      );
-  }
-
-  // If no info and not loading (e.g., initial state or cleared), don't render anything
+  // If no info, don't render anything (Wait until data is resolved before showing sidebar)
   if (!info) return null;
 
   const showContentSkeleton = isLoading && (!info?.description || info.description === "");

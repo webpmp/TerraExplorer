@@ -78,6 +78,8 @@ const mainInfoSchemaConfig = {
   required: ["name", "type", "coordinates", "description", "population", "climate", "funFacts", "notable"]
 };
 
+import { jsonrepair } from 'jsonrepair';
+
 // Helper to cleanup JSON string before parsing
 const cleanJsonString = (str: string): string => {
   if (!str) return "";
@@ -89,142 +91,71 @@ const cleanJsonString = (str: string): string => {
   
   // Remove literal ellipses "..." or unicode ellipses which models sometimes use to indicate truncation
   cleaned = cleaned.replace(/\.\.\./g, '');
-  cleaned = cleaned.replace(/\u2026/g, ''); // Use unicode escape for ellipsis
-  
-  // Remove trailing commas before closing braces/brackets
-  cleaned = cleaned.replace(/,(\s*[\]}])/g, '$1');
+  cleaned = cleaned.replace(/\u2026/g, '');
   
   return cleaned.trim();
-};
-
-// Helper to attempt repairing truncated JSON
-const repairTruncatedJson = (jsonStr: string): string => {
-  let fixed = jsonStr.trim();
-  if (!fixed) return "{}";
-
-  // 1. Handle unclosed strings
-  // Count double quotes that are NOT escaped
-  let inString = false;
-  let isEscaped = false;
-  
-  for (let i = 0; i < fixed.length; i++) {
-      if (fixed[i] === '\\') {
-          isEscaped = !isEscaped;
-      } else {
-          if (fixed[i] === '"' && !isEscaped) {
-              inString = !inString;
-          }
-          isEscaped = false;
-      }
-  }
-
-  // If we ended inside a string, close it
-  if (inString) {
-      fixed += '"';
-  }
-
-  // Remove any trailing comma at the end of the truncated payload
-  fixed = fixed.replace(/,\s*$/, '');
-
-  // 2. Handle missing closing braces/brackets
-  // We strip strings temporarily to count structural braces accurately
-  const stripped = fixed.replace(/"([^"\\]*(\\.[^"\\]*)*)"/g, '""');
-  
-  const openBraces = (stripped.match(/{/g) || []).length;
-  const closeBraces = (stripped.match(/}/g) || []).length;
-  const openBrackets = (stripped.match(/\[/g) || []).length;
-  const closeBrackets = (stripped.match(/\]/g) || []).length;
-
-  // Append missing closing tokens. 
-  // Order matters: usually we are deep inside objects, so close } then ]
-  for (let i = 0; i < (openBraces - closeBraces); i++) fixed += '}';
-  for (let i = 0; i < (openBrackets - closeBrackets); i++) fixed += ']';
-  
-  // Final cleanup for commas right before brackets that might have appeared
-  fixed = fixed.replace(/,(\s*[\]}])/g, '$1');
-
-  // 3. Fix hanging values due to truncation
-  // Fix dangling colons, e.g. "key":} -> "key":null}
-  fixed = fixed.replace(/:\s*([\]}])/g, ':null$1');
-  // Fix dangling decimals, e.g. 36.} -> 36.0}
-  fixed = fixed.replace(/(\d+\.)\s*([\]}])/g, '$10$2'); 
-  // Fix dangling minus signs, e.g. "lat": -} -> "lat": -0}
-  fixed = fixed.replace(/(:\s*-)\s*([\]}])/g, '$10$2');
-
-  return fixed;
 };
 
 // Helper to safely parse JSON that might be wrapped in markdown or truncated
 const safeJsonParse = (text: string) => {
   if (!text) return null;
 
-  // 1. Try extracting from markdown code blocks first
-  const markdownMatch = text.match(/```(?:json)?([\s\S]*?)```/);
-  if (markdownMatch) {
-    try {
-      const innerCleaned = cleanJsonString(markdownMatch[1]);
-      return JSON.parse(innerCleaned);
-    } catch (e) {
-       try {
-         return JSON.parse(repairTruncatedJson(cleanJsonString(markdownMatch[1])));
-       } catch (e2) {
-         // Continue
-       }
-    }
-  }
+  // 1. Clean markdown first
+  let cleaned = cleanJsonString(text);
 
-  // 2. Brute force: find the first '{' or '['
-  const firstOpenBrace = text.indexOf('{');
-  const firstOpenBracket = text.indexOf('[');
-  let startIdx = -1;
-  let endIdx = -1;
-
-  if (firstOpenBrace !== -1 && (firstOpenBracket === -1 || firstOpenBrace < firstOpenBracket)) {
-      startIdx = firstOpenBrace;
-      // Use lastIndexOf, but if it's broken, we might take the whole string
-      endIdx = text.lastIndexOf('}');
-  } else if (firstOpenBracket !== -1) {
-      startIdx = firstOpenBracket;
-      endIdx = text.lastIndexOf(']');
-  }
-  
-  if (startIdx !== -1) {
-    // If endIdx is missing (truncation) or before start, take to end of text
-    const actualEndIdx = (endIdx !== -1 && endIdx > startIdx) ? endIdx + 1 : text.length;
-    const jsonStr = text.substring(startIdx, actualEndIdx);
-    
-    try {
-      return JSON.parse(cleanJsonString(jsonStr));
-    } catch (e) {
-       try {
-         return JSON.parse(repairTruncatedJson(cleanJsonString(jsonStr)));
-       } catch (e2) {
-         // Fail silently
-       }
-    }
-  }
-
-  // 3. Last resort: Try parsing the whole cleaned string
-  const cleaned = cleanJsonString(text);
-  try {
-    return JSON.parse(cleaned);
-  } catch (e) {
-      // One final attempt at repair on the whole string
-      try {
-        return JSON.parse(repairTruncatedJson(cleaned));
-      } catch (e2) {
-        // Ignore
-      }
-  }
-
-  // 4. Suppress conversational refusals
-  const lower = text.toLowerCase().trim();
+  // 2. Suppress conversational refusals early if there are no brackets at all
+  const lower = cleaned.toLowerCase().trim();
   if (lower.startsWith("i am") || lower.startsWith("sorry") || lower.startsWith("i cannot")) {
       return null;
   }
-  
-  console.error("JSON Parse failed for text:", text.substring(0, 100) + "...");
-  return null;
+
+  // 3. Brute force extraction as fallback if the cleaned string has conversational text around it
+  const firstOpenBrace = cleaned.indexOf('{');
+  const firstOpenBracket = cleaned.indexOf('[');
+  let jsonCandy = cleaned;
+
+  if (firstOpenBrace !== -1 || firstOpenBracket !== -1) {
+    let startIdx = -1;
+    let endIdx = -1;
+
+    if (firstOpenBrace !== -1 && (firstOpenBracket === -1 || firstOpenBrace < firstOpenBracket)) {
+        startIdx = firstOpenBrace;
+        endIdx = cleaned.lastIndexOf('}');
+    } else {
+        startIdx = firstOpenBracket;
+        endIdx = cleaned.lastIndexOf(']');
+    }
+
+    if (startIdx !== -1) {
+      if (endIdx !== -1 && endIdx > startIdx) {
+        // If we found both, extract that portion
+        jsonCandy = cleaned.substring(startIdx, endIdx + 1);
+      } else {
+        // If truncated, take everything from startIdx
+        jsonCandy = cleaned.substring(startIdx);
+      }
+    }
+  }
+
+  // 4. Parse & Repair
+  try {
+    return JSON.parse(jsonCandy);
+  } catch (e1: any) {
+    try {
+      // Use powerful jsonrepair module
+      const repaired = jsonrepair(jsonCandy);
+      return JSON.parse(repaired);
+    } catch (e2: any) {
+      // If the extracted candy failed, try repairing the entire cleaned text as an absolute last resort
+      try {
+        const repairedFull = jsonrepair(cleaned);
+        return JSON.parse(repairedFull);
+      } catch (e3: any) {
+         console.error("JSON Parse failed for text:", text.substring(0, 100) + "...", "Errors:", e1.message, e2.message);
+         return null;
+      }
+    }
+  }
 };
 
 export const fetchLiveNews = async (query: string, exclude: string[] = []): Promise<NewsItem[]> => {
@@ -371,6 +302,74 @@ export const resolveLocationQuery = async (query: string): Promise<SearchResult 
   }
 };
 
+export const getInfoFromFeature = async (name: string, lat: number, lng: number): Promise<LocationInfo | null> => {
+  try {
+    const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
+    
+    const mainPrompt = `
+      Provide encyclopedic information for the location named "${name}" located at coordinates: ${lat}, ${lng}.
+      Current Date: ${currentDate}
+      
+      Return a JSON object with:
+      - name: The specific name provided: "${name}". Do not change this name or summarize a region unless absolutely necessary.
+      - type: Continent, Country, State, City, Ocean, or Point of Interest.
+      - description: Detailed Wikipedia-style encyclopedia entry about ${name} (approx 80 words).
+      - population: Recent estimate (if applicable).
+      - climate: Köppen climate classification.
+      - funFacts: 3 interesting facts.
+      - coordinates: The exact input coordinates {lat: ${lat}, lng: ${lng}}
+      - notable: 3 notable people. For 'significance', provide a descriptive sentence.
+      
+      Output ONLY the JSON object.
+    `;
+
+    const mainRequest = generateContentWithRetry({
+      model: modelName,
+      contents: mainPrompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: mainInfoSchemaConfig,
+        maxOutputTokens: 4000,
+      }
+    });
+
+    const mainResponse = await mainRequest;
+    let data = safeJsonParse(mainResponse.text);
+
+    if (!data) {
+        data = {
+            name: name,
+            type: "Point of Interest",
+            description: "Information unavailable.",
+            coordinates: { lat, lng },
+            funFacts: [],
+            news: [],
+            notable: []
+        };
+    }
+    
+    // Ensure the name returned is the one requested
+    data.name = name;
+
+    data.news = [];
+    return data as LocationInfo;
+
+  } catch (error: any) {
+    console.error("Error resolving feature info:", error);
+    return {
+        name: name,
+        type: LocationType.POI,
+        description: error.message?.includes('429') || error.message?.includes('Quota') 
+            ? "API Quota Exceeded. Please try again later."
+            : "Could not retrieve information at this time.",
+        coordinates: { lat, lng },
+        funFacts: [],
+        news: [],
+        notable: []
+    } as unknown as LocationInfo;
+  }
+};
+
 export const getInfoFromCoordinates = async (lat: number, lng: number): Promise<LocationInfo | null> => {
   try {
     const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
@@ -446,12 +445,28 @@ export const getInfoFromCoordinates = async (lat: number, lng: number): Promise<
   }
 };
 
+// Schema for nearby places
+const nearbyPlacesSchemaConfig = {
+  type: Type.ARRAY,
+  items: {
+    type: Type.OBJECT,
+    properties: {
+      id: { type: Type.STRING },
+      name: { type: Type.STRING },
+      lat: { type: Type.NUMBER },
+      lng: { type: Type.NUMBER },
+      populationClass: { type: Type.STRING }
+    },
+    required: ["id", "name", "lat", "lng", "populationClass"]
+  }
+};
+
 export const getNearbyPlaces = async (lat: number, lng: number, radius: number = 25): Promise<MapMarker[]> => {
   try {
     const prompt = `
       I am looking at a globe at coordinates ${lat}, ${lng}.
       Identify 5-8 major cities, towns, landmarks, notable features, or significant points of interest within an approximate ${radius}km radius.
-      Return a strict JSON array: [{"id": "uuid", "name": "Name", "lat": 0.0, "lng": 0.0, "populationClass": "medium"}]
+      Return a strict JSON array.
       Do not repeat places. Stop after 8 places. Output ONLY the JSON payload.
     `;
 
@@ -460,6 +475,7 @@ export const getNearbyPlaces = async (lat: number, lng: number, radius: number =
       contents: prompt,
       config: {
         responseMimeType: "application/json",
+        responseSchema: nearbyPlacesSchemaConfig,
         maxOutputTokens: 4000,
       }
     });
@@ -470,6 +486,7 @@ export const getNearbyPlaces = async (lat: number, lng: number, radius: number =
     return [];
 
   } catch (error: any) {
+    console.error("Error fetching nearby places:", error);
     return [];
   }
 };

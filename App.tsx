@@ -1,16 +1,16 @@
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
-import { Stars, CameraControls } from '@react-three/drei';
+import { Stars, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Loader2 } from 'lucide-react';
 
 import Earth from './components/Earth';
 import InfoPanel from './components/InfoPanel';
 import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint } from './types';
-import { resolveLocationQuery, getInfoFromCoordinates, getNearbyPlaces, getMoreNews, fetchLiveNews, generateRoute } from './services/geminiService';
+import { resolveLocationQuery, getInfoFromCoordinates, getInfoFromFeature, getNearbyPlaces, getMoreNews, fetchLiveNews, generateRoute } from './services/geminiService';
 
 // Helper to convert Lat/Lng to 3D Cartesian coordinates (Local Space)
 const latLngToVector3 = (lat: number, lng: number, radius: number = 1) => {
@@ -33,6 +33,23 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
     Math.sin(dLon/2) * Math.sin(dLon/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
   return R * c; 
+};
+
+const CameraAnimator: React.FC<{
+  targetPosRef: React.MutableRefObject<THREE.Vector3 | null>;
+  cameraControlsRef: React.RefObject<any>;
+}> = ({ targetPosRef, cameraControlsRef }) => {
+  useFrame(({ camera }) => {
+    if (targetPosRef.current && cameraControlsRef.current) {
+        camera.position.lerp(targetPosRef.current, 0.05);
+        cameraControlsRef.current.update(); // Update controls to reflect new position
+        
+        if (camera.position.distanceTo(targetPosRef.current) < 0.05) {
+            targetPosRef.current = null;
+        }
+    }
+  });
+  return null;
 };
 
 // Component to position the sun (directional light) at the camera's position
@@ -129,7 +146,8 @@ const VisibilityTracker: React.FC<{
 const ThemeZoomInitializer: React.FC<{
   skin: SkinType;
   cameraControlsRef: React.RefObject<any>;
-}> = ({ skin, cameraControlsRef }) => {
+  onLockZoom: (distance: number) => void;
+}> = ({ skin, cameraControlsRef, onLockZoom }) => {
   const hasAppliedRef = useRef(false);
   const animationState = useRef<{
     active: boolean;
@@ -149,13 +167,14 @@ const ThemeZoomInitializer: React.FC<{
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   };
 
-  useFrame(() => {
+  useFrame(({ camera }) => {
     if (skin === 'parchment') {
       if (!hasAppliedRef.current) {
         if (cameraControlsRef.current) {
           const defaultDistance = 4.5;
           // Current zoom is inversely proportional to distance. Higher zoom -> lower distance.
-          const currentZoom = defaultDistance / cameraControlsRef.current.distance;
+          const currentDistance = cameraControlsRef.current.getDistance();
+          const currentZoom = defaultDistance / currentDistance;
           const defaultZoom = 1.0;
           
           let targetZoom = defaultZoom * 1.5;
@@ -187,6 +206,12 @@ const ThemeZoomInitializer: React.FC<{
       if (t >= 1) {
         t = 1;
         animationState.current.active = false;
+        
+        if (skin === 'parchment') {
+          const baselineDistance = 4.5;
+          const finalDistance = baselineDistance / animationState.current.targetZoom;
+          onLockZoom(finalDistance);
+        }
       }
       
       const easedT = easeInOutCubic(t);
@@ -198,7 +223,8 @@ const ThemeZoomInitializer: React.FC<{
       
       const baselineDistance = 4.5;
       const newDistance = baselineDistance / newZoom;
-      cameraControlsRef.current.dollyTo(newDistance, false);
+      camera.position.normalize().multiplyScalar(newDistance);
+      cameraControlsRef.current.update();
     }
   });
 
@@ -226,6 +252,7 @@ const App: React.FC = () => {
   const [isZoomedOut, setIsZoomedOut] = useState(true);
   const [isLocationVisible, setIsLocationVisible] = useState(true);
   const [isZoomLocked, setIsZoomLocked] = useState(false);
+  const [lockedZoomDistance, setLockedZoomDistance] = useState<number | null>(null);
   
   // Route State
   const [routeWaypoints, setRouteWaypoints] = useState<Waypoint[]>([]);
@@ -237,9 +264,21 @@ const App: React.FC = () => {
   // Track focus state to manage suggestions pausing
   const [isFocused, setIsFocused] = useState(false);
   
+  type InteractionStateType = 'GLOBE_IDLE' | 'GLOBE_SEARCHING' | 'PINS_RENDERED' | 'PIN_SELECTED';
+  const [interactionState, setInteractionState] = useState<InteractionStateType>('GLOBE_IDLE');
+  
   const cameraControlsRef = useRef<any>(null);
   const earthRef = useRef<THREE.Mesh>(null);
   const userModifiedZoomRef = useRef(false);
+  const zoomAnimRef = useRef<number | null>(null);
+  const targetZoomRef = useRef<number | null>(null);
+
+  const targetCameraPosRef = useRef<THREE.Vector3 | null>(null);
+
+  const animateCameraTo = useCallback((worldCameraPos: THREE.Vector3) => {
+      // With OrbitControls we just lerp the position in a generic frame loop
+      targetCameraPosRef.current = worldCameraPos.clone();
+  }, []);
 
   // Load favorites from local storage on mount
   useEffect(() => {
@@ -639,6 +678,7 @@ const App: React.FC = () => {
   }, []);
 
   const loadWaypointData = useCallback(async (wp: Waypoint) => {
+     setInteractionState('PIN_SELECTED');
      setIsLoading(true);
      setIsNewsFetching(false);
      setLocationInfo(null);
@@ -647,15 +687,11 @@ const App: React.FC = () => {
 
      // Move camera
      if (earthRef.current && cameraControlsRef.current) {
-        const targetDist = isZoomLocked ? cameraControlsRef.current.distance : 2.0; 
+        const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 2.0; 
         const localCameraVec = latLngToVector3(wp.lat, wp.lng, targetDist);
         const worldCameraPos = localCameraVec.clone().applyMatrix4(earthRef.current.matrixWorld);
         
-        cameraControlsRef.current.setLookAt(
-            worldCameraPos.x, worldCameraPos.y, worldCameraPos.z,
-            0, 0, 0,
-            true
-        );
+        animateCameraTo(worldCameraPos);
      }
 
      // Fetch full info
@@ -693,6 +729,7 @@ const App: React.FC = () => {
   }, [isZoomLocked]);
 
   const handleGlobeClick = useCallback(async (lat: number, lng: number, point: THREE.Vector3) => {
+    setInteractionState('GLOBE_SEARCHING');
     setIsLoading(true);
     setLocationInfo(null);
     setSearchError(null);
@@ -716,18 +753,14 @@ const App: React.FC = () => {
     }
     
     setSelectedMarkerId(null);
-    setIsFocused(true);
+    setIsFocused(false);
 
     if (cameraControlsRef.current) {
       const direction = point.clone().normalize();
-      const targetDist = isZoomLocked ? cameraControlsRef.current.distance : 2.2;
+      const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 2.2;
       const camPos = direction.multiplyScalar(targetDist); 
       
-      cameraControlsRef.current.setLookAt(
-        camPos.x, camPos.y, camPos.z,
-        0, 0, 0,
-        true
-      );
+      animateCameraTo(camPos);
     }
 
     let newMarkers = await getNearbyPlaces(lat, lng);
@@ -750,30 +783,12 @@ const App: React.FC = () => {
 
     setMarkers(newMarkers);
     
-    setLocationInfo({
-        name: markersWithDist.length > 0 ? "Nearby Points of Interest" : "Uncharted Region",
-        type: LocationType.POI,
-        description: markersWithDist.length > 0
-            ? `Identified ${markersWithDist.length} location${markersWithDist.length > 1 ? 's' : ''} within the vicinity of the selected coordinates.`
-            : `No nearby results found for these coordinates. Try searching or clicking elsewhere on the globe.`,
-        population: 'Not Applicable',
-        climate: 'Not applicable',
-        funFacts: markersWithDist.length > 0 
-           ? ['Select a pin on the globe for detailed information.', ...markersWithDist.map(m => `${m.name} (${(m._dist ?? 0).toFixed(1)} km away)`)]
-           : ['No distinct landmarks or regions identified nearby.'],
-        coordinates: { lat, lng },
-        news: [],
-        notable: markersWithDist.map(m => ({
-            name: m.name,
-            significance: `Approx ${(m._dist ?? 0).toFixed(1)} km away at ${(m.lat ?? 0).toFixed(2)}°, ${(m.lng ?? 0).toFixed(2)}°`,
-            category: 'Location'
-        }))
-    });
-    
     setIsLoading(false);
-  }, [activeRouteId, isZoomLocked]);
+    setInteractionState('PINS_RENDERED');
+  }, [activeRouteId, isZoomLocked, lockedZoomDistance, animateCameraTo]);
 
   const handleMarkerClick = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint, point: THREE.Vector3) => {
+    setInteractionState('PIN_SELECTED');
     setSearchError(null);
     setAutoRotate(false);
     setSelectedMarkerId(marker.id);
@@ -829,16 +844,15 @@ const App: React.FC = () => {
     setIsNewsFetching(false);
 
     if (cameraControlsRef.current) {
-        const targetDist = isZoomLocked ? cameraControlsRef.current.distance : 1.5;
+        const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.5;
         const worldCamPos = point.clone().normalize().multiplyScalar(targetDist);
-        cameraControlsRef.current.setLookAt(
-            worldCamPos.x, worldCamPos.y, worldCamPos.z,
-            0, 0, 0,
-            true 
-        );
+        animateCameraTo(worldCamPos);
     }
 
-    const data = await getInfoFromCoordinates(marker.lat, marker.lng);
+    const data = await getInfoFromFeature(marker.name, marker.lat, marker.lng);
+    
+    console.log(`[Click Debug] featureId: ${marker.id}, label text: ${marker.name}, resolved entity name: ${data?.name}`);
+    
     setLocationInfo(data);
     setIsLoading(false);
 
@@ -854,6 +868,7 @@ const App: React.FC = () => {
   }, [routeWaypoints, loadWaypointData, activeRouteId, isZoomLocked]);
 
   const handleSearch = async (query: string) => {
+    setInteractionState('PIN_SELECTED');
     setIsLoading(true);
     setIsNewsFetching(false);
     setLocationInfo(null);
@@ -888,20 +903,14 @@ const App: React.FC = () => {
       setIsLoading(false);
 
       let targetDist = Math.max(1.3, 4.5 - ((result.suggestedZoom / 10) * (4.5 - 1.2)));
-      if (isZoomLocked && cameraControlsRef.current) {
-         targetDist = cameraControlsRef.current.distance;
+      if (isZoomLocked && lockedZoomDistance) {
+         targetDist = lockedZoomDistance;
       }
       const localCameraVec = latLngToVector3(lat, lng, targetDist);
 
       if (earthRef.current) {
          const worldCameraPos = localCameraVec.clone().applyMatrix4(earthRef.current.matrixWorld);
-         if (cameraControlsRef.current) {
-          cameraControlsRef.current.setLookAt(
-            worldCameraPos.x, worldCameraPos.y, worldCameraPos.z,
-            0, 0, 0,
-            true 
-          );
-        }
+         animateCameraTo(worldCameraPos);
       }
 
       if (result.locationInfo.name) {
@@ -921,6 +930,7 @@ const App: React.FC = () => {
   };
 
   const handleTraceRoute = async (text: string) => {
+      setInteractionState('PIN_SELECTED');
       setIsLoading(true);
       setSearchError(null);
       setLocationInfo(null);
@@ -959,11 +969,45 @@ const App: React.FC = () => {
       }
   };
 
+  const clampZoom = useCallback((z: number) => {
+    const minZ = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.2;
+    const maxZ = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 8;
+    return Math.max(minZ, Math.min(maxZ, z));
+  }, [isZoomLocked, lockedZoomDistance]);
+
+  const animateZoom = useCallback(() => {
+    if (!cameraControlsRef.current || targetZoomRef.current === null) {
+      zoomAnimRef.current = null;
+      return;
+    }
+
+    const camera = cameraControlsRef.current.object;
+    const currentZoom = cameraControlsRef.current.getDistance();
+    const diff = targetZoomRef.current - currentZoom;
+
+    // smoothing factor (tune 0.08-0.15)
+    const nextZoom = currentZoom + diff * 0.12;
+    camera.position.normalize().multiplyScalar(nextZoom);
+    cameraControlsRef.current?.update();
+
+    if (Math.abs(diff) > 0.001) {
+      zoomAnimRef.current = requestAnimationFrame(animateZoom);
+    } else {
+      zoomAnimRef.current = null;
+    }
+  }, []);
+
+  const BUTTON_ZOOM_FACTOR = 1.25;
+
   const handleZoomIn = useCallback(() => {
     if (!isZoomLocked && cameraControlsRef.current) {
-      cameraControlsRef.current.dolly(1, true);
+      targetZoomRef.current = targetZoomRef.current ?? cameraControlsRef.current.getDistance();
+      targetZoomRef.current = clampZoom(targetZoomRef.current / BUTTON_ZOOM_FACTOR);
+      if (!zoomAnimRef.current) {
+        zoomAnimRef.current = requestAnimationFrame(animateZoom);
+      }
     }
-  }, [isZoomLocked]);
+  }, [isZoomLocked, clampZoom, animateZoom]);
 
   const handleUserZoomIn = useCallback(() => {
     userModifiedZoomRef.current = true;
@@ -973,11 +1017,41 @@ const App: React.FC = () => {
   const handleZoomOut = useCallback(() => {
     userModifiedZoomRef.current = true;
     if (!isZoomLocked && cameraControlsRef.current) {
-      cameraControlsRef.current.dolly(-1, true);
+      targetZoomRef.current = targetZoomRef.current ?? cameraControlsRef.current.getDistance();
+      targetZoomRef.current = clampZoom(targetZoomRef.current * BUTTON_ZOOM_FACTOR);
+      if (!zoomAnimRef.current) {
+        zoomAnimRef.current = requestAnimationFrame(animateZoom);
+      }
     }
-  }, [isZoomLocked]);
+  }, [isZoomLocked, clampZoom, animateZoom]);
+
+  useEffect(() => {
+    const WHEEL_SENSITIVITY = 0.02;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+
+      if (!isZoomLocked && cameraControlsRef.current) {
+        targetZoomRef.current = targetZoomRef.current ?? cameraControlsRef.current.getDistance();
+        targetZoomRef.current = clampZoom(targetZoomRef.current + e.deltaY * WHEEL_SENSITIVITY);
+        
+        userModifiedZoomRef.current = true;
+
+        if (!zoomAnimRef.current) {
+          zoomAnimRef.current = requestAnimationFrame(animateZoom);
+        }
+      }
+    };
+
+    const container = document.getElementById('canvas-container');
+    if (container) {
+      container.addEventListener('wheel', handleWheel, { passive: false });
+      return () => container.removeEventListener('wheel', handleWheel);
+    }
+  }, [isZoomLocked, clampZoom, animateZoom]);
 
   const handleClosePanel = () => {
+    setInteractionState('GLOBE_IDLE');
     setLocationInfo(null);
     setSelectedMarkerId(null);
     setIsNewsFetching(false);
@@ -1190,6 +1264,7 @@ const App: React.FC = () => {
     <div 
       className={`relative w-full h-screen bg-black overflow-hidden bg-cover bg-center bg-no-repeat`}
       style={skin === 'parchment' ? { backgroundImage: 'url(https://raw.githubusercontent.com/webpmp/webpmp.github.io/master/terra-explorer-noglobe.png)' } : {}}
+      onContextMenu={(e) => e.preventDefault()}
     >
       {/* Background Gradient for Parchment Theme Contrast */}
       {skin === 'parchment' && (
@@ -1197,7 +1272,7 @@ const App: React.FC = () => {
       )}
 
       {/* 3D Scene */}
-      <div className="absolute inset-0 z-0">
+      <div id="canvas-container" className="absolute inset-0 z-0">
         <Canvas camera={{ position: [0, 0, 4.5], fov: 45 }}>
         <ambientLight intensity={skin === 'modern' || skin === 'parchment' ? 0.4 : 1.5} color={skin === 'modern' || skin === 'parchment' ? "#ccccff" : "#ffffff"} />
         <Sun skin={skin} />
@@ -1210,7 +1285,7 @@ const App: React.FC = () => {
           ref={earthRef}
           onLocationClick={handleGlobeClick} 
           onMarkerClick={handleMarkerClick}
-          isInteracting={isInteracting}
+          isInteracting={isInteracting || isDragging}
           setIsInteracting={setIsInteracting}
           autoRotate={autoRotate}
           skin={skin}
@@ -1228,25 +1303,40 @@ const App: React.FC = () => {
             onVisibilityChange={handleVisibilityChange} 
         />
 
-        <CameraControls 
+        <OrbitControls 
           ref={cameraControlsRef} 
-          minDistance={1.2} 
-          maxDistance={8}
-          smoothTime={0.8}
-          dollySpeed={isZoomLocked ? 0 : 1}
+          minDistance={isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.2} 
+          maxDistance={isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 8}
+          enablePan={false}
+          enableRotate={true}
+          enableZoom={false}
+          enableDamping={true}
+          dampingFactor={0.05}
           onStart={() => {
             setIsDragging(true);
             setAutoRotate(false);
             userModifiedZoomRef.current = true;
+            targetCameraPosRef.current = null;
           }}
           onEnd={() => {
             setIsDragging(false);
           }}
+          target={[0, 0, 0]}
+          makeDefault
+        />
+
+        <CameraAnimator 
+           targetPosRef={targetCameraPosRef} 
+           cameraControlsRef={cameraControlsRef} 
         />
 
         <ThemeZoomInitializer
           skin={skin}
           cameraControlsRef={cameraControlsRef}
+          onLockZoom={(dist) => {
+             setLockedZoomDistance(dist);
+             setIsZoomLocked(true);
+          }}
         />
         
         <RotationManager 
@@ -1293,19 +1383,19 @@ const App: React.FC = () => {
         {isSkinMenuOpen && (
           <div className="mt-2 flex flex-col w-28 bg-black/80 backdrop-blur border border-white/20 rounded shadow-xl overflow-hidden">
             <button 
-              onClick={() => { setSkin('modern'); setIsSkinMenuOpen(false); }}
+              onClick={() => { setSkin('modern'); setIsZoomLocked(false); setLockedZoomDistance(null); setIsSkinMenuOpen(false); }}
               className={`px-3 py-2 text-xs text-left hover:bg-white/10 ${skin === 'modern' ? 'text-white font-bold bg-white/5' : 'text-gray-400'}`}
             >
               MODERN
             </button>
             <button 
-              onClick={() => { setSkin('retro-green'); setIsSkinMenuOpen(false); }}
+              onClick={() => { setSkin('retro-green'); setIsZoomLocked(false); setLockedZoomDistance(null); setIsSkinMenuOpen(false); }}
               className={`px-3 py-2 text-xs text-left font-mono hover:bg-white/10 ${skin === 'retro-green' ? 'text-green-400 font-bold bg-white/5' : 'text-green-400/50'}`}
             >
               CRT-G
             </button>
             <button 
-              onClick={() => { setSkin('retro-amber'); setIsSkinMenuOpen(false); }}
+              onClick={() => { setSkin('retro-amber'); setIsZoomLocked(false); setLockedZoomDistance(null); setIsSkinMenuOpen(false); }}
               className={`px-3 py-2 text-xs text-left font-mono hover:bg-white/10 ${skin === 'retro-amber' ? 'text-amber-400 font-bold bg-white/5' : 'text-amber-400/50'}`}
             >
               CRT-A
@@ -1335,24 +1425,35 @@ const App: React.FC = () => {
         />
       )}
 
-      <InfoPanel 
-        info={locationInfo} 
-        isLoading={isLoading}
-        isNewsFetching={isNewsFetching}
-        onClose={handleClosePanel} 
-        skin={skin}
-        isFavorite={isCurrentLocationFavorite}
-        onSaveFavorite={handleSaveFavorite}
-        onRemoveFavorite={() => handleRemoveFavorite()}
-        currentFavoriteName={currentFavorite?.name}
-        onLoadMoreNews={handleLoadMoreNews}
-        routeNav={(routeWaypoints.length > 0 && currentWaypointIndex !== -1) ? {
-            current: currentWaypointIndex + 1,
-            total: routeWaypoints.length,
-            onNext: handleNextWaypoint,
-            onPrev: handlePrevWaypoint
-        } : undefined}
-      />
+      {interactionState === 'GLOBE_SEARCHING' && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-50">
+          <div className="bg-black/60 text-white px-4 py-2 rounded-full font-medium shadow-xl border border-white/20 backdrop-blur-md flex items-center gap-3">
+             <Loader2 className="w-5 h-5 animate-spin" />
+             Scanning region...
+          </div>
+        </div>
+      )}
+
+      {interactionState === 'PIN_SELECTED' && (
+        <InfoPanel 
+          info={locationInfo} 
+          isLoading={isLoading}
+          isNewsFetching={isNewsFetching}
+          onClose={handleClosePanel} 
+          skin={skin}
+          isFavorite={isCurrentLocationFavorite}
+          onSaveFavorite={handleSaveFavorite}
+          onRemoveFavorite={() => handleRemoveFavorite()}
+          currentFavoriteName={currentFavorite?.name}
+          onLoadMoreNews={handleLoadMoreNews}
+          routeNav={(routeWaypoints.length > 0 && currentWaypointIndex !== -1) ? {
+              current: currentWaypointIndex + 1,
+              total: routeWaypoints.length,
+              onNext: handleNextWaypoint,
+              onPrev: handlePrevWaypoint
+          } : undefined}
+        />
+      )}
 
       <Controls 
         onSearch={handleSearch} 
@@ -1368,7 +1469,17 @@ const App: React.FC = () => {
         isTraceModalOpen={isTraceModalOpen}
         onToggleTraceModal={setIsTraceModalOpen}
         isZoomLocked={isZoomLocked}
-        onToggleZoomLock={() => setIsZoomLocked(prev => !prev)}
+        onToggleZoomLock={() => {
+           setIsZoomLocked(prev => {
+              if (!prev) {
+                 setLockedZoomDistance(cameraControlsRef.current?.getDistance() || null);
+                 return true;
+              } else {
+                 setLockedZoomDistance(null);
+                 return false;
+              }
+           });
+        }}
       />
     </div>
   );

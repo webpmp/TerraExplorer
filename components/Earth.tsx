@@ -1,8 +1,8 @@
 
 import React, { useRef, useImperativeHandle, forwardRef, useMemo, useEffect, useState, Suspense } from 'react';
-import { useFrame, useLoader } from '@react-three/fiber';
+import { useFrame, useLoader, useThree } from '@react-three/fiber';
 import { TextureLoader } from 'three';
-import { Decal, useTexture, Line, Text, Billboard, Instances, Instance } from '@react-three/drei';
+import { Decal, useTexture, Line, Text, Billboard, Instances, Instance, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { SkinType, GeoCoordinates, MapMarker, FavoriteLocation, Waypoint } from '../types';
 
@@ -130,6 +130,7 @@ const UniversalMarker: React.FC<{
   isSelected: boolean,
   isWaypoint?: boolean,
   waypointIndex?: number,
+  markerData?: any,
   onClick: (e: any) => void 
 }> = ({ 
   position, 
@@ -141,6 +142,7 @@ const UniversalMarker: React.FC<{
   isSelected,
   isWaypoint,
   waypointIndex,
+  markerData,
   onClick 
 }) => {
   const meshRef = useRef<THREE.Group>(null);
@@ -161,8 +163,7 @@ const UniversalMarker: React.FC<{
     <group position={position} onClick={onClick} ref={meshRef}>
       {/* Invisible Hitbox - ensures easy clicking even if visual dot is small */}
       <mesh 
-        onPointerOver={() => document.body.style.cursor = 'pointer'}
-        onPointerOut={() => document.body.style.cursor = 'auto'}
+        userData={{ isPin: true, markerData, worldPos: position, visualSize: size }}
       >
          <sphereGeometry args={[hitSize, 16, 16]} />
          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
@@ -174,8 +175,8 @@ const UniversalMarker: React.FC<{
         <meshBasicMaterial 
           color={color} 
           toneMapped={false} 
-          transparent={true}
-          opacity={0.5} 
+          transparent={false}
+          opacity={1.0} 
         />
       </mesh>
       
@@ -186,8 +187,8 @@ const UniversalMarker: React.FC<{
               color={outlineColor} 
               side={THREE.BackSide} 
               toneMapped={false} 
-              transparent={!isRetro} // Transparent for modern (white halo effect)
-              opacity={isRetro ? 1.0 : 0.8}
+              transparent={false} // Transparent for modern (white halo effect)
+              opacity={1.0}
            />
       </mesh>
 
@@ -213,10 +214,15 @@ const UniversalMarker: React.FC<{
 };
 
 const RouteLine: React.FC<{ 
+
   waypoints: Waypoint[], 
+
   color: string,
+
   isRetro: boolean,
+
   markerPositions?: Map<string, THREE.Vector3>
+
 }> = ({ waypoints, color, isRetro, markerPositions }) => {
   const dotPoints = useMemo(() => {
     if (waypoints.length < 2) return [];
@@ -269,6 +275,204 @@ const RouteLine: React.FC<{
         <Instance key={i} position={pos} />
       ))}
     </Instances>
+  );
+};
+
+const HoverOverlay: React.FC<{
+  isInteracting: boolean;
+  groupRef: React.RefObject<THREE.Group>;
+  skin: SkinType;
+  onMarkerClick: (marker: any, point: THREE.Vector3) => void;
+  outlineColor: string;
+}> = ({ isInteracting, groupRef, skin, onMarkerClick, outlineColor }) => {
+  const isParchment = skin === 'parchment';
+  const isModern = skin === 'modern' || isParchment;
+  const isAmber = skin === 'retro-amber';
+  
+  const { camera, gl, size, scene } = useThree();
+  const [hoveredPin, setHoveredPin] = useState<any>(null);
+  const [hoveredObject, setHoveredObject] = useState<THREE.Object3D | null>(null);
+
+  const containerGroupRef = useRef<THREE.Group>(null);
+  const lineRef = useRef<SVGLineElement>(null);
+  const capRef = useRef<SVGCircleElement>(null);
+
+  // Compute label offset constants
+  const labelX = 30;
+  const labelY = -30;
+  const length = Math.sqrt(labelX * labelX + labelY * labelY);
+  const nDirX = labelX / length;
+  const nDirY = labelY / length;
+
+  useEffect(() => {
+    const raycaster = new THREE.Raycaster();
+    let throttleTimeout: any = null;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isInteracting) {
+         if (hoveredPin) {
+             setHoveredPin(null);
+             setHoveredObject(null);
+             document.body.style.cursor = 'auto';
+         }
+         return;
+      }
+
+      if (throttleTimeout) return;
+
+      throttleTimeout = setTimeout(() => {
+        throttleTimeout = null;
+
+        const bounds = gl.domElement.getBoundingClientRect();
+        const x = e.clientX - bounds.left;
+        const y = e.clientY - bounds.top;
+
+        const mouse = new THREE.Vector2(
+          (x / size.width) * 2 - 1,
+          -(y / size.height) * 2 + 1
+        );
+
+        raycaster.setFromCamera(mouse, camera);
+
+        if (groupRef.current) {
+          const pins: THREE.Object3D[] = [];
+          groupRef.current.traverse((obj) => {
+            if (obj.userData?.isPin) {
+              pins.push(obj);
+            }
+          });
+
+          const intersects = raycaster.intersectObjects(pins, false);
+
+          if (intersects.length > 0) {
+            const firstHit = intersects[0].object;
+            const markerData = firstHit.userData.markerData;
+            
+            if (markerData && (!hoveredPin || hoveredPin.id !== markerData.id)) {
+                setHoveredPin(markerData);
+                setHoveredObject(firstHit);
+                document.body.style.cursor = 'pointer';
+            }
+          } else {
+            if (hoveredPin) {
+               setHoveredPin(null);
+               setHoveredObject(null);
+               document.body.style.cursor = 'auto';
+            }
+          }
+        }
+      }, 50); // 50ms throttle
+    };
+
+    const container = gl.domElement;
+    container.addEventListener('mousemove', handleMouseMove);
+    container.addEventListener('mouseout', () => {
+        setHoveredPin(null);
+        setHoveredObject(null);
+        document.body.style.cursor = 'auto';
+    });
+
+    return () => {
+      container.removeEventListener('mousemove', handleMouseMove);
+      clearTimeout(throttleTimeout);
+      document.body.style.cursor = 'auto';
+    };
+  }, [isInteracting, camera, size, gl, hoveredPin, groupRef]);
+
+  useFrame(() => {
+    if (!hoveredPin || !hoveredObject || !containerGroupRef.current) return;
+
+    // 1. Refresh world position every frame
+    const wp = new THREE.Vector3();
+    hoveredObject.getWorldPosition(wp);
+    containerGroupRef.current.position.copy(wp);
+
+    // 2. Compute dynamic pin radius in screen pixels
+    const markerVisualSize = (hoveredObject.userData.visualSize || 0.01) * 1.2;
+    
+    // Project center
+    const centerScreen = wp.clone().project(camera);
+    
+    // Project an edge point
+    const edgeWp = wp.clone().add(camera.up.clone().multiplyScalar(markerVisualSize));
+    const edgeScreen = edgeWp.project(camera);
+
+    // Convert projected coords to screen pixels
+    const heightHalf = size.height / 2;
+    const centerY = -(centerScreen.y * heightHalf) + heightHalf;
+    const edgeY = -(edgeScreen.y * heightHalf) + heightHalf;
+    
+    const pinScreenRadius = Math.abs(centerY - edgeY);
+
+    // 3. Update the SVG line endpoints
+    if (lineRef.current) {
+       // Start point from pin edge towards label
+       const startX = nDirX * pinScreenRadius;
+       // Y goes from +30 to 0 relative to SVG origin, so we adjust accordingly.
+       // The SVG is positioned at top: -30px. Label is at bottom: 30px, left: 30px relative to pin.
+       // That means pin center is at x=0, y=30 within the SVG.
+       const startY = 30 + nDirY * pinScreenRadius;
+
+       lineRef.current.setAttribute('x1', startX.toString());
+       lineRef.current.setAttribute('y1', startY.toString());
+       // End point is still at the label (top right of SVG box)
+       lineRef.current.setAttribute('x2', '30');
+       lineRef.current.setAttribute('y2', '0');
+       
+       if (capRef.current) {
+           capRef.current.setAttribute('cx', startX.toString());
+           capRef.current.setAttribute('cy', startY.toString());
+       }
+    }
+  });
+
+  if (!hoveredPin) return null;
+
+  return (
+    <group ref={containerGroupRef}>
+      <Html center zIndexRange={[100, 0]} style={{ pointerEvents: 'auto' }}>
+        <div 
+          style={{ position: 'relative', cursor: 'pointer' }}
+          onClick={(e) => {
+              e.stopPropagation();
+              if (containerGroupRef.current) {
+                  onMarkerClick(hoveredPin, containerGroupRef.current.position.clone());
+              }
+          }}
+        >
+          {/* Connector Line */}
+          <svg style={{ position: 'absolute', top: '-30px', left: '0px', width: '30px', height: '30px', overflow: 'visible', pointerEvents: 'none' }}>
+            <line 
+              ref={lineRef}
+              x1="0" y1="30"
+              x2="30" y2="0"
+              stroke={isModern ? "rgba(255,255,255,0.6)" : outlineColor} 
+              strokeWidth="1.5" 
+            />
+            <circle
+              ref={capRef}
+              cx="0"
+              cy="30"
+              r="3"
+              fill={isModern ? "white" : outlineColor}
+            />
+          </svg>
+
+          {/* Label Content */}
+          <div 
+            style={{ position: 'absolute', bottom: '30px', left: '30px' }}
+            className={`px-3 py-1.5 rounded-lg whitespace-nowrap text-sm font-bold shadow-xl border backdrop-blur-md transition-opacity duration-200 hover:scale-105 active:scale-95
+            ${isModern 
+                ? 'bg-black/60 text-white border-white/20 hover:bg-black/80' 
+                : isAmber
+                  ? 'bg-amber-900/80 text-amber-400 border-amber-500 font-mono hover:bg-amber-800'
+                  : 'bg-green-900/80 text-green-400 border-green-500 font-mono hover:bg-green-800'}`}
+          >
+            {hoveredPin.name || 'Unknown Location'}
+          </div>
+        </div>
+      </Html>
+    </group>
   );
 };
 
@@ -553,6 +757,9 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
   const handleGlobeClick = (e: any) => {
     e.stopPropagation();
     
+    // Ignore right click
+    if (e.button === 2) return;
+
     // Prevent click if user was dragging (delta is distance in pixels)
     if (e.delta > 5) return;
 
@@ -578,6 +785,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
   }
 
   return (
+    <>
     <group ref={groupRef}>
       {/* Route Lines */}
       {routeWaypoints && routeWaypoints.length > 0 && (
@@ -593,9 +801,18 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
       <mesh 
         ref={innerMeshRef}
         onClick={handleGlobeClick}
-        onPointerDown={() => props.setIsInteracting(true)}
-        onPointerUp={() => props.setIsInteracting(false)}
-        onPointerOut={() => props.setIsInteracting(false)}
+        onPointerDown={(e) => {
+          if (e.button === 2) return;
+          props.setIsInteracting(true);
+        }}
+        onPointerUp={(e) => {
+          if (e.button === 2) return;
+          props.setIsInteracting(false);
+        }}
+        onPointerOut={(e) => {
+          if (e.button === 2) return;
+          props.setIsInteracting(false);
+        }}
       >
         {isGreen ? (
           <sphereGeometry args={[1, 16, 12]} />
@@ -634,6 +851,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
           isSelected={selectedMarkerId === marker.id}
           isWaypoint={marker.isWaypoint}
           waypointIndex={marker.index}
+          markerData={marker.data}
           onClick={(e) => handleMarkerClick(e, marker.data)}
         />
       ))}
@@ -673,6 +891,10 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
         </mesh>
       )}
     </group>
+    
+    {/* Hover Overlay outside the rotating group so it stays oriented to screen */}
+    <HoverOverlay isInteracting={props.isInteracting} groupRef={groupRef} skin={props.skin} onMarkerClick={props.onMarkerClick} outlineColor={outlineColor} />
+    </>
   );
 });
 
