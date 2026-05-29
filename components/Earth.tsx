@@ -640,6 +640,11 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
             const layoutRadius = Math.max(0.014, group.length * 0.005);
             
             group.forEach((item, k) => {
+                // Geographic accuracy requirement: Do NOT modify original coordinates or position for scan result markers
+                if (item.type === 'marker') {
+                    return;
+                }
+
                 const angle = (k / group.length) * Math.PI * 2;
                 const offsetX = Math.cos(angle) * layoutRadius;
                 const offsetY = Math.sin(angle) * layoutRadius;
@@ -655,6 +660,13 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
         
         // Store finalized positions
         group.forEach(item => finalPosMap.set(item.id, item.position));
+    });
+
+    // Telemetry logger for scan result markers
+    itemsWithPos.forEach(item => {
+        if (item.type === 'marker') {
+            console.log(`[Scan Result Marker] ID: ${item.id}, Input Lat/Lng: ${item.lat}, ${item.lng}, Final Projected Position: [${item.position.x.toFixed(4)}, ${item.position.y.toFixed(4)}, ${item.position.z.toFixed(4)}]`);
+        }
     });
 
     // 4. Final Processing (Hitbox Size)
