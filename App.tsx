@@ -833,68 +833,6 @@ const App: React.FC = () => {
          setIsLoading(false);
      }
   }, [isZoomLocked, lockedZoomDistance, reconcileCameraState]);
-
-  const handleGlobeClick = useCallback(async (lat: number, lng: number, point: THREE.Vector3) => {
-    const scanId = ++activeScanIdRef.current;
-    setScanningArea({ lat, lng });
-    setIsScanningArea(true);
-
-    setInteractionState('GLOBE_SEARCHING');
-    setIsLoading(true);
-    setLocationInfo(null);
-    setSearchError(null);
-    setAutoRotate(false); 
-    setMarkers([]); // Clear transient markers
-    
-    if (!activeRouteId) {
-        setRouteWaypoints([]);
-        setCurrentWaypointIndex(-1);
-    } else {
-        setCurrentWaypointIndex(-1);
-    }
-    
-    setSelectedMarkerId(null);
-    setIsFocused(false);
-
-    if (cameraControlsRef.current) {
-      const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 2.2;
-      
-      cameraStateRef.current.routeSuggestedDistance = targetDist;
-      cameraStateRef.current.targetRotation = { lat, lng };
-      
-      requestAnimationFrame(() => {
-         reconcileCameraState();
-      });
-    }
-
-    let newMarkers = await getNearbyPlaces(lat, lng);
-    
-    if (scanId !== activeScanIdRef.current) return;
-
-    // Compute distance and rank
-    const markersWithDist = newMarkers.map(m => {
-        const d = calculateDistance(lat, lng, m.lat, m.lng);
-        return { ...m, _dist: d };
-    });
-    markersWithDist.sort((a, b) => a._dist - b._dist);
-    
-    // Sort actual markers list
-    newMarkers = markersWithDist.map(m => ({
-       id: m.id,
-       name: m.name,
-       lat: m.lat,
-       lng: m.lng,
-       populationClass: m.populationClass
-    }));
-
-    setMarkers(newMarkers);
-    setScanningArea(null);
-    setIsScanningArea(false);
-    
-    setIsLoading(false);
-    setInteractionState('PINS_RENDERED');
-  }, [activeRouteId, isZoomLocked, lockedZoomDistance, reconcileCameraState]);
-
   const handleMarkerClick = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint, point: THREE.Vector3) => {
     setInteractionState('PIN_SELECTED');
     setSearchError(null);
@@ -932,7 +870,7 @@ const App: React.FC = () => {
             setRouteWaypoints([]);
             setCurrentWaypointIndex(-1);
         } else {
-             setCurrentWaypointIndex(-1);
+              setCurrentWaypointIndex(-1);
         }
     }
     
@@ -977,8 +915,99 @@ const App: React.FC = () => {
          return { ...prev, news };
        });
        setIsNewsFetching(false);
-    }
+     }
   }, [routeWaypoints, loadWaypointData, activeRouteId, isZoomLocked, lockedZoomDistance, reconcileCameraState]);
+
+  const handleGlobeClick = useCallback(async (lat: number, lng: number, point: THREE.Vector3) => {
+    // Check if the clicked location is close to an existing waypoint
+    const isClose = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+      const R = 6371; // km
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLng = (lng2 - lng1) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLng/2) * Math.sin(dLng/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c < 150; // 150km threshold
+    };
+
+    const nearbyWaypoint = routeWaypoints.find(wp => isClose(lat, lng, wp.lat, wp.lng));
+
+    if (nearbyWaypoint) {
+       // Waypoint flow: Keep existing behavior and open the location overlay as normal
+       handleMarkerClick(nearbyWaypoint, point);
+       return;
+    }
+
+    // Non-waypoint flow: Do NOT open any overlay under any condition. Set scanning state.
+    const scanId = ++activeScanIdRef.current;
+    setScanningArea({ lat, lng });
+    setIsScanningArea(true);
+
+    setInteractionState('GLOBE_SEARCHING');
+    setIsLoading(true);
+    setLocationInfo(null); // Ensure NO overlay is opened
+    setSearchError(null);
+    setAutoRotate(false); 
+    setMarkers([]); // Clear transient markers
+    
+    if (!activeRouteId) {
+        setRouteWaypoints([]);
+        setCurrentWaypointIndex(-1);
+    } else {
+        setCurrentWaypointIndex(-1);
+    }
+    
+    setSelectedMarkerId(null);
+    setIsFocused(false);
+
+    if (cameraControlsRef.current) {
+      const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 2.2;
+      
+      cameraStateRef.current.routeSuggestedDistance = targetDist;
+      cameraStateRef.current.targetRotation = { lat, lng };
+      
+      requestAnimationFrame(() => {
+         reconcileCameraState();
+      });
+    }
+
+    // Return immediately while the scanning request runs in the background
+    (async () => {
+       try {
+          let newMarkers = await getNearbyPlaces(lat, lng);
+          if (scanId !== activeScanIdRef.current) return;
+
+          // Compute distance and rank
+          const markersWithDist = newMarkers.map(m => {
+              const d = calculateDistance(lat, lng, m.lat, m.lng);
+              return { ...m, _dist: d };
+          });
+          markersWithDist.sort((a, b) => a._dist - b._dist);
+          
+          // Sort actual markers list
+          newMarkers = markersWithDist.map(m => ({
+             id: m.id,
+             name: m.name,
+             lat: m.lat,
+             lng: m.lng,
+             populationClass: m.populationClass
+          }));
+
+          setMarkers(newMarkers);
+          setScanningArea(null);
+          setIsScanningArea(false);
+          
+          setIsLoading(false);
+          setInteractionState('PINS_RENDERED');
+       } catch (err) {
+          if (scanId === activeScanIdRef.current) {
+             setIsScanningArea(false);
+             setIsLoading(false);
+          }
+       }
+    })();
+  }, [activeRouteId, isZoomLocked, lockedZoomDistance, reconcileCameraState, routeWaypoints, handleMarkerClick]);;
 
   const handleSearch = async (query: string) => {
     setInteractionState('PIN_SELECTED');
