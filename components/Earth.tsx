@@ -20,6 +20,7 @@ interface EarthProps {
   selectedMarkerId: string | null;
   routeWaypoints?: Waypoint[];
   currentWaypointIndex?: number;
+  scanningArea?: GeoCoordinates | null;
 }
 
 // Helper to convert Lat/Lng to 3D Cartesian coordinates
@@ -131,6 +132,7 @@ const UniversalMarker: React.FC<{
   isWaypoint?: boolean,
   waypointIndex?: number,
   markerData?: any,
+  skin?: SkinType,
   onClick: (e: any) => void 
 }> = ({ 
   position, 
@@ -143,6 +145,7 @@ const UniversalMarker: React.FC<{
   isWaypoint,
   waypointIndex,
   markerData,
+  skin,
   onClick 
 }) => {
   const meshRef = useRef<THREE.Group>(null);
@@ -163,7 +166,14 @@ const UniversalMarker: React.FC<{
     <group position={position} onClick={onClick} ref={meshRef}>
       {/* Invisible Hitbox - ensures easy clicking even if visual dot is small */}
       <mesh 
-        userData={{ isPin: true, markerData, worldPos: position, visualSize: size }}
+        userData={{ 
+          isPin: true, 
+          markerData, 
+          worldPos: position, 
+          visualSize: size,
+          isWaypoint,
+          waypointIndex
+        }}
       >
          <sphereGeometry args={[hitSize, 16, 16]} />
          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
@@ -201,13 +211,13 @@ const UniversalMarker: React.FC<{
          <Billboard follow={true}>
             <Text
               fontSize={size * 1.5} // Increased font size relative to dot for better legibility
-              color={isRetro ? "black" : "white"}
+              color={isRetro ? "black" : (skin === 'parchment' ? "#3e2723" : "black")}
               anchorX="center"
               anchorY="middle"
-              outlineWidth={isRetro ? 0 : "5%"}
-              outlineColor="black"
+              outlineWidth={isRetro ? 0 : "8%"}
+              outlineColor={skin === 'parchment' ? "#f4ead5" : "white"}
               fontWeight="bold"
-              position={[0, 0, 0]}
+              position={[0, 0, size + 0.005]}
             >
               {waypointIndex + 1}
             </Text>
@@ -427,6 +437,9 @@ const HoverOverlay: React.FC<{
 
   if (!hoveredPin) return null;
 
+  const isWaypoint = hoveredObject?.userData?.isWaypoint;
+  const waypointIndex = hoveredObject?.userData?.waypointIndex;
+
   return (
     <group ref={containerGroupRef}>
       <Html center zIndexRange={[100, 0]} style={{ pointerEvents: 'auto' }}>
@@ -460,7 +473,9 @@ const HoverOverlay: React.FC<{
                   ? 'bg-black text-amber-300 border-amber-400 font-mono hover:bg-amber-900/40'
                   : 'bg-black text-green-300 border-green-400 font-mono hover:bg-green-900/40'}`}
           >
-            {hoveredPin.name || 'Unknown Location'}
+            {isWaypoint && waypointIndex !== undefined 
+              ? `${waypointIndex + 1}. ${hoveredPin.name || 'Unknown Location'}` 
+              : (hoveredPin.name || 'Unknown Location')}
           </div>
         </div>
       </Html>
@@ -470,7 +485,7 @@ const HoverOverlay: React.FC<{
 
 const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
   const groupRef = useRef<THREE.Group>(null);
-  const { autoRotate, isInteracting, skin, markers, favorites, showFavorites, selectedMarkerId, routeWaypoints, currentWaypointIndex } = props;
+  const { autoRotate, isInteracting, skin, markers, favorites, showFavorites, selectedMarkerId, routeWaypoints, currentWaypointIndex, scanningArea } = props;
 
   // Rotate the entire group
   useFrame((state, delta) => {
@@ -656,6 +671,20 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
 
   const innerMeshRef = useRef<THREE.Mesh>(null);
   useImperativeHandle(ref, () => innerMeshRef.current!);
+
+  const scanRingRef = useRef<THREE.Mesh | null>(null);
+
+  useFrame(({ clock }) => {
+     if (scanRingRef.current) {
+        const time = clock.getElapsedTime();
+        // Pulse scale between 0.3 and 1.2
+        const scale = 0.3 + Math.abs(Math.sin(time * 5.0)) * 0.9;
+        scanRingRef.current.scale.set(scale, scale, 1);
+        if (scanRingRef.current.material) {
+           (scanRingRef.current.material as THREE.MeshBasicMaterial).opacity = 0.4 * (1.0 - (scale - 0.3) / 0.9);
+        }
+     }
+  });
 
   const [colorMap, normalMap, specularMap, cloudsMap, displacementMap] = useLoader(TextureLoader, [
     'https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg',
@@ -844,6 +873,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
           isWaypoint={marker.isWaypoint}
           waypointIndex={marker.index}
           markerData={marker.data}
+          skin={skin}
           onClick={(e) => handleMarkerClick(e, marker.data)}
         />
       ))}
@@ -880,6 +910,29 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
         <mesh scale={[1.2, 1.2, 1.2]}>
             <sphereGeometry args={[1, 64, 64]} />
             <primitive object={atmosphereMaterial} attach="material" />
+        </mesh>
+      )}
+
+      {/* Scanning Radar Ping Outline */}
+      {scanningArea && (
+        <mesh 
+          position={latLngToVector3(scanningArea.lat, scanningArea.lng, 1.015)}
+          ref={(mesh) => {
+             scanRingRef.current = mesh;
+             if (mesh) {
+                const origin = new THREE.Vector3(0, 0, 0);
+                mesh.lookAt(origin);
+             }
+          }}
+        >
+           <ringGeometry args={[0, 0.08, 32]} />
+           <meshBasicMaterial 
+             color={isParchment ? "#8b5a2b" : (isAmber ? "#fbbf24" : (isGreen ? "#4ade80" : "#22d3ee"))} 
+             transparent 
+             opacity={0.3} 
+             side={THREE.DoubleSide}
+             depthWrite={false}
+           />
         </mesh>
       )}
     </group>

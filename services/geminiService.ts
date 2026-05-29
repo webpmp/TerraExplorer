@@ -14,9 +14,25 @@ const modelName = "gemini-2.5-flash";
 
 // Helper for exponential backoff retry
 const generateContentWithRetry = async (params: any, retries = 3): Promise<any> => {
+  const requestUrl = `https://generativelanguage.googleapis.com/v1beta/models/${params.model || modelName}:generateContent`;
+  console.log("=== GEMINI API REQUEST START ===");
+  console.log("Request URL:", requestUrl);
+  console.log("Request Payload:", JSON.stringify(params, null, 2));
   try {
-    return await ai.models.generateContent(params);
+    const response = await ai.models.generateContent(params);
+    console.log("Response Status Code: 200 OK");
+    console.log("Response Body:", JSON.stringify(response, null, 2));
+    console.log("=== GEMINI API REQUEST END ===");
+    return response;
   } catch (error: any) {
+    console.error("=== GEMINI API REQUEST ERROR ===");
+    console.error("Request URL:", requestUrl);
+    console.error("Error Name:", error?.name);
+    console.error("Error Message:", error?.message);
+    console.error("Error Status/Code:", error?.status || error?.code);
+    console.error("Full Thrown Exception:", error);
+    console.error("=================================");
+    
     // Check for common rate limit error signatures from Google GenAI SDK or raw response
     const isQuotaError = 
       error?.status === 429 || 

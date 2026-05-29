@@ -522,7 +522,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const showContentSkeleton = isLoading && (!info?.description || info.description === "");
 
   return (
-    <div className="absolute top-[90px] right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-150px)] flex flex-col gap-3 animate-in slide-in-from-right-12 fade-in duration-500 pointer-events-none">
+    <div className="absolute top-[282px] right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-342px)] flex flex-col gap-3 animate-in slide-in-from-right-12 fade-in duration-500 pointer-events-none">
         
         {/* Main Info Box */}
         <div className={`${theme.container} flex flex-col shrink min-h-0 overflow-hidden pointer-events-auto`}>
@@ -592,7 +592,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             {/* 3. Location title */}
             <div className="flex flex-col gap-2 items-center text-center">
               <div className="flex items-center justify-center gap-2 flex-wrap">
-                 <h2 className={`${titleSize} font-bold ${theme.headerTitle}`}>{info.name}</h2>
+                 <h2 className={`${titleSize} font-bold ${theme.headerTitle}`}>
+                   {routeNav ? `${routeNav.current}. ` : ''}{info.name}
+                 </h2>
                  <span className={`${smallTextSize} uppercase px-2 py-0.5 ${theme.tag}`}>{info.type}</span>
               </div>
               <p className={`${subtextSize} font-mono ${theme.subtext}`}>
@@ -624,11 +626,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             <button onClick={() => setActiveTab('overview')} className={`flex-1 py-2 ${tabTextSize} font-bold uppercase transition-colors flex items-center justify-center gap-1 ${activeTab === 'overview' ? `${theme.tabActive} border-l-0` : theme.tabInactive}`}>
               <Map size={tabIconSize} /> Overview
             </button>
-            <button onClick={() => setActiveTab('news')} className={`flex-1 py-2 ${tabTextSize} font-bold uppercase transition-colors flex items-center justify-center gap-1 ${activeTab === 'news' ? theme.tabActive : theme.tabInactive}`}>
-              <Newspaper size={tabIconSize} /> News
-            </button>
-            <button onClick={() => setActiveTab('notable')} className={`flex-1 py-2 ${tabTextSize} font-bold uppercase transition-colors flex items-center justify-center gap-1 ${activeTab === 'notable' ? `${theme.tabActive} border-r-0` : theme.tabInactive}`}>
+            <button onClick={() => setActiveTab('notable')} className={`flex-1 py-2 ${tabTextSize} font-bold uppercase transition-colors flex items-center justify-center gap-1 ${activeTab === 'notable' ? theme.tabActive : theme.tabInactive}`}>
               <Crown size={tabIconSize} /> Notable
+            </button>
+            <button onClick={() => setActiveTab('news')} className={`flex-1 py-2 ${tabTextSize} font-bold uppercase transition-colors flex items-center justify-center gap-1 ${activeTab === 'news' ? `${theme.tabActive} border-r-0` : theme.tabInactive}`}>
+              <Newspaper size={tabIconSize} /> News
             </button>
           </div>
 

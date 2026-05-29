@@ -9,7 +9,7 @@ import Earth from './components/Earth';
 import InfoPanel from './components/InfoPanel';
 import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
-import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint } from './types';
+import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint, GeoCoordinates } from './types';
 import { resolveLocationQuery, getInfoFromCoordinates, getInfoFromFeature, getNearbyPlaces, getMoreNews, fetchLiveNews, generateRoute } from './services/geminiService';
 
 // Helper to convert Lat/Lng to 3D Cartesian coordinates (Local Space)
@@ -35,6 +35,10 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * c; 
 };
 
+const PARCHMENT_DEFAULT_DISTANCE = 3.0;
+const DISTANCE_EPSILON = 0.01;
+
+
 const CameraAnimator: React.FC<{
   targetPosRef: React.MutableRefObject<THREE.Vector3 | null>;
   cameraControlsRef: React.RefObject<any>;
@@ -48,6 +52,47 @@ const CameraAnimator: React.FC<{
             targetPosRef.current = null;
         }
     }
+  });
+  return null;
+};
+
+const AuthoritativeCameraEnforcer: React.FC<{
+  skin: SkinType;
+  cameraControlsRef: React.RefObject<any>;
+  targetCameraPosRef: React.MutableRefObject<THREE.Vector3 | null>;
+  isSidebarOpen: boolean;
+  cameraStateRef: React.MutableRefObject<any>;
+  parchmentZoom: number;
+}> = ({ skin, cameraControlsRef, targetCameraPosRef, isSidebarOpen, cameraStateRef, parchmentZoom }) => {
+  useFrame(() => {
+    if (!cameraControlsRef.current) return;
+    const controls = cameraControlsRef.current;
+    const camera = controls.object;
+    
+    const cameraState = cameraStateRef.current;
+    
+    // Single Source of Truth for Authoritative Distance
+    let authoritativeDistance = 4.5;
+    if (skin === 'parchment') {
+       const aspect = window.innerWidth / window.innerHeight;
+       const baseDistance = aspect <= 1.28985 ? 3.0 : (3.0 * 1.28985) / aspect;
+       authoritativeDistance = baseDistance / parchmentZoom;
+    } else {
+       if (cameraState.activeRoute) {
+          authoritativeDistance = cameraState.routeSuggestedDistance;
+       } else {
+          authoritativeDistance = cameraState.themeSuggestedDistance;
+       }
+    }
+    
+    // Force set camera distance strictly while preserving normalized rotation
+    camera.position.normalize().multiplyScalar(authoritativeDistance);
+    
+    if (targetCameraPosRef.current) {
+       targetCameraPosRef.current.normalize().multiplyScalar(authoritativeDistance);
+    }
+    
+    controls.update();
   });
   return null;
 };
@@ -142,62 +187,53 @@ const VisibilityTracker: React.FC<{
   return null;
 };
 
-// Component to conditionally initialize and correct zoom for parchment theme
-const ThemeZoomInitializer: React.FC<{
-  skin: SkinType;
-  cameraControlsRef: React.RefObject<any>;
-  onLockZoom: (distance: number) => void;
-  isSidebarOpen: boolean;
-}> = ({ skin, cameraControlsRef, onLockZoom, isSidebarOpen }) => {
-  const baseZoomRef = useRef(1.0);
-  const adjustedZoomRef = useRef(1.0);
-  const prevSkinRef = useRef<SkinType>(skin);
 
-  useFrame(({ camera }) => {
-    if (!cameraControlsRef.current) return;
-
-    const defaultDistance = 4.5;
-    const currentDistance = cameraControlsRef.current.getDistance();
-    const currentZoom = defaultDistance / currentDistance;
-
-    // Track zoom states when not actively switching themes
-    if (skin === prevSkinRef.current) {
-       if (isSidebarOpen) {
-          adjustedZoomRef.current = currentZoom;
-       } else {
-          baseZoomRef.current = currentZoom;
-       }
-    }
-
-    if (skin !== prevSkinRef.current) {
-      if (skin === 'parchment') {
-        const parchmentBaseZoom = 1.5; // default scale for parchment
-        let newZoom = parchmentBaseZoom;
-
-        if (isSidebarOpen && baseZoomRef.current > 0) {
-           const zoomRatio = adjustedZoomRef.current / baseZoomRef.current;
-           newZoom = parchmentBaseZoom * Math.min(Math.max(zoomRatio, 0.5), 3.0);
-        }
-
-        // Clamp target zoom based on distance limits (minDistance: 1.2, maxDistance: 8)
-        newZoom = Math.max(defaultDistance / 8, Math.min(defaultDistance / 1.2, newZoom));
-
-        const finalDistance = Math.max(1.2, Math.min(8, defaultDistance / newZoom));
-        
-        // Preserve current camera rotation but update the zoom/distance
-        camera.position.normalize().multiplyScalar(finalDistance);
-        cameraControlsRef.current.update();
-        
-        onLockZoom(finalDistance);
-      }
-      prevSkinRef.current = skin;
-    }
-  });
-
-  return null;
-};
 
 const App: React.FC = () => {
+  const [worldDimensions, setWorldDimensions] = useState({
+    width: window.innerWidth,
+    height: window.innerHeight
+  });
+
+  const [parchmentZoom, setParchmentZoom] = useState(1.0);
+  const targetParchmentZoomRef = useRef<number>(1.0);
+  const parchmentZoomAnimRef = useRef<number | null>(null);
+  
+  const activeScanIdRef = useRef<number>(0);
+  const [scanningArea, setScanningArea] = useState<GeoCoordinates | null>(null);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setWorldDimensions({
+        width: window.innerWidth,
+        height: window.innerHeight
+      });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const animateParchmentZoom = useCallback(() => {
+    setParchmentZoom(prev => {
+       const diff = targetParchmentZoomRef.current - prev;
+       if (Math.abs(diff) < 0.001) {
+          parchmentZoomAnimRef.current = null;
+          return targetParchmentZoomRef.current;
+       }
+       parchmentZoomAnimRef.current = requestAnimationFrame(animateParchmentZoom);
+       return prev + diff * 0.12;
+    });
+  }, []);
+
+  const handleCancelScan = useCallback(() => {
+    activeScanIdRef.current++;
+    setInteractionState('GLOBE_IDLE');
+    setIsLoading(false);
+    setIsFocused(false);
+    setMarkers([]);
+    setScanningArea(null);
+  }, []);
+
   const [locationInfo, setLocationInfo] = useState<LocationInfo | null>(null);
   const [markers, setMarkers] = useState<MapMarker[]>([]);
   const [favorites, setFavorites] = useState<FavoriteLocation[]>([]);
@@ -206,6 +242,11 @@ const App: React.FC = () => {
   const [isFavoritesPanelOpen, setIsFavoritesPanelOpen] = useState(false);
   const [visibleFavoriteIds, setVisibleFavoriteIds] = useState<string[]>([]);
   const [activeRouteId, setActiveRouteId] = useState<string | null>(null);
+
+  // Route State
+  const [routeWaypoints, setRouteWaypoints] = useState<Waypoint[]>([]);
+  const [currentWaypointIndex, setCurrentWaypointIndex] = useState<number>(-1);
+  const [isTraceModalOpen, setIsTraceModalOpen] = useState(false);
 
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -220,10 +261,90 @@ const App: React.FC = () => {
   const [isZoomLocked, setIsZoomLocked] = useState(false);
   const [lockedZoomDistance, setLockedZoomDistance] = useState<number | null>(null);
   
-  // Route State
-  const [routeWaypoints, setRouteWaypoints] = useState<Waypoint[]>([]);
-  const [currentWaypointIndex, setCurrentWaypointIndex] = useState<number>(-1);
-  const [isTraceModalOpen, setIsTraceModalOpen] = useState(false);
+  const [currentCameraDistance, setCurrentCameraDistance] = useState(4.5);
+  const currentCameraDistanceRef = useRef(4.5);
+
+  const cameraStateRef = useRef({
+      mode: 'route' as 'route' | 'theme',
+      theme: 'modern' as SkinType,
+      activeRoute: null as string | null,
+      routeSuggestedDistance: 2.0,
+      themeSuggestedDistance: 4.5,
+      targetRotation: null as { lat: number; lng: number } | null
+  });
+
+  const updateCameraDistance = useCallback((dist: number) => {
+    setCurrentCameraDistance(dist);
+    currentCameraDistanceRef.current = dist;
+    cameraStateRef.current.themeSuggestedDistance = dist;
+    cameraStateRef.current.routeSuggestedDistance = dist;
+  }, []);
+
+  const reconcileCameraState = useCallback(() => {
+     if (!cameraControlsRef.current) return;
+     
+     // Cancel manual zoom animations on programmatic transitions
+     targetZoomRef.current = null;
+     if (zoomAnimRef.current) {
+        cancelAnimationFrame(zoomAnimRef.current);
+        zoomAnimRef.current = null;
+     }
+
+     const cameraState = cameraStateRef.current;
+
+     const isSidebarOpen = !!locationInfo || routeWaypoints.length > 0 || isFavoritesPanelOpen;
+
+     // Only allow target rotation updates
+     if (cameraState.targetRotation && earthRef.current) {
+        const { lat, lng } = cameraState.targetRotation;
+        
+        let targetDistance = 4.5;
+        if (skin === 'parchment') {
+           const aspect = window.innerWidth / window.innerHeight;
+           const baseDistance = aspect <= 1.28985 ? 3.0 : (3.0 * 1.28985) / aspect;
+           targetDistance = baseDistance / parchmentZoom;
+        } else if (cameraState.activeRoute) {
+           targetDistance = cameraState.routeSuggestedDistance;
+        } else {
+           targetDistance = cameraState.themeSuggestedDistance;
+        }
+        
+        const localCameraVec = latLngToVector3(lat, lng, targetDistance);
+        const worldCameraPos = localCameraVec.clone().applyMatrix4(earthRef.current.matrixWorld);
+        targetCameraPosRef.current = worldCameraPos;
+     }
+  }, [skin, locationInfo, routeWaypoints.length, isFavoritesPanelOpen, parchmentZoom]);
+
+  const handleSkinChange = useCallback((newSkin: SkinType) => {
+     cameraStateRef.current.theme = newSkin;
+     setSkin(newSkin);
+     setParchmentZoom(1.0); // Reset parchment zoom on theme change
+     targetParchmentZoomRef.current = 1.0;
+     if (parchmentZoomAnimRef.current) {
+        cancelAnimationFrame(parchmentZoomAnimRef.current);
+        parchmentZoomAnimRef.current = null;
+     }
+
+     // Reset standard zoom references as well
+     targetZoomRef.current = null;
+     if (zoomAnimRef.current) {
+        cancelAnimationFrame(zoomAnimRef.current);
+        zoomAnimRef.current = null;
+     }
+
+     if (newSkin === 'parchment') {
+        cameraStateRef.current.mode = 'theme';
+     } else {
+        cameraStateRef.current.mode = 'route';
+        setIsZoomLocked(false);
+        setLockedZoomDistance(null);
+     }
+     
+     // Compute target rotation synchronously
+     reconcileCameraState();
+  }, [reconcileCameraState]);
+  
+
   
   const [isSkinMenuOpen, setIsSkinMenuOpen] = useState(false);
   
@@ -639,10 +760,16 @@ const App: React.FC = () => {
     }
   }, [routeWaypoints, activeRouteId]);
 
+  useEffect(() => {
+    cameraStateRef.current.activeRoute = activeRouteId;
+    requestAnimationFrame(() => {
+      reconcileCameraState();
+    });
+  }, [activeRouteId, reconcileCameraState]);
+
   const handleVisibilityChange = useCallback((visible: boolean) => {
     setIsLocationVisible(visible);
   }, []);
-
   const loadWaypointData = useCallback(async (wp: Waypoint) => {
      setInteractionState('PIN_SELECTED');
      setIsLoading(true);
@@ -651,13 +778,16 @@ const App: React.FC = () => {
      setSelectedMarkerId(wp.id);
      setIsFocused(true);
 
-     // Move camera
+     // Propose camera values to central state
      if (earthRef.current && cameraControlsRef.current) {
         const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 2.0; 
-        const localCameraVec = latLngToVector3(wp.lat, wp.lng, targetDist);
-        const worldCameraPos = localCameraVec.clone().applyMatrix4(earthRef.current.matrixWorld);
         
-        animateCameraTo(worldCameraPos);
+        cameraStateRef.current.routeSuggestedDistance = targetDist;
+        cameraStateRef.current.targetRotation = { lat: wp.lat, lng: wp.lng };
+        
+        requestAnimationFrame(() => {
+           reconcileCameraState();
+        });
      }
 
      // Fetch full info
@@ -692,9 +822,12 @@ const App: React.FC = () => {
      } else {
          setIsLoading(false);
      }
-  }, [isZoomLocked]);
+  }, [isZoomLocked, lockedZoomDistance, reconcileCameraState]);
 
   const handleGlobeClick = useCallback(async (lat: number, lng: number, point: THREE.Vector3) => {
+    const scanId = ++activeScanIdRef.current;
+    setScanningArea({ lat, lng });
+
     setInteractionState('GLOBE_SEARCHING');
     setIsLoading(true);
     setLocationInfo(null);
@@ -702,19 +835,10 @@ const App: React.FC = () => {
     setAutoRotate(false); 
     setMarkers([]); // Clear transient markers
     
-    // Clicking globe clears active route ONLY if it's not a saved "Checked" route?
-    // Actually, usually map click deselects everything. But if a layer is "On", it should stay on.
-    // However, if we click empty space, we probably want to inspect that space.
-    // Let's keep the route visible but deselect the specific waypoint.
-    // BUT: Current logic is handleGlobeClick calls setRouteWaypoints([]) below.
-    // To support "Turn On Route", we should probably NOT clear routeWaypoints if activeRouteId is set?
-    // The prompt says "turn on... to view". If I view it, clicking elsewhere shouldn't turn it off.
-    
     if (!activeRouteId) {
         setRouteWaypoints([]);
         setCurrentWaypointIndex(-1);
     } else {
-        // Just deselect waypoint
         setCurrentWaypointIndex(-1);
     }
     
@@ -722,15 +846,20 @@ const App: React.FC = () => {
     setIsFocused(false);
 
     if (cameraControlsRef.current) {
-      const direction = point.clone().normalize();
       const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 2.2;
-      const camPos = direction.multiplyScalar(targetDist); 
       
-      animateCameraTo(camPos);
+      cameraStateRef.current.routeSuggestedDistance = targetDist;
+      cameraStateRef.current.targetRotation = { lat, lng };
+      
+      requestAnimationFrame(() => {
+         reconcileCameraState();
+      });
     }
 
     let newMarkers = await getNearbyPlaces(lat, lng);
     
+    if (scanId !== activeScanIdRef.current) return;
+
     // Compute distance and rank
     const markersWithDist = newMarkers.map(m => {
         const d = calculateDistance(lat, lng, m.lat, m.lng);
@@ -748,10 +877,11 @@ const App: React.FC = () => {
     }));
 
     setMarkers(newMarkers);
+    setScanningArea(null);
     
     setIsLoading(false);
     setInteractionState('PINS_RENDERED');
-  }, [activeRouteId, isZoomLocked, lockedZoomDistance, animateCameraTo]);
+  }, [activeRouteId, isZoomLocked, lockedZoomDistance, reconcileCameraState]);
 
   const handleMarkerClick = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint, point: THREE.Vector3) => {
     setInteractionState('PIN_SELECTED');
@@ -811,8 +941,13 @@ const App: React.FC = () => {
 
     if (cameraControlsRef.current) {
         const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.5;
-        const worldCamPos = point.clone().normalize().multiplyScalar(targetDist);
-        animateCameraTo(worldCamPos);
+        
+        cameraStateRef.current.routeSuggestedDistance = targetDist;
+        cameraStateRef.current.targetRotation = { lat: marker.lat, lng: marker.lng };
+        
+        requestAnimationFrame(() => {
+           reconcileCameraState();
+        });
     }
 
     const data = await getInfoFromFeature(marker.name, marker.lat, marker.lng);
@@ -831,7 +966,7 @@ const App: React.FC = () => {
        });
        setIsNewsFetching(false);
     }
-  }, [routeWaypoints, loadWaypointData, activeRouteId, isZoomLocked]);
+  }, [routeWaypoints, loadWaypointData, activeRouteId, isZoomLocked, lockedZoomDistance, reconcileCameraState]);
 
   const handleSearch = async (query: string) => {
     setInteractionState('PIN_SELECTED');
@@ -841,6 +976,7 @@ const App: React.FC = () => {
     setSearchError(null);
     setAutoRotate(false);
     setMarkers([]); 
+    setScanningArea(null);
     
     // Search clears route unless locked? Usually search implies a new context.
     // Let's clear active route on search to be safe.
@@ -868,16 +1004,14 @@ const App: React.FC = () => {
       setLocationInfo(result.locationInfo);
       setIsLoading(false);
 
-      let targetDist = Math.max(1.3, 4.5 - ((result.suggestedZoom / 10) * (4.5 - 1.2)));
-      if (isZoomLocked && lockedZoomDistance) {
-         targetDist = lockedZoomDistance;
-      }
-      const localCameraVec = latLngToVector3(lat, lng, targetDist);
-
-      if (earthRef.current) {
-         const worldCameraPos = localCameraVec.clone().applyMatrix4(earthRef.current.matrixWorld);
-         animateCameraTo(worldCameraPos);
-      }
+      const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : Math.max(1.3, 4.5 - ((result.suggestedZoom / 10) * (4.5 - 1.2)));
+      
+      cameraStateRef.current.routeSuggestedDistance = targetDist;
+      cameraStateRef.current.targetRotation = { lat, lng };
+      
+      requestAnimationFrame(() => {
+         reconcileCameraState();
+      });
 
       if (result.locationInfo.name) {
         setIsNewsFetching(true);
@@ -902,6 +1036,7 @@ const App: React.FC = () => {
       setLocationInfo(null);
       setAutoRotate(false);
       setMarkers([]); 
+      setScanningArea(null);
       setIsFocused(true);
       
       // Clear current active route when generating new one
@@ -936,10 +1071,15 @@ const App: React.FC = () => {
   };
 
   const clampZoom = useCallback((z: number) => {
+    if (skin === 'parchment') {
+       const aspect = window.innerWidth / window.innerHeight;
+       const baseDistance = aspect <= 1.28985 ? 3.0 : (3.0 * 1.28985) / aspect;
+       return baseDistance;
+    }
     const minZ = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.2;
     const maxZ = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 8;
     return Math.max(minZ, Math.min(maxZ, z));
-  }, [isZoomLocked, lockedZoomDistance]);
+  }, [isZoomLocked, lockedZoomDistance, skin]);
 
   const animateZoom = useCallback(() => {
     if (!cameraControlsRef.current || targetZoomRef.current === null) {
@@ -956,16 +1096,26 @@ const App: React.FC = () => {
     camera.position.normalize().multiplyScalar(nextZoom);
     cameraControlsRef.current?.update();
 
+    updateCameraDistance(nextZoom);
+
     if (Math.abs(diff) > 0.001) {
       zoomAnimRef.current = requestAnimationFrame(animateZoom);
     } else {
       zoomAnimRef.current = null;
+      targetZoomRef.current = null;
     }
-  }, []);
+  }, [updateCameraDistance]);
 
   const BUTTON_ZOOM_FACTOR = 1.25;
 
   const handleZoomIn = useCallback(() => {
+    if (skin === 'parchment') {
+       targetParchmentZoomRef.current = Math.min(3.0, targetParchmentZoomRef.current * BUTTON_ZOOM_FACTOR);
+       if (!parchmentZoomAnimRef.current) {
+          parchmentZoomAnimRef.current = requestAnimationFrame(animateParchmentZoom);
+       }
+       return;
+    }
     if (!isZoomLocked && cameraControlsRef.current) {
       targetZoomRef.current = targetZoomRef.current ?? cameraControlsRef.current.getDistance();
       targetZoomRef.current = clampZoom(targetZoomRef.current / BUTTON_ZOOM_FACTOR);
@@ -973,7 +1123,7 @@ const App: React.FC = () => {
         zoomAnimRef.current = requestAnimationFrame(animateZoom);
       }
     }
-  }, [isZoomLocked, clampZoom, animateZoom]);
+  }, [isZoomLocked, clampZoom, animateZoom, skin, animateParchmentZoom]);
 
   const handleUserZoomIn = useCallback(() => {
     userModifiedZoomRef.current = true;
@@ -981,6 +1131,13 @@ const App: React.FC = () => {
   }, [handleZoomIn]);
 
   const handleZoomOut = useCallback(() => {
+    if (skin === 'parchment') {
+       targetParchmentZoomRef.current = Math.max(0.4, targetParchmentZoomRef.current / BUTTON_ZOOM_FACTOR);
+       if (!parchmentZoomAnimRef.current) {
+          parchmentZoomAnimRef.current = requestAnimationFrame(animateParchmentZoom);
+       }
+       return;
+    }
     userModifiedZoomRef.current = true;
     if (!isZoomLocked && cameraControlsRef.current) {
       targetZoomRef.current = targetZoomRef.current ?? cameraControlsRef.current.getDistance();
@@ -989,13 +1146,20 @@ const App: React.FC = () => {
         zoomAnimRef.current = requestAnimationFrame(animateZoom);
       }
     }
-  }, [isZoomLocked, clampZoom, animateZoom]);
+  }, [isZoomLocked, clampZoom, animateZoom, skin, animateParchmentZoom]);
 
   useEffect(() => {
     const WHEEL_SENSITIVITY = 0.02;
 
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
+      if (skin === 'parchment') {
+         targetParchmentZoomRef.current = Math.max(0.4, Math.min(3.0, targetParchmentZoomRef.current - e.deltaY * 0.0015));
+         if (!parchmentZoomAnimRef.current) {
+            parchmentZoomAnimRef.current = requestAnimationFrame(animateParchmentZoom);
+         }
+         return;
+      }
 
       if (!isZoomLocked && cameraControlsRef.current) {
         targetZoomRef.current = targetZoomRef.current ?? cameraControlsRef.current.getDistance();
@@ -1014,7 +1178,7 @@ const App: React.FC = () => {
       container.addEventListener('wheel', handleWheel, { passive: false });
       return () => container.removeEventListener('wheel', handleWheel);
     }
-  }, [isZoomLocked, clampZoom, animateZoom]);
+  }, [isZoomLocked, clampZoom, animateZoom, skin]);
 
   const handleClosePanel = () => {
     setInteractionState('GLOBE_IDLE');
@@ -1023,6 +1187,7 @@ const App: React.FC = () => {
     setIsNewsFetching(false);
     setIsFocused(false);
     setMarkers([]); // Clear markers on close
+    setScanningArea(null);
   };
 
   const getCurrentFavorite = () => {
@@ -1226,19 +1391,41 @@ const App: React.FC = () => {
       ? (showSavedItems ? routeWaypoints : []) 
       : routeWaypoints;
 
+  const isParchment = skin === 'parchment';
+  
+  const fovRadians = (45 * Math.PI) / 180;
+  // Calculate baseline distance ignoring user zoom to keep the opening size fixed on zoom!
+  const aspect = worldDimensions.width / worldDimensions.height;
+  const baseDistance = aspect <= 1.28985 ? 3.0 : (3.0 * 1.28985) / aspect;
+  const globeVisualRadius = worldDimensions.height / (2 * baseDistance * Math.tan(fovRadians / 2));
+  const maskRadius = isParchment ? globeVisualRadius * 1.025 : 0;
+
+  const canvasContainerStyle: React.CSSProperties = isParchment ? {
+     position: 'absolute',
+     inset: 0,
+     zIndex: 10,
+     clipPath: `circle(${maskRadius}px at center)`,
+     WebkitClipPath: `circle(${maskRadius}px at center)`,
+     transform: 'translateY(-15px)',
+  } : {
+     position: 'absolute',
+     inset: 0,
+     zIndex: 10,
+  };
+
   return (
     <div 
       className={`relative w-full h-screen bg-black overflow-hidden bg-cover bg-center bg-no-repeat`}
-      style={skin === 'parchment' ? { backgroundImage: 'url(https://raw.githubusercontent.com/webpmp/webpmp.github.io/master/terra-explorer-noglobe.png)' } : {}}
+      style={isParchment ? { backgroundImage: 'url(https://raw.githubusercontent.com/webpmp/webpmp.github.io/master/terra-explorer-noglobe.png)' } : {}}
       onContextMenu={(e) => e.preventDefault()}
     >
       {/* Background Gradient for Parchment Theme Contrast */}
-      {skin === 'parchment' && (
+      {isParchment && (
          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none z-0"></div>
       )}
 
       {/* 3D Scene */}
-      <div id="canvas-container" className="absolute inset-0 z-0">
+      <div id="canvas-container" style={canvasContainerStyle}>
         <Canvas camera={{ position: [0, 0, 4.5], fov: 45 }}>
           <Suspense fallback={null}>
             <ambientLight intensity={skin === 'modern' || skin === 'parchment' ? 0.4 : 1.5} color={skin === 'modern' || skin === 'parchment' ? "#ccccff" : "#ffffff"} />
@@ -1263,6 +1450,7 @@ const App: React.FC = () => {
           selectedMarkerId={selectedMarkerId}
           routeWaypoints={displayRouteWaypoints}
           currentWaypointIndex={currentWaypointIndex}
+          scanningArea={scanningArea}
         />
         
         <VisibilityTracker 
@@ -1279,6 +1467,11 @@ const App: React.FC = () => {
           enableZoom={false}
           enableDamping={true}
           dampingFactor={0.05}
+          onChange={() => {
+            if (cameraControlsRef.current) {
+              updateCameraDistance(cameraControlsRef.current.getDistance());
+            }
+          }}
           onStart={() => {
             setIsDragging(true);
             setAutoRotate(false);
@@ -1287,6 +1480,9 @@ const App: React.FC = () => {
           }}
           onEnd={() => {
             setIsDragging(false);
+            if (cameraControlsRef.current) {
+              updateCameraDistance(cameraControlsRef.current.getDistance());
+            }
           }}
           target={[0, 0, 0]}
           makeDefault
@@ -1297,15 +1493,16 @@ const App: React.FC = () => {
            cameraControlsRef={cameraControlsRef} 
         />
 
-        <ThemeZoomInitializer
-          skin={skin}
-          cameraControlsRef={cameraControlsRef}
-          isSidebarOpen={!!locationInfo || routeWaypoints.length > 0 || isFavoritesPanelOpen}
-          onLockZoom={(dist) => {
-             setLockedZoomDistance(dist);
-             setIsZoomLocked(true);
-          }}
+        <AuthoritativeCameraEnforcer 
+           skin={skin}
+           cameraControlsRef={cameraControlsRef}
+           targetCameraPosRef={targetCameraPosRef}
+           isSidebarOpen={!!locationInfo || routeWaypoints.length > 0 || isFavoritesPanelOpen}
+           cameraStateRef={cameraStateRef}
+           parchmentZoom={parchmentZoom}
         />
+
+
         
             <RotationManager 
               isDragging={isDragging} 
@@ -1320,6 +1517,24 @@ const App: React.FC = () => {
           </Suspense>
         </Canvas>
       </div>
+
+      {/* Parchment Engraved Depth Bevel Shadow Ring */}
+      {isParchment && (
+        <div 
+          className="absolute pointer-events-none rounded-full"
+          style={{
+            zIndex: 15,
+            top: '50%',
+            left: '50%',
+            width: `${maskRadius * 2 + 8}px`,
+            height: `${maskRadius * 2 + 8}px`,
+            transform: 'translate(-50%, -50%) translateY(-15px)',
+            border: '8px solid #8b5a2b',
+            boxShadow: 'inset 0 0 20px rgba(0, 0, 0, 0.85), 0 0 15px rgba(0, 0, 0, 0.65)',
+            background: 'transparent',
+          }}
+        />
+      )}
 
       {/* Retro Effect Overlay */}
       {(skin === 'retro-green' || skin === 'retro-amber') && <div className="scanlines"></div>}
@@ -1352,25 +1567,25 @@ const App: React.FC = () => {
         {isSkinMenuOpen && (
           <div className="mt-2 flex flex-col w-28 bg-black/80 backdrop-blur border border-white/20 rounded shadow-xl overflow-hidden">
             <button 
-              onClick={() => { setSkin('modern'); setIsZoomLocked(false); setLockedZoomDistance(null); setIsSkinMenuOpen(false); }}
+              onClick={() => { handleSkinChange('modern'); setIsSkinMenuOpen(false); }}
               className={`px-3 py-2 text-xs text-left hover:bg-white/10 ${skin === 'modern' ? 'text-white font-bold bg-white/5' : 'text-gray-400'}`}
             >
               MODERN
             </button>
             <button 
-              onClick={() => { setSkin('retro-green'); setIsZoomLocked(false); setLockedZoomDistance(null); setIsSkinMenuOpen(false); }}
+              onClick={() => { handleSkinChange('retro-green'); setIsSkinMenuOpen(false); }}
               className={`px-3 py-2 text-xs text-left font-mono hover:bg-white/10 ${skin === 'retro-green' ? 'text-green-400 font-bold bg-white/5' : 'text-green-400/50'}`}
             >
               CRT-G
             </button>
             <button 
-              onClick={() => { setSkin('retro-amber'); setIsZoomLocked(false); setLockedZoomDistance(null); setIsSkinMenuOpen(false); }}
+              onClick={() => { handleSkinChange('retro-amber'); setIsSkinMenuOpen(false); }}
               className={`px-3 py-2 text-xs text-left font-mono hover:bg-white/10 ${skin === 'retro-amber' ? 'text-amber-400 font-bold bg-white/5' : 'text-amber-400/50'}`}
             >
               CRT-A
             </button>
             <button 
-              onClick={() => { setSkin('parchment'); setIsSkinMenuOpen(false); }}
+              onClick={() => { handleSkinChange('parchment'); setIsSkinMenuOpen(false); }}
               className={`px-3 py-2 text-xs text-left hover:bg-white/10 ${skin === 'parchment' ? 'text-[#D2B48C] font-bold bg-white/5' : 'text-[#D2B48C]/50'}`}
             >
               PARCHMENT
@@ -1395,10 +1610,26 @@ const App: React.FC = () => {
       )}
 
       {interactionState === 'GLOBE_SEARCHING' && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-50">
-          <div className="bg-black/60 text-white px-4 py-2 rounded-full font-medium shadow-xl border border-white/20 backdrop-blur-md flex items-center gap-3">
-             <Loader2 className="w-5 h-5 animate-spin" />
-             Scanning region...
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-auto z-50 flex flex-col items-center gap-3">
+          <div className={`px-4 py-3 flex flex-col items-center gap-3 border backdrop-blur-md transition-all shadow-xl rounded-xl
+            ${skin === 'parchment' ? 'bg-[#f4ead5] text-[#3e2723] border-[#8b5a2b]' : 
+              skin === 'retro-green' ? 'bg-black text-green-300 border-green-400 font-mono' :
+              skin === 'retro-amber' ? 'bg-black text-amber-300 border-amber-400 font-mono' :
+              'bg-black/80 text-white border-white/20'}`}>
+             <div className="flex items-center gap-3">
+                <Loader2 className="w-5 h-5 animate-spin text-current" />
+                <span className="font-bold tracking-wider uppercase text-xs">Scanning region...</span>
+             </div>
+             <button 
+               onClick={handleCancelScan}
+               className={`px-3 py-1 text-xs font-bold uppercase transition-all shadow-sm border
+                 ${skin === 'parchment' ? 'bg-[#d2b48c] hover:bg-[#c2a47c] text-[#3e2723] border-[#8b5a2b] rounded-sm' : 
+                   skin === 'retro-green' ? 'bg-black hover:bg-green-400 hover:text-black text-green-300 border-green-400' :
+                   skin === 'retro-amber' ? 'bg-black hover:bg-amber-400 hover:text-black text-amber-300 border-amber-400' :
+                   'bg-red-600 hover:bg-red-500 text-white border-transparent rounded-lg'}`}
+             >
+               Cancel
+             </button>
           </div>
         </div>
       )}
