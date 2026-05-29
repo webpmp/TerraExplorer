@@ -677,8 +677,14 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
   const crosshairRef = useRef<THREE.Group | null>(null);
   const centerPulseRef = useRef<THREE.Mesh | null>(null);
 
+  const renderedLogRef = useRef(false);
+
   useFrame(({ clock }) => {
      if (props.scanningArea) {
+        if (!renderedLogRef.current) {
+           console.log("triangulation_rendering");
+           renderedLogRef.current = true;
+        }
         const time = clock.getElapsedTime();
         
         // 1. Rotate crosshair triangulation lines
@@ -706,6 +712,8 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
               }
            }
         }
+     } else {
+        renderedLogRef.current = false;
      }
   });
 

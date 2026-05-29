@@ -921,6 +921,8 @@ const App: React.FC = () => {
   }, [routeWaypoints, loadWaypointData, activeRouteId, isZoomLocked, lockedZoomDistance, reconcileCameraState]);
 
   const handleGlobeClick = useCallback(async (lat: number, lng: number, point: THREE.Vector3) => {
+    console.log("scan_started");
+
     // Check if the clicked location is close to an existing waypoint
     const isClose = (lat1: number, lng1: number, lat2: number, lng2: number) => {
       const R = 6371; // km
@@ -943,6 +945,8 @@ const App: React.FC = () => {
 
     // Non-waypoint flow: Do NOT open any overlay under any condition. Set scanning state.
     const scanId = ++activeScanIdRef.current;
+    
+    console.log("triangulation_started");
     setScanningArea({ lat, lng });
     setIsScanningArea(true);
     setScanningStatusText("Starting scan");
@@ -984,13 +988,38 @@ const App: React.FC = () => {
        return false;
     };
 
+    // Explicit and authoritative resolve scan callback
+    const resolveScan = async (state: 'success' | 'empty' | 'error', message: string, results: MapMarker[] = []) => {
+       if (scanId !== activeScanIdRef.current) return;
+       console.log(`scan_resolved: ${state} - ${message}`);
+       
+       if (state === 'success') {
+          setScanningStatusText("Scan complete");
+          setMarkers(results);
+       } else {
+          setScanningStatusText(message);
+       }
+
+       // Keep scan rings briefly, then fade out (wait 1500ms)
+       await new Promise(resolve => setTimeout(resolve, 1500));
+       if (scanId !== activeScanIdRef.current) return;
+       setScanningArea(null);
+       setIsScanningArea(false);
+
+       // Return to default state after short delay
+       await new Promise(resolve => setTimeout(resolve, 2000));
+       if (scanId !== activeScanIdRef.current) return;
+       setScanningStatusText(null);
+       setIsLoading(false);
+       if (state === 'success') {
+          setInteractionState('PINS_RENDERED');
+       }
+    };
+
     // Return immediately while the scanning request runs in the background
     (async () => {
        const steps = ["Starting scan", "Locating area", "Expanding search", "Checking area", "Reviewing results", "Finalizing"];
-       let animationFinished = false;
-       let fetchFinished = false;
-       let newMarkers: MapMarker[] = [];
-       let errorMsg: string | null = null;
+       let scanResolved = false;
 
        // 1. Progress Animation Loop (runs gradually, 600-1000ms per step)
        const progressPromise = (async () => {
@@ -999,7 +1028,6 @@ const App: React.FC = () => {
              setScanningStatusText(steps[i]);
              await new Promise(resolve => setTimeout(resolve, 600 + Math.random() * 400));
           }
-          animationFinished = true;
        })();
 
        // 2. Parallel API Fetch with explicit 9 second timeout
@@ -1008,6 +1036,7 @@ const App: React.FC = () => {
              setTimeout(() => reject(new Error("TIMEOUT")), 9000)
           );
           try {
+             console.log("scan_data_requested");
              const result = await Promise.race([
                 getNearbyPlaces(lat, lng),
                 timeoutPromise
@@ -1016,6 +1045,7 @@ const App: React.FC = () => {
              if (scanId !== activeScanIdRef.current) return;
 
              if (result && result.length > 0) {
+                console.log("scan_results_received");
                 // Compute distance and rank
                 const markersWithDist = result.map(m => {
                     const d = calculateDistance(lat, lng, m.lat, m.lng);
@@ -1023,83 +1053,59 @@ const App: React.FC = () => {
                 });
                 markersWithDist.sort((a, b) => a._dist - b._dist);
                 
-                newMarkers = markersWithDist.map(m => ({
+                const finalMarkers = markersWithDist.map(m => ({
                    id: m.id,
                    name: m.name,
                    lat: m.lat,
                    lng: m.lng,
                    populationClass: m.populationClass
                 }));
+
+                // Wait for the visual progress animation to finish first to enforce visual pacing
+                await progressPromise;
+                if (scanId !== activeScanIdRef.current) return;
+
+                scanResolved = true;
+                await resolveScan('success', 'Scan complete', finalMarkers);
              } else {
-                if (isHighlyPopulatedRegion(lat, lng)) {
-                   errorMsg = "Too much activity in this area";
-                } else {
-                   errorMsg = "No information found in this area";
-                }
+                console.log("scan_results_empty");
+                const emptyMsg = isHighlyPopulatedRegion(lat, lng)
+                   ? "Too much activity in this area"
+                   : "No information found in this area";
+
+                await progressPromise;
+                if (scanId !== activeScanIdRef.current) return;
+
+                scanResolved = true;
+                await resolveScan('empty', emptyMsg);
              }
           } catch (err: any) {
              if (scanId !== activeScanIdRef.current) return;
+             console.log("scan_results_empty");
+             let errorMsg = "Scan failed";
              if (err?.message === "TIMEOUT") {
                 errorMsg = "Scan took too long to complete";
              } else if (err?.message?.includes("access") || err?.message?.includes("permission") || err?.status === 403) {
                 errorMsg = "This area cannot be accessed";
-             } else {
-                errorMsg = "Scan failed";
              }
+
+             await progressPromise;
+             if (scanId !== activeScanIdRef.current) return;
+
+             scanResolved = true;
+             await resolveScan('error', errorMsg);
           }
-          fetchFinished = true;
        })();
 
-       // Wait for both animation and fetch to complete
-       try {
-          await Promise.all([progressPromise, fetchPromise]);
+       // 3. Guaranteed resolution guard fallback (10s total limit)
+       setTimeout(async () => {
           if (scanId !== activeScanIdRef.current) return;
-
-          // If there is an error message (or no results found)
-          if (errorMsg) {
-             setScanningStatusText(errorMsg);
-             
-             // Keep scan rings briefly, then fade out (wait 1500ms before removing)
-             await new Promise(resolve => setTimeout(resolve, 1500));
-             if (scanId !== activeScanIdRef.current) return;
-             setScanningArea(null);
-             setIsScanningArea(false);
-
-             // Return to default state after an additional delay
-             await new Promise(resolve => setTimeout(resolve, 2000));
-             if (scanId !== activeScanIdRef.current) return;
-             setScanningStatusText(null);
-             setIsLoading(false);
-          } else {
-             // Results found successfully!
-             setScanningStatusText("Scan complete");
-             setMarkers(newMarkers);
-
-             // Keep map visualization briefly, then fade out
-             await new Promise(resolve => setTimeout(resolve, 1500));
-             if (scanId !== activeScanIdRef.current) return;
-             setScanningArea(null);
-             setIsScanningArea(false);
-
-             // Return to default state after short delay
-             await new Promise(resolve => setTimeout(resolve, 2000));
-             if (scanId !== activeScanIdRef.current) return;
-             setScanningStatusText(null);
-             setIsLoading(false);
-             setInteractionState('PINS_RENDERED');
+          if (!scanResolved) {
+             console.warn("Scan resolution guard triggered!");
+             scanResolved = true;
+             await resolveScan('error', "Scan took too long to complete");
           }
-       } catch (err) {
-          if (scanId === activeScanIdRef.current) {
-             setScanningStatusText("Scan failed");
-             await new Promise(resolve => setTimeout(resolve, 2000));
-             if (scanId === activeScanIdRef.current) {
-                setScanningArea(null);
-                setIsScanningArea(false);
-                setScanningStatusText(null);
-                setIsLoading(false);
-             }
-          }
-       }
+       }, 10000);
     })();
   }, [activeRouteId, isZoomLocked, lockedZoomDistance, reconcileCameraState, routeWaypoints, handleMarkerClick]);;
 
