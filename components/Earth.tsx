@@ -156,24 +156,32 @@ const UniversalMarker: React.FC<{
 
   useFrame((state) => {
     if (meshRef.current) {
-      // 1. Pulsate animation - Slowed down frequency from 8 to 3
-      if (isSelected) {
-        const scale = 1 + Math.sin(state.clock.elapsedTime * 3) * 0.3; 
-        meshRef.current.scale.setScalar(scale);
-      } else {
-        meshRef.current.scale.setScalar(1);
-      }
+      // 1. Zoom scale calculation (0.0 = zoomed out, 1.0 = zoomed in)
+      const distance = state.camera.position.length();
+      const zoomLevel = THREE.MathUtils.clamp((8.0 - distance) / (8.0 - 1.2), 0, 1);
 
-      // 2. Overlap screen-space separation (pixel-level offsets determined after projection)
+      // Subtle size scaling formula: size multiplier goes from 0.8 to 0.95
+      const sizeMultiplier = 0.8 + zoomLevel * 0.15;
+      const baseScale = isSelected 
+        ? (1 + Math.sin(state.clock.elapsedTime * 3) * 0.3)
+        : 1;
+      meshRef.current.scale.setScalar(baseScale * sizeMultiplier);
+
+      // 2. Overlap screen-space separation (zoom-aware separation with spiral offset)
       if (overlapSize > 1) {
-         // zoom scale: goes from 0.0 (all the way zoomed out) to 1.0 (fully zoomed in)
-         const distance = state.camera.position.length();
-         const offsetScale = THREE.MathUtils.clamp((8.0 - distance) / (8.0 - 1.2), 0, 1);
-         
+         // zoom-aware separation limits
+         const baseMin = 12; // base min separation in pixels
+         const zoomFactor = 4; // additional separation pixels per zoom step
+         const minDistancePx = baseMin + (zoomLevel * zoomFactor); // e.g. 12px at zoom 0, 16px at zoom 1
+
+         // Circular / spiral micro-spread layout: enforces separation of at least minDistancePx
+         const pixelRadius = Math.max(minDistancePx, (overlapSize * minDistancePx) / (2 * Math.PI));
          const angle = (overlapIndex / overlapSize) * Math.PI * 2;
-         const pixelRadius = 14; // separation threshold of 14px
-         const dx = Math.cos(angle) * pixelRadius * offsetScale;
-         const dy = Math.sin(angle) * pixelRadius * offsetScale;
+         const spiralScale = 1.0 + (overlapIndex / overlapSize) * 0.25; // deterministic spiral fan-out
+
+         // dx/dy in screen pixels
+         const dx = Math.cos(angle) * pixelRadius * spiralScale;
+         const dy = Math.sin(angle) * pixelRadius * spiralScale;
 
          // Convert pixels to world units at the marker's distance from the camera
          const d = state.camera.position.distanceTo(position);
