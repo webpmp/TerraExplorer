@@ -196,6 +196,7 @@ const App: React.FC = () => {
   });
 
   const [parchmentZoom, setParchmentZoom] = useState(1.0);
+  const currentParchmentZoomRef = useRef<number>(1.0);
   const targetParchmentZoomRef = useRef<number>(1.0);
   const parchmentZoomAnimRef = useRef<number | null>(null);
   
@@ -214,15 +215,21 @@ const App: React.FC = () => {
   }, []);
 
   const animateParchmentZoom = useCallback(() => {
-    setParchmentZoom(prev => {
-       const diff = targetParchmentZoomRef.current - prev;
-       if (Math.abs(diff) < 0.001) {
-          parchmentZoomAnimRef.current = null;
-          return targetParchmentZoomRef.current;
-       }
-       parchmentZoomAnimRef.current = requestAnimationFrame(animateParchmentZoom);
-       return prev + diff * 0.12;
-    });
+     const currentZoom = currentParchmentZoomRef.current;
+     const diff = targetParchmentZoomRef.current - currentZoom;
+     
+     if (Math.abs(diff) < 0.001) {
+        currentParchmentZoomRef.current = targetParchmentZoomRef.current;
+        setParchmentZoom(targetParchmentZoomRef.current);
+        parchmentZoomAnimRef.current = null;
+        return;
+     }
+     
+     const nextZoom = currentZoom + diff * 0.08; // Buttery smooth 0.08 smoothing factor
+     currentParchmentZoomRef.current = nextZoom;
+     setParchmentZoom(nextZoom);
+     
+     parchmentZoomAnimRef.current = requestAnimationFrame(animateParchmentZoom);
   }, []);
 
   const handleCancelScan = useCallback(() => {
@@ -318,12 +325,13 @@ const App: React.FC = () => {
   const handleSkinChange = useCallback((newSkin: SkinType) => {
      cameraStateRef.current.theme = newSkin;
      setSkin(newSkin);
-     setParchmentZoom(1.0); // Reset parchment zoom on theme change
-     targetParchmentZoomRef.current = 1.0;
-     if (parchmentZoomAnimRef.current) {
-        cancelAnimationFrame(parchmentZoomAnimRef.current);
-        parchmentZoomAnimRef.current = null;
-     }
+      setParchmentZoom(1.0); // Reset parchment zoom on theme change
+      currentParchmentZoomRef.current = 1.0;
+      targetParchmentZoomRef.current = 1.0;
+      if (parchmentZoomAnimRef.current) {
+         cancelAnimationFrame(parchmentZoomAnimRef.current);
+         parchmentZoomAnimRef.current = null;
+      }
 
      // Reset standard zoom references as well
      targetZoomRef.current = null;
