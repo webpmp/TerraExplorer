@@ -178,7 +178,7 @@ const Controls: React.FC<ControlsProps> = ({
   // Handle query setting when scanning area state changes
   useEffect(() => {
     if (isScanningArea) {
-      setQuery("SCANNING AREA");
+      setQuery("SCANNING REGION");
     } else {
       setQuery("");
     }

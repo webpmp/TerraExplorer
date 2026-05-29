@@ -912,29 +912,6 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
             <primitive object={atmosphereMaterial} attach="material" />
         </mesh>
       )}
-
-      {/* Scanning Radar Ping Outline */}
-      {scanningArea && (
-        <mesh 
-          position={latLngToVector3(scanningArea.lat, scanningArea.lng, 1.015)}
-          ref={(mesh) => {
-             scanRingRef.current = mesh;
-             if (mesh) {
-                const origin = new THREE.Vector3(0, 0, 0);
-                mesh.lookAt(origin);
-             }
-          }}
-        >
-           <ringGeometry args={[0, 0.08, 32]} />
-           <meshBasicMaterial 
-             color={isParchment ? "#8b5a2b" : (isAmber ? "#fbbf24" : (isGreen ? "#4ade80" : "#22d3ee"))} 
-             transparent 
-             opacity={0.3} 
-             side={THREE.DoubleSide}
-             depthWrite={false}
-           />
-        </mesh>
-      )}
     </group>
     
     {/* Hover Overlay outside the rotating group so it stays oriented to screen */}
