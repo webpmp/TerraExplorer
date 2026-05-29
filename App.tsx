@@ -1650,30 +1650,6 @@ const App: React.FC = () => {
         />
       )}
 
-      {interactionState === 'GLOBE_SEARCHING' && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-auto z-50 flex flex-col items-center gap-3">
-          <div className={`px-4 py-3 flex flex-col items-center gap-3 border backdrop-blur-md transition-all shadow-xl rounded-xl
-            ${skin === 'parchment' ? 'bg-[#f4ead5] text-[#3e2723] border-[#8b5a2b]' : 
-              skin === 'retro-green' ? 'bg-black text-green-300 border-green-400 font-mono' :
-              skin === 'retro-amber' ? 'bg-black text-amber-300 border-amber-400 font-mono' :
-              'bg-black/80 text-white border-white/20'}`}>
-             <div className="flex items-center gap-3">
-                <Loader2 className="w-5 h-5 animate-spin text-current" />
-                <span className="font-bold tracking-wider uppercase text-xs">Scanning region...</span>
-             </div>
-             <button 
-               onClick={handleCancelScan}
-               className={`px-3 py-1 text-xs font-bold uppercase transition-all shadow-sm border
-                 ${skin === 'parchment' ? 'bg-[#d2b48c] hover:bg-[#c2a47c] text-[#3e2723] border-[#8b5a2b] rounded-sm' : 
-                   skin === 'retro-green' ? 'bg-black hover:bg-green-400 hover:text-black text-green-300 border-green-400' :
-                   skin === 'retro-amber' ? 'bg-black hover:bg-amber-400 hover:text-black text-amber-300 border-amber-400' :
-                   'bg-red-600 hover:bg-red-500 text-white border-transparent rounded-lg'}`}
-             >
-               Cancel
-             </button>
-          </div>
-        </div>
-      )}
 
       {interactionState === 'PIN_SELECTED' && (
         <InfoPanel 

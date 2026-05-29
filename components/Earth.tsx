@@ -672,16 +672,39 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
   const innerMeshRef = useRef<THREE.Mesh>(null);
   useImperativeHandle(ref, () => innerMeshRef.current!);
 
-  const scanRingRef = useRef<THREE.Mesh | null>(null);
+  const scanGroupRef = useRef<THREE.Group | null>(null);
+  const scanRingsRef = useRef<(THREE.Mesh | null)[]>([]);
+  const crosshairRef = useRef<THREE.Group | null>(null);
+  const centerPulseRef = useRef<THREE.Mesh | null>(null);
 
   useFrame(({ clock }) => {
-     if (scanRingRef.current) {
+     if (props.scanningArea) {
         const time = clock.getElapsedTime();
-        // Pulse scale between 0.3 and 1.2
-        const scale = 0.3 + Math.abs(Math.sin(time * 5.0)) * 0.9;
-        scanRingRef.current.scale.set(scale, scale, 1);
-        if (scanRingRef.current.material) {
-           (scanRingRef.current.material as THREE.MeshBasicMaterial).opacity = 0.4 * (1.0 - (scale - 0.3) / 0.9);
+        
+        // 1. Rotate crosshair triangulation lines
+        if (crosshairRef.current) {
+           crosshairRef.current.rotation.z = time * 0.8;
+        }
+        
+        // 2. Animate center pulse
+        if (centerPulseRef.current) {
+           const pulse = 0.5 + Math.abs(Math.sin(time * 6.0)) * 0.5;
+           centerPulseRef.current.scale.set(pulse, pulse, 1);
+           if (centerPulseRef.current.material) {
+              (centerPulseRef.current.material as THREE.MeshBasicMaterial).opacity = 0.8 * (1.0 - (pulse - 0.5) / 1.0);
+           }
+        }
+        
+        // 3. Animate expanding rings
+        for (let i = 0; i < 3; i++) {
+           const ring = scanRingsRef.current[i];
+           if (ring) {
+              const phase = (time * 0.4 + i * 0.33) % 1.0;
+              ring.scale.set(phase, phase, 1);
+              if (ring.material) {
+                 (ring.material as THREE.MeshBasicMaterial).opacity = 0.45 * (1.0 - phase);
+              }
+           }
         }
      }
   });
@@ -905,12 +928,62 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
         </mesh>
       )}
 
-      {/* Atmosphere Glow - Hide for Green and Parchment */}
-      {(!isGreen && !isParchment) && (
-        <mesh scale={[1.2, 1.2, 1.2]}>
-            <sphereGeometry args={[1, 64, 64]} />
-            <primitive object={atmosphereMaterial} attach="material" />
-        </mesh>
+      {/* Map Scan Visualization Layer */}
+      {scanningArea && (
+        <group 
+          position={latLngToVector3(scanningArea.lat, scanningArea.lng, 1.015)}
+          ref={(group) => {
+             if (group) {
+                const origin = new THREE.Vector3(0, 0, 0);
+                group.lookAt(origin);
+             }
+          }}
+        >
+          {/* Inner Glow Center Pulse */}
+          <mesh ref={centerPulseRef}>
+             <ringGeometry args={[0, 0.015, 32]} />
+             <meshBasicMaterial 
+               color={isParchment ? "#8b5a2b" : (isAmber ? "#fbbf24" : (isGreen ? "#4ade80" : "#22d3ee"))}
+               transparent
+               opacity={0.8}
+               depthWrite={false}
+               side={THREE.DoubleSide}
+             />
+          </mesh>
+          
+          {/* Rotating Triangulation Radar Crosshair/Lines */}
+          <group ref={crosshairRef}>
+             {[0, 120, 240].map((angle, idx) => (
+                <line key={idx}>
+                   <bufferGeometry attach="geometry">
+                      <bufferAttribute
+                         attach="attributes-position"
+                         args={[new Float32Array([0, 0, 0, 0.12 * Math.cos(angle * Math.PI / 180), 0.12 * Math.sin(angle * Math.PI / 180), 0]), 3]}
+                      />
+                   </bufferGeometry>
+                   <lineBasicMaterial 
+                      color={isParchment ? "#8b5a2b" : (isAmber ? "#fbbf24" : (isGreen ? "#4ade80" : "#22d3ee"))} 
+                      transparent 
+                      opacity={0.25} 
+                      depthWrite={false}
+                   />
+                </line>
+             ))}
+          </group>
+
+          {/* Expanding rings */}
+          {[0, 1, 2].map((i) => (
+             <mesh key={i} ref={(el) => { scanRingsRef.current[i] = el; }}>
+                <ringGeometry args={[0.08, 0.085, 32]} />
+                <meshBasicMaterial 
+                  color={isParchment ? "#8b5a2b" : (isAmber ? "#fbbf24" : (isGreen ? "#4ade80" : "#22d3ee"))}
+                  transparent
+                  depthWrite={false}
+                  side={THREE.DoubleSide}
+                />
+             </mesh>
+          ))}
+        </group>
       )}
     </group>
     
