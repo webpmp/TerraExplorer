@@ -133,7 +133,9 @@ const UniversalMarker: React.FC<{
   waypointIndex?: number,
   markerData?: any,
   skin?: SkinType,
-  onClick: (e: any) => void 
+  onClick: (e: any) => void,
+  overlapIndex?: number,
+  overlapSize?: number
 }> = ({ 
   position, 
   color, 
@@ -146,18 +148,49 @@ const UniversalMarker: React.FC<{
   waypointIndex,
   markerData,
   skin,
-  onClick 
+  onClick,
+  overlapIndex = 0,
+  overlapSize = 1
 }) => {
   const meshRef = useRef<THREE.Group>(null);
 
   useFrame((state) => {
     if (meshRef.current) {
+      // 1. Pulsate animation - Slowed down frequency from 8 to 3
       if (isSelected) {
-        // Pulsate animation - Slowed down frequency from 8 to 3
         const scale = 1 + Math.sin(state.clock.elapsedTime * 3) * 0.3; 
         meshRef.current.scale.setScalar(scale);
       } else {
         meshRef.current.scale.setScalar(1);
+      }
+
+      // 2. Overlap screen-space separation (pixel-level offsets determined after projection)
+      if (overlapSize > 1) {
+         // zoom scale: goes from 0.0 (all the way zoomed out) to 1.0 (fully zoomed in)
+         const distance = state.camera.position.length();
+         const offsetScale = THREE.MathUtils.clamp((8.0 - distance) / (8.0 - 1.2), 0, 1);
+         
+         const angle = (overlapIndex / overlapSize) * Math.PI * 2;
+         const pixelRadius = 14; // separation threshold of 14px
+         const dx = Math.cos(angle) * pixelRadius * offsetScale;
+         const dy = Math.sin(angle) * pixelRadius * offsetScale;
+
+         // Convert pixels to world units at the marker's distance from the camera
+         const d = state.camera.position.distanceTo(position);
+         const fovRad = (state.camera as THREE.PerspectiveCamera).fov * Math.PI / 180;
+         const worldPerPixel = (2 * d * Math.tan(fovRad / 2)) / state.size.height;
+
+         // Get camera's local X (Right) and Y (Up) axis in world space
+         const right = new THREE.Vector3(1, 0, 0).applyQuaternion(state.camera.quaternion);
+         const up = new THREE.Vector3(0, 1, 0).applyQuaternion(state.camera.quaternion);
+
+         const displacement = new THREE.Vector3()
+            .addScaledVector(right, dx * worldPerPixel)
+            .addScaledVector(up, dy * worldPerPixel);
+
+         meshRef.current.position.copy(position).add(displacement);
+      } else {
+         meshRef.current.position.copy(position);
       }
     }
   });
@@ -669,13 +702,45 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
         }
     });
 
+    // Overlap clustering for scan result markers
+    const scanMarkers = itemsWithPos.filter(item => item.type === 'marker');
+    const overlapGroups: Map<string, { index: number, size: number }> = new Map();
+    const OVERLAP_DISTANCE_THRESHOLD = 0.005; // extremely close/overlapping
+    const visitedScan = new Set<number>();
+    
+    for (let i = 0; i < scanMarkers.length; i++) {
+        if (visitedScan.has(i)) continue;
+        const groupIndices = [i];
+        visitedScan.add(i);
+        
+        for (let j = i + 1; j < scanMarkers.length; j++) {
+            if (visitedScan.has(j)) continue;
+            if (scanMarkers[i].position.distanceTo(scanMarkers[j].position) < OVERLAP_DISTANCE_THRESHOLD) {
+                groupIndices.push(j);
+                visitedScan.add(j);
+            }
+        }
+        
+        groupIndices.forEach((idx, k) => {
+            overlapGroups.set(scanMarkers[idx].id, {
+                index: k,
+                size: groupIndices.length
+            });
+        });
+    }
+
     // 4. Final Processing (Hitbox Size)
-    const result = itemsWithPos.map(item => ({
-        ...item,
-        visualSize: item.baseSize,
-        // Reduced hitbox to allow clicking individual items in tight clusters
-        hitSize: Math.max(item.baseSize, 0.015) 
-    }));
+    const result = itemsWithPos.map(item => {
+        const overlap = overlapGroups.get(item.id) || { index: 0, size: 1 };
+        return {
+            ...item,
+            visualSize: item.baseSize,
+            // Reduced hitbox to allow clicking individual items in tight clusters
+            hitSize: Math.max(item.baseSize, 0.015),
+            overlapIndex: overlap.index,
+            overlapSize: overlap.size
+        };
+    });
 
     return { processedMarkers: result, adjustedPositions: finalPosMap };
 
@@ -918,6 +983,8 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
           markerData={marker.data}
           skin={skin}
           onClick={(e) => handleMarkerClick(e, marker.data)}
+          overlapIndex={marker.overlapIndex}
+          overlapSize={marker.overlapSize}
         />
       ))}
 
