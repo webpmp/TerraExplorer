@@ -202,6 +202,7 @@ const App: React.FC = () => {
   
   const activeScanIdRef = useRef<number>(0);
   const [scanningArea, setScanningArea] = useState<GeoCoordinates | null>(null);
+  const [isScanningArea, setIsScanningArea] = useState(false);
 
   useEffect(() => {
     const handleResize = () => {
@@ -239,6 +240,7 @@ const App: React.FC = () => {
     setIsFocused(false);
     setMarkers([]);
     setScanningArea(null);
+    setIsScanningArea(false);
   }, []);
 
   const [locationInfo, setLocationInfo] = useState<LocationInfo | null>(null);
@@ -835,6 +837,7 @@ const App: React.FC = () => {
   const handleGlobeClick = useCallback(async (lat: number, lng: number, point: THREE.Vector3) => {
     const scanId = ++activeScanIdRef.current;
     setScanningArea({ lat, lng });
+    setIsScanningArea(true);
 
     setInteractionState('GLOBE_SEARCHING');
     setIsLoading(true);
@@ -886,6 +889,7 @@ const App: React.FC = () => {
 
     setMarkers(newMarkers);
     setScanningArea(null);
+    setIsScanningArea(false);
     
     setIsLoading(false);
     setInteractionState('PINS_RENDERED');
@@ -1688,6 +1692,8 @@ const App: React.FC = () => {
               }
            });
         }}
+        isScanningArea={isScanningArea}
+        onCancelScan={handleCancelScan}
       />
     </div>
   );

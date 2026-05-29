@@ -18,6 +18,8 @@ interface ControlsProps {
   onToggleTraceModal: (isOpen: boolean) => void;
   isZoomLocked: boolean;
   onToggleZoomLock: () => void;
+  isScanningArea?: boolean;
+  onCancelScan?: () => void;
 }
 
 // Custom Icon for Trace Route
@@ -139,7 +141,9 @@ const Controls: React.FC<ControlsProps> = ({
   isTraceModalOpen,
   onToggleTraceModal,
   isZoomLocked,
-  onToggleZoomLock
+  onToggleZoomLock,
+  isScanningArea = false,
+  onCancelScan
 }) => {
   const [query, setQuery] = useState("");
   const [placeholder, setPlaceholder] = useState("Search location...");
@@ -168,12 +172,24 @@ const Controls: React.FC<ControlsProps> = ({
     const interval = setInterval(() => {
       setPlaceholder(generateSuggestion());
     }, 8000); // Change every 8 seconds
-
     return () => clearInterval(interval);
   }, [isFocused, paused]);
 
+  // Handle query setting when scanning area state changes
+  useEffect(() => {
+    if (isScanningArea) {
+      setQuery("SCANNING AREA");
+    } else {
+      setQuery("");
+    }
+  }, [isScanningArea]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isScanningArea) {
+      if (onCancelScan) onCancelScan();
+      return;
+    }
     if (query.trim()) {
       onSearch(query);
     } else if (placeholder !== "Search location..." && placeholder !== "SEARCH LOCATION...") {
@@ -359,10 +375,11 @@ const Controls: React.FC<ControlsProps> = ({
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
             placeholder={displayPlaceholder}
+            disabled={isScanningArea}
             className={`w-full bg-transparent border-none px-4 py-4 focus:ring-0 outline-none ${theme.inputField}`}
           />
           
-          {query && (
+          {query && !isScanningArea && (
             <button
               type="button"
               onClick={() => setQuery("")}
@@ -374,11 +391,12 @@ const Controls: React.FC<ControlsProps> = ({
           )}
 
           <button 
-            type="submit"
-            disabled={isSearching}
+            type={isScanningArea ? "button" : "submit"}
+            onClick={isScanningArea ? onCancelScan : undefined}
+            disabled={isSearching && !isScanningArea}
             className={`mr-2 px-4 py-2 transition-colors disabled:opacity-50 ${theme.submitBtn}`}
           >
-            {isSearching ? <Loader2 size={18} className="animate-spin" /> : "EXPLORE"}
+            {isScanningArea ? "CANCEL" : isSearching ? <Loader2 size={18} className="animate-spin" /> : "EXPLORE"}
           </button>
         </div>
       </form>
