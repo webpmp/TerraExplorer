@@ -51,6 +51,7 @@ export interface MapMarker {
   lat: number;
   lng: number;
   populationClass: 'large' | 'medium' | 'small'; // Affects dot size
+  type?: string;
 }
 
 export interface SearchResult {

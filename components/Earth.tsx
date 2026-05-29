@@ -134,8 +134,8 @@ const UniversalMarker: React.FC<{
   markerData?: any,
   skin?: SkinType,
   onClick: (e: any) => void,
-  overlapIndex?: number,
-  overlapSize?: number
+  markerId?: string,
+  scanOffsetsRef?: React.RefObject<Record<string, THREE.Vector3>>
 }> = ({ 
   position, 
   color, 
@@ -149,8 +149,8 @@ const UniversalMarker: React.FC<{
   markerData,
   skin,
   onClick,
-  overlapIndex = 0,
-  overlapSize = 1
+  markerId = '',
+  scanOffsetsRef
 }) => {
   const meshRef = useRef<THREE.Group>(null);
 
@@ -167,39 +167,9 @@ const UniversalMarker: React.FC<{
         : 1;
       meshRef.current.scale.setScalar(baseScale * sizeMultiplier);
 
-      // 2. Overlap screen-space separation (zoom-aware separation with spiral offset)
-      if (overlapSize > 1) {
-         // zoom-aware separation limits
-         const baseMin = 12; // base min separation in pixels
-         const zoomFactor = 4; // additional separation pixels per zoom step
-         const minDistancePx = baseMin + (zoomLevel * zoomFactor); // e.g. 12px at zoom 0, 16px at zoom 1
-
-         // Circular / spiral micro-spread layout: enforces separation of at least minDistancePx
-         const pixelRadius = Math.max(minDistancePx, (overlapSize * minDistancePx) / (2 * Math.PI));
-         const angle = (overlapIndex / overlapSize) * Math.PI * 2;
-         const spiralScale = 1.0 + (overlapIndex / overlapSize) * 0.25; // deterministic spiral fan-out
-
-         // dx/dy in screen pixels
-         const dx = Math.cos(angle) * pixelRadius * spiralScale;
-         const dy = Math.sin(angle) * pixelRadius * spiralScale;
-
-         // Convert pixels to world units at the marker's distance from the camera
-         const d = state.camera.position.distanceTo(position);
-         const fovRad = (state.camera as THREE.PerspectiveCamera).fov * Math.PI / 180;
-         const worldPerPixel = (2 * d * Math.tan(fovRad / 2)) / state.size.height;
-
-         // Get camera's local X (Right) and Y (Up) axis in world space
-         const right = new THREE.Vector3(1, 0, 0).applyQuaternion(state.camera.quaternion);
-         const up = new THREE.Vector3(0, 1, 0).applyQuaternion(state.camera.quaternion);
-
-         const displacement = new THREE.Vector3()
-            .addScaledVector(right, dx * worldPerPixel)
-            .addScaledVector(up, dy * worldPerPixel);
-
-         meshRef.current.position.copy(position).add(displacement);
-      } else {
-         meshRef.current.position.copy(position);
-      }
+      // 2. Fetch screen-space collision offset computed in parent's useFrame loop
+      const displacement = scanOffsetsRef?.current?.[markerId] || new THREE.Vector3(0, 0, 0);
+      meshRef.current.position.copy(position).add(displacement);
     }
   });
 
@@ -526,6 +496,7 @@ const HoverOverlay: React.FC<{
 
 const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
   const groupRef = useRef<THREE.Group>(null);
+  const scanOffsetsRef = useRef<Record<string, THREE.Vector3>>({});
   const { autoRotate, isInteracting, skin, markers, favorites, showFavorites, selectedMarkerId, routeWaypoints, currentWaypointIndex, scanningArea } = props;
 
   // Rotate the entire group
@@ -710,45 +681,13 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
         }
     });
 
-    // Overlap clustering for scan result markers
-    const scanMarkers = itemsWithPos.filter(item => item.type === 'marker');
-    const overlapGroups: Map<string, { index: number, size: number }> = new Map();
-    const OVERLAP_DISTANCE_THRESHOLD = 0.005; // extremely close/overlapping
-    const visitedScan = new Set<number>();
-    
-    for (let i = 0; i < scanMarkers.length; i++) {
-        if (visitedScan.has(i)) continue;
-        const groupIndices = [i];
-        visitedScan.add(i);
-        
-        for (let j = i + 1; j < scanMarkers.length; j++) {
-            if (visitedScan.has(j)) continue;
-            if (scanMarkers[i].position.distanceTo(scanMarkers[j].position) < OVERLAP_DISTANCE_THRESHOLD) {
-                groupIndices.push(j);
-                visitedScan.add(j);
-            }
-        }
-        
-        groupIndices.forEach((idx, k) => {
-            overlapGroups.set(scanMarkers[idx].id, {
-                index: k,
-                size: groupIndices.length
-            });
-        });
-    }
-
     // 4. Final Processing (Hitbox Size)
-    const result = itemsWithPos.map(item => {
-        const overlap = overlapGroups.get(item.id) || { index: 0, size: 1 };
-        return {
-            ...item,
-            visualSize: item.baseSize,
-            // Reduced hitbox to allow clicking individual items in tight clusters
-            hitSize: Math.max(item.baseSize, 0.015),
-            overlapIndex: overlap.index,
-            overlapSize: overlap.size
-        };
-    });
+    const result = itemsWithPos.map(item => ({
+        ...item,
+        visualSize: item.baseSize,
+        // Reduced hitbox to allow clicking individual items in tight clusters
+        hitSize: Math.max(item.baseSize, 0.015)
+    }));
 
     return { processedMarkers: result, adjustedPositions: finalPosMap };
 
@@ -889,6 +828,83 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
             mat.displacementBias = -mat.displacementScale / 2; // Center the displacement
         }
     }
+
+    // Dynamic screen-space repulsion for region scan markers
+    const scanMarkers = processedMarkers.filter(m => m.type === 'marker');
+    if (scanMarkers.length > 0) {
+       // Project all scan result markers to screen coordinates
+       const screenCoords = scanMarkers.map(m => {
+          const tempV = new THREE.Vector3().copy(m.position).project(state.camera);
+          return {
+             id: m.id,
+             position: m.position,
+             x: (tempV.x * 0.5 + 0.5) * state.size.width,
+             y: (tempV.y * 0.5 + 0.5) * state.size.height
+          };
+       });
+
+       // Reset/initialize screen space offsets
+       const screenOffsets = scanMarkers.map(() => ({ x: 0, y: 0 }));
+
+       // Calculate zoom Level and dynamic minPixelDistance
+       const distance = state.camera.position.length();
+       const zoomLevel = THREE.MathUtils.clamp((8.0 - distance) / (8.0 - 1.2), 0, 1);
+       
+       // Zoom-aware spacing threshold formula: minPixelDistance = baseDistance * (1 + zoomLevel * factor)
+       const baseDistance = 14; // base distance in pixels
+       const factor = 2; // separation factor per zoom level
+       const minPixelDistance = baseDistance * (1 + zoomLevel * factor);
+
+       // 3 iterations of relaxation passes to resolve overlaps dynamically
+       for (let pass = 0; pass < 3; pass++) {
+          for (let i = 0; i < scanMarkers.length; i++) {
+             for (let j = i + 1; j < scanMarkers.length; j++) {
+                const posI = { x: screenCoords[i].x + screenOffsets[i].x, y: screenCoords[i].y + screenOffsets[i].y };
+                const posJ = { x: screenCoords[j].x + screenOffsets[j].x, y: screenCoords[j].y + screenOffsets[j].y };
+                
+                const dx = posJ.x - posI.x;
+                const dy = posJ.y - posI.y;
+                const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
+                
+                if (dist < minPixelDistance) {
+                   const overlap = minPixelDistance - dist;
+                   const rx = dx / dist;
+                   const ry = dy / dist;
+                   
+                   // Push them apart equally (0.5 each)
+                   const force = overlap * 0.5;
+                   screenOffsets[i].x -= rx * force;
+                   screenOffsets[i].y -= ry * force;
+                   screenOffsets[j].x += rx * force;
+                   screenOffsets[j].y += ry * force;
+                }
+             }
+          }
+       }
+
+       // Convert screen space offsets to camera-aligned world space displacements
+       scanMarkers.forEach((m, i) => {
+          const dx = screenOffsets[i].x;
+          const dy = screenOffsets[i].y;
+          
+          if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
+             const d = state.camera.position.distanceTo(m.position);
+             const fovRad = (state.camera as THREE.PerspectiveCamera).fov * Math.PI / 180;
+             const worldPerPixel = (2 * d * Math.tan(fovRad / 2)) / state.size.height;
+
+             const right = new THREE.Vector3(1, 0, 0).applyQuaternion(state.camera.quaternion);
+             const up = new THREE.Vector3(0, 1, 0).applyQuaternion(state.camera.quaternion);
+
+             const displacement = new THREE.Vector3()
+                .addScaledVector(right, dx * worldPerPixel)
+                .addScaledVector(up, dy * worldPerPixel);
+                
+             scanOffsetsRef.current[m.id] = displacement;
+          } else {
+             scanOffsetsRef.current[m.id] = new THREE.Vector3(0, 0, 0);
+          }
+       });
+    }
   });
 
   const handleGlobeClick = (e: any) => {
@@ -991,8 +1007,8 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
           markerData={marker.data}
           skin={skin}
           onClick={(e) => handleMarkerClick(e, marker.data)}
-          overlapIndex={marker.overlapIndex}
-          overlapSize={marker.overlapSize}
+          markerId={marker.id}
+          scanOffsetsRef={scanOffsetsRef}
         />
       ))}
 

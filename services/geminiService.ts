@@ -471,9 +471,10 @@ const nearbyPlacesSchemaConfig = {
       name: { type: Type.STRING },
       lat: { type: Type.NUMBER },
       lng: { type: Type.NUMBER },
-      populationClass: { type: Type.STRING }
+      populationClass: { type: Type.STRING },
+      type: { type: Type.STRING }
     },
-    required: ["id", "name", "lat", "lng", "populationClass"]
+    required: ["id", "name", "lat", "lng", "populationClass", "type"]
   }
 };
 
@@ -482,6 +483,7 @@ export const getNearbyPlaces = async (lat: number, lng: number, radius: number =
     const prompt = `
       I am looking at a globe at coordinates ${lat}, ${lng}.
       Identify 5-8 major cities, towns, landmarks, notable features, or significant points of interest within an approximate ${radius}km radius.
+      Assign a semantic type to each place: "city", "town", "village", "landmark", "poi", "infrastructure", "mountain", "valley", or "terrain".
       Return a strict JSON array.
       Do not repeat places. Stop after 8 places. Output ONLY the JSON payload.
     `;

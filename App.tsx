@@ -1057,12 +1057,22 @@ const App: React.FC = () => {
         // 2. Parallel API Fetch
         try {
            console.log("scan_data_requested");
-           const result = await getNearbyPlaces(lat, lng);
+            const rawResult = await getNearbyPlaces(lat, lng);
 
-           if (currentScanId !== activeScanIdRef.current) return;
+            if (currentScanId !== activeScanIdRef.current) return;
 
-           console.log("RAW SCAN OUTPUT:", result);
-           console.log("PARSED RESULTS:", result);
+            // Only allow human-relevant location types
+            const result = rawResult.filter(r =>
+               r.type === "city" ||
+               r.type === "town" ||
+               r.type === "village" ||
+               r.type === "landmark" ||
+               r.type === "poi" ||
+               r.type === "infrastructure"
+            );
+
+            console.log("RAW SCAN OUTPUT:", rawResult);
+            console.log("PARSED RESULTS:", result);
 
            // Wait for the visual progress animation (up to "Reviewing results") to finish first to enforce visual pacing
            await progressPromise;
@@ -1094,7 +1104,8 @@ const App: React.FC = () => {
                     name: m.name,
                     lat: m.lat,
                     lng: m.lng,
-                    populationClass: m.populationClass
+                    populationClass: m.populationClass,
+                    type: m.type
                  }));
                  await resolveScan({
                     type: "results",
@@ -1107,7 +1118,8 @@ const App: React.FC = () => {
                     name: m.name,
                     lat: m.lat,
                     lng: m.lng,
-                    populationClass: m.populationClass
+                    populationClass: m.populationClass,
+                    type: m.type
                  }));
                  await resolveScan({
                     type: "results",
