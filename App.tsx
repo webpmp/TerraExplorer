@@ -1071,8 +1071,34 @@ const App: React.FC = () => {
            // IMMEDIATELY queue the terminal scan resolution
            queueMicrotask(async () => {
               if (currentScanId !== activeScanIdRef.current) return;
-              if (result && result.length > 0) {
-                 console.log("scan_results_received");
+
+              // Debug logs
+              console.log("[Scan Decision Point] results length:", result?.length);
+              console.log("[Scan Decision Point] raw payload:", JSON.stringify(result));
+
+              const MAX_RESULTS_THRESHOLD = 8;
+
+              if (!result || result.length === 0) {
+                 console.log("[Scan Decision Point] classification branch chosen: NO_RESULTS_FOUND");
+                 await resolveScan({
+                    type: "empty",
+                    message: "No information found in this area"
+                 });
+              } else if (result.length > MAX_RESULTS_THRESHOLD) {
+                 console.log("[Scan Decision Point] classification branch chosen: DENSE_RESULTS (truncated to threshold)");
+                 const finalMarkers = result.slice(0, MAX_RESULTS_THRESHOLD).map(m => ({
+                    id: m.id,
+                    name: m.name,
+                    lat: m.lat,
+                    lng: m.lng,
+                    populationClass: m.populationClass
+                 }));
+                 await resolveScan({
+                    type: "results",
+                    data: finalMarkers
+                 });
+              } else {
+                 console.log("[Scan Decision Point] classification branch chosen: RESULTS_FOUND");
                  const finalMarkers = result.map(m => ({
                     id: m.id,
                     name: m.name,
@@ -1080,13 +1106,10 @@ const App: React.FC = () => {
                     lng: m.lng,
                     populationClass: m.populationClass
                  }));
-                 await resolveScan({ type: "results", data: finalMarkers });
-              } else {
-                 console.log("scan_results_empty");
-                 const emptyMsg = isHighlyPopulatedRegion(lat, lng)
-                    ? "Too much activity in this area"
-                    : "No information found in this area";
-                 await resolveScan({ type: "empty", message: emptyMsg });
+                 await resolveScan({
+                    type: "results",
+                    data: finalMarkers
+                 });
               }
               console.log("EXIT FINALIZING (resolved)");
            });
@@ -1102,7 +1125,8 @@ const App: React.FC = () => {
 
            queueMicrotask(async () => {
               if (currentScanId !== activeScanIdRef.current) return;
-              console.log("scan_results_empty");
+              console.log("[Scan Decision Point] classification branch chosen: ERROR");
+              console.error("[Scan Decision Point] raw error:", err);
               let errorMsg = "Scan failed";
               if (err?.message?.includes("access") || err?.message?.includes("permission") || err?.status === 403) {
                  errorMsg = "This area cannot be accessed";
