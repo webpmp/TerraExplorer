@@ -19,6 +19,7 @@ interface ControlsProps {
   isZoomLocked: boolean;
   onToggleZoomLock: () => void;
   isScanningArea?: boolean;
+  scanningStatusText?: string | null;
   onCancelScan?: () => void;
 }
 
@@ -143,6 +144,7 @@ const Controls: React.FC<ControlsProps> = ({
   isZoomLocked,
   onToggleZoomLock,
   isScanningArea = false,
+  scanningStatusText = null,
   onCancelScan
 }) => {
   const [query, setQuery] = useState("");
@@ -177,16 +179,16 @@ const Controls: React.FC<ControlsProps> = ({
 
   // Handle query setting when scanning area state changes
   useEffect(() => {
-    if (isScanningArea) {
-      setQuery("SCANNING REGION");
+    if (scanningStatusText) {
+      setQuery(scanningStatusText);
     } else {
       setQuery("");
     }
-  }, [isScanningArea]);
+  }, [scanningStatusText]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isScanningArea) {
+    if (scanningStatusText) {
       if (onCancelScan) onCancelScan();
       return;
     }
@@ -375,11 +377,11 @@ const Controls: React.FC<ControlsProps> = ({
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
             placeholder={displayPlaceholder}
-            disabled={isScanningArea}
+            disabled={!!scanningStatusText}
             className={`w-full bg-transparent border-none px-4 py-4 focus:ring-0 outline-none ${theme.inputField}`}
           />
           
-          {query && !isScanningArea && (
+          {query && !scanningStatusText && (
             <button
               type="button"
               onClick={() => setQuery("")}
@@ -391,12 +393,12 @@ const Controls: React.FC<ControlsProps> = ({
           )}
 
           <button 
-            type={isScanningArea ? "button" : "submit"}
-            onClick={isScanningArea ? onCancelScan : undefined}
-            disabled={isSearching && !isScanningArea}
+            type={scanningStatusText ? "button" : "submit"}
+            onClick={scanningStatusText ? onCancelScan : undefined}
+            disabled={isSearching && !scanningStatusText}
             className={`mr-2 px-4 py-2 transition-colors disabled:opacity-50 ${theme.submitBtn}`}
           >
-            {isScanningArea ? "CANCEL" : isSearching ? <Loader2 size={18} className="animate-spin" /> : "EXPLORE"}
+            {scanningStatusText ? "CANCEL" : isSearching ? <Loader2 size={18} className="animate-spin" /> : "EXPLORE"}
           </button>
         </div>
       </form>

@@ -203,6 +203,7 @@ const App: React.FC = () => {
   const activeScanIdRef = useRef<number>(0);
   const [scanningArea, setScanningArea] = useState<GeoCoordinates | null>(null);
   const [isScanningArea, setIsScanningArea] = useState(false);
+  const [scanningStatusText, setScanningStatusText] = useState<string | null>(null);
 
   useEffect(() => {
     const handleResize = () => {
@@ -241,6 +242,7 @@ const App: React.FC = () => {
     setMarkers([]);
     setScanningArea(null);
     setIsScanningArea(false);
+    setScanningStatusText(null);
   }, []);
 
   const [locationInfo, setLocationInfo] = useState<LocationInfo | null>(null);
@@ -943,6 +945,7 @@ const App: React.FC = () => {
     const scanId = ++activeScanIdRef.current;
     setScanningArea({ lat, lng });
     setIsScanningArea(true);
+    setScanningStatusText("Starting scan");
 
     setInteractionState('GLOBE_SEARCHING');
     setIsLoading(true);
@@ -972,38 +975,129 @@ const App: React.FC = () => {
       });
     }
 
+    // Heuristic for highly populated regions:
+    const isHighlyPopulatedRegion = (la: number, ln: number): boolean => {
+       if (la >= 35 && la <= 60 && ln >= -10 && ln <= 30) return true; // Europe
+       if (la >= 25 && la <= 48 && ln >= -90 && ln <= -70) return true; // Eastern US
+       if (la >= 20 && la <= 45 && ln >= 100 && ln <= 145) return true; // East Asia (China/Japan)
+       if (la >= 8 && la <= 33 && ln >= 68 && ln <= 90) return true; // South Asia (India)
+       return false;
+    };
+
     // Return immediately while the scanning request runs in the background
     (async () => {
+       const steps = ["Starting scan", "Locating area", "Expanding search", "Checking area", "Reviewing results", "Finalizing"];
+       let animationFinished = false;
+       let fetchFinished = false;
+       let newMarkers: MapMarker[] = [];
+       let errorMsg: string | null = null;
+
+       // 1. Progress Animation Loop (runs gradually, 600-1000ms per step)
+       const progressPromise = (async () => {
+          for (let i = 0; i < steps.length; i++) {
+             if (scanId !== activeScanIdRef.current) return;
+             setScanningStatusText(steps[i]);
+             await new Promise(resolve => setTimeout(resolve, 600 + Math.random() * 400));
+          }
+          animationFinished = true;
+       })();
+
+       // 2. Parallel API Fetch with explicit 9 second timeout
+       const fetchPromise = (async () => {
+          const timeoutPromise = new Promise((_, reject) => 
+             setTimeout(() => reject(new Error("TIMEOUT")), 9000)
+          );
+          try {
+             const result = await Promise.race([
+                getNearbyPlaces(lat, lng),
+                timeoutPromise
+             ]) as MapMarker[];
+
+             if (scanId !== activeScanIdRef.current) return;
+
+             if (result && result.length > 0) {
+                // Compute distance and rank
+                const markersWithDist = result.map(m => {
+                    const d = calculateDistance(lat, lng, m.lat, m.lng);
+                    return { ...m, _dist: d };
+                });
+                markersWithDist.sort((a, b) => a._dist - b._dist);
+                
+                newMarkers = markersWithDist.map(m => ({
+                   id: m.id,
+                   name: m.name,
+                   lat: m.lat,
+                   lng: m.lng,
+                   populationClass: m.populationClass
+                }));
+             } else {
+                if (isHighlyPopulatedRegion(lat, lng)) {
+                   errorMsg = "Too much activity in this area";
+                } else {
+                   errorMsg = "No information found in this area";
+                }
+             }
+          } catch (err: any) {
+             if (scanId !== activeScanIdRef.current) return;
+             if (err?.message === "TIMEOUT") {
+                errorMsg = "Scan took too long to complete";
+             } else if (err?.message?.includes("access") || err?.message?.includes("permission") || err?.status === 403) {
+                errorMsg = "This area cannot be accessed";
+             } else {
+                errorMsg = "Scan failed";
+             }
+          }
+          fetchFinished = true;
+       })();
+
+       // Wait for both animation and fetch to complete
        try {
-          let newMarkers = await getNearbyPlaces(lat, lng);
+          await Promise.all([progressPromise, fetchPromise]);
           if (scanId !== activeScanIdRef.current) return;
 
-          // Compute distance and rank
-          const markersWithDist = newMarkers.map(m => {
-              const d = calculateDistance(lat, lng, m.lat, m.lng);
-              return { ...m, _dist: d };
-          });
-          markersWithDist.sort((a, b) => a._dist - b._dist);
-          
-          // Sort actual markers list
-          newMarkers = markersWithDist.map(m => ({
-             id: m.id,
-             name: m.name,
-             lat: m.lat,
-             lng: m.lng,
-             populationClass: m.populationClass
-          }));
+          // If there is an error message (or no results found)
+          if (errorMsg) {
+             setScanningStatusText(errorMsg);
+             
+             // Keep scan rings briefly, then fade out (wait 1500ms before removing)
+             await new Promise(resolve => setTimeout(resolve, 1500));
+             if (scanId !== activeScanIdRef.current) return;
+             setScanningArea(null);
+             setIsScanningArea(false);
 
-          setMarkers(newMarkers);
-          setScanningArea(null);
-          setIsScanningArea(false);
-          
-          setIsLoading(false);
-          setInteractionState('PINS_RENDERED');
+             // Return to default state after an additional delay
+             await new Promise(resolve => setTimeout(resolve, 2000));
+             if (scanId !== activeScanIdRef.current) return;
+             setScanningStatusText(null);
+             setIsLoading(false);
+          } else {
+             // Results found successfully!
+             setScanningStatusText("Scan complete");
+             setMarkers(newMarkers);
+
+             // Keep map visualization briefly, then fade out
+             await new Promise(resolve => setTimeout(resolve, 1500));
+             if (scanId !== activeScanIdRef.current) return;
+             setScanningArea(null);
+             setIsScanningArea(false);
+
+             // Return to default state after short delay
+             await new Promise(resolve => setTimeout(resolve, 2000));
+             if (scanId !== activeScanIdRef.current) return;
+             setScanningStatusText(null);
+             setIsLoading(false);
+             setInteractionState('PINS_RENDERED');
+          }
        } catch (err) {
           if (scanId === activeScanIdRef.current) {
-             setIsScanningArea(false);
-             setIsLoading(false);
+             setScanningStatusText("Scan failed");
+             await new Promise(resolve => setTimeout(resolve, 2000));
+             if (scanId === activeScanIdRef.current) {
+                setScanningArea(null);
+                setIsScanningArea(false);
+                setScanningStatusText(null);
+                setIsLoading(false);
+             }
           }
        }
     })();
@@ -1698,6 +1792,7 @@ const App: React.FC = () => {
            });
         }}
         isScanningArea={isScanningArea}
+        scanningStatusText={scanningStatusText}
         onCancelScan={handleCancelScan}
       />
     </div>
