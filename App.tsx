@@ -1061,6 +1061,9 @@ const App: React.FC = () => {
 
            if (currentScanId !== activeScanIdRef.current) return;
 
+           console.log("RAW SCAN OUTPUT:", result);
+           console.log("PARSED RESULTS:", result);
+
            // Wait for the visual progress animation (up to "Reviewing results") to finish first to enforce visual pacing
            await progressPromise;
            if (currentScanId !== activeScanIdRef.current) return;
