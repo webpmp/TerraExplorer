@@ -1,6 +1,6 @@
 
-import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Canvas, useThree, useFrame } from '@react-three/fiber';
+import React, { useState, useRef, useCallback, useEffect, Suspense } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
 import { Stars, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { ChevronDown, Loader2 } from 'lucide-react';
@@ -142,89 +142,55 @@ const VisibilityTracker: React.FC<{
   return null;
 };
 
-// Component to conditionally initialize zoom for parchment theme
+// Component to conditionally initialize and correct zoom for parchment theme
 const ThemeZoomInitializer: React.FC<{
   skin: SkinType;
   cameraControlsRef: React.RefObject<any>;
   onLockZoom: (distance: number) => void;
-}> = ({ skin, cameraControlsRef, onLockZoom }) => {
-  const hasAppliedRef = useRef(false);
-  const animationState = useRef<{
-    active: boolean;
-    startTime: number;
-    startZoom: number;
-    targetZoom: number;
-    duration: number;
-  }>({
-    active: false,
-    startTime: 0,
-    startZoom: 0,
-    targetZoom: 0,
-    duration: 1000, // ms
-  });
-
-  const easeInOutCubic = (t: number) => {
-    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-  };
+  isSidebarOpen: boolean;
+}> = ({ skin, cameraControlsRef, onLockZoom, isSidebarOpen }) => {
+  const baseZoomRef = useRef(1.0);
+  const adjustedZoomRef = useRef(1.0);
+  const prevSkinRef = useRef<SkinType>(skin);
 
   useFrame(({ camera }) => {
-    if (skin === 'parchment') {
-      if (!hasAppliedRef.current) {
-        if (cameraControlsRef.current) {
-          const defaultDistance = 4.5;
-          // Current zoom is inversely proportional to distance. Higher zoom -> lower distance.
-          const currentDistance = cameraControlsRef.current.getDistance();
-          const currentZoom = defaultDistance / currentDistance;
-          const defaultZoom = 1.0;
-          
-          let targetZoom = defaultZoom * 1.5;
-          
-          // Clamp target zoom based on distance limits (minDistance: 1.2, maxDistance: 8)
-          targetZoom = Math.max(defaultDistance / 8, Math.min(defaultDistance / 1.2, targetZoom));
+    if (!cameraControlsRef.current) return;
 
-          animationState.current = {
-            active: true,
-            startTime: performance.now(),
-            startZoom: currentZoom,
-            targetZoom: targetZoom,
-            duration: 1000,
-          };
-          hasAppliedRef.current = true;
-        }
-      }
-    } else {
-      hasAppliedRef.current = false;
-      if (animationState.current.active) {
-        animationState.current.active = false; // Cancel animation on theme switch
-      }
+    const defaultDistance = 4.5;
+    const currentDistance = cameraControlsRef.current.getDistance();
+    const currentZoom = defaultDistance / currentDistance;
+
+    // Track zoom states when not actively switching themes
+    if (skin === prevSkinRef.current) {
+       if (isSidebarOpen) {
+          adjustedZoomRef.current = currentZoom;
+       } else {
+          baseZoomRef.current = currentZoom;
+       }
     }
 
-    if (animationState.current.active && cameraControlsRef.current) {
-      const now = performance.now();
-      let t = (now - animationState.current.startTime) / animationState.current.duration;
-      
-      if (t >= 1) {
-        t = 1;
-        animationState.current.active = false;
-        
-        if (skin === 'parchment') {
-          const baselineDistance = 4.5;
-          const finalDistance = baselineDistance / animationState.current.targetZoom;
-          onLockZoom(finalDistance);
+    if (skin !== prevSkinRef.current) {
+      if (skin === 'parchment') {
+        const parchmentBaseZoom = 1.5; // default scale for parchment
+        let newZoom = parchmentBaseZoom;
+
+        if (isSidebarOpen && baseZoomRef.current > 0) {
+           const zoomRatio = adjustedZoomRef.current / baseZoomRef.current;
+           newZoom = parchmentBaseZoom * Math.min(Math.max(zoomRatio, 0.5), 3.0);
         }
+
+        // Clamp target zoom based on distance limits (minDistance: 1.2, maxDistance: 8)
+        newZoom = Math.max(defaultDistance / 8, Math.min(defaultDistance / 1.2, newZoom));
+
+        const finalDistance = Math.max(1.2, Math.min(8, defaultDistance / newZoom));
+        
+        // Preserve current camera rotation but update the zoom/distance
+        camera.position.normalize().multiplyScalar(finalDistance);
+        cameraControlsRef.current.update();
+        
+        onLockZoom(finalDistance);
       }
-      
-      const easedT = easeInOutCubic(t);
-      const newZoom = THREE.MathUtils.lerp(
-        animationState.current.startZoom,
-        animationState.current.targetZoom,
-        easedT
-      );
-      
-      const baselineDistance = 4.5;
-      const newDistance = baselineDistance / newZoom;
-      camera.position.normalize().multiplyScalar(newDistance);
-      cameraControlsRef.current.update();
+      prevSkinRef.current = skin;
     }
   });
 
@@ -1274,7 +1240,8 @@ const App: React.FC = () => {
       {/* 3D Scene */}
       <div id="canvas-container" className="absolute inset-0 z-0">
         <Canvas camera={{ position: [0, 0, 4.5], fov: 45 }}>
-        <ambientLight intensity={skin === 'modern' || skin === 'parchment' ? 0.4 : 1.5} color={skin === 'modern' || skin === 'parchment' ? "#ccccff" : "#ffffff"} />
+          <Suspense fallback={null}>
+            <ambientLight intensity={skin === 'modern' || skin === 'parchment' ? 0.4 : 1.5} color={skin === 'modern' || skin === 'parchment' ? "#ccccff" : "#ffffff"} />
         <Sun skin={skin} />
         {(skin === 'modern' || skin === 'parchment') && (
            <pointLight position={[-10, 0, -5]} intensity={1.0} color="#0044ff" distance={20} />
@@ -1333,23 +1300,25 @@ const App: React.FC = () => {
         <ThemeZoomInitializer
           skin={skin}
           cameraControlsRef={cameraControlsRef}
+          isSidebarOpen={!!locationInfo || routeWaypoints.length > 0 || isFavoritesPanelOpen}
           onLockZoom={(dist) => {
              setLockedZoomDistance(dist);
              setIsZoomLocked(true);
           }}
         />
         
-        <RotationManager 
-          isDragging={isDragging} 
-          autoRotate={autoRotate} 
-          setAutoRotate={setAutoRotate} 
-          onZoomChange={(zoomedOut) => {
-             setIsZoomedOut(zoomedOut);
-             if (zoomedOut) setIsFocused(false);
-          }}
-          disabled={isLoading || routeWaypoints.length > 0 || !!locationInfo || markers.length > 0}
-        />
-      </Canvas>
+            <RotationManager 
+              isDragging={isDragging} 
+              autoRotate={autoRotate} 
+              setAutoRotate={setAutoRotate} 
+              onZoomChange={(zoomedOut) => {
+                 setIsZoomedOut(zoomedOut);
+                 if (zoomedOut) setIsFocused(false);
+              }}
+              disabled={isLoading || routeWaypoints.length > 0 || !!locationInfo || markers.length > 0}
+            />
+          </Suspense>
+        </Canvas>
       </div>
 
       {/* Retro Effect Overlay */}

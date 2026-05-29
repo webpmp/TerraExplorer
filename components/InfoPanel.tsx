@@ -275,12 +275,47 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     setEditNoteText(note.text);
   };
 
-  const saveEdit = (id: string) => {
-    const updated = notes.map(n => n.id === id ? { ...n, text: editNoteText } : n);
-    saveNotesToStorage(updated);
+  const cancelEdit = (id: string) => {
+    const note = notes.find(n => n.id === id);
+    if (note && note.text.trim() === "") {
+       handleDeleteNote(id);
+    }
     setEditingNoteId(null);
     setEditNoteText("");
   };
+
+  const saveEdit = (id: string) => {
+    if (editNoteText.trim() === "") {
+       handleDeleteNote(id);
+    } else {
+       const updated = notes.map(n => n.id === id ? { ...n, text: editNoteText } : n);
+       saveNotesToStorage(updated);
+    }
+    setEditingNoteId(null);
+    setEditNoteText("");
+  };
+
+  const handleInitialAddNote = () => {
+    const emptyNote = notes.find(n => n.text.trim() === '');
+    if (emptyNote) {
+        setIsNotesExpanded(true);
+        setEditingNoteId(emptyNote.id);
+        setEditNoteText('');
+        return;
+    }
+    const newEmptyNote: Note = {
+        id: Date.now().toString(),
+        text: '',
+        timestamp: Date.now()
+    };
+    const updated = [...notes, newEmptyNote];
+    saveNotesToStorage(updated);
+    setIsNotesExpanded(true);
+    setEditingNoteId(newEmptyNote.id);
+    setEditNoteText('');
+  };
+
+  const hasNotes = notes && notes.length > 0;
 
   // Handle Favorite Click
   const handleFavoriteClick = () => {
@@ -372,7 +407,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     },
     'retro-green': {
       container: "bg-black border-2 border-green-400 shadow-[0_0_20px_rgba(74,222,128,0.2)] text-green-300 font-retro tracking-widest",
-      header: "bg-green-900/30 border-b-2 border-green-400",
+      header: "bg-green-900/30",
       headerTitle: "text-green-300 uppercase",
       tag: "text-black bg-green-400 border-green-400 rounded-none font-bold",
       subtext: "text-green-300",
@@ -392,7 +427,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     },
     'retro-amber': {
       container: "bg-black border-2 border-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.2)] text-amber-300 font-retro tracking-widest",
-      header: "bg-amber-900/30 border-b-2 border-amber-400",
+      header: "bg-amber-900/30",
       headerTitle: "text-amber-300 uppercase",
       tag: "text-black bg-amber-400 border-amber-400 rounded-none font-bold",
       subtext: "text-amber-300",
@@ -412,7 +447,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     },
     'parchment': {
       container: "bg-[#f4ead5] border border-[#8b5a2b] shadow-[4px_4px_10px_rgba(0,0,0,0.3)] text-[#3e2723] font-sans",
-      header: "bg-[#e8d5b5]/30 border-b border-[#8b5a2b]",
+      header: "bg-[#e8d5b5]/30",
       headerTitle: "text-[#8b5a2b] font-bold uppercase tracking-wider brand-font",
       tag: "text-[#3e2723] bg-[#d2b48c] border border-[#8b5a2b] rounded-sm font-bold shadow-sm",
       subtext: "text-[#8b5a2b]",
@@ -492,72 +527,73 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         {/* Main Info Box */}
         <div className={`${theme.container} flex flex-col shrink min-h-0 overflow-hidden pointer-events-auto`}>
           {/* Header */}
-          <div className={`relative p-5 shrink-0 ${theme.header}`}>
-            <div className="absolute top-3 right-3 flex gap-2">
-              <div className="relative">
-                <button 
-                  onClick={handleFavoriteClick} 
-                  className={`p-1 transition-colors ${theme.actionBtn}`} 
-                  title={isFavorite ? "Edit Favorite" : (routeNav ? "Save Route" : "Save Location")}
-                >
-                  <Pin size={20} className={isFavorite ? "fill-current" : ""} />
-                </button>
-                
-                {/* Favorite Dialog Popover */}
-                {showFavoriteDialog && (
-                   <div className={`absolute top-full right-0 mt-2 w-64 p-3 z-50 flex flex-col gap-3 ${theme.popover}`}>
-                      <h3 className={`text-xs font-bold uppercase opacity-80 ${isRetro ? 'text-current' : 'text-white'}`}>
-                        {isFavorite ? 'Edit Favorite' : (routeNav ? 'Save Route' : 'Save Location')}
-                      </h3>
-                      <form onSubmit={submitFavorite} className="flex flex-col gap-2">
-                         <input 
-                           type="text" 
-                           value={favoriteNameInput}
-                           onChange={(e) => setFavoriteNameInput(e.target.value)}
-                           placeholder="Enter name..."
-                           className={`w-full p-2 text-sm bg-transparent border outline-none ${theme.notesInput}`}
-                           autoFocus
-                         />
-                         <div className="flex gap-2 justify-end">
-                            {isFavorite && (
-                                <button 
-                                  type="button" 
-                                  onClick={() => { onRemoveFavorite(); setShowFavoriteDialog(false); }}
-                                  className="p-1.5 hover:text-red-400 transition-colors"
-                                  title="Remove"
-                                >
-                                    <Trash2 size={16} />
-                                </button>
-                            )}
-                            <button 
-                              type="button" 
-                              onClick={() => setShowFavoriteDialog(false)}
-                              className="px-2 py-1 text-xs opacity-70 hover:opacity-100 hover:bg-white/10 rounded"
-                            >
-                                Cancel
-                            </button>
-                            <button 
-                              type="submit"
-                              disabled={!favoriteNameInput.trim()}
-                              className={`px-3 py-1 text-xs font-bold uppercase transition-colors disabled:opacity-50 ${isRetro ? 'bg-current text-black hover:opacity-80' : 'bg-cyan-600 hover:bg-cyan-500 text-white rounded'}`}
-                            >
-                                Save
-                            </button>
-                         </div>
-                      </form>
-                   </div>
-                )}
-              </div>
-              
-              <button onClick={onClose} className={`p-1 transition-colors ${theme.closeBtn}`}>
-                <X size={20} />
+          <div className={`relative p-5 shrink-0 flex flex-col items-center ${skin === 'modern' ? 'border-b border-white/10' : ''} ${theme.header}`}>
+            {/* 1. Close X button */}
+            <button onClick={onClose} className={`absolute top-3 right-3 p-1 transition-colors ${theme.closeBtn}`}>
+              <X size={20} />
+            </button>
+            
+            {/* 2. Save Location icon button */}
+            <div className="flex justify-center w-full mb-3 mt-1 relative">
+              <button 
+                onClick={handleFavoriteClick} 
+                className={`p-2 transition-colors ${theme.actionBtn}`} 
+                title={isFavorite ? "Edit Favorite" : (routeNav ? "Save Route" : "Save Location")}
+              >
+                <Pin size={24} className={isFavorite ? "fill-current" : ""} />
               </button>
+              
+              {/* Favorite Dialog Popover */}
+              {showFavoriteDialog && (
+                 <div className={`absolute top-full mt-2 w-64 p-3 z-50 flex flex-col gap-3 left-1/2 -translate-x-1/2 ${theme.popover}`}>
+                    <h3 className={`text-xs text-left font-bold uppercase opacity-80 ${isRetro ? 'text-current' : 'text-white'}`}>
+                      {isFavorite ? 'Edit Favorite' : (routeNav ? 'Save Route' : 'Save Location')}
+                    </h3>
+                    <form onSubmit={submitFavorite} className="flex flex-col gap-2">
+                       <input 
+                         type="text" 
+                         value={favoriteNameInput}
+                         onChange={(e) => setFavoriteNameInput(e.target.value)}
+                         placeholder="Enter name..."
+                         className={`w-full p-2 text-sm bg-transparent border outline-none ${theme.notesInput}`}
+                         autoFocus
+                       />
+                       <div className="flex gap-2 justify-end">
+                          {isFavorite && (
+                              <button 
+                                type="button" 
+                                onClick={() => { onRemoveFavorite(); setShowFavoriteDialog(false); }}
+                                className="p-1.5 hover:text-red-400 transition-colors"
+                                title="Remove"
+                              >
+                                  <Trash2 size={16} />
+                              </button>
+                          )}
+                          <button 
+                            type="button" 
+                            onClick={() => setShowFavoriteDialog(false)}
+                            className="px-2 py-1 text-xs opacity-70 hover:opacity-100 hover:bg-white/10 rounded"
+                          >
+                              Cancel
+                          </button>
+                          <button 
+                            type="submit"
+                            disabled={!favoriteNameInput.trim()}
+                            className={`px-3 py-1 text-xs font-bold uppercase transition-colors disabled:opacity-50 ${isRetro ? 'bg-current text-black hover:opacity-80' : 'bg-cyan-600 hover:bg-cyan-500 text-white rounded'}`}
+                          >
+                              Save
+                          </button>
+                       </div>
+                    </form>
+                 </div>
+              )}
             </div>
             
-            <div className="flex flex-col gap-1 pr-12">
-              <div className="flex items-center gap-2">
+            {/* 3. Location title */}
+            <div className="flex flex-col gap-2 items-center text-center">
+              <div className="flex items-center justify-center gap-2 flex-wrap">
                  <h2 className={`${titleSize} font-bold ${theme.headerTitle}`}>{info.name}</h2>
-                 <span className={`${smallTextSize} uppercase px-1.5 py-0.5 ${theme.tag}`}>{info.type}</span>
+                 <span className={`${smallTextSize} uppercase px-2 py-0.5 ${theme.tag}`}>{info.type}</span>
               </div>
               <p className={`${subtextSize} font-mono ${theme.subtext}`}>
                 {info.coordinates?.lat != null ? info.coordinates.lat.toFixed(2) : '0.00'}° N, 
@@ -771,86 +807,92 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           </div>
         </div>
 
-        {/* My Notes Section - Always visible if info exists */}
-        <div className={`pointer-events-auto shrink-0 transition-all duration-300 ${theme.container} ${!isNotesExpanded ? 'hover:brightness-110 cursor-pointer' : ''}`}>
-             <div 
-               className={`px-5 py-3 flex items-center justify-between cursor-pointer ${isNotesExpanded ? 'border-b ' + (isRetro ? 'border-green-400/50' : 'border-white/10') : ''}`}
-               onClick={() => setIsNotesExpanded(!isNotesExpanded)}
-             >
-                <div className="flex items-center gap-2">
-                    <StickyNote size={16} className={theme.icon} />
-                    <span className={`font-bold uppercase ${isRetro ? 'text-lg' : 'text-sm'} ${theme.headerTitle}`}>My Notes</span>
-                    {notes.length > 0 && (
-                        <span className={`text-xs px-1.5 py-0.5 rounded-full ${isRetro ? 'bg-green-400 text-black' : isParchment ? 'bg-[#d2b48c] text-[#3e2723] border border-[#8b5a2b]' : 'bg-cyan-900 text-cyan-300'}`}>
-                            {notes.length}
-                        </span>
-                    )}
-                </div>
-                {isNotesExpanded ? <ChevronDown size={18} className={theme.subtext} /> : <ChevronUp size={18} className={theme.subtext} />}
-             </div>
-
-             {isNotesExpanded && (
-                 <div className="p-4 bg-opacity-50 animate-in slide-in-from-top-2 duration-300">
-                     {/* Add Note Input */}
-                     <form onSubmit={handleAddNote} className="mb-4 flex gap-2">
-                         <input 
-                            type="text" 
-                            value={newNote}
-                            onChange={(e) => setNewNote(e.target.value)}
-                            placeholder="Add a personal note..."
-                            className={`flex-1 px-3 py-2 outline-none text-sm transition-colors ${theme.notesInput}`}
-                         />
-                         <button 
-                            type="submit"
-                            disabled={!newNote.trim()}
-                            className={`p-2 transition-colors disabled:opacity-50 ${theme.actionBtn}`}
-                         >
-                            <Plus size={18} />
-                         </button>
-                     </form>
-
-                     {/* Notes List */}
-                     <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
-                         {notes.length === 0 ? (
-                             <p className={`text-center py-2 italic opacity-60 ${smallTextSize} ${theme.bodyText}`}>No notes yet.</p>
-                         ) : (
-                             notes.map((note) => (
-                                 <div key={note.id} className={`p-3 group relative ${theme.noteCard}`}>
-                                     {editingNoteId === note.id ? (
-                                         <div className="flex flex-col gap-2">
-                                             <textarea 
-                                                value={editNoteText}
-                                                onChange={(e) => setEditNoteText(e.target.value)}
-                                                className={`w-full p-2 text-sm bg-transparent border-b ${isRetro ? 'border-green-400 text-green-300' : 'border-cyan-400 text-white'} outline-none resize-none`}
-                                                rows={2}
-                                                autoFocus
-                                             />
-                                             <div className="flex justify-end gap-2">
-                                                 <button onClick={() => setEditingNoteId(null)} className="p-1 hover:text-red-400"><X size={14}/></button>
-                                                 <button onClick={() => saveEdit(note.id)} className="p-1 hover:text-green-400"><Save size={14}/></button>
-                                             </div>
+        {/* My Notes Section */}
+        {hasNotes ? (
+          <div className={`pointer-events-auto shrink-0 transition-all duration-300 ${theme.container} ${!isNotesExpanded ? 'hover:brightness-110 cursor-pointer' : ''}`}>
+               <div 
+                 className={`px-5 py-3 flex items-center justify-between cursor-pointer ${isNotesExpanded ? 'border-b ' + (isRetro ? 'border-green-400/50' : 'border-white/10') : ''}`}
+                 onClick={() => setIsNotesExpanded(!isNotesExpanded)}
+               >
+                  <div className="flex items-center gap-2">
+                      <StickyNote size={16} className={theme.icon} />
+                      <span className={`font-bold uppercase ${isRetro ? 'text-lg' : 'text-sm'} ${theme.headerTitle}`}>My Notes</span>
+                      <span className={`text-xs px-1.5 py-0.5 rounded-full ${isRetro ? 'bg-green-400 text-black' : isParchment ? 'bg-[#d2b48c] text-[#3e2723] border border-[#8b5a2b]' : 'bg-cyan-900 text-cyan-300'}`}>
+                          {notes.length}
+                      </span>
+                  </div>
+                  {isNotesExpanded ? <ChevronDown size={18} className={theme.subtext} /> : <ChevronUp size={18} className={theme.subtext} />}
+               </div>
+  
+               {isNotesExpanded && (
+                   <div className="p-4 bg-opacity-50 animate-in slide-in-from-top-2 duration-300">
+                       {/* Add Note Input */}
+                       <form onSubmit={handleAddNote} className="mb-4 flex gap-2">
+                           <input 
+                              type="text" 
+                              value={newNote}
+                              onChange={(e) => setNewNote(e.target.value)}
+                              placeholder="Add a personal note..."
+                              className={`flex-1 px-3 py-2 outline-none text-sm transition-colors ${theme.notesInput}`}
+                           />
+                           <button 
+                              type="submit"
+                              disabled={!newNote.trim()}
+                              className={`p-2 transition-colors disabled:opacity-50 ${theme.actionBtn}`}
+                           >
+                              <Plus size={18} />
+                           </button>
+                       </form>
+  
+                       {/* Notes List */}
+                       <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
+                         {notes.map((note) => (
+                             <div key={note.id} className={`p-3 group relative ${theme.noteCard}`}>
+                                 {editingNoteId === note.id ? (
+                                     <div className="flex flex-col gap-2">
+                                         <textarea 
+                                            value={editNoteText}
+                                            onChange={(e) => setEditNoteText(e.target.value)}
+                                            className={`w-full p-2 text-sm bg-transparent border-b ${isRetro ? 'border-green-400 text-green-300' : 'border-cyan-400 text-white'} outline-none resize-none`}
+                                            rows={2}
+                                            autoFocus
+                                         />
+                                         <div className="flex justify-end gap-2">
+                                             <button onClick={() => cancelEdit(note.id)} className="p-1 hover:text-red-400"><X size={14}/></button>
+                                             <button onClick={() => saveEdit(note.id)} className="p-1 hover:text-green-400"><Save size={14}/></button>
                                          </div>
-                                     ) : (
-                                        <>
-                                            <p className={`${bodySize} ${theme.bodyText} pr-6 break-words whitespace-pre-wrap`}>
-                                                {renderNoteText(note.text)}
-                                            </p>
-                                            <p className={`text-[10px] mt-1 opacity-50 ${theme.subtext}`}>
-                                                {new Date(note.timestamp).toLocaleDateString()}
-                                            </p>
-                                            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button onClick={() => startEditing(note)} className={`p-1 ${isRetro ? 'hover:text-green-200' : 'hover:text-cyan-200'}`}><Edit2 size={12} /></button>
-                                                <button onClick={() => handleDeleteNote(note.id)} className={`p-1 hover:text-red-400`}><Trash2 size={12} /></button>
-                                            </div>
-                                        </>
-                                     )}
-                                 </div>
-                             ))
-                         )}
-                     </div>
-                 </div>
-             )}
-        </div>
+                                     </div>
+                                 ) : (
+                                    <>
+                                        <p className={`${bodySize} ${theme.bodyText} pr-6 break-words whitespace-pre-wrap`}>
+                                            {renderNoteText(note.text)}
+                                        </p>
+                                        <p className={`text-[10px] mt-1 opacity-50 ${theme.subtext}`}>
+                                            {new Date(note.timestamp).toLocaleDateString()}
+                                        </p>
+                                        <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button onClick={() => startEditing(note)} className={`p-1 ${isRetro ? 'hover:text-green-200' : 'hover:text-cyan-200'}`}><Edit2 size={12} /></button>
+                                            <button onClick={() => handleDeleteNote(note.id)} className={`p-1 hover:text-red-400`}><Trash2 size={12} /></button>
+                                        </div>
+                                    </>
+                                 )}
+                             </div>
+                         ))}
+                       </div>
+                   </div>
+               )}
+          </div>
+        ) : (
+          <div className={`p-4 shrink-0 flex justify-center items-center pointer-events-auto transition-all ${theme.container}`}>
+             <button
+                onClick={handleInitialAddNote}
+                className={`flex w-full justify-center items-center gap-2 px-6 py-3 font-bold uppercase tracking-wider text-sm transition-colors ${theme.actionBtn} hover:brightness-110`}
+             >
+                <StickyNote size={16} />
+                Add Note
+             </button>
+          </div>
+        )}
     </div>
   );
 };

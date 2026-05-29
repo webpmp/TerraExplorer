@@ -169,27 +169,31 @@ const UniversalMarker: React.FC<{
          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
 
-      {/* Main Dot (Visual) */}
-      <mesh pointerEvents="none">
-        <sphereGeometry args={[size, 16, 16]} />
-        <meshBasicMaterial 
-          color={color} 
-          toneMapped={false} 
-          transparent={false}
-          opacity={1.0} 
-        />
-      </mesh>
-      
       {/* Border Outline (Inverted Hull) - Thinner stroke (1.2 instead of 1.4) */}
-      <mesh scale={[1.2, 1.2, 1.2]} pointerEvents="none">
+      <mesh scale={[1.2, 1.2, 1.2]} pointerEvents="none" renderOrder={998}>
            <sphereGeometry args={[size, 16, 16]} />
            <meshBasicMaterial 
               color={outlineColor} 
               side={THREE.BackSide} 
               toneMapped={false} 
-              transparent={false} // Transparent for modern (white halo effect)
+              transparent={true} 
               opacity={1.0}
+              depthTest={true}
+              depthWrite={false}
            />
+      </mesh>
+
+      {/* Main Dot (Visual) */}
+      <mesh pointerEvents="none" renderOrder={999}>
+        <sphereGeometry args={[size, 16, 16]} />
+        <meshBasicMaterial 
+          color={color} 
+          toneMapped={false} 
+          transparent={true}
+          opacity={1.0} 
+          depthTest={true}
+          depthWrite={false}
+        />
       </mesh>
 
       {/* Waypoint Number */}
@@ -418,11 +422,6 @@ const HoverOverlay: React.FC<{
        // End point is still at the label (top right of SVG box)
        lineRef.current.setAttribute('x2', '30');
        lineRef.current.setAttribute('y2', '0');
-       
-       if (capRef.current) {
-           capRef.current.setAttribute('cx', startX.toString());
-           capRef.current.setAttribute('cy', startY.toString());
-       }
     }
   });
 
@@ -449,13 +448,6 @@ const HoverOverlay: React.FC<{
               stroke={isModern ? "rgba(255,255,255,0.6)" : outlineColor} 
               strokeWidth="1.5" 
             />
-            <circle
-              ref={capRef}
-              cx="0"
-              cy="30"
-              r="3"
-              fill={isModern ? "white" : outlineColor}
-            />
           </svg>
 
           {/* Label Content */}
@@ -465,8 +457,8 @@ const HoverOverlay: React.FC<{
             ${isModern 
                 ? 'bg-black/60 text-white border-white/20 hover:bg-black/80' 
                 : isAmber
-                  ? 'bg-amber-900/80 text-amber-400 border-amber-500 font-mono hover:bg-amber-800'
-                  : 'bg-green-900/80 text-green-400 border-green-500 font-mono hover:bg-green-800'}`}
+                  ? 'bg-black text-amber-300 border-amber-400 font-mono hover:bg-amber-900/40'
+                  : 'bg-black text-green-300 border-green-400 font-mono hover:bg-green-900/40'}`}
           >
             {hoveredPin.name || 'Unknown Location'}
           </div>
@@ -493,7 +485,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
   const isAmber = skin === 'retro-amber';
 
   // Marker Colors
-  const markerColor = isParchment ? '#8b5a2b' : isModern ? '#ff3333' : isGreen ? '#a3e635' : '#fcd34d';
+  const markerColor = isParchment ? '#8b5a2b' : isModern ? '#ff0000' : isGreen ? '#a3e635' : '#fcd34d';
   const favoriteColor = isParchment ? '#8b0000' : isModern ? '#d946ef' : '#ffffff'; 
   const waypointColor = isParchment ? '#d2b48c' : isModern ? '#00e5ff' : isGreen ? '#4ade80' : '#fbbf24'; 
   

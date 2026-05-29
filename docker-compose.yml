@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  terraexplorer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Pass the Gemini API Key into the build process so Vite can inject it
+        - GEMINI_API_KEY=${GEMINI_API_KEY:-AIzaSyBm0fkUxPb2Uy5ophIxuOAkjpGhYHVHz8M}
+    image: terraexplorer-ai:latest
+    container_name: terraexplorer-ai-container
+    ports:
+      - "8080:80"
+    restart: always
