@@ -305,6 +305,15 @@ const Controls: React.FC<ControlsProps> = ({
     }
   };
 
+  const showSearchGlow = !!scanningStatusText || isSearching;
+  
+  const glowClass = !showSearchGlow ? "" : (
+     skin === 'modern' ? 'active-search-glow-modern' :
+     skin === 'retro-green' ? 'active-search-glow-green' :
+     skin === 'retro-amber' ? 'active-search-glow-amber' :
+     'active-search-glow-parchment'
+  );
+
   const theme = themes[skin];
   
   // Format placeholder for retro skins, clear on focus
@@ -312,6 +321,76 @@ const Controls: React.FC<ControlsProps> = ({
 
   return (
     <div className="absolute bottom-6 left-0 right-0 z-20 flex flex-col items-center gap-4 pointer-events-none px-4">
+      <style>{`
+        @keyframes search-orbit {
+          from {
+            stroke-dashoffset: 0;
+          }
+          to {
+            stroke-dashoffset: -1000;
+          }
+        }
+        @keyframes search-pulse-glow {
+          0%, 100% {
+            box-shadow: 0 0 5px rgba(34, 211, 238, 0.2);
+            border-color: rgba(34, 211, 238, 0.3);
+          }
+          50% {
+            box-shadow: 0 0 15px rgba(34, 211, 238, 0.6);
+            border-color: rgba(34, 211, 238, 0.8);
+          }
+        }
+        @keyframes search-pulse-glow-retro-green {
+          0%, 100% {
+            box-shadow: 0 0 5px rgba(74, 222, 128, 0.2);
+            border-color: rgba(74, 222, 128, 0.4);
+          }
+          50% {
+            box-shadow: 0 0 15px rgba(74, 222, 128, 0.7);
+            border-color: rgba(74, 222, 128, 0.9);
+          }
+        }
+        @keyframes search-pulse-glow-retro-amber {
+          0%, 100% {
+            box-shadow: 0 0 5px rgba(251, 191, 36, 0.2);
+            border-color: rgba(251, 191, 36, 0.4);
+          }
+          50% {
+            box-shadow: 0 0 15px rgba(251, 191, 36, 0.7);
+            border-color: rgba(251, 191, 36, 0.9);
+          }
+        }
+        @keyframes search-pulse-glow-parchment {
+          0%, 100% {
+            box-shadow: 0 0 5px rgba(139, 90, 43, 0.2);
+            border-color: rgba(139, 90, 43, 0.4);
+          }
+          50% {
+            box-shadow: 0 0 15px rgba(139, 90, 43, 0.7);
+            border-color: rgba(139, 90, 43, 0.9);
+          }
+        }
+        .active-search-glow-modern {
+          animation: search-pulse-glow 2s infinite ease-in-out;
+          background-color: rgba(0, 0, 0, 0.85) !important;
+        }
+        .active-search-glow-green {
+          animation: search-pulse-glow-retro-green 2s infinite ease-in-out;
+          background-color: rgba(0, 20, 0, 0.2) !important;
+        }
+        .active-search-glow-amber {
+          animation: search-pulse-glow-retro-amber 2s infinite ease-in-out;
+          background-color: rgba(20, 10, 0, 0.2) !important;
+        }
+        .active-search-glow-parchment {
+          animation: search-pulse-glow-parchment 2s infinite ease-in-out;
+          background-color: #f7eedb !important;
+        }
+        .orbiting-dot {
+          stroke-dasharray: 20 980;
+          animation: search-orbit 3s linear infinite;
+        }
+      `}</style>
       {/* Error Message */}
       {searchError && (
         <div className={`pointer-events-auto animate-bounce ${theme.error}`}>
@@ -395,7 +474,37 @@ const Controls: React.FC<ControlsProps> = ({
       {/* Search Input */}
       <form onSubmit={handleSubmit} className="w-full max-w-[532px] pointer-events-auto relative group">
         <div className={theme.glow}></div>
-        <div className={`relative flex items-center overflow-hidden transition-all ${theme.inputWrapper}`}>
+        <div className={`relative flex items-center overflow-hidden transition-all ${theme.inputWrapper} ${glowClass}`}>
+          {showSearchGlow && (
+            <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" style={{ zIndex: 5 }}>
+              <rect
+                x="0.5"
+                y="0.5"
+                width="calc(100% - 1px)"
+                height="calc(100% - 1px)"
+                rx={skin === 'modern' ? '9999px' : skin === 'parchment' ? '4px' : '0px'}
+                ry={skin === 'modern' ? '9999px' : skin === 'parchment' ? '4px' : '0px'}
+                fill="none"
+                stroke={
+                  skin === 'modern' ? '#22d3ee' :
+                  skin === 'retro-green' ? '#4ade80' :
+                  skin === 'retro-amber' ? '#fbbf24' :
+                  '#8b5a2b'
+                }
+                strokeWidth="2"
+                pathLength="1000"
+                className="orbiting-dot"
+                style={{
+                  filter: `drop-shadow(0 0 4px ${
+                    skin === 'modern' ? '#22d3ee' :
+                    skin === 'retro-green' ? '#4ade80' :
+                    skin === 'retro-amber' ? '#fbbf24' :
+                    '#8b5a2b'
+                  })`
+                }}
+              />
+            </svg>
+          )}
           <Search className={`ml-4 ${theme.inputIcon}`} size={20} />
           <input
             type="text"
