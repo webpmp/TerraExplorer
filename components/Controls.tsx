@@ -319,7 +319,7 @@ const Controls: React.FC<ControlsProps> = ({
   const theme = themes[skin];
   
   // Dynamic styling for inline geocoding/search error status display inside the search input
-  const hasInlineError = !!(searchError && searchError !== "TEMPORARILY UNABLE TO LOAD LOCATION DATA");
+  const hasInlineError = !!(searchError && searchError !== "TEMPORARILY UNABLE TO LOAD LOCATION DATA" && searchError !== "LOCATION SYSTEM UNAVAILABLE");
   const errorTextClass = (hasInlineError && !isFocused) ? (
     skin === 'parchment' ? 'text-[#8b0000] font-bold font-mono text-sm uppercase' :
     skin === 'retro-green' ? 'text-green-400 font-bold font-retro tracking-wider uppercase text-lg blinking' :
@@ -409,9 +409,9 @@ const Controls: React.FC<ControlsProps> = ({
           animation: search-orbit 3s linear infinite;
         }
       `}</style>
-      {/* Error Message - Only floating overlay for critical system failures */}
-      {searchError === "TEMPORARILY UNABLE TO LOAD LOCATION DATA" && (
-        <div className={`pointer-events-auto animate-bounce ${theme.error}`}>
+      {/* Error Message - Only floating overlay for critical system failures (no motion allowed) */}
+      {(searchError === "TEMPORARILY UNABLE TO LOAD LOCATION DATA" || searchError === "LOCATION SYSTEM UNAVAILABLE") && (
+        <div className={`pointer-events-auto ${theme.error}`}>
           <AlertTriangle size={16} />
           {searchError}
         </div>
@@ -526,7 +526,7 @@ const Controls: React.FC<ControlsProps> = ({
           <Search className={`ml-4 ${theme.inputIcon}`} size={20} />
           <input
             type="text"
-            value={searchError && !isFocused && searchError !== "TEMPORARILY UNABLE TO LOAD LOCATION DATA" ? searchError : query}
+            value={hasInlineError && !isFocused ? searchError : query}
             onChange={(e) => {
               if (hasInlineError && onClearError) onClearError();
               setQuery(e.target.value);

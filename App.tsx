@@ -10,7 +10,7 @@ import InfoPanel from './components/InfoPanel';
 import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint, GeoCoordinates } from './types';
-import { resolveLocationQuery, getInfoFromCoordinates, getInfoFromFeature, getNearbyPlaces, getMoreNews, fetchLiveNews, generateRoute, extractEntityFromQuery } from './services/geminiService';
+import { resolveLocationQuery, getInfoFromCoordinates, getInfoFromFeature, getNearbyPlaces, getMoreNews, fetchLiveNews, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity } from './services/geminiService';
 
 // Helper to convert Lat/Lng to 3D Cartesian coordinates (Local Space)
 const latLngToVector3 = (lat: number, lng: number, radius: number = 1) => {
@@ -1158,8 +1158,9 @@ const App: React.FC = () => {
     const cleanQuery = query.trim();
     if (!cleanQuery) return;
 
-    // Intent routing: extract entity from natural language queries
-    const extracted = extractEntityFromQuery(cleanQuery);
+    // 1. Intent routing & entity extraction
+    const parsedQuery = routeIntentAndExtractEntity(cleanQuery);
+    console.log(`[DEBUG] Intent Routed: ${parsedQuery.intent}, Extracted Entity: "${parsedQuery.entity}"`);
 
     setInteractionState('PIN_SELECTED');
     setIsLoading(true);
@@ -1177,10 +1178,11 @@ const App: React.FC = () => {
     setSelectedMarkerId(null);
     setIsFocused(true);
 
-    // Show status line inside the search input: LOCATING X...
-    setScanningStatusText(`LOCATING ${extracted.toUpperCase()}`);
+    // 2. Active loading state inside the search input
+    setScanningStatusText(`LOCATING ${parsedQuery.entity.toUpperCase()}`);
 
-    const result = await resolveLocationQuery(extracted);
+    // 3. Unified entity resolver lookup
+    const result = await resolveLocationQuery(parsedQuery.entity);
     
     setScanningStatusText(null);
 
@@ -1221,14 +1223,16 @@ const App: React.FC = () => {
     } else {
       let userError = "COULD NOT RESOLVE LOCATION";
       const errorCode = result?.error;
-      if (errorCode === "NOT_FOUND") {
-        userError = "COULD NOT FIND A MATCH FOR THIS LOCATION";
-      } else if (errorCode === "AMBIGUOUS") {
-        userError = "LOCATION IS TOO AMBIGUOUS TO RESOLVE";
+      if (errorCode === "LOCATION_SYSTEM_UNAVAILABLE") {
+        userError = "LOCATION SYSTEM UNAVAILABLE";
+      } else if (errorCode === "NOT_FOUND") {
+        userError = "COULD NOT FIND LOCATION";
+      } else if (errorCode === "NO_GEOGRAPHIC_DATA") {
+        userError = "NO RESULTS FOUND FOR THIS QUERY";
       } else if (errorCode === "TEMP_FAILURE") {
         userError = "TEMPORARILY UNABLE TO LOAD LOCATION DATA";
-      } else if (errorCode === "NO_GEOGRAPHIC_DATA") {
-        userError = "NO LOCATION DATA AVAILABLE FOR THIS SEARCH";
+      } else if (errorCode === "AMBIGUOUS") {
+        userError = "LOCATION IS TOO AMBIGUOUS TO RESOLVE";
       }
       setSearchError(userError);
       setIsLoading(false);

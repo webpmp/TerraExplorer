@@ -262,25 +262,37 @@ export const resolveLocationQuery = async (query: string): Promise<SearchResult 
   try {
     const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
     
+    // Pre-flight capability check: If API key is invalid or missing, fail immediately
+    if (!apiKey || apiKey === 'dummy-key-for-ts-check') {
+       console.log("[DEBUG] Failure reason code: LOCATION_SYSTEM_UNAVAILABLE");
+       return { error: "LOCATION_SYSTEM_UNAVAILABLE" };
+    }
+
     const mainPrompt = `
-      You are an intelligent geographic knowledge engine.
+      You are an intelligent geographic knowledge engine and unified semantic entity resolver.
       Current Date: ${currentDate}
       User Query: "${query}"
 
-      Instructions:
-      1. Analyze the query. Identify the specific geographic location.
-      2. Return a JSON object containing the location details.
-      3. 'suggestedZoom': 0-10 scale. 8-10 for specific landmarks/cities, 4-6 for countries.
-      4. 'description': Explain specifically WHY this location answers their question, then provide context. Keep it under 100 words.
-      5. 'population': Recent population estimate (e.g. "8.4 million").
-      6. 'climate': Köppen climate classification (e.g. "Tropical Rainforest").
-      7. 'funFacts': List 3 interesting facts about the location.
-      8. 'coordinates': Precise decimal lat/lng.
-         - CRITICAL: If the query cannot be matched to any known place, set coordinates to {"lat": 999, "lng": 999} and set name to "NOT_FOUND".
+      Your task is to resolve the user query (which might be a direct place lookup, a natural language query, a historical event query, or an exploratory/POI theme) into a specific geographic location or a highly relevant central event coordinate point.
+      
+      Instructions for different query types:
+      1. Direct place lookup (e.g. "Dallas", "Tokyo", "Paris France"): Resolve to the exact city/state coordinates.
+      2. Natural language / Historical events (e.g. "Great Fire of London", "assassination of Archduke Franz Ferdinand"): Identify the most relevant geographic location where the historical event took place (e.g., London / Pudding Lane coordinates lat 51.51, lng -0.08, or Sarajevo coordinates lat 43.85, lng 18.41) and explain the specific historical context in 'description'.
+      3. Exploratory / mixed POI queries (e.g. "shipwrecks near Bermuda Triangle"): Identify the central coordinates of the region or historical theme, and explain the topic in 'description'.
+      4. DO NOT fail for natural language, events, or POI queries if a location can be inferred. Instead, resolve to the most educational and historically accurate coordinates.
+
+      Return a JSON object containing the location/event details.
+      - 'suggestedZoom': 0-10 scale. 8-10 for specific landmarks/cities/events, 4-6 for countries/regions.
+      - 'description': Explain specifically WHY this location/event answers their query, then provide historical/geographical context. Keep it under 100 words.
+      - 'population': Recent population estimate or write "Historical/Event" if not applicable.
+      - 'climate': Köppen climate classification or write "Varies" if not applicable.
+      - 'funFacts': List 3 interesting facts about the location or historical event.
+      - 'coordinates': Precise decimal lat/lng.
+         - CRITICAL: If the query cannot be matched to any known place or historical event location at all, set coordinates to {"lat": 999, "lng": 999} and set name to "NOT_FOUND".
          - CRITICAL: If the query is too ambiguous or incomplete to resolve (e.g. multiple matches exist or input is unclear), set coordinates to {"lat": 998, "lng": 998} and set name to "AMBIGUOUS".
          - CRITICAL: If there is no geographic data available for this search, set coordinates to {"lat": 997, "lng": 997} and set name to "NO_GEOGRAPHIC_DATA".
-      9. 'notable': List 3 notable people associated with this place. For 'significance', provide a descriptive sentence (approx 100-120 chars).
-      10. 'type': Choose ONE from: Continent, Country, State, City, Ocean, Point of Interest. Do not use random numbers.
+      - 'notable': List 3 notable people associated with this place/event. For 'significance', provide a descriptive sentence (approx 100-120 chars).
+      - 'type': Choose ONE from: Continent, Country, State, City, Ocean, Point of Interest.
       
       Output strictly valid JSON.
     `;
@@ -645,14 +657,42 @@ export const generateRoute = async (text: string): Promise<Waypoint[]> => {
   }
 };
 
-export const extractEntityFromQuery = (query: string): string => {
+export type QueryIntent = 'DIRECT' | 'NATURAL_LOCATION' | 'EXPLORATORY';
+
+export interface ExtractedQuery {
+  intent: QueryIntent;
+  entity: string;
+}
+
+export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
   const clean = query.trim();
   
-  // Regex patterns to detect natural language prefixes/suffixes
-  const patterns = [
+  // 1. Check for Exploratory / mixed knowledge patterns
+  const exploratoryPatterns = [
+    /\bnear\b/i,
+    /\baround\b/i,
+    /\bshipwrecks\b/i,
+    /\bplaces\s+in\b/i,
+    /\bhistory\s+of\b/i,
+    /\bimportant\s+places\b/i,
+    /\bevents\s+of\b/i,
+    /\bbattles\s+of\b/i,
+  ];
+  
+  for (const pattern of exploratoryPatterns) {
+    if (pattern.test(clean)) {
+      return { intent: 'EXPLORATORY', entity: clean };
+    }
+  }
+
+  // 2. Check for Natural language location queries
+  const nlPatterns = [
+    /^\s*where\s+did\s+(.+?)\s+take\s+place\s*\??\s*$/i,
+    /^\s*where\s+did\s+(.+?)\s+happen\s*\??\s*$/i,
     /^\s*where\s+is\s+located\s+(.+)$/i,
     /^\s*where\s+is\s+(.+?)(?:\s+located|\s+found)?\s*\??\s*$/i,
     /^\s*where\s+was\s+(.+?)(?:\s+found|\s+located)?\s*\??\s*$/i,
+    /^\s*location\s+of\s+(.+?)\s*$/i,
     /^\s*tell\s+me\s+(?:about|more\s+about)\s+(.+?)\s*$/i,
     /^\s*show\s+me\s+(.+?)\s*$/i,
     /^\s*find\s+(.+?)\s*$/i,
@@ -662,13 +702,21 @@ export const extractEntityFromQuery = (query: string): string => {
     /^\s*info(?:rmation)?\s+on\s+(.+?)\s*$/i,
   ];
 
-  for (const pattern of patterns) {
+  for (const pattern of nlPatterns) {
     const match = clean.match(pattern);
     if (match && match[1]) {
-      // Return the extracted entity
-      return match[1].replace(/[?.,!]+$/, "").trim();
+      return { 
+        intent: 'NATURAL_LOCATION', 
+        entity: match[1].replace(/[?.,!]+$/, "").trim() 
+      };
     }
   }
 
-  return clean;
+  // 3. Fallback to Direct lookup
+  return { intent: 'DIRECT', entity: clean };
+};
+
+export const extractEntityFromQuery = (query: string): string => {
+  const extracted = routeIntentAndExtractEntity(query);
+  return extracted.entity;
 };
