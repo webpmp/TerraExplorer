@@ -529,7 +529,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           {/* Header */}
           <div className={`relative p-5 shrink-0 flex flex-col items-center ${skin === 'modern' ? 'border-b border-white/10' : ''} ${theme.header}`}>
             {/* 1. Close X button */}
-            <button onClick={onClose} className={`absolute top-3 right-3 p-1 transition-colors ${theme.closeBtn}`}>
+            <button onClick={onClose} className={`absolute top-3 right-3 p-1 z-50 pointer-events-auto transition-colors ${theme.closeBtn}`} aria-label="Close panel">
               <X size={20} />
             </button>
             

@@ -224,7 +224,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
           <div className={`${theme.container} flex flex-col shrink min-h-0 overflow-hidden`}>
               <div className={`p-4 flex items-center justify-between shrink-0 ${theme.header}`}>
                   <h2 className={`text-lg font-bold ${theme.headerTitle}`}>EXPLORATIONS</h2>
-                  <button onClick={onClose} className={theme.closeBtn}>
+                  <button onClick={onClose} className={`${theme.closeBtn} z-50 pointer-events-auto`} aria-label="Close explorations">
                       <X size={18} />
                   </button>
               </div>
