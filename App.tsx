@@ -1210,7 +1210,20 @@ const App: React.FC = () => {
       }
 
     } else {
-      setSearchError(`Could not find location: "${query}"`);
+      let userError = "UNABLE TO RESOLVE LOCATION DATA";
+      const errorCode = result?.error;
+      if (errorCode === "NOT_FOUND") {
+        userError = "COULD NOT FIND A MATCH FOR THIS LOCATION";
+      } else if (errorCode === "AMBIGUOUS") {
+        userError = "LOCATION IS TOO AMBIGUOUS TO RESOLVE";
+      } else if (errorCode === "TEMP_FAILURE") {
+        userError = "TEMPORARILY UNABLE TO LOAD LOCATION DATA";
+      } else if (errorCode === "NO_GEOGRAPHIC_DATA") {
+        userError = "NO LOCATION DATA AVAILABLE FOR THIS SEARCH";
+      } else if (errorCode === "UNABLE_TO_RESOLVE") {
+        userError = "UNABLE TO RESOLVE LOCATION DATA";
+      }
+      setSearchError(userError);
       setIsLoading(false);
     }
   };

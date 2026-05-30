@@ -55,8 +55,9 @@ export interface MapMarker {
 }
 
 export interface SearchResult {
-  locationInfo: LocationInfo;
-  suggestedZoom: number;
+  locationInfo?: LocationInfo;
+  suggestedZoom?: number;
+  error?: "NOT_FOUND" | "AMBIGUOUS" | "TEMP_FAILURE" | "NO_GEOGRAPHIC_DATA" | "UNABLE_TO_RESOLVE";
 }
 
 export interface Waypoint {

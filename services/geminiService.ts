@@ -276,6 +276,9 @@ export const resolveLocationQuery = async (query: string): Promise<SearchResult 
       6. 'climate': Köppen climate classification (e.g. "Tropical Rainforest").
       7. 'funFacts': List 3 interesting facts about the location.
       8. 'coordinates': Precise decimal lat/lng.
+         - CRITICAL: If the query cannot be matched to any known place, set coordinates to {"lat": 999, "lng": 999} and set name to "NOT_FOUND".
+         - CRITICAL: If the query is too ambiguous or incomplete to resolve (e.g. multiple matches exist or input is unclear), set coordinates to {"lat": 998, "lng": 998} and set name to "AMBIGUOUS".
+         - CRITICAL: If there is no geographic data available for this search, set coordinates to {"lat": 997, "lng": 997} and set name to "NO_GEOGRAPHIC_DATA".
       9. 'notable': List 3 notable people associated with this place. For 'significance', provide a descriptive sentence (approx 100-120 chars).
       10. 'type': Choose ONE from: Continent, Country, State, City, Ocean, Point of Interest. Do not use random numbers.
       
@@ -294,7 +297,37 @@ export const resolveLocationQuery = async (query: string): Promise<SearchResult 
 
     const mainResponse = await mainRequest;
     const data = safeJsonParse(mainResponse.text);
-    if (!data) return null;
+    
+    // Debug-only internal logging
+    console.log("[DEBUG] Raw lookup query:", query);
+    console.log("[DEBUG] Response payload:", mainResponse.text);
+    console.log("[DEBUG] Parsed result:", data);
+
+    if (!data) {
+       console.log("[DEBUG] Failure reason code: DATA_PARSE_NULL");
+       return { error: "UNABLE_TO_RESOLVE" };
+    }
+
+    if (data.coordinates) {
+       const lat = data.coordinates.lat;
+       const lng = data.coordinates.lng;
+       
+       if (lat === 999 && lng === 999) {
+          console.log("[DEBUG] Failure reason code: LOCATION_NOT_FOUND");
+          return { error: "NOT_FOUND" };
+       }
+       if (lat === 998 && lng === 998) {
+          console.log("[DEBUG] Failure reason code: LOCATION_AMBIGUOUS");
+          return { error: "AMBIGUOUS" };
+       }
+       if (lat === 997 && lng === 997) {
+          console.log("[DEBUG] Failure reason code: NO_GEOGRAPHIC_DATA");
+          return { error: "NO_GEOGRAPHIC_DATA" };
+       }
+    } else {
+       console.log("[DEBUG] Failure reason code: MISSING_COORDINATES");
+       return { error: "NO_GEOGRAPHIC_DATA" };
+    }
 
     if (!data.coordinates || typeof data.coordinates.lat !== 'number') {
         console.warn("Resolved location missing valid coordinates");
@@ -312,9 +345,16 @@ export const resolveLocationQuery = async (query: string): Promise<SearchResult 
       suggestedZoom: data.suggestedZoom || 5
     };
 
-  } catch (error) {
-    console.error("Error resolving location:", error);
-    return null;
+  } catch (error: any) {
+    console.log("[DEBUG] Raw lookup query:", query);
+    console.log("[DEBUG] Failure reason code: EXCEPTION_THROWN", error?.message || error);
+    
+    // Distinguish temporary failure (network issues/timeout/blocked request)
+    const errMsg = error?.message?.toLowerCase() || "";
+    if (errMsg.includes("fetch") || errMsg.includes("network") || errMsg.includes("timeout") || errMsg.includes("quota") || errMsg.includes("limit") || errMsg.includes("exhaust")) {
+       return { error: "TEMP_FAILURE" };
+    }
+    return { error: "UNABLE_TO_RESOLVE" };
   }
 };
 
