@@ -732,7 +732,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
            const pulse = 0.5 + Math.abs(Math.sin(time * 6.0)) * 0.5;
            centerPulseRef.current.scale.set(pulse, pulse, 1);
            if (centerPulseRef.current.material) {
-              (centerPulseRef.current.material as THREE.MeshBasicMaterial).opacity = 0.8 * (1.0 - (pulse - 0.5) / 1.0);
+              (centerPulseRef.current.material as THREE.MeshBasicMaterial).opacity = 0.95 * (1.0 - (pulse - 0.5) / 1.0);
            }
         }
         
@@ -743,7 +743,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
               const phase = (time * 0.4 + i * 0.33) % 1.0;
               ring.scale.set(phase, phase, 1);
               if (ring.material) {
-                 (ring.material as THREE.MeshBasicMaterial).opacity = 0.45 * (1.0 - phase);
+                 (ring.material as THREE.MeshBasicMaterial).opacity = 0.8 * (1.0 - phase);
               }
            }
         }
@@ -1070,9 +1070,9 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
           <mesh ref={centerPulseRef}>
              <ringGeometry args={[0, 0.015, 32]} />
              <meshBasicMaterial 
-               color={isParchment ? "#8b5a2b" : (isAmber ? "#fbbf24" : (isGreen ? "#4ade80" : "#22d3ee"))}
+               color={isParchment ? "#e8d5b5" : (isAmber ? "#fbbf24" : (isGreen ? "#4ade80" : "#22d3ee"))}
                transparent
-               opacity={0.8}
+               opacity={0.95}
                depthWrite={false}
                side={THREE.DoubleSide}
              />
@@ -1089,9 +1089,9 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
                       />
                    </bufferGeometry>
                    <lineBasicMaterial 
-                      color={isParchment ? "#8b5a2b" : (isAmber ? "#fbbf24" : (isGreen ? "#4ade80" : "#22d3ee"))} 
+                      color={isParchment ? "#e8d5b5" : (isAmber ? "#fbbf24" : (isGreen ? "#4ade80" : "#22d3ee"))} 
                       transparent 
-                      opacity={0.25} 
+                      opacity={0.75} 
                       depthWrite={false}
                    />
                 </line>
@@ -1103,7 +1103,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
              <mesh key={i} ref={(el) => { scanRingsRef.current[i] = el; }}>
                 <ringGeometry args={[0.08, 0.085, 32]} />
                 <meshBasicMaterial 
-                  color={isParchment ? "#8b5a2b" : (isAmber ? "#fbbf24" : (isGreen ? "#4ade80" : "#22d3ee"))}
+                  color={isParchment ? "#e8d5b5" : (isAmber ? "#fbbf24" : (isGreen ? "#4ade80" : "#22d3ee"))}
                   transparent
                   depthWrite={false}
                   side={THREE.DoubleSide}

@@ -460,7 +460,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       closeBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] border border-transparent rounded",
       actionBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] border border-transparent rounded",
       loadMoreBtn: "bg-[#e8d5b5]/50 border border-[#8b5a2b] hover:bg-[#d2b48c] text-[#5c3a21] rounded-sm text-sm tracking-widest uppercase font-bold",
-      notesInput: "bg-[#f4ead5] border border-[#8b5a2b] text-[#522B07] placeholder-[#522B07] shadow-[inset_1px_1px_3px_rgba(0,0,0,0.1)] rounded-sm focus:border-[#5c3a21]",
+      notesInput: "bg-[#f4ead5] border border-[#8b5a2b] text-[#522B07] placeholder-[#522B07] shadow-[inset_1px_1px_3px_rgba(0,0,0,0.1)] rounded-sm focus:border-[#5c3a21] caret-[#522B07]",
       noteCard: "bg-[#f4ead5] border border-[#8b5a2b]/50 rounded-sm shadow-[inset_1px_1px_2px_rgba(255,255,255,0.4)]",
       navBtn: "bg-[#e8d5b5] border border-[#8b5a2b]/40 hover:bg-[#d2b48c] hover:text-[#3e2723] text-[#5c3a21]",
       popover: "bg-[#f4ead5] border-2 border-[#8b5a2b] rounded-sm shadow-[0_4px_15px_rgba(0,0,0,0.4)]"
@@ -606,7 +606,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
           {/* Route Navigation */}
           {routeNav && (
-            <div className={`p-3 border-b flex items-center justify-between ${isRetro ? 'border-current opacity-80' : 'border-white/10 bg-white/5'}`}>
+             <div className={`p-3 border-b flex items-center justify-between ${isRetro ? 'border-current opacity-80' : isParchment ? 'border-[#8b5a2b]/30 bg-[#e8d5b5]/20' : 'border-white/10 bg-white/5'}`}>
                 <button onClick={routeNav.onPrev} className={`p-1.5 rounded-full ${theme.navBtn}`}>
                     <ChevronLeft size={16} />
                 </button>
@@ -663,7 +663,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                              <h3 className={`text-sm font-bold uppercase tracking-widest mb-1 ${isRetro ? 'text-current' : isParchment ? 'text-[#8b5a2b]' : 'text-cyan-400'}`}>
                                 {info.routeContext.title}
                             </h3>
-                            <p className={`leading-relaxed ${bodySize} font-medium ${theme.bodyText} mb-4 border-b ${isRetro ? 'border-current/30' : 'border-white/10'} pb-4`}>
+                            <p className={`leading-relaxed ${bodySize} font-medium ${theme.bodyText} mb-4 border-b ${isRetro ? 'border-current/30' : isParchment ? 'border-[#8b5a2b]/30' : 'border-white/10'} pb-4`}>
                                 {info.routeContext.text}
                             </p>
                         </div>
@@ -813,7 +813,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         {hasNotes ? (
           <div className={`pointer-events-auto shrink-0 transition-all duration-300 ${theme.container} ${!isNotesExpanded ? 'hover:brightness-110 cursor-pointer' : ''}`}>
                <div 
-                 className={`px-5 py-3 flex items-center justify-between cursor-pointer ${isNotesExpanded ? 'border-b ' + (isRetro ? 'border-green-400/50' : 'border-white/10') : ''}`}
+                 className={`px-5 py-3 flex items-center justify-between cursor-pointer ${isNotesExpanded ? 'border-b ' + (isRetro ? 'border-green-400/50' : isParchment ? 'border-[#8b5a2b]/30' : 'border-white/10') : ''}`}
                  onClick={() => setIsNotesExpanded(!isNotesExpanded)}
                >
                   <div className="flex items-center gap-2">
@@ -855,7 +855,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                                          <textarea 
                                             value={editNoteText}
                                             onChange={(e) => setEditNoteText(e.target.value)}
-                                            className={`w-full p-2 text-sm bg-transparent border-b ${isRetro ? 'border-green-400 text-green-300' : 'border-cyan-400 text-white'} outline-none resize-none`}
+                                            className={`w-full p-2 text-sm bg-transparent border-b ${isRetro ? 'border-green-400 text-green-300' : isParchment ? 'border-[#8b5a2b] text-[#522B07] caret-[#522B07]' : 'border-cyan-400 text-white'} outline-none resize-none`}
                                             rows={2}
                                             autoFocus
                                          />

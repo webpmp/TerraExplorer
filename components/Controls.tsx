@@ -295,7 +295,7 @@ const Controls: React.FC<ControlsProps> = ({
       btnActive: "bg-[#d2b48c] text-[#3e2723] border-[#5c3a21] shadow-[inset_1px_1px_3px_rgba(0,0,0,0.3)]",
       favActive: "bg-[#e8d5b5] text-[#b8860b] border-[#b8860b] shadow-[0_0_10px_rgba(184,134,11,0.3)] hover:bg-[#d2b48c] hover:text-[#8b6508]",
       
-      inputWrapper: "bg-[#f4ead5]/95 backdrop-blur-md border border-[#8b5a2b]/60 rounded shadow-[inset_0_1px_4px_rgba(0,0,0,0.1)]",
+      inputWrapper: "bg-[#f4ead5]/95 backdrop-blur-md border-0 rounded shadow-[inset_0_0_0_1px_rgba(140,110,75,0.35)]",
       inputIcon: "text-[#8b5a2b]",
       inputField: "text-[#522B07] placeholder-[#522B07] font-mono text-sm",
       submitBtn: "bg-[#e8d5b5] text-[#5c3a21] hover:bg-[#d2b48c]/80 rounded-[0_3px_3px_0] font-sans font-bold uppercase",
@@ -318,21 +318,24 @@ const Controls: React.FC<ControlsProps> = ({
 
   const theme = themes[skin];
   
-  // Dynamic styling for inline geocoding/search error status display inside the search input
-  const hasInlineError = !!(searchError && searchError !== "TEMPORARILY UNABLE TO LOAD LOCATION DATA" && searchError !== "LOCATION SYSTEM UNAVAILABLE");
-  const errorTextClass = (hasInlineError && !isFocused) ? (
-    skin === 'parchment' ? 'text-[#8b0000] font-bold font-mono text-sm uppercase' :
-    skin === 'retro-green' ? 'text-green-400 font-bold font-retro tracking-wider uppercase text-lg blinking' :
-    skin === 'retro-amber' ? 'text-amber-400 font-bold font-retro tracking-wider uppercase text-lg blinking' :
-    'text-red-500 font-bold font-mono text-sm uppercase'
-  ) : theme.inputField;
-
   const handleInputFocus = () => {
     setIsFocused(true);
-    if (hasInlineError && onClearError) {
+    if (searchError && onClearError) {
        onClearError();
     }
   };
+
+  const tooltipStyle = 
+    skin === 'modern' ? 'bg-slate-900 border border-red-500/40 text-red-200' :
+    skin === 'retro-green' ? 'bg-black border-2 border-green-400 text-green-400 font-retro rounded-none' :
+    skin === 'retro-amber' ? 'bg-black border-2 border-amber-400 text-amber-400 font-retro rounded-none' :
+    'bg-[#f4ead5] border border-[#8b5a2b] text-[#8b0000] font-sans rounded-sm';
+
+  const errorIconColor = 
+    skin === 'modern' ? 'text-red-500' :
+    skin === 'retro-green' ? 'text-green-400' :
+    skin === 'retro-amber' ? 'text-amber-400' :
+    'text-[#8b0000]';
 
   // Format placeholder for retro skins, clear on focus
   const displayPlaceholder = isFocused ? "" : (skin === 'modern' ? placeholder : placeholder.toUpperCase());
@@ -380,12 +383,16 @@ const Controls: React.FC<ControlsProps> = ({
         }
         @keyframes search-pulse-glow-parchment {
           0%, 100% {
-            box-shadow: 0 0 5px rgba(139, 90, 43, 0.2);
-            border-color: rgba(139, 90, 43, 0.4);
+            box-shadow: 0 0 2px rgba(200, 170, 120, 0.20), 0 0 5px rgba(120, 95, 65, 0.08);
+            opacity: 0.45;
           }
-          50% {
-            box-shadow: 0 0 15px rgba(139, 90, 43, 0.7);
-            border-color: rgba(139, 90, 43, 0.9);
+          30% {
+            box-shadow: 0 0 3px rgba(200, 170, 120, 0.30), 0 0 7px rgba(120, 95, 65, 0.12);
+            opacity: 0.65;
+          }
+          60% {
+            box-shadow: 0 0 6px rgba(210, 180, 130, 0.55), 0 0 12px rgba(120, 95, 65, 0.18);
+            opacity: 0.95;
           }
         }
         .active-search-glow-modern {
@@ -402,20 +409,13 @@ const Controls: React.FC<ControlsProps> = ({
         }
         .active-search-glow-parchment {
           animation: search-pulse-glow-parchment 2s infinite ease-in-out;
-          background-color: #f7eedb !important;
         }
         .orbiting-dot {
           stroke-dasharray: 20 980;
           animation: search-orbit 3s linear infinite;
         }
       `}</style>
-      {/* Error Message - Only floating overlay for critical system failures (no motion allowed) */}
-      {(searchError === "TEMPORARILY UNABLE TO LOAD LOCATION DATA" || searchError === "LOCATION SYSTEM UNAVAILABLE") && (
-        <div className={`pointer-events-auto ${theme.error}`}>
-          <AlertTriangle size={16} />
-          {searchError}
-        </div>
-      )}
+
 
       {/* Trace Route Modal */}
       {isTraceModalOpen && (
@@ -492,46 +492,114 @@ const Controls: React.FC<ControlsProps> = ({
       {/* Search Input */}
       <form onSubmit={handleSubmit} className="w-full max-w-[532px] pointer-events-auto relative group">
         <div className={theme.glow}></div>
-        <div className={`relative flex items-center overflow-hidden transition-all ${theme.inputWrapper} ${glowClass}`}>
+        {skin === 'parchment' ? (
+          <div className="relative w-full">
+            {/* Outer wrapper: renders glow with no clipping, z-0, extending beyond input boundaries */}
+            {showSearchGlow && (
+              <div className="absolute inset-[-3px] z-0 rounded pointer-events-none active-search-glow-parchment" />
+            )}
+            {/* Inner container: actual input field, z-10 */}
+            <div className={`relative z-10 flex items-center transition-all ${theme.inputWrapper}`}>
+              <Search className={`ml-4 ${theme.inputIcon}`} size={20} />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => {
+                  if (searchError && onClearError) onClearError();
+                  setQuery(e.target.value);
+                }}
+                onFocus={handleInputFocus}
+                onBlur={() => setIsFocused(false)}
+                placeholder={displayPlaceholder}
+                disabled={!!scanningStatusText}
+                className={`w-full bg-transparent border-none px-4 py-4 focus:ring-0 outline-none ${theme.inputField}`}
+              />
 
-          <Search className={`ml-4 ${theme.inputIcon}`} size={20} />
-          <input
-            type="text"
-            value={hasInlineError && !isFocused ? searchError : query}
-            onChange={(e) => {
-              if (hasInlineError && onClearError) onClearError();
-              setQuery(e.target.value);
-            }}
-            onFocus={handleInputFocus}
-            onBlur={() => setIsFocused(false)}
-            placeholder={displayPlaceholder}
-            disabled={!!scanningStatusText}
-            className={`w-full bg-transparent border-none px-4 py-4 focus:ring-0 outline-none ${errorTextClass}`}
-          />
-          
-          {(query || (hasInlineError && !isFocused)) && !scanningStatusText && (
-            <button
-              type="button"
-              onClick={() => {
-                setQuery("");
-                if (hasInlineError && onClearError) onClearError();
+              {searchError && (
+                <div className="relative flex items-center mr-2 select-none group/error-tooltip">
+                  <AlertTriangle className={`cursor-pointer animate-pulse shrink-0 ${errorIconColor}`} size={20} />
+                  {/* Tooltip Content */}
+                  <div className={`absolute bottom-full mb-2 right-1/2 translate-x-1/2 pointer-events-none opacity-0 group-hover/error-tooltip:opacity-100 transition-opacity duration-200 z-50 whitespace-nowrap text-xs font-bold uppercase tracking-wider px-3 py-1.5 shadow-xl border backdrop-blur-md ${tooltipStyle}`}>
+                    {searchError}
+                  </div>
+                </div>
+              )}
+              
+              {query && !scanningStatusText && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuery("");
+                    if (searchError && onClearError) onClearError();
+                  }}
+                  className={theme.resetBtn}
+                  aria-label="Clear Search"
+                >
+                  <X size={16} />
+                </button>
+              )}
+
+              <button 
+                type={scanningStatusText ? "button" : "submit"}
+                onClick={scanningStatusText ? onCancelScan : undefined}
+                disabled={isSearching && !scanningStatusText}
+                className={`mr-2 px-4 py-2 transition-colors disabled:opacity-50 ${theme.submitBtn}`}
+              >
+                {scanningStatusText ? "CANCEL" : isSearching ? <Loader2 size={18} className="animate-spin" /> : "EXPLORE"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className={`relative flex items-center transition-all ${theme.inputWrapper} ${glowClass}`}>
+            <Search className={`ml-4 ${theme.inputIcon}`} size={20} />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => {
+                if (searchError && onClearError) onClearError();
+                setQuery(e.target.value);
               }}
-              className={theme.resetBtn}
-              aria-label="Clear Search"
-            >
-              <X size={16} />
-            </button>
-          )}
+              onFocus={handleInputFocus}
+              onBlur={() => setIsFocused(false)}
+              placeholder={displayPlaceholder}
+              disabled={!!scanningStatusText}
+              className={`w-full bg-transparent border-none px-4 py-4 focus:ring-0 outline-none ${theme.inputField}`}
+            />
 
-          <button 
-            type={scanningStatusText ? "button" : "submit"}
-            onClick={scanningStatusText ? onCancelScan : undefined}
-            disabled={isSearching && !scanningStatusText}
-            className={`mr-2 px-4 py-2 transition-colors disabled:opacity-50 ${theme.submitBtn}`}
-          >
-            {scanningStatusText ? "CANCEL" : isSearching ? <Loader2 size={18} className="animate-spin" /> : "EXPLORE"}
-          </button>
-        </div>
+            {searchError && (
+              <div className="relative flex items-center mr-2 select-none group/error-tooltip">
+                <AlertTriangle className={`cursor-pointer animate-pulse shrink-0 ${errorIconColor}`} size={20} />
+                {/* Tooltip Content */}
+                <div className={`absolute bottom-full mb-2 right-1/2 translate-x-1/2 pointer-events-none opacity-0 group-hover/error-tooltip:opacity-100 transition-opacity duration-200 z-50 whitespace-nowrap text-xs font-bold uppercase tracking-wider px-3 py-1.5 shadow-xl border backdrop-blur-md ${tooltipStyle}`}>
+                  {searchError}
+                </div>
+              </div>
+            )}
+            
+            {query && !scanningStatusText && (
+              <button
+                type="button"
+                onClick={() => {
+                  setQuery("");
+                  if (searchError && onClearError) onClearError();
+                }}
+                className={theme.resetBtn}
+                aria-label="Clear Search"
+              >
+                <X size={16} />
+              </button>
+            )}
+
+            <button 
+              type={scanningStatusText ? "button" : "submit"}
+              onClick={scanningStatusText ? onCancelScan : undefined}
+              disabled={isSearching && !scanningStatusText}
+              className={`mr-2 px-4 py-2 transition-colors disabled:opacity-50 ${theme.submitBtn}`}
+            >
+              {scanningStatusText ? "CANCEL" : isSearching ? <Loader2 size={18} className="animate-spin" /> : "EXPLORE"}
+            </button>
+          </div>
+        )}
       </form>
       
       {/* Copyright Text */}
