@@ -169,7 +169,18 @@ const UniversalMarker: React.FC<{
 
       // 2. Fetch screen-space collision offset computed in parent's useFrame loop
       const displacement = scanOffsetsRef?.current?.[markerId] || new THREE.Vector3(0, 0, 0);
-      meshRef.current.position.copy(position).add(displacement);
+      
+      const parent = meshRef.current.parent;
+      if (parent && (displacement.x !== 0 || displacement.y !== 0 || displacement.z !== 0)) {
+         // Convert position to world coordinates, add world-space displacement, and map back to local coordinates
+         const worldPos = new THREE.Vector3().copy(position).applyMatrix4(parent.matrixWorld);
+         worldPos.add(displacement);
+         
+         const localPos = worldPos.applyMatrix4(new THREE.Matrix4().copy(parent.matrixWorld).invert());
+         meshRef.current.position.copy(localPos);
+      } else {
+         meshRef.current.position.copy(position);
+      }
     }
   });
 
@@ -831,13 +842,17 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
 
     // Dynamic screen-space repulsion for region scan markers
     const scanMarkers = processedMarkers.filter(m => m.type === 'marker');
-    if (scanMarkers.length > 0) {
+    if (scanMarkers.length > 0 && groupRef.current) {
+       const parent = groupRef.current;
        // Project all scan result markers to screen coordinates
        const screenCoords = scanMarkers.map(m => {
-          const tempV = new THREE.Vector3().copy(m.position).project(state.camera);
+          const worldPos = new THREE.Vector3().copy(m.position).applyMatrix4(parent.matrixWorld);
+          const tempV = worldPos.clone().project(state.camera);
           return {
              id: m.id,
              position: m.position,
+             worldPos: worldPos,
+             tempV: tempV,
              x: (tempV.x * 0.5 + 0.5) * state.size.width,
              y: (tempV.y * 0.5 + 0.5) * state.size.height
           };
@@ -888,17 +903,18 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
           const dy = screenOffsets[i].y;
           
           if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
-             const d = state.camera.position.distanceTo(m.position);
-             const fovRad = (state.camera as THREE.PerspectiveCamera).fov * Math.PI / 180;
-             const worldPerPixel = (2 * d * Math.tan(fovRad / 2)) / state.size.height;
+             const resolvedX = screenCoords[i].x + dx;
+             const resolvedY = screenCoords[i].y + dy;
 
-             const right = new THREE.Vector3(1, 0, 0).applyQuaternion(state.camera.quaternion);
-             const up = new THREE.Vector3(0, 1, 0).applyQuaternion(state.camera.quaternion);
+             const resolvedNDC = new THREE.Vector3(
+                (resolvedX / state.size.width) * 2 - 1,
+                (resolvedY / state.size.height) * 2 - 1,
+                screenCoords[i].tempV.z
+             );
 
-             const displacement = new THREE.Vector3()
-                .addScaledVector(right, dx * worldPerPixel)
-                .addScaledVector(up, dy * worldPerPixel);
-                
+             const resolvedWorldPos = resolvedNDC.unproject(state.camera);
+             const displacement = new THREE.Vector3().subVectors(resolvedWorldPos, screenCoords[i].worldPos);
+             
              scanOffsetsRef.current[m.id] = displacement;
           } else {
              scanOffsetsRef.current[m.id] = new THREE.Vector3(0, 0, 0);

@@ -177,13 +177,40 @@ const Controls: React.FC<ControlsProps> = ({
     return () => clearInterval(interval);
   }, [isFocused, paused]);
 
-  // Handle query setting when scanning area state changes
+  // Handle query setting when scanning area state changes with ellipsis animation and ALL CAPS formatting
   useEffect(() => {
-    if (scanningStatusText) {
-      setQuery(scanningStatusText);
-    } else {
+    if (!scanningStatusText) {
       setQuery("");
+      return;
     }
+
+    const isTerminalState = (text: string) => {
+      const upper = text.toUpperCase();
+      return upper.includes("COMPLETE") || 
+             upper.includes("NO INFORMATION FOUND") || 
+             upper.includes("FAILED") || 
+             upper.includes("CANCELLED") || 
+             upper.includes("TOO LONG") || 
+             upper.includes("CANNOT BE ACCESSED") ||
+             upper.includes("TOO MUCH ACTIVITY");
+    };
+
+    if (isTerminalState(scanningStatusText)) {
+      setQuery(scanningStatusText.toUpperCase());
+      return;
+    }
+
+    // For active/processing states, capitalize and cycle trailing ellipsis
+    const baseText = scanningStatusText.replace(/\.*$/, "").toUpperCase();
+    let count = 1;
+    setQuery(`${baseText}.`);
+
+    const interval = setInterval(() => {
+      count = (count % 3) + 1;
+      setQuery(`${baseText}${".".repeat(count)}`);
+    }, 400); // 400ms cadence
+
+    return () => clearInterval(interval);
   }, [scanningStatusText]);
 
   const handleSubmit = (e: React.FormEvent) => {

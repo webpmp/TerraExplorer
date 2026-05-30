@@ -203,6 +203,7 @@ const App: React.FC = () => {
   const activeScanIdRef = useRef<number>(0);
   const scanResolvedRef = useRef<boolean>(false);
   const scanStatusRef = useRef<string | null>(null);
+  const scanFullyProcessedRef = useRef<boolean>(false);
   const [scanningArea, setScanningArea] = useState<GeoCoordinates | null>(null);
   const [isScanningArea, setIsScanningArea] = useState(false);
   const [scanningStatusText, setScanningStatusText] = useState<string | null>(null);
@@ -910,7 +911,9 @@ const App: React.FC = () => {
        });
        setIsNewsFetching(false);
      }
-  }, [routeWaypoints, loadWaypointData, activeRouteId, isZoomLocked, lockedZoomDistance, reconcileCameraState]);  const setScanStatus = useCallback((text: string | null) => {
+  }, [routeWaypoints, loadWaypointData, activeRouteId, isZoomLocked, lockedZoomDistance, reconcileCameraState]);  
+  
+  const setScanStatus = useCallback((text: string | null) => {
      setScanningStatusText(text);
      scanStatusRef.current = text;
   }, []);
@@ -918,6 +921,7 @@ const App: React.FC = () => {
   const startScan = useCallback((location: GeoCoordinates) => {
      activeScanIdRef.current++;
      scanResolvedRef.current = false;
+     scanFullyProcessedRef.current = false;
      console.log("scan_started");
      console.log("triangulation_started");
      setScanningArea(location);
@@ -956,6 +960,13 @@ const App: React.FC = () => {
   const resolveScan = useCallback(async (result: { type: "results", data: MapMarker[] } | { type: "empty", message: string }) => {
      const currentScanId = activeScanIdRef.current;
      if (scanResolvedRef.current) return;
+
+     // Safety gate check:
+     if (!scanFullyProcessedRef.current) {
+        console.warn("Attempted resolveScan before processing complete!");
+        return;
+     }
+
      scanResolvedRef.current = true;
      console.log("SCAN RESOLVED");
 
@@ -985,6 +996,13 @@ const App: React.FC = () => {
   const failScan = useCallback(async (error: string) => {
      const currentScanId = activeScanIdRef.current;
      if (scanResolvedRef.current) return;
+
+     // Safety gate check (allow cancellation without full processing if user clicked CANCEL):
+     if (!scanFullyProcessedRef.current && error !== "Scan cancelled") {
+        console.warn("Attempted failScan before processing complete!");
+        return;
+     }
+
      scanResolvedRef.current = true;
      console.log("SCAN RESOLVED");
      setScanStatus(error);
@@ -1003,9 +1021,10 @@ const App: React.FC = () => {
      setInteractionState('GLOBE_IDLE');
   }, [setScanStatus]);
 
-  const handleCancelScan = useCallback(() => {
-     failScan("Scan cancelled");
-  }, [failScan]);
+   const handleCancelScan = useCallback(() => {
+      scanFullyProcessedRef.current = true;
+      failScan("Scan cancelled");
+   }, [failScan]);
 
   const handleGlobeClick = useCallback(async (lat: number, lng: number, point: THREE.Vector3) => {
      // Check if the clicked location is close to an existing waypoint
@@ -1040,127 +1059,100 @@ const App: React.FC = () => {
         if (la >= 8 && la <= 33 && ln >= 68 && ln <= 90) return true; // South Asia (India)
         return false;
      };
+      // Return immediately while the scanning request runs in the background
+      (async () => {
+         const steps = ["Starting scan", "Locating area", "Expanding search", "Checking area"];
 
-     // Return immediately while the scanning request runs in the background
-     (async () => {
-        const steps = ["Starting scan", "Locating area", "Expanding search", "Checking area", "Reviewing results"];
+         // 1. Progress Animation Loop (runs gradually, 600-1000ms per step)
+         const progressPromise = (async () => {
+            for (let i = 0; i < steps.length; i++) {
+               if (currentScanId !== activeScanIdRef.current) return;
+               setScanStatus(steps[i]);
+               await new Promise(resolve => setTimeout(resolve, 600 + Math.random() * 400));
+            }
+         })();
 
-        // 1. Progress Animation Loop (runs gradually, 600-1000ms per step)
-        const progressPromise = (async () => {
-           for (let i = 0; i < steps.length; i++) {
-              if (currentScanId !== activeScanIdRef.current) return;
-              setScanStatus(steps[i]);
-              await new Promise(resolve => setTimeout(resolve, 600 + Math.random() * 400));
-           }
-        })();
-
-        // 2. Parallel API Fetch
-        try {
-           console.log("scan_data_requested");
-            const rawResult = await getNearbyPlaces(lat, lng);
+         // 2. Parallel API Fetch
+         try {
+            console.log("scan_data_requested");
+            let result = await getNearbyPlaces(lat, lng, 25);
 
             if (currentScanId !== activeScanIdRef.current) return;
 
-            // Only allow human-relevant location types
-            const result = rawResult.filter(r =>
-               r.type === "city" ||
-               r.type === "town" ||
-               r.type === "village" ||
-               r.type === "landmark" ||
-               r.type === "poi" ||
-               r.type === "infrastructure"
-            );
+            // Wait for the visual progress animation (up to "Checking area") to finish first to enforce visual pacing
+            await progressPromise;
+            if (currentScanId !== activeScanIdRef.current) return;
 
-            console.log("RAW SCAN OUTPUT:", rawResult);
-            console.log("PARSED RESULTS:", result);
+            // Explicit "Processing results" phase
+            setScanStatus("Reviewing results");
+            await new Promise(resolve => setTimeout(resolve, 800));
+            if (currentScanId !== activeScanIdRef.current) return;
 
-           // Wait for the visual progress animation (up to "Reviewing results") to finish first to enforce visual pacing
-           await progressPromise;
-           if (currentScanId !== activeScanIdRef.current) return;
+            // Fallback enrichment flow: if raw results are empty, fetch 100km radius places
+            if (!result || result.length === 0) {
+               setScanStatus("Finalizing results");
+               result = await getNearbyPlaces(lat, lng, 100);
+               if (currentScanId !== activeScanIdRef.current) return;
 
-           console.log("ENTER FINALIZING");
-           setScanStatus("Finalizing");
+               await new Promise(resolve => setTimeout(resolve, 800));
+               if (currentScanId !== activeScanIdRef.current) return;
+            } else {
+               setScanStatus("Finalizing results");
+               await new Promise(resolve => setTimeout(resolve, 500));
+               if (currentScanId !== activeScanIdRef.current) return;
+            }
 
-           // IMMEDIATELY queue the terminal scan resolution
-           queueMicrotask(async () => {
-              if (currentScanId !== activeScanIdRef.current) return;
+            // Pipeline fully complete - trigger completion gate
+            scanFullyProcessedRef.current = true;
 
-              // Debug logs
-              console.log("[Scan Decision Point] results length:", result?.length);
-              console.log("[Scan Decision Point] raw payload:", JSON.stringify(result));
+            if (result && result.length > 0) {
+               console.log("scan_results_received");
+               const finalMarkers = result.map(m => ({
+                  id: m.id,
+                  name: m.name,
+                  lat: m.lat,
+                  lng: m.lng,
+                  populationClass: m.populationClass
+               }));
+               await resolveScan({ type: "results", data: finalMarkers });
+            } else {
+               console.log("scan_results_empty");
+               const emptyMsg = isHighlyPopulatedRegion(lat, lng)
+                  ? "Too much activity in this area"
+                  : "No information found in this area";
+               await resolveScan({ type: "empty", message: emptyMsg });
+            }
 
-              const MAX_RESULTS_THRESHOLD = 8;
+         } catch (err: any) {
+            if (currentScanId !== activeScanIdRef.current) return;
+            
+            await progressPromise;
+            if (currentScanId !== activeScanIdRef.current) return;
 
-              if (!result || result.length === 0) {
-                 console.log("[Scan Decision Point] classification branch chosen: NO_RESULTS_FOUND");
-                 await resolveScan({
-                    type: "empty",
-                    message: "No information found in this area"
-                 });
-              } else if (result.length > MAX_RESULTS_THRESHOLD) {
-                 console.log("[Scan Decision Point] classification branch chosen: DENSE_RESULTS (truncated to threshold)");
-                 const finalMarkers = result.slice(0, MAX_RESULTS_THRESHOLD).map(m => ({
-                    id: m.id,
-                    name: m.name,
-                    lat: m.lat,
-                    lng: m.lng,
-                    populationClass: m.populationClass,
-                    type: m.type
-                 }));
-                 await resolveScan({
-                    type: "results",
-                    data: finalMarkers
-                 });
-              } else {
-                 console.log("[Scan Decision Point] classification branch chosen: RESULTS_FOUND");
-                 const finalMarkers = result.map(m => ({
-                    id: m.id,
-                    name: m.name,
-                    lat: m.lat,
-                    lng: m.lng,
-                    populationClass: m.populationClass,
-                    type: m.type
-                 }));
-                 await resolveScan({
-                    type: "results",
-                    data: finalMarkers
-                 });
-              }
-              console.log("EXIT FINALIZING (resolved)");
-           });
+            setScanStatus("Finalizing results");
+            await new Promise(resolve => setTimeout(resolve, 600));
+            if (currentScanId !== activeScanIdRef.current) return;
 
-        } catch (err: any) {
-           if (currentScanId !== activeScanIdRef.current) return;
-           
-           await progressPromise;
-           if (currentScanId !== activeScanIdRef.current) return;
+            scanFullyProcessedRef.current = true;
 
-           console.log("ENTER FINALIZING");
-           setScanStatus("Finalizing");
+            console.log("scan_results_empty");
+            let errorMsg = "Scan failed";
+            if (err?.message?.includes("access") || err?.message?.includes("permission") || err?.status === 403) {
+               errorMsg = "This area cannot be accessed";
+            }
+            await failScan(errorMsg);
+         }
 
-           queueMicrotask(async () => {
-              if (currentScanId !== activeScanIdRef.current) return;
-              console.log("[Scan Decision Point] classification branch chosen: ERROR");
-              console.error("[Scan Decision Point] raw error:", err);
-              let errorMsg = "Scan failed";
-              if (err?.message?.includes("access") || err?.message?.includes("permission") || err?.status === 403) {
-                 errorMsg = "This area cannot be accessed";
-              }
-              await failScan(errorMsg);
-              console.log("EXIT FINALIZING (resolved)");
-           });
-        }
-
-        // 3. Fallback resolution guard (10s total limit)
-        setTimeout(async () => {
-           if (currentScanId !== activeScanIdRef.current) return;
-           if (scanResolvedRef.current) return;
-           if (scanStatusRef.current === "Finalizing") return; // Grace window for FINALIZING!
-           console.warn("Scan fallback guard triggered!");
-           await failScan("Scan took too long to complete");
-        }, 10000);
-     })();
-  }, [routeWaypoints, handleMarkerClick, startScan, resolveScan, failScan, setScanStatus]);;
+         // 3. Fallback resolution guard (10s total limit)
+         setTimeout(async () => {
+            if (currentScanId !== activeScanIdRef.current) return;
+            if (scanResolvedRef.current) return;
+            if (scanStatusRef.current === "Finalizing results" || scanStatusRef.current === "Reviewing results") return; // Grace window for active processing!
+            console.warn("Scan fallback guard triggered!");
+            await failScan("Scan took too long to complete");
+         }, 10000);
+      })();
+   }, [routeWaypoints, handleMarkerClick, startScan, resolveScan, failScan, setScanStatus]);;
 
   const handleSearch = async (query: string) => {
     setInteractionState('PIN_SELECTED');

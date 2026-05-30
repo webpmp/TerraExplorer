@@ -478,12 +478,37 @@ const nearbyPlacesSchemaConfig = {
   }
 };
 
-export const getNearbyPlaces = async (lat: number, lng: number, radius: number = 25): Promise<MapMarker[]> => {
+export const getNearbyPlaces = async (lat: number, lng: number, radius: number = 25, isFallback: boolean = false): Promise<MapMarker[]> => {
   try {
-    const prompt = `
+    const prompt = isFallback ? `
+      I am looking at a globe at coordinates ${lat}, ${lng}. We are performing a broad fallback search because the initial search returned weak or empty results.
+      Aggressively search within a wide ${radius}km radius to locate the most prominent, globally or regionally recognizable human-populated cities, major towns, famous historic districts, cultural landmarks, unesco world heritage sites, major museums, or renowned tourist destinations that are highly educational and worth learning about.
+      If there are any well-known cities or landmarks (for example: Honolulu, Waikiki, Maui towns, or Pearl Harbor in Hawaii), you MUST include them!
+      
+      Allowed categories: "capital_city", "major_city", "world_landmark", "historical_site", "museum", "unesco_site", "cultural_site", "tourist_destination", "major_district", "national_park", "famous_mountain", "famous_lake", "preserve", "lake", "river", "mountain", "valley".
+      
+      CRITICAL INSTRUCTIONS:
+      - STRICTLY FORBIDDEN: Do NOT return highways, road segments, raceways, route geometry, unnamed infrastructure, or generic paths under any circumstances.
+      - Highly prioritize major human settlements, cities, famous historic sites, and world-class museums or landmarks.
+      - DO NOT include unnamed valleys, small streams, generic state parks, or low-significance preserves.
+      
+      Assign a semantic type to each place matching one of the allowed categories.
+      Return a strict JSON array.
+      Do not repeat places. Stop after 8 places. Output ONLY the JSON payload.
+    ` : `
       I am looking at a globe at coordinates ${lat}, ${lng}.
-      Identify 5-8 major cities, towns, landmarks, notable features, or significant points of interest within an approximate ${radius}km radius.
-      Assign a semantic type to each place: "city", "town", "village", "landmark", "poi", "infrastructure", "mountain", "valley", or "terrain".
+      Act as an editorial curator to discover 5-8 meaningful places in this region that a curious traveler would recognize or want to explore and learn about (cultural significance, historical relevance, architectural marvels, world landmarks, major cities, unesco heritage sites, or globally significant natural wonders).
+      
+      Allowed categories: "capital_city", "major_city", "world_landmark", "historical_site", "museum", "unesco_site", "cultural_site", "tourist_destination", "major_district", "national_park", "famous_mountain", "famous_lake", "preserve", "lake", "river", "mountain", "valley".
+      
+      CRITICAL INSTRUCTIONS:
+      - STRICTLY FORBIDDEN: Do NOT return highways, road segments, raceways, unnamed infrastructure, or generic paths under any circumstances.
+      - ONLY include highly significant, globally or regionally famous natural landmarks (e.g., Mount Fuji, Grand Canyon, Lake Tahoe, Yosemite).
+      - DO NOT include generic rivers, unnamed lakes, generic state parks, or random preserves.
+      - In heavily populated areas, human locations must heavily dominate.
+      - In remote areas (like oceans, deserts, or rural Alaska), you may include more natural features if human locations do not exist.
+      
+      Assign a semantic type to each place matching one of the allowed categories.
       Return a strict JSON array.
       Do not repeat places. Stop after 8 places. Output ONLY the JSON payload.
     `;
