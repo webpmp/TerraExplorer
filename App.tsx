@@ -1051,14 +1051,6 @@ const App: React.FC = () => {
      const currentScanId = activeScanIdRef.current + 1; // Anticipate the scan ID
      startScan({ lat, lng });
 
-     // Heuristic for highly populated regions:
-     const isHighlyPopulatedRegion = (la: number, ln: number): boolean => {
-        if (la >= 35 && la <= 60 && ln >= -10 && ln <= 30) return true; // Europe
-        if (la >= 25 && la <= 48 && ln >= -90 && ln <= -70) return true; // Eastern US
-        if (la >= 20 && la <= 45 && ln >= 100 && ln <= 145) return true; // East Asia (China/Japan)
-        if (la >= 8 && la <= 33 && ln >= 68 && ln <= 90) return true; // South Asia (India)
-        return false;
-     };
       // Return immediately while the scanning request runs in the background
       (async () => {
          const steps = ["Starting scan", "Locating area", "Expanding search", "Checking area"];
@@ -1116,12 +1108,10 @@ const App: React.FC = () => {
                }));
                await resolveScan({ type: "results", data: finalMarkers });
             } else {
-               console.log("scan_results_empty");
-               const emptyMsg = isHighlyPopulatedRegion(lat, lng)
-                  ? "Too much activity in this area"
-                  : "No information found in this area";
-               await resolveScan({ type: "empty", message: emptyMsg });
-            }
+                console.log("scan_results_empty");
+                const emptyMsg = "No information found in this area";
+                await resolveScan({ type: "empty", message: emptyMsg });
+             }
 
          } catch (err: any) {
             if (currentScanId !== activeScanIdRef.current) return;

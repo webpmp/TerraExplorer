@@ -493,36 +493,7 @@ const Controls: React.FC<ControlsProps> = ({
       <form onSubmit={handleSubmit} className="w-full max-w-[532px] pointer-events-auto relative group">
         <div className={theme.glow}></div>
         <div className={`relative flex items-center overflow-hidden transition-all ${theme.inputWrapper} ${glowClass}`}>
-          {showSearchGlow && (
-            <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" style={{ zIndex: 5 }}>
-              <rect
-                x="0.5"
-                y="0.5"
-                width="calc(100% - 1px)"
-                height="calc(100% - 1px)"
-                rx={skin === 'modern' ? '9999px' : skin === 'parchment' ? '4px' : '0px'}
-                ry={skin === 'modern' ? '9999px' : skin === 'parchment' ? '4px' : '0px'}
-                fill="none"
-                stroke={
-                  skin === 'modern' ? '#22d3ee' :
-                  skin === 'retro-green' ? '#4ade80' :
-                  skin === 'retro-amber' ? '#fbbf24' :
-                  '#8b5a2b'
-                }
-                strokeWidth="2"
-                pathLength="1000"
-                className="orbiting-dot"
-                style={{
-                  filter: `drop-shadow(0 0 4px ${
-                    skin === 'modern' ? '#22d3ee' :
-                    skin === 'retro-green' ? '#4ade80' :
-                    skin === 'retro-amber' ? '#fbbf24' :
-                    '#8b5a2b'
-                  })`
-                }}
-              />
-            </svg>
-          )}
+
           <Search className={`ml-4 ${theme.inputIcon}`} size={20} />
           <input
             type="text"
