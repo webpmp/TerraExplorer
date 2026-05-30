@@ -10,6 +10,7 @@ interface ControlsProps {
   onTraceRoute: (text: string) => void;
   isSearching: boolean;
   searchError?: string | null;
+  onClearError?: () => void;
   skin: SkinType;
   showFavorites: boolean;
   onToggleShowFavorites: () => void;
@@ -135,6 +136,7 @@ const Controls: React.FC<ControlsProps> = ({
   onTraceRoute,
   isSearching, 
   searchError,
+  onClearError,
   skin, 
   showFavorites, 
   onToggleShowFavorites,
@@ -316,6 +318,22 @@ const Controls: React.FC<ControlsProps> = ({
 
   const theme = themes[skin];
   
+  // Dynamic styling for inline geocoding/search error status display inside the search input
+  const hasInlineError = !!(searchError && searchError !== "TEMPORARILY UNABLE TO LOAD LOCATION DATA");
+  const errorTextClass = (hasInlineError && !isFocused) ? (
+    skin === 'parchment' ? 'text-[#8b0000] font-bold font-mono text-sm uppercase' :
+    skin === 'retro-green' ? 'text-green-400 font-bold font-retro tracking-wider uppercase text-lg blinking' :
+    skin === 'retro-amber' ? 'text-amber-400 font-bold font-retro tracking-wider uppercase text-lg blinking' :
+    'text-red-500 font-bold font-mono text-sm uppercase'
+  ) : theme.inputField;
+
+  const handleInputFocus = () => {
+    setIsFocused(true);
+    if (hasInlineError && onClearError) {
+       onClearError();
+    }
+  };
+
   // Format placeholder for retro skins, clear on focus
   const displayPlaceholder = isFocused ? "" : (skin === 'modern' ? placeholder : placeholder.toUpperCase());
 
@@ -391,8 +409,8 @@ const Controls: React.FC<ControlsProps> = ({
           animation: search-orbit 3s linear infinite;
         }
       `}</style>
-      {/* Error Message */}
-      {searchError && (
+      {/* Error Message - Only floating overlay for critical system failures */}
+      {searchError === "TEMPORARILY UNABLE TO LOAD LOCATION DATA" && (
         <div className={`pointer-events-auto animate-bounce ${theme.error}`}>
           <AlertTriangle size={16} />
           {searchError}
@@ -508,19 +526,25 @@ const Controls: React.FC<ControlsProps> = ({
           <Search className={`ml-4 ${theme.inputIcon}`} size={20} />
           <input
             type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onFocus={() => setIsFocused(true)}
+            value={searchError && !isFocused && searchError !== "TEMPORARILY UNABLE TO LOAD LOCATION DATA" ? searchError : query}
+            onChange={(e) => {
+              if (hasInlineError && onClearError) onClearError();
+              setQuery(e.target.value);
+            }}
+            onFocus={handleInputFocus}
             onBlur={() => setIsFocused(false)}
             placeholder={displayPlaceholder}
             disabled={!!scanningStatusText}
-            className={`w-full bg-transparent border-none px-4 py-4 focus:ring-0 outline-none ${theme.inputField}`}
+            className={`w-full bg-transparent border-none px-4 py-4 focus:ring-0 outline-none ${errorTextClass}`}
           />
           
-          {query && !scanningStatusText && (
+          {(query || (hasInlineError && !isFocused)) && !scanningStatusText && (
             <button
               type="button"
-              onClick={() => setQuery("")}
+              onClick={() => {
+                setQuery("");
+                if (hasInlineError && onClearError) onClearError();
+              }}
               className={theme.resetBtn}
               aria-label="Clear Search"
             >

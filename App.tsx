@@ -10,7 +10,7 @@ import InfoPanel from './components/InfoPanel';
 import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint, GeoCoordinates } from './types';
-import { resolveLocationQuery, getInfoFromCoordinates, getInfoFromFeature, getNearbyPlaces, getMoreNews, fetchLiveNews, generateRoute } from './services/geminiService';
+import { resolveLocationQuery, getInfoFromCoordinates, getInfoFromFeature, getNearbyPlaces, getMoreNews, fetchLiveNews, generateRoute, extractEntityFromQuery } from './services/geminiService';
 
 // Helper to convert Lat/Lng to 3D Cartesian coordinates (Local Space)
 const latLngToVector3 = (lat: number, lng: number, radius: number = 1) => {
@@ -1155,6 +1155,12 @@ const App: React.FC = () => {
    }, [routeWaypoints, handleMarkerClick, startScan, resolveScan, failScan, setScanStatus]);;
 
   const handleSearch = async (query: string) => {
+    const cleanQuery = query.trim();
+    if (!cleanQuery) return;
+
+    // Intent routing: extract entity from natural language queries
+    const extracted = extractEntityFromQuery(cleanQuery);
+
     setInteractionState('PIN_SELECTED');
     setIsLoading(true);
     setIsNewsFetching(false);
@@ -1164,8 +1170,6 @@ const App: React.FC = () => {
     setMarkers([]); 
     setScanningArea(null);
     
-    // Search clears route unless locked? Usually search implies a new context.
-    // Let's clear active route on search to be safe.
     setRouteWaypoints([]); 
     setActiveRouteId(null);
     
@@ -1173,8 +1177,13 @@ const App: React.FC = () => {
     setSelectedMarkerId(null);
     setIsFocused(true);
 
-    const result = await resolveLocationQuery(query);
+    // Show status line inside the search input: LOCATING X...
+    setScanningStatusText(`LOCATING ${extracted.toUpperCase()}`);
+
+    const result = await resolveLocationQuery(extracted);
     
+    setScanningStatusText(null);
+
     if (result && result.locationInfo && result.locationInfo.coordinates) {
       const { lat, lng } = result.locationInfo.coordinates;
       
@@ -1210,7 +1219,7 @@ const App: React.FC = () => {
       }
 
     } else {
-      let userError = "UNABLE TO RESOLVE LOCATION DATA";
+      let userError = "COULD NOT RESOLVE LOCATION";
       const errorCode = result?.error;
       if (errorCode === "NOT_FOUND") {
         userError = "COULD NOT FIND A MATCH FOR THIS LOCATION";
@@ -1220,8 +1229,6 @@ const App: React.FC = () => {
         userError = "TEMPORARILY UNABLE TO LOAD LOCATION DATA";
       } else if (errorCode === "NO_GEOGRAPHIC_DATA") {
         userError = "NO LOCATION DATA AVAILABLE FOR THIS SEARCH";
-      } else if (errorCode === "UNABLE_TO_RESOLVE") {
-        userError = "UNABLE TO RESOLVE LOCATION DATA";
       }
       setSearchError(userError);
       setIsLoading(false);
@@ -1837,6 +1844,7 @@ const App: React.FC = () => {
         onZoomOut={handleZoomOut}
         isSearching={isLoading}
         searchError={searchError}
+        onClearError={() => setSearchError(null)}
         skin={skin}
         showFavorites={isFavoritesPanelOpen}
         onToggleShowFavorites={() => setIsFavoritesPanelOpen(!isFavoritesPanelOpen)}

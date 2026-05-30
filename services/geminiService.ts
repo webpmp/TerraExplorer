@@ -644,3 +644,31 @@ export const generateRoute = async (text: string): Promise<Waypoint[]> => {
     return [];
   }
 };
+
+export const extractEntityFromQuery = (query: string): string => {
+  const clean = query.trim();
+  
+  // Regex patterns to detect natural language prefixes/suffixes
+  const patterns = [
+    /^\s*where\s+is\s+located\s+(.+)$/i,
+    /^\s*where\s+is\s+(.+?)(?:\s+located|\s+found)?\s*\??\s*$/i,
+    /^\s*where\s+was\s+(.+?)(?:\s+found|\s+located)?\s*\??\s*$/i,
+    /^\s*tell\s+me\s+(?:about|more\s+about)\s+(.+?)\s*$/i,
+    /^\s*show\s+me\s+(.+?)\s*$/i,
+    /^\s*find\s+(.+?)\s*$/i,
+    /^\s*locate\s+(.+?)\s*$/i,
+    /^\s*go\s+to\s+(.+?)\s*$/i,
+    /^\s*take\s+me\s+to\s+(.+?)\s*$/i,
+    /^\s*info(?:rmation)?\s+on\s+(.+?)\s*$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = clean.match(pattern);
+    if (match && match[1]) {
+      // Return the extracted entity
+      return match[1].replace(/[?.,!]+$/, "").trim();
+    }
+  }
+
+  return clean;
+};
