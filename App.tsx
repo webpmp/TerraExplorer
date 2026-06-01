@@ -11,6 +11,7 @@ import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint, GeoCoordinates } from './types';
 import { resolveLocationQuery, getInfoFromCoordinates, getInfoFromFeature, getNearbyPlaces, getMoreNews, fetchLiveNews, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity } from './services/geminiService';
+import logoImage from './assets/logo-terra-explorer-nobg-med.png';
 
 // Helper to convert Lat/Lng to 3D Cartesian coordinates (Local Space)
 const latLngToVector3 = (lat: number, lng: number, radius: number = 1) => {
@@ -317,7 +318,7 @@ const App: React.FC = () => {
         const worldCameraPos = localCameraVec.clone().applyMatrix4(earthRef.current.matrixWorld);
         targetCameraPosRef.current = worldCameraPos;
      }
-  }, [skin, locationInfo, routeWaypoints.length, isFavoritesPanelOpen, parchmentZoom]);
+  }, [skin, locationInfo, routeWaypoints.length, parchmentZoom]);
 
   const handleSkinChange = useCallback((newSkin: SkinType) => {
      cameraStateRef.current.theme = newSkin;
@@ -1558,21 +1559,6 @@ const App: React.FC = () => {
     });
   }, [locationInfo]);
 
-  const getHeaderStyle = () => {
-    switch (skin) {
-      case 'retro-green': return 'text-green-300 font-retro tracking-widest';
-      case 'retro-amber': return 'text-amber-300 font-retro tracking-widest';
-      default: return 'text-white brand-font tracking-tighter';
-    }
-  };
-
-  const getSubheaderStyle = () => {
-    switch (skin) {
-      case 'retro-green': return 'text-green-400/80 font-retro';
-      case 'retro-amber': return 'text-amber-400/80 font-retro';
-      default: return 'text-gray-300 font-mono tracking-widest';
-    }
-  };
 
   const shouldPauseSuggestions = isFocused && !isZoomedOut;
 
@@ -1741,12 +1727,16 @@ const App: React.FC = () => {
 
       {/* UI Overlay */}
       <div className={`absolute top-8 left-8 z-10 pointer-events-none ${skin === 'parchment' ? 'hidden' : ''}`}>
-        <h1 className={`text-4xl font-bold drop-shadow-lg ${getHeaderStyle()}`}>
-          TERRA<span className={skin === 'modern' ? 'text-cyan-400' : ''}>EXPLORER</span>
-        </h1>
-        <p className={`text-sm mt-1 drop-shadow-md ${getSubheaderStyle()}`}>
-          KNOWLEDGE ENGINE
-        </p>
+        <img 
+          src={logoImage} 
+          alt="TerraExplorer Knowledge Engine" 
+          className="h-16 object-contain drop-shadow-lg"
+          style={
+            skin === 'retro-green' ? { filter: 'sepia(1) saturate(20) hue-rotate(75deg) brightness(1.2) contrast(1.2)' } :
+            skin === 'retro-amber' ? { filter: 'sepia(1) saturate(20) hue-rotate(340deg) brightness(1.2) contrast(1.2)' } :
+            undefined
+          }
+        />
       </div>
 
       {/* Skin Selector */}
