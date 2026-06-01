@@ -358,7 +358,7 @@ const App: React.FC = () => {
     handleSkinChange(skins[nextIndex]);
   }, [skin, handleSkinChange]);
   
-  const [isSkinMenuOpen, setIsSkinMenuOpen] = useState(false);
+
   
   // Track focus state to manage suggestions pausing
   const [isFocused, setIsFocused] = useState(false);
@@ -1749,50 +1749,7 @@ const App: React.FC = () => {
         />
       </div>
 
-      {/* Skin Selector */}
-      <div className="absolute top-8 right-8 z-30 flex flex-col items-end">
-        <button 
-          onClick={() => setIsSkinMenuOpen(!isSkinMenuOpen)}
-          className={`px-3 py-1 flex items-center gap-1 text-xs transition-all ${
-            skin === 'modern' ? 'bg-cyan-500 text-black border border-cyan-500 font-bold rounded-full' : 
-            skin === 'retro-green' ? 'bg-green-400 text-black border border-green-400 font-bold font-mono rounded-none' :
-            skin === 'parchment' ? 'bg-[#D2B48C] text-[#3e2723] border border-[#3e2723] font-bold rounded shadow-sm' :
-            'bg-amber-400 text-black border border-amber-400 font-bold font-mono rounded-none'
-          }`}
-        >
-          {skin === 'modern' ? 'MODERN' : skin === 'retro-green' ? 'CRT-G' : skin === 'parchment' ? 'PARCHMENT' : 'CRT-A'}
-          <ChevronDown size={14} />
-        </button>
 
-        {isSkinMenuOpen && (
-          <div className="mt-2 flex flex-col w-28 bg-black/80 backdrop-blur border border-white/20 rounded shadow-xl overflow-hidden">
-            <button 
-              onClick={() => { handleSkinChange('modern'); setIsSkinMenuOpen(false); }}
-              className={`px-3 py-2 text-xs text-left hover:bg-white/10 ${skin === 'modern' ? 'text-white font-bold bg-white/5' : 'text-gray-400'}`}
-            >
-              MODERN
-            </button>
-            <button 
-              onClick={() => { handleSkinChange('retro-green'); setIsSkinMenuOpen(false); }}
-              className={`px-3 py-2 text-xs text-left font-mono hover:bg-white/10 ${skin === 'retro-green' ? 'text-green-400 font-bold bg-white/5' : 'text-green-400/50'}`}
-            >
-              CRT-G
-            </button>
-            <button 
-              onClick={() => { handleSkinChange('retro-amber'); setIsSkinMenuOpen(false); }}
-              className={`px-3 py-2 text-xs text-left font-mono hover:bg-white/10 ${skin === 'retro-amber' ? 'text-amber-400 font-bold bg-white/5' : 'text-amber-400/50'}`}
-            >
-              CRT-A
-            </button>
-            <button 
-              onClick={() => { handleSkinChange('parchment'); setIsSkinMenuOpen(false); }}
-              className={`px-3 py-2 text-xs text-left hover:bg-white/10 ${skin === 'parchment' ? 'text-[#D2B48C] font-bold bg-white/5' : 'text-[#D2B48C]/50'}`}
-            >
-              PARCHMENT
-            </button>
-          </div>
-        )}
-      </div>
 
       {isFavoritesPanelOpen && (
         <FavoritesPanel 
