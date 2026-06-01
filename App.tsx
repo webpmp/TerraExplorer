@@ -1735,8 +1735,8 @@ const App: React.FC = () => {
             width: '240px',
             height: '211px',
             objectFit: 'contain',
-            ...(skin === 'retro-green' ? { filter: 'invert(1) sepia(1) saturate(12) hue-rotate(75deg) brightness(0.7) contrast(1.1) drop-shadow(0 0 4px rgba(34, 197, 94, 0.6)) drop-shadow(2px 2px 2px rgba(16, 185, 129, 0.4))' } :
-               skin === 'retro-amber' ? { filter: 'invert(1) sepia(1) saturate(12) hue-rotate(340deg) brightness(0.7) contrast(1.1) drop-shadow(0 0 4px rgba(245, 158, 11, 0.6)) drop-shadow(2px 2px 2px rgba(239, 68, 68, 0.4))' } :
+            ...(skin === 'retro-green' ? { filter: 'invert(1) sepia(1) saturate(12) hue-rotate(75deg) brightness(0.4) contrast(1.1) drop-shadow(0 0 3px rgba(34, 197, 94, 0.4)) drop-shadow(1px 1px 1px rgba(16, 185, 129, 0.3))' } :
+               skin === 'retro-amber' ? { filter: 'invert(1) sepia(1) saturate(12) hue-rotate(340deg) brightness(0.4) contrast(1.1) drop-shadow(0 0 3px rgba(245, 158, 11, 0.4)) drop-shadow(1px 1px 1px rgba(239, 68, 68, 0.3))' } :
                {})
           }}
         />
