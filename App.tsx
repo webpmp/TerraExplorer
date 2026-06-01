@@ -11,7 +11,7 @@ import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint, GeoCoordinates } from './types';
 import { resolveLocationQuery, getInfoFromCoordinates, getInfoFromFeature, getNearbyPlaces, getMoreNews, fetchLiveNews, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity } from './services/geminiService';
-import logoImage from './assets/logo-terra-explorer-nobg-med.png';
+import logoImage from './assets/logo-terra-explorer-black.png';
 
 // Helper to convert Lat/Lng to 3D Cartesian coordinates (Local Space)
 const latLngToVector3 = (lat: number, lng: number, radius: number = 1) => {
@@ -1730,12 +1730,15 @@ const App: React.FC = () => {
         <img 
           src={logoImage} 
           alt="TerraExplorer Knowledge Engine" 
-          className="h-16 object-contain drop-shadow-lg"
-          style={
-            skin === 'retro-green' ? { filter: 'sepia(1) saturate(20) hue-rotate(75deg) brightness(1.2) contrast(1.2)' } :
-            skin === 'retro-amber' ? { filter: 'sepia(1) saturate(20) hue-rotate(340deg) brightness(1.2) contrast(1.2)' } :
-            undefined
-          }
+          className="drop-shadow-lg"
+          style={{
+            width: '320px',
+            height: '281px',
+            objectFit: 'contain',
+            ...(skin === 'retro-green' ? { filter: 'sepia(1) saturate(20) hue-rotate(75deg) brightness(1.2) contrast(1.2)' } :
+               skin === 'retro-amber' ? { filter: 'sepia(1) saturate(20) hue-rotate(340deg) brightness(1.2) contrast(1.2)' } :
+               {})
+          }}
         />
       </div>
 
