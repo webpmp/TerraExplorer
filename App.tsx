@@ -13,6 +13,7 @@ import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Wayp
 import { resolveLocationQuery, getInfoFromCoordinates, getInfoFromFeature, getNearbyPlaces, getMoreNews, fetchLiveNews, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity } from './services/geminiService';
 import logoImageBlack from './assets/logo-terra-explorer-black.png';
 import logoImageGreen from './assets/logo-terra-explorer-green.png';
+import logoImageAmber from './assets/logo-terra-explorer-amber.png';
 
 // Helper to convert Lat/Lng to 3D Cartesian coordinates (Local Space)
 const latLngToVector3 = (lat: number, lng: number, radius: number = 1) => {
@@ -1729,15 +1730,17 @@ const App: React.FC = () => {
       {/* UI Overlay */}
       <div className={`absolute top-8 left-8 z-10 pointer-events-none ${skin === 'parchment' ? 'hidden' : ''}`}>
         <img 
-          src={skin === 'retro-green' ? logoImageGreen : logoImageBlack} 
+          src={
+            skin === 'retro-green' ? logoImageGreen : 
+            skin === 'retro-amber' ? logoImageAmber : 
+            logoImageBlack
+          } 
           alt="TerraExplorer Knowledge Engine" 
           className="drop-shadow-lg"
           style={{
             width: '240px',
             height: '211px',
-            objectFit: 'contain',
-            ...(skin === 'retro-amber' ? { filter: 'invert(1) sepia(1) saturate(12) hue-rotate(340deg) brightness(0.4) contrast(1.1)' } :
-               {})
+            objectFit: 'contain'
           }}
         />
       </div>
