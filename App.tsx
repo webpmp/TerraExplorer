@@ -1732,11 +1732,11 @@ const App: React.FC = () => {
           alt="TerraExplorer Knowledge Engine" 
           className="drop-shadow-lg"
           style={{
-            width: '320px',
-            height: '281px',
+            width: '240px',
+            height: '211px',
             objectFit: 'contain',
-            ...(skin === 'retro-green' ? { filter: 'sepia(1) saturate(20) hue-rotate(75deg) brightness(1.2) contrast(1.2)' } :
-               skin === 'retro-amber' ? { filter: 'sepia(1) saturate(20) hue-rotate(340deg) brightness(1.2) contrast(1.2)' } :
+            ...(skin === 'retro-green' ? { filter: 'invert(1) sepia(1) saturate(20) hue-rotate(75deg) brightness(1.2) contrast(1.2)' } :
+               skin === 'retro-amber' ? { filter: 'invert(1) sepia(1) saturate(20) hue-rotate(340deg) brightness(1.2) contrast(1.2)' } :
                {})
           }}
         />
