@@ -352,7 +352,11 @@ const App: React.FC = () => {
      reconcileCameraState();
   }, [reconcileCameraState]);
   
-
+  const handleCycleSkin = useCallback(() => {
+    const skins: SkinType[] = ['modern', 'retro-green', 'retro-amber', 'parchment'];
+    const nextIndex = (skins.indexOf(skin) + 1) % skins.length;
+    handleSkinChange(skins[nextIndex]);
+  }, [skin, handleSkinChange]);
   
   const [isSkinMenuOpen, setIsSkinMenuOpen] = useState(false);
   
@@ -1856,6 +1860,7 @@ const App: React.FC = () => {
         isScanningArea={isScanningArea}
         scanningStatusText={scanningStatusText}
         onCancelScan={handleCancelScan}
+        onCycleSkin={handleCycleSkin}
       />
     </div>
   );

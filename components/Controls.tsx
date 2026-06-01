@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, ZoomIn, ZoomOut, Loader2, Star, AlertTriangle, X, Lock, Unlock } from 'lucide-react';
+import { Search, ZoomIn, ZoomOut, Loader2, Star, AlertTriangle, X, Lock, Unlock, Palette } from 'lucide-react';
 import { SkinType } from '../types';
 
 interface ControlsProps {
@@ -19,6 +19,7 @@ interface ControlsProps {
   onToggleTraceModal: (isOpen: boolean) => void;
   isZoomLocked: boolean;
   onToggleZoomLock: () => void;
+  onCycleSkin?: () => void;
   isScanningArea?: boolean;
   scanningStatusText?: string | null;
   onCancelScan?: () => void;
@@ -145,6 +146,7 @@ const Controls: React.FC<ControlsProps> = ({
   onToggleTraceModal,
   isZoomLocked,
   onToggleZoomLock,
+  onCycleSkin,
   isScanningArea = false,
   scanningStatusText = null,
   onCancelScan
@@ -487,6 +489,19 @@ const Controls: React.FC<ControlsProps> = ({
         >
           {isZoomLocked ? <Lock size={20} /> : <Unlock size={20} />}
         </button>
+        {onCycleSkin && (
+          <>
+            <div className={`w-px mx-1 self-stretch ${skin === 'parchment' ? 'bg-[#8b5a2b]/30' : skin === 'retro-green' ? 'bg-green-400/30' : skin === 'retro-amber' ? 'bg-amber-400/30' : 'bg-white/20'}`}></div>
+            <button 
+              onClick={onCycleSkin}
+              className={`p-3 transition-all active:scale-95 ${theme.btn}`}
+              aria-label="Switch Theme"
+              title="Switch Theme"
+            >
+              <Palette size={20} />
+            </button>
+          </>
+        )}
       </div>
 
       {/* Search Input */}
