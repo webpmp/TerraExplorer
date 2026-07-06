@@ -591,8 +591,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             
             {/* 3. Location title */}
             <div className="flex flex-col gap-2 items-center text-center">
-              <div className="flex items-center justify-center gap-2 flex-wrap">
-                 <h2 className={`${titleSize} font-bold ${theme.headerTitle}`}>
+              <div className="flex flex-col items-center justify-center gap-1">
+                 <h2 className={`${titleSize} font-bold text-center ${theme.headerTitle}`}>
                    {routeNav ? `${routeNav.current}. ` : ''}{info.name}
                  </h2>
                  <span className={`${smallTextSize} uppercase px-2 py-0.5 ${theme.tag}`}>{info.type}</span>
