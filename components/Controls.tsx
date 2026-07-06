@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, ZoomIn, ZoomOut, Loader2, Star, AlertTriangle, X, Lock, Unlock, Palette } from 'lucide-react';
+import { Search, ZoomIn, ZoomOut, Loader2, Star, AlertTriangle, X, Lock, Unlock, Palette, Settings } from 'lucide-react';
 import { SkinType } from '../types';
 
 interface ControlsProps {
@@ -23,6 +23,7 @@ interface ControlsProps {
   isScanningArea?: boolean;
   scanningStatusText?: string | null;
   onCancelScan?: () => void;
+  onToggleSettings?: () => void;
 }
 
 // Custom Icon for Trace Route
@@ -149,7 +150,8 @@ const Controls: React.FC<ControlsProps> = ({
   onCycleSkin,
   isScanningArea = false,
   scanningStatusText = null,
-  onCancelScan
+  onCancelScan,
+  onToggleSettings
 }) => {
   const [query, setQuery] = useState("");
   const [placeholder, setPlaceholder] = useState("Search location...");
@@ -489,6 +491,8 @@ const Controls: React.FC<ControlsProps> = ({
         >
           {isZoomLocked ? <Lock size={20} /> : <Unlock size={20} />}
         </button>
+
+
         {onCycleSkin && (
           <>
             <div className={`w-px mx-1 self-stretch ${skin === 'parchment' ? 'bg-[#8b5a2b]/30' : skin === 'retro-green' ? 'bg-green-400/30' : skin === 'retro-amber' ? 'bg-amber-400/30' : 'bg-white/20'}`}></div>
@@ -501,6 +505,17 @@ const Controls: React.FC<ControlsProps> = ({
               <Palette size={20} />
             </button>
           </>
+        )}
+
+        {onToggleSettings && (
+            <button 
+              onClick={onToggleSettings}
+              className={`p-3 transition-all active:scale-95 ${theme.btn}`}
+              aria-label="Settings"
+              title="Settings"
+            >
+              <Settings size={20} />
+            </button>
         )}
       </div>
 

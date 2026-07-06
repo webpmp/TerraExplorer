@@ -9,7 +9,8 @@ import Earth from './components/Earth';
 import InfoPanel from './components/InfoPanel';
 import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
-import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint, GeoCoordinates } from './types';
+import SettingsPanel from './components/SettingsPanel';
+import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint, GeoCoordinates, UserSettings, AIProvider, NewsProvider } from './types';
 import { resolveLocationQuery, getInfoFromCoordinates, getInfoFromFeature, getNearbyPlaces, getMoreNews, fetchLiveNews, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity } from './services/geminiService';
 import logoImageBlack from './assets/logo-terra-explorer-black.png';
 import logoImageGreen from './assets/logo-terra-explorer-green.png';
@@ -249,6 +250,30 @@ const App: React.FC = () => {
   const [isFavoritesPanelOpen, setIsFavoritesPanelOpen] = useState(false);
   const [visibleFavoriteIds, setVisibleFavoriteIds] = useState<string[]>([]);
   const [activeRouteId, setActiveRouteId] = useState<string | null>(null);
+
+  // Settings State
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [userSettings, setUserSettings] = useState<UserSettings>(() => {
+    const saved = localStorage.getItem('terraExplorerSettings');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        // Ignore
+      }
+    }
+    return {
+      aiProvider: 'gemini',
+      lmStudioUrl: 'http://localhost:1234/v1',
+      newsProvider: 'gemini',
+      newsApiKey: ''
+    };
+  });
+
+  const handleUpdateSettings = useCallback((newSettings: UserSettings) => {
+    setUserSettings(newSettings);
+    localStorage.setItem('terraExplorerSettings', JSON.stringify(newSettings));
+  }, []);
 
   // Route State
   const [routeWaypoints, setRouteWaypoints] = useState<Waypoint[]>([]);
@@ -1751,20 +1776,31 @@ const App: React.FC = () => {
 
 
 
-      {isFavoritesPanelOpen && (
-        <FavoritesPanel 
-            favorites={favorites}
-            onClose={() => setIsFavoritesPanelOpen(false)}
-            visibleFavoriteIds={visibleFavoriteIds}
-            activeRouteId={activeRouteId}
-            onToggleVisibility={handleToggleFavoriteVisibility}
-            onUpdate={handleUpdateFavorite}
-            onDelete={handleRemoveFavorite}
-            onFlyTo={handleFavoriteFlyTo}
+      <div className="absolute top-[281px] left-8 z-30 flex flex-col gap-4 bottom-8 pointer-events-none w-[24rem]">
+        {isFavoritesPanelOpen && (
+          <FavoritesPanel 
+              favorites={favorites}
+              onClose={() => setIsFavoritesPanelOpen(false)}
+              visibleFavoriteIds={visibleFavoriteIds}
+              activeRouteId={activeRouteId}
+              onToggleVisibility={handleToggleFavoriteVisibility}
+              onUpdate={handleUpdateFavorite}
+              onDelete={handleRemoveFavorite}
+              onFlyTo={handleFavoriteFlyTo}
+              skin={skin}
+              dimmed={isTraceModalOpen}
+          />
+        )}
+
+        {isSettingsOpen && (
+          <SettingsPanel
+            settings={userSettings}
+            onUpdateSettings={handleUpdateSettings}
+            onClose={() => setIsSettingsOpen(false)}
             skin={skin}
-            dimmed={isTraceModalOpen}
-        />
-      )}
+          />
+        )}
+      </div>
 
 
       {interactionState === 'PIN_SELECTED' && (
@@ -1818,6 +1854,7 @@ const App: React.FC = () => {
         scanningStatusText={scanningStatusText}
         onCancelScan={handleCancelScan}
         onCycleSkin={handleCycleSkin}
+        onToggleSettings={() => setIsSettingsOpen(!isSettingsOpen)}
       />
     </div>
   );

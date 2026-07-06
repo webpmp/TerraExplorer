@@ -34,8 +34,8 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 # Copy production build artifacts from the build stage to Nginx HTML directory
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# Expose port 80
-EXPOSE 80
+# Expose port 3004
+EXPOSE 3004
 
 # Start Nginx
 CMD ["nginx", "-g", "daemon off;"]

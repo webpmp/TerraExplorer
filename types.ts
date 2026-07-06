@@ -60,6 +60,17 @@ export interface SearchResult {
   error?: "NOT_FOUND" | "AMBIGUOUS" | "TEMP_FAILURE" | "NO_GEOGRAPHIC_DATA" | "UNABLE_TO_RESOLVE" | "LOCATION_SYSTEM_UNAVAILABLE";
 }
 
+export type AIProvider = 'gemini' | 'lmstudio';
+export type NewsProvider = 'gemini' | 'newsapi' | 'newsdata' | 'nyt';
+
+export interface UserSettings {
+  aiProvider: AIProvider;
+  lmStudioUrl: string;
+  lmStudioModel: string;
+  newsProvider: NewsProvider;
+  newsApiKey: string;
+}
+
 export interface Waypoint {
   id: string;
   name: string;

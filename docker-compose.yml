@@ -11,5 +11,5 @@ services:
     image: terraexplorer-ai:latest
     container_name: terraexplorer-ai-container
     ports:
-      - "8080:80"
+      - "3004:3004"
     restart: always

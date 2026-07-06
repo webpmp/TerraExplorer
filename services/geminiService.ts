@@ -12,8 +12,32 @@ const ai = new GoogleGenAI({ apiKey: apiKey || 'dummy-key-for-ts-check' });
 
 const modelName = "gemini-2.5-flash";
 
+const getUserSettings = (): any => {
+  const saved = localStorage.getItem('terraExplorerSettings');
+  if (saved) {
+    try {
+      return JSON.parse(saved);
+    } catch (e) {
+      // Ignore
+    }
+  }
+  return {
+    aiProvider: 'gemini',
+    lmStudioUrl: 'http://localhost:1234/v1',
+    lmStudioModel: 'local-model',
+    newsProvider: 'gemini',
+    newsApiKey: ''
+  };
+};
+
 // Helper for exponential backoff retry
 const generateContentWithRetry = async (params: any, retries = 3): Promise<any> => {
+  const settings = getUserSettings();
+  
+  if (settings.aiProvider === 'lmstudio') {
+    return generateLocalLMStudioContent(params, settings.lmStudioUrl, settings.lmStudioModel);
+  }
+
   const requestUrl = `https://generativelanguage.googleapis.com/v1beta/models/${params.model || modelName}:generateContent`;
   console.log("=== GEMINI API REQUEST START ===");
   console.log("Request URL:", requestUrl);
@@ -52,6 +76,77 @@ const generateContentWithRetry = async (params: any, retries = 3): Promise<any> 
       return generateContentWithRetry(params, retries - 1);
     }
     
+    throw error;
+  }
+};
+
+const generateLocalLMStudioContent = async (params: any, baseUrl: string, model: string = "local-model"): Promise<any> => {
+  try {
+    // Basic translation from Gemini format to OpenAI format
+    const messages = [];
+    const isJson = params.config?.responseMimeType === "application/json";
+    let schemaInstruction = '';
+    if (isJson) {
+      schemaInstruction = '\n\nYou must respond with a valid JSON object. Ensure all requested fields are present.';
+    }
+
+    if (params.systemInstruction) {
+      const sysContent = params.systemInstruction.parts?.[0]?.text || params.systemInstruction;
+      messages.push({ role: 'system', content: sysContent + schemaInstruction });
+    } else if (schemaInstruction) {
+      messages.push({ role: 'system', content: schemaInstruction.trim() });
+    }
+    
+    if (params.contents) {
+      if (typeof params.contents === 'string') {
+        messages.push({ role: 'user', content: params.contents });
+      } else if (Array.isArray(params.contents)) {
+        for (const item of params.contents) {
+           if (typeof item === 'string') {
+             messages.push({ role: 'user', content: item });
+           } else {
+             let role = item.role === 'model' ? 'assistant' : 'user';
+             const text = item.parts?.[0]?.text || item.text || '';
+             messages.push({ role, content: text });
+           }
+        }
+      }
+    }
+
+    const payload: any = {
+      model: model,
+      messages,
+      temperature: params.config?.temperature ?? params.generationConfig?.temperature ?? 0.7,
+      max_tokens: params.config?.maxOutputTokens ?? params.generationConfig?.maxOutputTokens,
+    };
+
+    if (isJson) {
+      // For compatibility with some local models, don't pass response_format if they might crash.
+      // We will rely purely on the system prompt schema instruction we just added.
+      // Many LM Studio models will 400 Bad Request on response_format unless it's perfectly supported.
+    }
+
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      throw new Error(`LM Studio error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    
+    // Translate back to Gemini format
+    return {
+      text: data.choices?.[0]?.message?.content || ""
+    };
+
+  } catch (error) {
+    console.error("Local LM Studio Request Failed", error);
     throw error;
   }
 };
@@ -174,7 +269,75 @@ const safeJsonParse = (text: string) => {
   }
 };
 
+const fetchCustomNews = async (query: string, exclude: string[], settings: any): Promise<NewsItem[]> => {
+  try {
+    let items: NewsItem[] = [];
+    const encodedQuery = encodeURIComponent(query);
+    
+    if (settings.newsProvider === 'newsapi') {
+      const res = await fetch(`https://newsapi.org/v2/everything?q=${encodedQuery}&sortBy=publishedAt&language=en&apiKey=${settings.newsApiKey}`);
+      const data = await res.json();
+      if (data.articles) {
+        items = data.articles.map((a: any) => ({
+          headline: a.title,
+          summary: a.description || "",
+          source: a.source?.name || "NewsAPI",
+          url: a.url
+        }));
+      }
+    } else if (settings.newsProvider === 'newsdata') {
+      const res = await fetch(`https://newsdata.io/api/1/news?apikey=${settings.newsApiKey}&q=${encodedQuery}&language=en`);
+      const data = await res.json();
+      if (data.results) {
+        items = data.results.map((a: any) => ({
+          headline: a.title,
+          summary: a.description || "",
+          source: a.source_id || "NewsData",
+          url: a.link
+        }));
+      }
+    } else if (settings.newsProvider === 'nyt') {
+      const res = await fetch(`https://api.nytimes.com/svc/search/v2/articlesearch.json?q=${encodedQuery}&api-key=${settings.newsApiKey}`);
+      const data = await res.json();
+      if (data.response?.docs) {
+        items = data.response.docs.map((a: any) => ({
+          headline: a.headline?.main || "NYT Article",
+          summary: a.abstract || a.snippet || "",
+          source: "The New York Times",
+          url: a.web_url
+        }));
+      }
+    }
+
+    // Filter out excluded headlines
+    if (exclude && exclude.length > 0) {
+      items = items.filter(item => {
+         const headlineNorm = (item.headline || "").toLowerCase();
+         return !exclude.some(ex => headlineNorm.includes(ex.toLowerCase()));
+      });
+    }
+
+    // Take top 5
+    return items.slice(0, 5).filter(n => {
+       if (!n.url) return false;
+       if (n.url.length < 10) return false;
+       if (!n.url.startsWith('http')) return false;
+       return true;
+    });
+
+  } catch (error) {
+    console.error("Custom News API fetch failed", error);
+    return [];
+  }
+};
+
+
 export const fetchLiveNews = async (query: string, exclude: string[] = []): Promise<NewsItem[]> => {
+  const settings = getUserSettings();
+  if (settings.newsProvider !== 'gemini' && settings.newsApiKey) {
+    return fetchCustomNews(query, exclude, settings);
+  }
+
   try {
     const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
     const count = exclude.length > 0 ? 5 : 3;
@@ -262,8 +425,9 @@ export const resolveLocationQuery = async (query: string): Promise<SearchResult 
   try {
     const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
     
-    // Pre-flight capability check: If API key is invalid or missing, fail immediately
-    if (!apiKey || apiKey === 'dummy-key-for-ts-check') {
+    const settings = getUserSettings();
+    // Pre-flight capability check: If API key is invalid or missing AND we are using Gemini, fail immediately
+    if (settings.aiProvider === 'gemini' && (!apiKey || apiKey === 'dummy-key-for-ts-check')) {
        console.log("[DEBUG] Failure reason code: LOCATION_SYSTEM_UNAVAILABLE");
        return { error: "LOCATION_SYSTEM_UNAVAILABLE" };
     }
@@ -282,6 +446,7 @@ export const resolveLocationQuery = async (query: string): Promise<SearchResult 
       4. DO NOT fail for natural language, events, or POI queries if a location can be inferred. Instead, resolve to the most educational and historically accurate coordinates.
 
       Return a JSON object containing the location/event details.
+      - 'name': The name of the location or event.
       - 'suggestedZoom': 0-10 scale. 8-10 for specific landmarks/cities/events, 4-6 for countries/regions.
       - 'description': Explain specifically WHY this location/event answers their query, then provide historical/geographical context. Keep it under 100 words.
       - 'population': Recent population estimate or write "Historical/Event" if not applicable.
@@ -308,7 +473,12 @@ export const resolveLocationQuery = async (query: string): Promise<SearchResult 
     });
 
     const mainResponse = await mainRequest;
-    const data = safeJsonParse(mainResponse.text);
+    let data = safeJsonParse(mainResponse.text);
+    
+    // Handle case where model returns an array of objects
+    if (Array.isArray(data) && data.length > 0) {
+      data = data[0];
+    }
     
     // Debug-only internal logging
     console.log("[DEBUG] Raw lookup query:", query);
@@ -588,7 +758,12 @@ export const getNearbyPlaces = async (lat: number, lng: number, radius: number =
 };
 
 export const getMoreNews = async (locationName: string, existingHeadlines: string[]): Promise<NewsItem[]> => {
-    return fetchLiveNews(locationName, existingHeadlines);
+  const settings = getUserSettings();
+  if (settings.newsProvider !== 'gemini' && settings.newsApiKey) {
+    return fetchCustomNews(locationName, existingHeadlines, settings);
+  }
+
+  try { return fetchLiveNews(locationName, existingHeadlines); } catch (e) { return []; }
 }
 
 export const generateRoute = async (text: string): Promise<Waypoint[]> => {
