@@ -456,7 +456,7 @@ export const resolveLocationQuery = async (query: string): Promise<SearchResult 
          - CRITICAL: If the query cannot be matched to any known place or historical event location at all, set coordinates to {"lat": 999, "lng": 999} and set name to "NOT_FOUND".
          - CRITICAL: If the query is too ambiguous or incomplete to resolve (e.g. multiple matches exist or input is unclear), set coordinates to {"lat": 998, "lng": 998} and set name to "AMBIGUOUS".
          - CRITICAL: If there is no geographic data available for this search, set coordinates to {"lat": 997, "lng": 997} and set name to "NO_GEOGRAPHIC_DATA".
-      - 'notable': List 3 notable people associated with this place/event. For 'significance', provide a descriptive sentence (approx 100-120 chars).
+      - 'notable': Array of 3 objects, each with 'name' (person's name) and 'significance' (descriptive sentence approx 100-120 chars).
       - 'type': Choose ONE from: Continent, Country, State, City, Ocean, Point of Interest.
       
       Output strictly valid JSON.
@@ -556,7 +556,7 @@ export const getInfoFromFeature = async (name: string, lat: number, lng: number)
       - climate: Köppen climate classification.
       - funFacts: 3 interesting facts.
       - coordinates: The exact input coordinates {lat: ${lat}, lng: ${lng}}
-      - notable: 3 notable people. For 'significance', provide a descriptive sentence.
+      - 'notable': Array of 3 objects, each with 'name' (person's name) and 'significance' (descriptive sentence).
       
       Output ONLY the JSON object.
     `;
@@ -624,7 +624,7 @@ export const getInfoFromCoordinates = async (lat: number, lng: number): Promise<
       - climate: Köppen climate classification.
       - funFacts: 3 interesting facts.
       - coordinates: The exact input coordinates {lat: ${lat}, lng: ${lng}}
-      - notable: 3 notable people. For 'significance', provide a descriptive sentence.
+      - 'notable': Array of 3 objects, each with 'name' (person's name) and 'significance' (descriptive sentence).
       
       Output ONLY the JSON object.
     `;

@@ -534,7 +534,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             </button>
             
             {/* 2. Save Location icon button */}
-            <div className="flex justify-center w-full mb-3 mt-1 relative">
+            <div className="flex justify-center w-full -mt-[10px] mb-[26px] relative z-10">
               <button 
                 onClick={handleFavoriteClick} 
                 className={`p-2 transition-colors ${theme.actionBtn}`} 
