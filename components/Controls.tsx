@@ -260,7 +260,7 @@ const Controls: React.FC<ControlsProps> = ({
       glow: "absolute inset-0 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full blur opacity-20 group-hover:opacity-40",
       error: "bg-red-900/80 border border-red-500 text-white text-sm px-4 py-2 rounded-lg backdrop-blur-md flex items-center gap-2",
       copyright: "text-white/40 font-sans",
-      modal: "bg-black/90 backdrop-blur-xl border border-cyan-400/30 text-white rounded-xl shadow-2xl"
+      modal: "bg-black/80 backdrop-blur-md border border-cyan-400/30 text-white rounded-xl shadow-2xl"
     },
     'retro-green': {
       btn: "bg-black border border-green-400 text-green-300 hover:bg-green-400 hover:text-black rounded-none font-retro",
@@ -276,7 +276,7 @@ const Controls: React.FC<ControlsProps> = ({
       glow: "hidden",
       error: "bg-black border border-green-400 text-green-300 font-retro px-4 py-2 uppercase blinking",
       copyright: "text-green-400/60 font-retro uppercase tracking-widest",
-      modal: "bg-black border-2 border-green-400 text-green-300 font-retro shadow-[0_0_20px_rgba(74,222,128,0.2)] rounded-none"
+      modal: "bg-black/85 backdrop-blur-sm border-2 border-green-400 text-green-300 font-retro shadow-[0_0_20px_rgba(74,222,128,0.2)] rounded-none"
     },
     'retro-amber': {
       btn: "bg-black border border-amber-400 text-amber-300 hover:bg-amber-400 hover:text-black rounded-none font-retro",
@@ -292,7 +292,7 @@ const Controls: React.FC<ControlsProps> = ({
       glow: "hidden",
       error: "bg-black border border-amber-400 text-amber-300 font-retro px-4 py-2 uppercase blinking",
       copyright: "text-amber-400/60 font-retro uppercase tracking-widest",
-      modal: "bg-black border-2 border-amber-400 text-amber-300 font-retro shadow-[0_0_20px_rgba(251,191,36,0.2)] rounded-none"
+      modal: "bg-black/85 backdrop-blur-sm border-2 border-amber-400 text-amber-300 font-retro shadow-[0_0_20px_rgba(251,191,36,0.2)] rounded-none"
     },
     'parchment': {
       btn: "bg-[#f4ead5] border border-[#8b5a2b] text-[#5c3a21] hover:bg-[#e8d5b5] hover:text-[#3e2723] rounded shadow-[2px_2px_4px_rgba(0,0,0,0.2)] font-sans",

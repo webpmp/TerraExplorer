@@ -95,19 +95,19 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
 
   const themes = {
     'modern': {
-      container: "bg-black/80 backdrop-blur-xl border border-cyan-400/30 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] text-white font-sans",
+      container: "bg-black/75 backdrop-blur-md border border-cyan-400/30 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] text-white font-sans",
       header: "bg-gradient-to-r from-blue-900 to-cyan-900",
       headerTitle: "brand-font text-white",
       closeBtn: "hover:bg-white/20 text-white rounded-full p-1 transition-colors"
     },
     'retro-green': {
-      container: "bg-black border-2 border-green-400 shadow-[0_0_20px_rgba(74,222,128,0.2)] text-green-300 font-retro tracking-widest",
+      container: "bg-black/85 backdrop-blur-sm border-2 border-green-400 shadow-[0_0_20px_rgba(74,222,128,0.2)] text-green-300 font-retro tracking-widest",
       header: "bg-green-900/30 border-b-2 border-green-400",
       headerTitle: "text-green-300 uppercase",
       closeBtn: "hover:bg-green-400 hover:text-black text-green-300 rounded-none p-1 transition-colors"
     },
     'retro-amber': {
-      container: "bg-black border-2 border-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.2)] text-amber-300 font-retro tracking-widest",
+      container: "bg-black/85 backdrop-blur-sm border-2 border-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.2)] text-amber-300 font-retro tracking-widest",
       header: "bg-amber-900/30 border-b-2 border-amber-400",
       headerTitle: "text-amber-300 uppercase",
       closeBtn: "hover:bg-amber-400 hover:text-black text-amber-300 rounded-none p-1 transition-colors"

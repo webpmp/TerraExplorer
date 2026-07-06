@@ -386,7 +386,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   // Theme configuration
   const themes = {
     'modern': {
-      container: "bg-black/80 backdrop-blur-xl border border-cyan-400/30 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] text-white font-sans",
+      container: "bg-black/75 backdrop-blur-md border border-cyan-400/30 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] text-white font-sans",
       header: "bg-gradient-to-r from-blue-900 to-cyan-900",
       headerTitle: "brand-font text-white",
       tag: "text-cyan-300 border-cyan-400/50 bg-cyan-900/60 rounded-full",
@@ -406,7 +406,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       popover: "bg-slate-900 border border-cyan-500/50 rounded-lg shadow-xl"
     },
     'retro-green': {
-      container: "bg-black border-2 border-green-400 shadow-[0_0_20px_rgba(74,222,128,0.2)] text-green-300 font-retro tracking-widest",
+      container: "bg-black/85 backdrop-blur-sm border-2 border-green-400 shadow-[0_0_20px_rgba(74,222,128,0.2)] text-green-300 font-retro tracking-widest",
       header: "bg-green-900/30",
       headerTitle: "text-green-300 uppercase",
       tag: "text-black bg-green-400 border-green-400 rounded-none font-bold",
@@ -426,7 +426,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       popover: "bg-black border-2 border-green-400 rounded-none shadow-[0_0_10px_rgba(74,222,128,0.4)]"
     },
     'retro-amber': {
-      container: "bg-black border-2 border-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.2)] text-amber-300 font-retro tracking-widest",
+      container: "bg-black/85 backdrop-blur-sm border-2 border-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.2)] text-amber-300 font-retro tracking-widest",
       header: "bg-amber-900/30",
       headerTitle: "text-amber-300 uppercase",
       tag: "text-black bg-amber-400 border-amber-400 rounded-none font-bold",

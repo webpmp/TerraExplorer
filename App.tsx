@@ -89,10 +89,17 @@ const AuthoritativeCameraEnforcer: React.FC<{
        }
     }
     
-    // Force set camera distance strictly while preserving normalized rotation
-    camera.position.normalize().multiplyScalar(authoritativeDistance);
+    // Protect against NaN
+    if (isNaN(authoritativeDistance) || authoritativeDistance <= 0) {
+        authoritativeDistance = 4.5;
+    }
     
-    if (targetCameraPosRef.current) {
+    // Force set camera distance strictly while preserving normalized rotation
+    if (camera.position.lengthSq() > 0.0001) {
+        camera.position.normalize().multiplyScalar(authoritativeDistance);
+    }
+    
+    if (targetCameraPosRef.current && targetCameraPosRef.current.lengthSq() > 0.0001) {
        targetCameraPosRef.current.normalize().multiplyScalar(authoritativeDistance);
     }
     
@@ -293,7 +300,7 @@ const App: React.FC = () => {
   const [isZoomLocked, setIsZoomLocked] = useState(false);
   const [lockedZoomDistance, setLockedZoomDistance] = useState<number | null>(null);
   
-  const [currentCameraDistance, setCurrentCameraDistance] = useState(4.5);
+
   const currentCameraDistanceRef = useRef(4.5);
 
   const cameraStateRef = useRef({
@@ -306,7 +313,7 @@ const App: React.FC = () => {
   });
 
   const updateCameraDistance = useCallback((dist: number) => {
-    setCurrentCameraDistance(dist);
+
     currentCameraDistanceRef.current = dist;
     cameraStateRef.current.themeSuggestedDistance = dist;
     cameraStateRef.current.routeSuggestedDistance = dist;
@@ -873,6 +880,7 @@ const App: React.FC = () => {
         // Load the saved route
         setRouteWaypoints(fav.waypoints);
         setActiveRouteId(fav.id); // Mark as active
+        cameraStateRef.current.activeRoute = fav.id; // Synchronous update for reconcileCameraState
         setCurrentWaypointIndex(0);
         if (fav.waypoints.length > 0) {
             loadWaypointData(fav.waypoints[0]);
@@ -1685,7 +1693,7 @@ const App: React.FC = () => {
           enableDamping={true}
           dampingFactor={0.05}
           onChange={() => {
-            if (cameraControlsRef.current) {
+            if (cameraControlsRef.current && !targetCameraPosRef.current) {
               updateCameraDistance(cameraControlsRef.current.getDistance());
             }
           }}
