@@ -11,7 +11,8 @@ import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import SettingsPanel from './components/SettingsPanel';
 import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint, GeoCoordinates, UserSettings, AIProvider, NewsProvider } from './types';
-import { resolveLocationQuery, getInfoFromCoordinates, getInfoFromFeature, getNearbyPlaces, getMoreNews, fetchLiveNews, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity } from './services/geminiService';
+import { getInfoFromCoordinates, getInfoFromFeature, getNearbyPlaces, getMoreNews, fetchLiveNews, generateRoute, extractEntityFromQuery } from './services/geminiService';
+import { runSearchPipeline } from './services/pipeline';
 import logoImageBlack from './assets/logo-terra-explorer-black.png';
 import logoImageGreen from './assets/logo-terra-explorer-green.png';
 import logoImageAmber from './assets/logo-terra-explorer-amber.png';
@@ -1190,7 +1191,6 @@ const App: React.FC = () => {
 
     // 1. Intent routing & entity extraction
     const parsedQuery = routeIntentAndExtractEntity(cleanQuery);
-    console.log(`[DEBUG] Intent Routed: ${parsedQuery.intent}, Extracted Entity: "${parsedQuery.entity}"`);
 
     setInteractionState('PIN_SELECTED');
     setIsLoading(true);
@@ -1212,26 +1212,38 @@ const App: React.FC = () => {
     setScanningStatusText(`LOCATING ${parsedQuery.entity.toUpperCase()}`);
 
     // 3. Unified entity resolver lookup
-    const result = await resolveLocationQuery(parsedQuery.entity);
-    
+    const pipelineResult = await runSearchPipeline(query);
+
+    console.log(`=== SEARCH PIPELINE TRACE ===
+Raw Query: ${query}
+Normalized Query: ${cleanQuery}
+Intent: ${parsedQuery.intent}
+Extracted Entity: ${parsedQuery.entity}
+Resolver Input: ${parsedQuery.entity}
+Resolver Output: ${JSON.stringify(pipelineResult)}
+=============================`);
+
     setScanningStatusText(null);
 
-    if (result && result.locationInfo && result.locationInfo.coordinates) {
-      const { lat, lng } = result.locationInfo.coordinates;
+    const hasValidCoords = pipelineResult.isValid && pipelineResult.finalData && !pipelineResult.error;
+
+    if (hasValidCoords) {
+      const { lat, lng } = pipelineResult.finalData!.coordinates;
       
       const searchMarker: MapMarker = {
         id: `search-${Date.now()}`,
-        name: result.locationInfo.name,
+        name: pipelineResult.finalData!.name,
         lat: lat,
         lng: lng,
         populationClass: 'large'
       };
       setMarkers([searchMarker]);
       setSelectedMarkerId(searchMarker.id);
-      setLocationInfo(result.locationInfo);
+      setLocationInfo(pipelineResult.finalData!);
       setIsLoading(false);
 
-      const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : Math.max(1.3, 4.5 - ((result.suggestedZoom / 10) * (4.5 - 1.2)));
+      const zoom = pipelineResult.metadataResult.coordinateResult.suggestedZoom || 5;
+      const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : Math.max(1.3, 4.5 - ((zoom / 10) * (4.5 - 1.2)));
       
       cameraStateRef.current.routeSuggestedDistance = targetDist;
       cameraStateRef.current.targetRotation = { lat, lng };
@@ -1240,19 +1252,29 @@ const App: React.FC = () => {
          reconcileCameraState();
       });
 
-      if (result.locationInfo.name) {
+      if (pipelineResult.finalData!.name) {
         setIsNewsFetching(true);
-        const news = await fetchLiveNews(result.locationInfo.name);
+        const news = await fetchLiveNews(pipelineResult.finalData!.name);
         setLocationInfo(prev => {
-          if (!prev || prev.name !== result.locationInfo.name) return prev;
+          if (!prev || prev.name !== pipelineResult.finalData!.name) return prev;
           return { ...prev, news };
         });
         setIsNewsFetching(false);
       }
 
     } else {
+      const errorData = pipelineResult.metadataResult.enrichedData;
+      if (errorData) {
+        console.log(`=== INVALID COORDINATE BLOCKED ===
+Query: ${query}
+Location: ${errorData.name}
+Coordinates: ${JSON.stringify(errorData.coordinates)}
+Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
+===============================`);
+      }
+
       let userError = "COULD NOT RESOLVE LOCATION";
-      const errorCode = result?.error;
+      const errorCode = pipelineResult.error;
       if (errorCode === "LOCATION_SYSTEM_UNAVAILABLE") {
         userError = "LOCATION SYSTEM UNAVAILABLE";
       } else if (errorCode === "NOT_FOUND") {

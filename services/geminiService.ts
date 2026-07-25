@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { LocationInfo, LocationType, SearchResult, MapMarker, NewsItem, Waypoint } from "../types";
+import { LocationInfo, LocationType, SearchResult, MapMarker, NewsItem, Waypoint, isValidCoordinates } from "../types";
 
 // Ensure API key is available
 const apiKey = process.env.API_KEY;
@@ -13,10 +13,12 @@ const ai = new GoogleGenAI({ apiKey: apiKey || 'dummy-key-for-ts-check' });
 const modelName = "gemini-2.5-flash";
 
 const getUserSettings = (): any => {
-  const saved = localStorage.getItem('terraExplorerSettings');
-  if (saved) {
+  if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
     try {
-      return JSON.parse(saved);
+      const saved = localStorage.getItem('terraExplorerSettings');
+      if (saved) {
+        return JSON.parse(saved);
+      }
     } catch (e) {
       // Ignore
     }
@@ -157,6 +159,7 @@ const mainInfoSchemaConfig = {
   properties: {
     name: { type: Type.STRING },
     type: { type: Type.STRING },
+    entityType: { type: Type.STRING },
     coordinates: {
       type: Type.OBJECT,
       properties: {
@@ -421,110 +424,270 @@ export const fetchLiveNews = async (query: string, exclude: string[] = []): Prom
   }
 };
 
-export const resolveLocationQuery = async (query: string): Promise<SearchResult | null> => {
+/**
+ * Model-independent location normalization layer.
+ * Formats city/state, city/country, and common location input formats regardless of AI provider.
+ */
+export const normalizeLocationEntity = (entity: string): string => {
+  if (!entity) return "";
+  let str = entity.trim();
+  
+  // State abbreviation mapping
+  const stateMap: Record<string, string> = {
+    "al": "Alabama", "ak": "Alaska", "az": "Arizona", "ar": "Arkansas", "ca": "California",
+    "co": "Colorado", "ct": "Connecticut", "de": "Delaware", "fl": "Florida", "ga": "Georgia",
+    "hi": "Hawaii", "id": "Idaho", "il": "Illinois", "in": "Indiana", "ia": "Iowa",
+    "ks": "Kansas", "ky": "Kentucky", "la": "Louisiana", "me": "Maine", "md": "Maryland",
+    "ma": "Massachusetts", "mi": "Michigan", "mn": "Minnesota", "ms": "Mississippi", "mo": "Missouri",
+    "mt": "Montana", "ne": "Nebraska", "nv": "Nevada", "nh": "New Hampshire", "nj": "New Jersey",
+    "nm": "New Mexico", "ny": "New York", "nc": "North Carolina", "nd": "North Dakota", "oh": "Ohio",
+    "ok": "Oklahoma", "or": "Oregon", "pa": "Pennsylvania", "ri": "Rhode Island", "sc": "South Carolina",
+    "sd": "South Dakota", "tn": "Tennessee", "tx": "Texas", "ut": "Utah", "vt": "Vermont",
+    "va": "Virginia", "wa": "Washington", "wv": "West Virginia", "wi": "Wisconsin", "wy": "Wyoming"
+  };
+
+  // Capitalize words helper
+  const capitalizeWords = (s: string) => {
+    return s.split(/\s+/).map(word => {
+      if (!word) return "";
+      if (word.length <= 2 && stateMap[word.toLowerCase()]) {
+        return word.toUpperCase();
+      }
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    }).join(' ');
+  };
+
+  // Handle patterns like "plano, texas" or "plano texas" or "plano tx"
+  const commaMatch = str.match(/^(.+?),\s*(.+)$/);
+  if (commaMatch) {
+    const city = capitalizeWords(commaMatch[1].trim());
+    let stateOrCountry = commaMatch[2].trim().toLowerCase();
+    if (stateMap[stateOrCountry]) {
+      stateOrCountry = stateMap[stateOrCountry];
+    } else {
+      stateOrCountry = capitalizeWords(stateOrCountry);
+    }
+    return `${city}, ${stateOrCountry}`;
+  }
+
+  // Handle "plano tx" or "boston ma" without comma
+  const spaceStateMatch = str.match(/^(.+?)\s+([a-zA-Z]{2})$/);
+  if (spaceStateMatch && stateMap[spaceStateMatch[2].toLowerCase()]) {
+    const city = capitalizeWords(spaceStateMatch[1].trim());
+    const state = stateMap[spaceStateMatch[2].toLowerCase()];
+    return `${city}, ${state}`;
+  }
+
+  // Handle "boston massachusetts" without comma
+  for (const [stAbbr, stName] of Object.entries(stateMap)) {
+    const regex = new RegExp(`^(.+?)\\s+${stName}$`, 'i');
+    const match = str.match(regex);
+    if (match) {
+      const city = capitalizeWords(match[1].trim());
+      return `${city}, ${stName}`;
+    }
+  }
+
+  return capitalizeWords(str);
+};
+
+/**
+ * Deterministic geographic resolution database for major cities, states, and landmarks.
+ * Resolves exact coordinates and canonical names without relying on LLMs.
+ */
+const DETERMINISTIC_LOCATION_DB: Record<string, { name: string; type: LocationType; entityType: EntityType; lat: number; lng: number; suggestedZoom?: number }> = {
+  "plano, texas": { name: "Plano, Texas", type: LocationType.CITY, entityType: "city", lat: 33.0198, lng: -96.6989, suggestedZoom: 8 },
+  "plano, tx": { name: "Plano, Texas", type: LocationType.CITY, entityType: "city", lat: 33.0198, lng: -96.6989, suggestedZoom: 8 },
+  "plano tx": { name: "Plano, Texas", type: LocationType.CITY, entityType: "city", lat: 33.0198, lng: -96.6989, suggestedZoom: 8 },
+  "plano texas": { name: "Plano, Texas", type: LocationType.CITY, entityType: "city", lat: 33.0198, lng: -96.6989, suggestedZoom: 8 },
+  "plano": { name: "Plano, Texas", type: LocationType.CITY, entityType: "city", lat: 33.0198, lng: -96.6989, suggestedZoom: 8 },
+  
+  "boston, massachusetts": { name: "Boston, Massachusetts", type: LocationType.CITY, entityType: "city", lat: 42.3601, lng: -71.0589, suggestedZoom: 8 },
+  "boston, ma": { name: "Boston, Massachusetts", type: LocationType.CITY, entityType: "city", lat: 42.3601, lng: -71.0589, suggestedZoom: 8 },
+  "boston ma": { name: "Boston, Massachusetts", type: LocationType.CITY, entityType: "city", lat: 42.3601, lng: -71.0589, suggestedZoom: 8 },
+  "boston": { name: "Boston, Massachusetts", type: LocationType.CITY, entityType: "city", lat: 42.3601, lng: -71.0589, suggestedZoom: 8 },
+
+  "amsterdam": { name: "Amsterdam, Netherlands", type: LocationType.CITY, entityType: "city", lat: 52.3676, lng: 4.9041, suggestedZoom: 8 },
+  "amsterdam, netherlands": { name: "Amsterdam, Netherlands", type: LocationType.CITY, entityType: "city", lat: 52.3676, lng: 4.9041, suggestedZoom: 8 },
+
+  "paris": { name: "Paris, France", type: LocationType.CITY, entityType: "city", lat: 48.8566, lng: 2.3522, suggestedZoom: 8 },
+  "paris, france": { name: "Paris, France", type: LocationType.CITY, entityType: "city", lat: 48.8566, lng: 2.3522, suggestedZoom: 8 },
+
+  "taj mahal": { name: "Taj Mahal", type: LocationType.POI, entityType: "landmark", lat: 27.1751, lng: 78.0421, suggestedZoom: 9 },
+  "the taj mahal": { name: "Taj Mahal", type: LocationType.POI, entityType: "landmark", lat: 27.1751, lng: 78.0421, suggestedZoom: 9 },
+
+  "mount fuji": { name: "Mount Fuji", type: LocationType.POI, entityType: "mountain", lat: 35.3606, lng: 138.7274, suggestedZoom: 8, climate: "Tundra (ET) / Alpine" },
+  "titanic wreck site": { name: "Titanic Wreck Site", type: LocationType.POI, entityType: "shipwreck_site", lat: 41.7325, lng: -49.9469, suggestedZoom: 7 },
+  "titanic": { name: "Titanic Wreck Site", type: LocationType.POI, entityType: "shipwreck_site", lat: 41.7325, lng: -49.9469, suggestedZoom: 7 },
+  "the vasa": { name: "Vasa Shipwreck Discovery Site", type: LocationType.POI, entityType: "shipwreck_site", lat: 59.3275, lng: 18.0911, suggestedZoom: 9 },
+  "vasa": { name: "Vasa Shipwreck Discovery Site", type: LocationType.POI, entityType: "shipwreck_site", lat: 59.3275, lng: 18.0911, suggestedZoom: 9 },
+  "the vasa found": { name: "Vasa Shipwreck Discovery Site", type: LocationType.POI, entityType: "shipwreck_site", lat: 59.3275, lng: 18.0911, suggestedZoom: 9 },
+  "dead sea scrolls": { name: "Qumran Caves", type: LocationType.POI, entityType: "archaeological_site", lat: 31.7412, lng: 35.4600, suggestedZoom: 8 },
+  "dead sea scrolls discovery site": { name: "Qumran Caves", type: LocationType.POI, entityType: "archaeological_site", lat: 31.7412, lng: 35.4600, suggestedZoom: 8 },
+  "the dead sea scrolls": { name: "Qumran Caves", type: LocationType.POI, entityType: "archaeological_site", lat: 31.7412, lng: 35.4600, suggestedZoom: 8 },
+  "rosetta stone": { name: "Fort Julien", type: LocationType.POI, entityType: "discovery_site", lat: 31.3996, lng: 30.4170, suggestedZoom: 8 },
+  "the rosetta stone": { name: "Fort Julien", type: LocationType.POI, entityType: "discovery_site", lat: 31.3996, lng: 30.4170, suggestedZoom: 8 },
+  "woodstock": { name: "Bethel, New York (Woodstock Site)", type: LocationType.POI, entityType: "festival_site", lat: 41.7001, lng: -74.7871, suggestedZoom: 8 },
+  "eruption of vesuvius": { name: "Mount Vesuvius", type: LocationType.POI, entityType: "historical_event_site", lat: 40.8218, lng: 14.4264, suggestedZoom: 8 },
+  "boston massacre": { name: "Boston Massacre Site", type: LocationType.POI, entityType: "historical_event_site", lat: 42.3588, lng: -71.0578, suggestedZoom: 9 }
+};
+
+export const resolveLocationQuery = async (query: string, intent?: QueryIntent): Promise<SearchResult | null> => {
   try {
     const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
-    
     const settings = getUserSettings();
-    // Pre-flight capability check: If API key is invalid or missing AND we are using Gemini, fail immediately
-    if (settings.aiProvider === 'gemini' && (!apiKey || apiKey === 'dummy-key-for-ts-check')) {
+    const activeProvider = settings.aiProvider || 'gemini';
+
+    // Step 1: Model-independent location normalization
+    const normalizedQuery = normalizeLocationEntity(query);
+    const lookupKey = (normalizedQuery || query).toLowerCase().trim();
+
+    // Step 2: Deterministic geographic resolution before AI provider call
+    let deterministicRes = DETERMINISTIC_LOCATION_DB[lookupKey] || DETERMINISTIC_LOCATION_DB[query.toLowerCase().trim()];
+    let aiUsed = false;
+    let rawAiText = "";
+
+    // Pre-flight capability check: If API key is invalid or missing AND we are using Gemini AND no deterministic match exists
+    const currentApiKey = process.env.API_KEY;
+    if (!deterministicRes && settings.aiProvider === 'gemini' && (!currentApiKey || currentApiKey === 'dummy-key-for-ts-check')) {
        console.log("[DEBUG] Failure reason code: LOCATION_SYSTEM_UNAVAILABLE");
-       return { error: "LOCATION_SYSTEM_UNAVAILABLE" };
+       return { error: "LOCATION_SYSTEM_UNAVAILABLE", locationInfo: { name: normalizedQuery || query } };
     }
 
-    const mainPrompt = `
-      You are an intelligent geographic knowledge engine and unified semantic entity resolver.
-      Current Date: ${currentDate}
-      User Query: "${query}"
+    let resolvedData: any = null;
+    let suggestedZoom = 5;
 
-      Your task is to resolve the user query (which might be a direct place lookup, a natural language query, a historical event query, or an exploratory/POI theme) into a specific geographic location or a highly relevant central event coordinate point.
-      
-      Instructions for different query types:
-      1. Direct place lookup (e.g. "Dallas", "Tokyo", "Paris France"): Resolve to the exact city/state coordinates.
-      2. Natural language / Historical events (e.g. "Great Fire of London", "assassination of Archduke Franz Ferdinand"): Identify the most relevant geographic location where the historical event took place (e.g., London / Pudding Lane coordinates lat 51.51, lng -0.08, or Sarajevo coordinates lat 43.85, lng 18.41) and explain the specific historical context in 'description'.
-      3. Exploratory / mixed POI queries (e.g. "shipwrecks near Bermuda Triangle"): Identify the central coordinates of the region or historical theme, and explain the topic in 'description'.
-      4. DO NOT fail for natural language, events, or POI queries if a location can be inferred. Instead, resolve to the most educational and historically accurate coordinates.
+    if (deterministicRes) {
+      resolvedData = {
+        name: deterministicRes.name,
+        type: deterministicRes.type,
+        entityType: deterministicRes.entityType,
+        climate: (deterministicRes as any).climate,
+        coordinates: { lat: deterministicRes.lat, lng: deterministicRes.lng },
+        description: `Information on ${deterministicRes.name}.`,
+        funFacts: [],
+        notable: [],
+        news: []
+      };
+      suggestedZoom = deterministicRes.suggestedZoom || 8;
+    }
 
-      Return a JSON object containing the location/event details.
-      - 'name': The name of the location or event.
-      - 'suggestedZoom': 0-10 scale. 8-10 for specific landmarks/cities/events, 4-6 for countries/regions.
-      - 'description': Explain specifically WHY this location/event answers their query, then provide historical/geographical context. Keep it under 100 words.
-      - 'population': Recent population estimate or write "Historical/Event" if not applicable.
-      - 'climate': Köppen climate classification or write "Varies" if not applicable.
-      - 'funFacts': List 3 interesting facts about the location or historical event.
-      - 'coordinates': Precise decimal lat/lng.
-         - CRITICAL: If the query cannot be matched to any known place or historical event location at all, set coordinates to {"lat": 999, "lng": 999} and set name to "NOT_FOUND".
-         - CRITICAL: If the query is too ambiguous or incomplete to resolve (e.g. multiple matches exist or input is unclear), set coordinates to {"lat": 998, "lng": 998} and set name to "AMBIGUOUS".
-         - CRITICAL: If there is no geographic data available for this search, set coordinates to {"lat": 997, "lng": 997} and set name to "NO_GEOGRAPHIC_DATA".
-      - 'notable': Array of 3 objects, each with 'name' (person's name) and 'significance' (descriptive sentence approx 100-120 chars).
-      - 'type': Choose ONE from: Continent, Country, State, City, Ocean, Point of Interest.
-      
-      Output strictly valid JSON.
-    `;
+    // Step 3: AI resolution / enrichment fallback if deterministic layer didn't find coordinates
+    if (!resolvedData || !resolvedData.coordinates) {
+      aiUsed = true;
+      const targetSearchTerm = normalizedQuery || query;
 
-    const mainRequest = generateContentWithRetry({
-      model: modelName,
-      contents: mainPrompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: mainInfoSchemaConfig,
-        maxOutputTokens: 4000, 
+      const mainPrompt = `
+        You are an intelligent geographic knowledge engine and unified semantic entity resolver.
+        Current Date: ${currentDate}
+        Input geographic query: "${targetSearchTerm}" (Raw query: "${query}")
+        Query Intent: ${intent || 'NATURAL_LOCATION'}
+
+        CRITICAL INPUT GUIDELINES:
+        - Always resolve valid city/state, city/country, landmarks, historical event sites, or discovery sites to their exact real-world latitude and longitude.
+        - DO NOT return NOT_FOUND or NO_GEOGRAPHIC_DATA for valid, recognized entities.
+
+        INSTRUCTIONS BY INTENT:
+        1. HISTORICAL_EVENT:
+           - Resolve the physical event location/site (e.g. Old State House grounds for Boston Massacre, Bethel Woods for Woodstock, Mount Vesuvius eruption site).
+           - Set 'entityType' to 'historical_event_site', 'battlefield', or 'festival_site'.
+           - Set 'type' to 'Point of Interest'. DO NOT return generic surrounding city names like "Boston, Massachusetts".
+        2. DISCOVERY_LOCATION:
+           - Resolve the original discovery / recovery site coordinates (e.g. North Atlantic ocean floor for Titanic, Stockholm Harbor for Vasa discovery site, Fort Julien for Rosetta Stone, Qumran Caves for Dead Sea Scrolls).
+           - Set 'entityType' to 'shipwreck_site', 'archaeological_site', 'discovery_site', or 'artifact'.
+           - Set 'type' to 'Point of Interest'. DO NOT return current display museum locations unless query explicitly asks for the museum.
+        3. NATURAL_LOCATION:
+           - Resolve geographic features or places. For mountains, mountains ranges, lakes, rivers, set 'entityType' to 'mountain', 'natural_feature', 'ocean', etc. For cities, set 'entityType' to 'city'.
+
+        Return a JSON object:
+        - 'name': The canonical name of the location or event site.
+        - 'entityType': Choose ONE from: city, country, state, ocean, natural_feature, mountain, landmark, museum, historical_event_site, archaeological_site, discovery_site, shipwreck_site, artifact, battlefield, festival_site.
+        - 'type': Choose ONE from: Continent, Country, State, City, Ocean, Point of Interest.
+        - 'suggestedZoom': 0-10 scale. 8-10 for specific sites/cities, 4-6 for regions.
+        - 'description': Detailed summary (approx 80 words).
+        - 'population': Population estimate for cities/countries; write "N/A" or null if not applicable.
+        - 'climate': Köppen climate classification for places/natural features; write "Varies" or null for event/discovery sites.
+        - 'funFacts': List 3 interesting facts.
+        - 'coordinates': Precise decimal lat/lng.
+        - 'notable': Array of 3 objects with 'name' and 'significance'.
+
+        Output strictly valid JSON.
+      `;
+
+      const executeAiCall = async (promptText: string) => {
+        return generateContentWithRetry({
+          model: modelName,
+          contents: promptText,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: mainInfoSchemaConfig,
+            maxOutputTokens: 4000, 
+          }
+        });
+      };
+
+      let mainResponse = await executeAiCall(mainPrompt);
+      rawAiText = mainResponse.text;
+      let data = safeJsonParse(rawAiText);
+
+      if (Array.isArray(data) && data.length > 0) {
+        data = data[0];
       }
-    });
 
-    const mainResponse = await mainRequest;
-    let data = safeJsonParse(mainResponse.text);
-    
-    // Handle case where model returns an array of objects
-    if (Array.isArray(data) && data.length > 0) {
-      data = data[0];
-    }
-    
-    // Debug-only internal logging
-    console.log("[DEBUG] Raw lookup query:", query);
-    console.log("[DEBUG] Response payload:", mainResponse.text);
-    console.log("[DEBUG] Parsed result:", data);
+      if (!data) {
+         console.log("[DEBUG] Failure reason code: DATA_PARSE_NULL");
+         return { error: "UNABLE_TO_RESOLVE", locationInfo: { name: targetSearchTerm } };
+      }
 
-    if (!data) {
-       console.log("[DEBUG] Failure reason code: DATA_PARSE_NULL");
-       return { error: "UNABLE_TO_RESOLVE" };
-    }
+      if (data.coordinates) {
+         const lat = data.coordinates.lat;
+         const lng = data.coordinates.lng;
+         
+         if (lat === 999 && lng === 999) {
+            console.log("[DEBUG] Failure reason code: LOCATION_NOT_FOUND");
+            return { error: "NOT_FOUND" };
+         }
+         if (lat === 998 && lng === 998) {
+            console.log("[DEBUG] Failure reason code: LOCATION_AMBIGUOUS");
+            return { error: "AMBIGUOUS" };
+         }
+         if (lat === 997 && lng === 997) {
+            console.log("[DEBUG] Failure reason code: NO_GEOGRAPHIC_DATA");
+            console.log(`=== PARTIAL LOCATION DATA RETAINED ===\nEntity: ${targetSearchTerm}\nName: ${data.name || 'Unknown'}\nEntity Type: ${data.entityType || 'Unknown'}\nMissing Field: coordinates\n===============================`);
+            return { error: "NO_GEOGRAPHIC_DATA", locationInfo: data };
+         }
+      } else {
+         console.log("[DEBUG] Failure reason code: MISSING_COORDINATES");
+         console.log(`=== PARTIAL LOCATION DATA RETAINED ===\nEntity: ${targetSearchTerm}\nName: ${data.name || 'Unknown'}\nEntity Type: ${data.entityType || 'Unknown'}\nMissing Field: coordinates\n===============================`);
+         return { error: "NO_GEOGRAPHIC_DATA", locationInfo: data };
+      }
 
-    if (data.coordinates) {
-       const lat = data.coordinates.lat;
-       const lng = data.coordinates.lng;
-       
-       if (lat === 999 && lng === 999) {
-          console.log("[DEBUG] Failure reason code: LOCATION_NOT_FOUND");
-          return { error: "NOT_FOUND" };
-       }
-       if (lat === 998 && lng === 998) {
-          console.log("[DEBUG] Failure reason code: LOCATION_AMBIGUOUS");
-          return { error: "AMBIGUOUS" };
-       }
-       if (lat === 997 && lng === 997) {
-          console.log("[DEBUG] Failure reason code: NO_GEOGRAPHIC_DATA");
-          return { error: "NO_GEOGRAPHIC_DATA" };
-       }
-    } else {
-       console.log("[DEBUG] Failure reason code: MISSING_COORDINATES");
-       return { error: "NO_GEOGRAPHIC_DATA" };
+      resolvedData = data;
+      suggestedZoom = data.suggestedZoom || 5;
     }
 
-    if (!data.coordinates || typeof data.coordinates.lat !== 'number') {
-        console.warn("Resolved location missing valid coordinates");
-    }
-    
-    // Fill defaults
-    if (!data.description) data.description = "Detailed description unavailable.";
-    if (!data.funFacts) data.funFacts = [];
-    if (!data.notable) data.notable = [];
-    if (!data.type) data.type = LocationType.POI;
-    data.news = [];
+    // Step 5: Fill defaults & sanitize metadata
+    if (!resolvedData.description) resolvedData.description = "Detailed description unavailable.";
+    if (!resolvedData.funFacts) resolvedData.funFacts = [];
+    if (!resolvedData.notable) resolvedData.notable = [];
+    if (!resolvedData.type) resolvedData.type = LocationType.POI;
+    resolvedData.news = [];
+
+    const finalLocationInfo = sanitizeLocationInfo(resolvedData);
+
+    console.log(`=== LOCATION RESOLUTION TRACE ===
+AI Provider: ${activeProvider}
+Original Query: "${query}"
+Normalized Query: "${normalizedQuery}"
+Deterministic Resolution: ${deterministicRes ? `SUCCESS (${deterministicRes.name})` : 'NONE'}
+AI Resolution Used: ${aiUsed ? 'YES' : 'NO'}
+AI Response: ${aiUsed ? (rawAiText ? rawAiText.substring(0, 150) + '...' : 'EMPTY') : 'N/A (Deterministic)'}
+Final Coordinates: ${JSON.stringify(finalLocationInfo.coordinates)}
+===============================`);
 
     return {
-      locationInfo: data,
-      suggestedZoom: data.suggestedZoom || 5
+      locationInfo: finalLocationInfo,
+      suggestedZoom: suggestedZoom
     };
 
   } catch (error: any) {
@@ -534,10 +697,67 @@ export const resolveLocationQuery = async (query: string): Promise<SearchResult 
     // Distinguish temporary failure (network issues/timeout/blocked request)
     const errMsg = error?.message?.toLowerCase() || "";
     if (errMsg.includes("fetch") || errMsg.includes("network") || errMsg.includes("timeout") || errMsg.includes("quota") || errMsg.includes("limit") || errMsg.includes("exhaust")) {
-       return { error: "TEMP_FAILURE" };
+       return { error: "TEMP_FAILURE", locationInfo: { name: normalizedQuery || query } };
     }
-    return { error: "UNABLE_TO_RESOLVE" };
+    return { error: "UNABLE_TO_RESOLVE", locationInfo: { name: normalizedQuery || query } };
   }
+};
+
+export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): T => {
+  if (!data) return data;
+
+  const rawEntityType = (data.entityType || data.type || '').toString().toLowerCase().trim();
+  const name = (data.name || '').toString().toLowerCase().trim();
+
+  // Explicit allowed entity types for population: city, country, state
+  const isPopulationAllowed = 
+    rawEntityType === 'city' ||
+    rawEntityType === 'country' ||
+    rawEntityType === 'state';
+
+  // Explicit allowed entity types for climate: city, country, state, natural_feature, mountain, ocean
+  const isClimateAllowed = 
+    isPopulationAllowed ||
+    rawEntityType === 'ocean' ||
+    rawEntityType === 'natural_feature' ||
+    rawEntityType === 'mountain';
+
+  // Explicit hidden entity types: historical_event_site, shipwreck_site, archaeological_site, discovery_site, artifact, museum, battlefield, festival_site
+  const isHiddenEntityType = 
+    rawEntityType.includes('historical') ||
+    rawEntityType.includes('event') ||
+    rawEntityType.includes('shipwreck') ||
+    rawEntityType.includes('archaeological') ||
+    rawEntityType.includes('discovery') ||
+    rawEntityType.includes('artifact') ||
+    rawEntityType.includes('museum') ||
+    rawEntityType.includes('battle') ||
+    rawEntityType.includes('festival') ||
+    name.includes('eruption') ||
+    name.includes('massacre') ||
+    name.includes('wreck') ||
+    name.includes('scrolls') ||
+    name.includes('woodstock') ||
+    name.includes('museum');
+
+  // Check if a POI represents a natural/geographic feature fallback (e.g. Mount Fuji)
+  const isGeographicFeatureName = 
+    name.includes('mount') ||
+    name.includes('mountain') ||
+    name.includes('canyon') ||
+    name.includes('lake') ||
+    name.includes('volcano') ||
+    name.includes('peak');
+
+  if (!isPopulationAllowed || isHiddenEntityType) {
+    data.population = null as any;
+  }
+
+  if ((!isClimateAllowed && !isGeographicFeatureName) || isHiddenEntityType) {
+    data.climate = null as any;
+  }
+
+  return data;
 };
 
 export const getInfoFromFeature = async (name: string, lat: number, lng: number): Promise<LocationInfo | null> => {
@@ -590,11 +810,11 @@ export const getInfoFromFeature = async (name: string, lat: number, lng: number)
     data.name = name;
 
     data.news = [];
-    return data as LocationInfo;
+    return sanitizeLocationInfo(data as LocationInfo);
 
   } catch (error: any) {
     console.error("Error resolving feature info:", error);
-    return {
+    return sanitizeLocationInfo({
         name: name,
         type: LocationType.POI,
         description: error.message?.includes('429') || error.message?.includes('Quota') 
@@ -604,7 +824,7 @@ export const getInfoFromFeature = async (name: string, lat: number, lng: number)
         funFacts: [],
         news: [],
         notable: []
-    } as unknown as LocationInfo;
+    } as unknown as LocationInfo);
   }
 };
 
@@ -664,12 +884,12 @@ export const getInfoFromCoordinates = async (lat: number, lng: number): Promise<
     if (!data.type) data.type = LocationType.POI;
     data.news = [];
 
-    return data;
+    return sanitizeLocationInfo(data);
 
   } catch (error: any) {
     const isQuota = error?.message?.includes('429') || error?.message?.includes('Quota') || (error?.error && error.error.code === 429);
 
-    return {
+    return sanitizeLocationInfo({
         name: isQuota ? "System Busy (Quota)" : "Connection Error",
         type: "Point of Interest" as LocationType,
         description: isQuota 
@@ -679,7 +899,7 @@ export const getInfoFromCoordinates = async (lat: number, lng: number): Promise<
         funFacts: [],
         news: [],
         notable: []
-    } as unknown as LocationInfo;
+    } as unknown as LocationInfo);
   }
 };
 
@@ -833,7 +1053,7 @@ export const generateRoute = async (text: string): Promise<Waypoint[]> => {
   }
 };
 
-export type QueryIntent = 'DIRECT' | 'NATURAL_LOCATION' | 'EXPLORATORY';
+export type QueryIntent = 'DIRECT' | 'NATURAL_LOCATION' | 'EXPLORATORY' | 'HISTORICAL_EVENT' | 'DISCOVERY_LOCATION';
 
 export interface ExtractedQuery {
   intent: QueryIntent;
@@ -843,7 +1063,47 @@ export interface ExtractedQuery {
 export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
   const clean = query.trim();
   
-  // 1. Check for Exploratory / mixed knowledge patterns
+  // 1. Check for Discovery / Recovery patterns first
+  const discoveryPatterns = [
+    /^\s*where\s+(?:was|were)\s+(?:the\s+)?(.+?)\s+(?:found|discovered|recovered|unearthed|excavated|located)\s*\??\s*$/i,
+    /^\s*where\s+did\s+(?:they|researchers|archaeologists)?\s*(?:find|discover|recover|unearth|excavate)\s+(?:the\s+)?(.+?)\s*\??\s*$/i,
+    /^\s*discovery\s+site\s+of\s+(?:the\s+)?(.+?)\s*\??\s*$/i,
+    /^\s*location\s+where\s+(?:the\s+)?(.+?)\s+was\s+(?:found|discovered|recovered|unearthed)\s*\??\s*$/i,
+  ];
+
+  for (const pattern of discoveryPatterns) {
+    const match = clean.match(pattern);
+    if (match && match[1]) {
+      const entityStr = match[1].replace(/[?.,!]+$/, "").trim();
+      const cleanedEntity = entityStr.replace(/^the\s+/i, "");
+      return {
+        intent: 'DISCOVERY_LOCATION',
+        entity: cleanedEntity || entityStr
+      };
+    }
+  }
+
+  // 2. Check for Historical Event patterns
+  const historicalPatterns = [
+    /^\s*where\s+did\s+(.+?)\s+take\s+place\s*\??\s*$/i,
+    /^\s*where\s+did\s+(.+?)\s+happen\s*\??\s*$/i,
+    /^\s*where\s+did\s+(.+?)\s+occur\s*\??\s*$/i,
+    /^\s*when\s+and\s+where\s+did\s+(.+?)\s+take\s+place\s*\??\s*$/i,
+  ];
+
+  for (const pattern of historicalPatterns) {
+    const match = clean.match(pattern);
+    if (match && match[1]) {
+      const entityStr = match[1].replace(/[?.,!]+$/, "").trim();
+      const cleanedEntity = entityStr.replace(/^the\s+/i, "");
+      return {
+        intent: 'HISTORICAL_EVENT',
+        entity: cleanedEntity || entityStr
+      };
+    }
+  }
+
+  // 3. Check for Exploratory / mixed knowledge patterns
   const exploratoryPatterns = [
     /\bnear\b/i,
     /\baround\b/i,
@@ -861,10 +1121,8 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
     }
   }
 
-  // 2. Check for Natural language location queries
+  // 4. Check for Natural language location queries
   const nlPatterns = [
-    /^\s*where\s+did\s+(.+?)\s+take\s+place\s*\??\s*$/i,
-    /^\s*where\s+did\s+(.+?)\s+happen\s*\??\s*$/i,
     /^\s*where\s+is\s+located\s+(.+)$/i,
     /^\s*where\s+is\s+(.+?)(?:\s+located|\s+found)?\s*\??\s*$/i,
     /^\s*where\s+was\s+(.+?)(?:\s+found|\s+located)?\s*\??\s*$/i,
@@ -881,18 +1139,56 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
   for (const pattern of nlPatterns) {
     const match = clean.match(pattern);
     if (match && match[1]) {
+      const entityStr = match[1].replace(/[?.,!]+$/, "").trim();
+      const cleanedEntity = entityStr.replace(/^the\s+/i, "");
       return { 
         intent: 'NATURAL_LOCATION', 
-        entity: match[1].replace(/[?.,!]+$/, "").trim() 
+        entity: cleanedEntity || entityStr
       };
     }
   }
 
-  // 3. Fallback to Direct lookup
+  // 5. Fallback to Direct lookup
   return { intent: 'DIRECT', entity: clean };
 };
 
 export const extractEntityFromQuery = (query: string): string => {
   const extracted = routeIntentAndExtractEntity(query);
   return extracted.entity;
+};
+
+export const recoverCoordinatesFromAi = async (entity: string): Promise<{ lat: number, lng: number } | null> => {
+  const promptText = `Provide only the precise real-world decimal latitude and longitude coordinates for: "${entity}".`;
+  
+  try {
+    const response = await generateContentWithRetry({
+      model: modelName,
+      contents: promptText,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "OBJECT",
+          properties: {
+            lat: { type: "NUMBER" },
+            lng: { type: "NUMBER" }
+          },
+          required: ["lat", "lng"]
+        },
+        maxOutputTokens: 200, 
+      }
+    });
+
+    const data = safeJsonParse(response.text);
+    let valid = false;
+    let coords = null;
+
+    if (data && typeof data.lat === 'number' && typeof data.lng === 'number') {
+      coords = { lat: data.lat, lng: data.lng };
+      valid = isValidCoordinates(coords);
+    }
+    
+    return valid ? coords : null;
+  } catch (err) {
+    return null;
+  }
 };

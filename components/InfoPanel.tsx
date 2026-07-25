@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { LocationInfo, SkinType, NotableItem } from '../types';
+import { LocationInfo, SkinType, NotableItem, isValidCoordinates } from '../types';
 import { 
   X, Users, Thermometer, Info, Newspaper, Crown, Map, Pin, ExternalLink, Loader2,
   BookOpen, Rocket, Trophy, Music, FlaskConical, Palette, Clapperboard, Image as ImageIcon,
@@ -34,12 +34,13 @@ interface Note {
 }
 
 // Helper to validate data availability
-const isValidData = (val: string | undefined) => {
-  if (!val) return false;
-  const v = val.toLowerCase().trim();
+const isValidData = (val: string | null | undefined) => {
+  if (val === null || val === undefined) return false;
+  const v = val.toString().toLowerCase().trim();
+  if (v === '' || v === 'undefined' || v === 'null') return false;
   
   // Check for keywords appearing within the string (substring match)
-  if (v.includes('n/a') || v.includes('not applicable') || v.includes('not available') || v.includes('unknown')) {
+  if (v.includes('n/a') || v.includes('not applicable') || v.includes('not available') || v.includes('unknown') || v.includes('varies') || v.includes('historical')) {
       return false;
   }
 
@@ -598,8 +599,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                  <span className={`${smallTextSize} uppercase px-2 py-0.5 ${theme.tag}`}>{info.type}</span>
               </div>
               <p className={`${subtextSize} font-mono ${theme.subtext}`}>
-                {info.coordinates?.lat != null ? info.coordinates.lat.toFixed(2) : '0.00'}° N, 
-                {info.coordinates?.lng != null ? info.coordinates.lng.toFixed(2) : '0.00'}° E
+                {isValidCoordinates(info.coordinates)
+                  ? `${info.coordinates.lat >= 0 ? info.coordinates.lat.toFixed(2) + '° N' : Math.abs(info.coordinates.lat).toFixed(2) + '° S'}, ${info.coordinates.lng >= 0 ? info.coordinates.lng.toFixed(2) + '° E' : Math.abs(info.coordinates.lng).toFixed(2) + '° W'}`
+                  : 'Coordinates unavailable'}
               </p>
             </div>
           </div>

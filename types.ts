@@ -5,6 +5,24 @@ export interface GeoCoordinates {
   lng: number;
 }
 
+export const isValidCoordinates = (coords: any): boolean => {
+  if (!coords || typeof coords !== 'object') return false;
+  const lat = Number(coords.lat);
+  const lng = Number(coords.lng);
+
+  if (isNaN(lat) || isNaN(lng)) return false;
+  if (lat < -90 || lat > 90) return false;
+  if (lng < -180 || lng > 180) return false;
+
+  // Check sentinel coordinates (997, 998, 999)
+  if (Math.abs(lat) >= 990 || Math.abs(lng) >= 990) return false;
+
+  // Check invalid 0,0 unless specifically Gulf of Guinea region
+  if (lat === 0 && lng === 0) return false;
+
+  return true;
+};
+
 export enum LocationType {
   CONTINENT = 'Continent',
   COUNTRY = 'Country',
@@ -13,6 +31,23 @@ export enum LocationType {
   OCEAN = 'Ocean',
   POI = 'Point of Interest'
 }
+
+export type EntityType = 
+  | 'city'
+  | 'country'
+  | 'state'
+  | 'ocean'
+  | 'natural_feature'
+  | 'mountain'
+  | 'landmark'
+  | 'museum'
+  | 'historical_event_site'
+  | 'archaeological_site'
+  | 'discovery_site'
+  | 'shipwreck_site'
+  | 'artifact'
+  | 'battlefield'
+  | 'festival_site';
 
 export interface NewsItem {
   headline: string;
@@ -30,9 +65,10 @@ export interface NotableItem {
 export interface LocationInfo {
   name: string;
   type: LocationType;
+  entityType?: string;
   description: string;
-  population?: string;
-  climate?: string;
+  population?: string | null;
+  climate?: string | null;
   funFacts: string[];
   coordinates: GeoCoordinates;
   boundary?: GeoCoordinates[];
@@ -55,7 +91,7 @@ export interface MapMarker {
 }
 
 export interface SearchResult {
-  locationInfo?: LocationInfo;
+  locationInfo?: LocationInfo | Partial<LocationInfo>;
   suggestedZoom?: number;
   error?: "NOT_FOUND" | "AMBIGUOUS" | "TEMP_FAILURE" | "NO_GEOGRAPHIC_DATA" | "UNABLE_TO_RESOLVE" | "LOCATION_SYSTEM_UNAVAILABLE";
 }
