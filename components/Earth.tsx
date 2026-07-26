@@ -131,6 +131,7 @@ const UniversalMarker: React.FC<{
   isSelected: boolean,
   isWaypoint?: boolean,
   waypointIndex?: number,
+  waypointRole?: string,
   markerData?: any,
   skin?: SkinType,
   onClick: (e: any) => void,
@@ -146,6 +147,7 @@ const UniversalMarker: React.FC<{
   isSelected,
   isWaypoint,
   waypointIndex,
+  waypointRole,
   markerData,
   skin,
   onClick,
@@ -165,7 +167,14 @@ const UniversalMarker: React.FC<{
       const baseScale = isSelected 
         ? (1 + Math.sin(state.clock.elapsedTime * 3) * 0.3)
         : 1;
-      meshRef.current.scale.setScalar(baseScale * sizeMultiplier);
+        
+      let roleScale = 1;
+      if (isWaypoint && waypointRole) {
+        if (waypointRole === 'primary') roleScale = 1.4;
+        else if (waypointRole === 'administrative') roleScale = 0.8;
+      }
+      
+      meshRef.current.scale.setScalar(baseScale * sizeMultiplier * roleScale);
 
       // 2. Fetch screen-space collision offset computed in parent's useFrame loop
       const displacement = scanOffsetsRef?.current?.[markerId] || new THREE.Vector3(0, 0, 0);
@@ -222,7 +231,7 @@ const UniversalMarker: React.FC<{
           color={color} 
           toneMapped={false} 
           transparent={true}
-          opacity={1.0} 
+          opacity={isWaypoint && waypointRole === 'administrative' ? 0.6 : 1.0} 
           depthTest={true}
           depthWrite={false}
         />
@@ -557,7 +566,8 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
                 color: waypointColor,
                 id: wp.id,
                 isWaypoint: true,
-                index: idx
+                index: idx,
+                role: wp.role
              });
         });
     }
@@ -1020,6 +1030,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
           isSelected={selectedMarkerId === marker.id}
           isWaypoint={marker.isWaypoint}
           waypointIndex={marker.index}
+          waypointRole={marker.role}
           markerData={marker.data}
           skin={skin}
           onClick={(e) => handleMarkerClick(e, marker.data)}

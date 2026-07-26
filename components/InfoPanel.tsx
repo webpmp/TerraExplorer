@@ -642,7 +642,32 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           </div>
       </div>
     ),
-    historicalContext: () => null,
+    historicalContext: () => (
+      (info.waypoint?.canonicalName || (info.waypoint?.alternateNames && info.waypoint.alternateNames.length > 0)) ? (
+        <div className={`p-3 ${theme.card}`}>
+            <div className="flex items-center gap-2 mb-2 text-current opacity-80">
+                <Info size={16} />
+                <span className={`${smallTextSize} font-bold uppercase`}>Historical Identity</span>
+            </div>
+            {info.waypoint?.canonicalName && (
+               <div className="mb-2">
+                   <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Canonical Name</span>
+                   <p className={`${isRetro ? 'text-base' : 'text-sm'} font-bold`}>{info.waypoint.canonicalName}</p>
+               </div>
+            )}
+            {info.waypoint?.alternateNames && info.waypoint.alternateNames.length > 0 && (
+               <div>
+                   <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Known As</span>
+                   <div className="flex flex-wrap gap-1">
+                     {info.waypoint.alternateNames.map((alt: string, i: number) => (
+                        <span key={i} className={`px-2 py-0.5 text-[10px] rounded border ${isRetro ? 'border-current text-current' : isParchment ? 'border-[#8b5a2b] bg-[#d2b48c] text-[#3e2723]' : 'border-cyan-500/30 bg-cyan-900/30 text-cyan-300'}`}>{alt}</span>
+                     ))}
+                   </div>
+               </div>
+            )}
+        </div>
+      ) : null
+    ),
     historicalPeriod: () => (
       info.historicalPeriod ? (
         <div className={`p-3 ${theme.card}`}>

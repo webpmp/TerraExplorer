@@ -23,7 +23,7 @@ export const isValidCoordinates = (coords: any): boolean => {
   return true;
 };
 
-export type QueryIntent = 'DIRECT' | 'NATURAL_LOCATION' | 'EXPLORATORY' | 'HISTORICAL_EVENT' | 'DISCOVERY_LOCATION';
+export type QueryIntent = 'DIRECT' | 'NATURAL_LOCATION' | 'EXPLORATORY' | 'HISTORICAL_EVENT' | 'DISCOVERY_LOCATION' | 'exploration' | 'specific_location' | 'historical_event' | 'route';
 
 export enum LocationType {
   CONTINENT = 'Continent',
@@ -110,6 +110,7 @@ export interface LocationInfo {
   climate?: ClimateInfo | null;
   relatedEntities?: RelatedEntity[];
   contextNotes?: string[];
+  metadataMode?: 'historical_site' | 'modern_place' | 'natural_feature';
   coordinates: GeoCoordinates;
   boundary?: GeoCoordinates[];
   news: NewsItem[];
@@ -151,12 +152,29 @@ export interface UserSettings {
   newsDataApiKey: string;
 }
 
+export interface Route {
+  title?: string;
+  routeType?: 'fixed_path' | 'network' | 'conceptual';
+  waypoints: Waypoint[];
+  routeConfidence?: {
+    level: 'high' | 'medium' | 'low';
+    reasoning: string;
+  };
+}
+
 export interface Waypoint {
   id: string;
   name: string;
+  canonicalName?: string;
+  historicalRegion?: string;
+  modernLocation?: string;
   lat: number;
   lng: number;
   context: string;
+  role?: "primary" | "related" | "administrative" | "historical_context";
+  parentId?: string;
+  sequence?: number;
+  alternateNames?: string[];
   routeTitle?: string;
   description?: string;
   significance?: string;
@@ -164,6 +182,10 @@ export interface Waypoint {
   historicalPeriod?: string;
   entities?: string[];
   relatedEntities?: RelatedEntity[];
+  historicalConfidence?: {
+    level: 'high' | 'medium' | 'low';
+    reasoning: string;
+  };
   metadata?: any;
   provenance?: ProvenanceRecord[];
 }

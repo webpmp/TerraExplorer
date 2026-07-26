@@ -12,6 +12,8 @@ import FavoritesPanel from './components/FavoritesPanel';
 import SettingsPanel from './components/SettingsPanel';
 import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint, GeoCoordinates, UserSettings, AIProvider, NewsProvider } from './types';
 import { getInfoFromCoordinates, getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity } from './services/geminiService';
+import { generateStory, playAudioContext } from './services/ttsService';
+import { logWaypointSnapshot } from './utils/pipelineDebug';
 import { fetchLiveNews } from './services/newsService';
 import { runSearchPipeline } from './services/pipeline';
 import { ENTITY_SCHEMAS } from './entitySchema';
@@ -893,22 +895,26 @@ const App: React.FC = () => {
 
      if (fetchGeographicMetadata) {
          // Fetch non-blocking
-         getInfoFromCoordinates(wp.lat, wp.lng).then(enrichedData => {
+         getInfoFromCoordinates(wp.lat, wp.lng, wp).then(enrichedData => {
              if (enrichedData) {
-                 const enrichmentIsUseful = Boolean(
+                 const aiMetadataUseful = Boolean(
                      enrichedData.population || 
                      enrichedData.climate || 
                      enrichedData.contextNotes?.length || 
-                     enrichedData.relatedEntities?.length || 
-                     enrichedData.news?.length
+                     enrichedData.relatedEntities?.length ||
+                     (enrichedData.description && enrichedData.description !== "Information unavailable." && enrichedData.description !== "Detailed description unavailable.")
                  );
 
-                 if (!enrichmentIsUseful) {
-                     console.log(`Enrichment Result: NOT USEFUL for ${wp.name}, skipping merge.`);
-                     return;
+                 if (!aiMetadataUseful) {
+                     console.log(`\n===== ENRICHMENT STATUS =====\nSTATUS: FAILED\nSOURCE: NONE\nFALLBACK: ROUTE_DATA_ONLY\n=============================`);
+                     
+                     // If news still succeeded, we might want to merge it, but AI metadata failed
+                     if (!enrichedData.news?.length) {
+                         return;
+                     }
+                 } else {
+                     console.log(`\n===== ENRICHMENT STATUS =====\nSTATUS: SUCCESS\nSOURCE: AI_METADATA\n=============================`);
                  }
-
-                 console.log(`Enrichment Result: Successfully fetched generic geographic metadata for ${wp.name}`);
                  setLocationInfo(prev => {
                      // Make sure we are still looking at the same waypoint!
                      if (!prev || prev.waypoint?.id !== wp.id) return prev;
@@ -920,10 +926,9 @@ const App: React.FC = () => {
                      console.log(`name: ${wp.name}`);
                      console.log(`coordinates: lat ${wp.lat}, lng ${wp.lng}`);
                      console.log(`description: ${desc}`);
-                     console.log(`Supplemental Fields Added: population, climate, relatedEntities, contextNotes`);
-                     console.log(`===============================`);
+                     console.log(`Metadata Mode: ${enrichedData.metadataMode || 'modern_place'}`);
 
-                     const nextState = {
+                     let nextState = {
                          ...prev,
                          ...enrichedData, // Enrichment fills in the blanks
                          name: wp.name, // Protected
@@ -931,6 +936,22 @@ const App: React.FC = () => {
                          description: desc, // Protected
                          waypoint: wp // Protected
                      };
+                     
+                     // 4. Handle metadataMode specific logic
+                     const mode = enrichedData.metadataMode || 'modern_place';
+                     if (mode === 'historical_site') {
+                         console.log(`Deprioritizing modern geographic data for historical_site.`);
+                         delete nextState.population;
+                         delete nextState.climate;
+                         nextState.news = []; 
+                     } else if (mode === 'natural_feature') {
+                         console.log(`Deprioritizing city demographics for natural_feature.`);
+                         delete nextState.population;
+                     } else {
+                         console.log(`Allowing normal geographic enrichment for modern_place.`);
+                     }
+                     
+                     console.log(`===============================`);
                      
                      return nextState;
                  });
@@ -1290,6 +1311,20 @@ const App: React.FC = () => {
     });
 
     setScanningStatusText(null);
+    
+    if (pipelineResult.mode === 'route') {
+      if (pipelineResult.isValid && pipelineResult.waypoints && pipelineResult.waypoints.length > 0) {
+        logWaypointSnapshot('App.tsx (Before Set State)', pipelineResult.waypoints[0]);
+        
+        setRouteWaypoints(pipelineResult.waypoints);
+        setCurrentWaypointIndex(0);
+        loadWaypointData(pipelineResult.waypoints[0]);
+      } else {
+        setSearchError("No identifiable locations found in the route.");
+        setIsLoading(false);
+      }
+      return;
+    }
 
     const hasValidCoords = pipelineResult.isValid && pipelineResult.finalData && !pipelineResult.error;
 
@@ -1362,12 +1397,20 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       // Clear current active route when generating new one
       setActiveRouteId(null);
       
-      const waypoints = await generateRoute(text);
+      const route = await generateRoute(text);
       
-      if (waypoints.length > 0) {
-          setRouteWaypoints(waypoints);
+      if (route.waypoints && route.waypoints.length > 0) {
+          setRouteWaypoints(route.waypoints);
+          
+          // Optionally, you might want to add a state for the route title or confidence if you choose to display it,
+          // for now we'll log it or let it be.
+          console.log(`Route Generated: ${route.title}`);
+          if (route.routeConfidence) {
+              console.log(`Confidence: ${route.routeConfidence.level} - ${route.routeConfidence.reasoning}`);
+          }
+          
           setCurrentWaypointIndex(0);
-          loadWaypointData(waypoints[0]);
+          loadWaypointData(route.waypoints[0]);
       } else {
           setSearchError("No identifiable locations found in the text.");
           setIsLoading(false);

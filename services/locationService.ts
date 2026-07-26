@@ -1,6 +1,7 @@
 import { LocationInfo } from '../types';
 import { getUserSettings, sanitizeLocationInfo } from './geminiService';
 import { fetchLiveNews } from './newsService';
+import { logWaypointSnapshot } from '../utils/pipelineDebug';
 
 export const enrichLocationInfo = async (resolvedData: any): Promise<any> => {
     const settings = getUserSettings();
@@ -22,15 +23,20 @@ export const enrichLocationInfo = async (resolvedData: any): Promise<any> => {
         return sanitizeLocationInfo(resolvedData);
     }
     
+    const wp = resolvedData.waypoint;
+    const enrichmentQuery = (wp && wp.canonicalName) ?? (wp && wp.modernLocation) ?? (wp && wp.name) ?? resolvedData.name ?? resolvedData.routeTitle ?? resolvedData.context ?? "Historical Location";
+    
+    logWaypointSnapshot('===== LOCATION ENRICHMENT START =====', wp);
+    
     // Fetch external live news
     try {
-        const newsItems = await fetchLiveNews(resolvedData.name);
+        const newsItems = await fetchLiveNews(enrichmentQuery);
         resolvedData.news = newsItems || [];
         
         console.log(`=== NEWS PIPELINE TRACE ===`);
         console.log(`Provider: ${settings.newsProvider}`);
         console.log(`API Key Present: ${apiKeyPresent}`);
-        console.log(`Query: ${resolvedData.name}`);
+        console.log(`Query: ${enrichmentQuery}`);
         console.log(`Articles Returned: ${newsItems?.length || 0}`);
         console.log(`===========================`);
     } catch (e) {

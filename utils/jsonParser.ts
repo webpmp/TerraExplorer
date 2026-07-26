@@ -51,38 +51,32 @@ export const sanitize = (text: string): string => {
     return sanitized.trim();
 };
 
-export const extract = (text: string): { extracted: string | null, reason: ParseFailureReason | null } => {
+export const extract = (text: string): { extracted: string | null, reason: ParseFailureReason | null, repairs: string[] } => {
     const firstBrace = text.indexOf('{');
     const firstBracket = text.indexOf('[');
     
     let startIndex = -1;
     let openChar = '';
-    let closeChar = '';
     
     if (firstBrace !== -1 && firstBracket !== -1) {
         if (firstBrace < firstBracket) {
             startIndex = firstBrace;
             openChar = '{';
-            closeChar = '}';
         } else {
             startIndex = firstBracket;
             openChar = '[';
-            closeChar = ']';
         }
     } else if (firstBrace !== -1) {
         startIndex = firstBrace;
         openChar = '{';
-        closeChar = '}';
     } else if (firstBracket !== -1) {
         startIndex = firstBracket;
         openChar = '[';
-        closeChar = ']';
     } else {
-        return { extracted: null, reason: "NO_JSON_FOUND" };
+        return { extracted: null, reason: "NO_JSON_FOUND", repairs: [] };
     }
     
-    // Explicit State Machine
-    let depth = 0;
+    const stack: string[] = [];
     let insideString = false;
     let escaped = false;
     let endIndex = -1;
@@ -90,7 +84,6 @@ export const extract = (text: string): { extracted: string | null, reason: Parse
     for (let i = startIndex; i < text.length; i++) {
         const char = text[i];
         
-        // Handle escaping
         if (escaped) {
             escaped = false;
             continue;
@@ -100,34 +93,114 @@ export const extract = (text: string): { extracted: string | null, reason: Parse
             continue;
         }
         
-        // Toggle strings
         if (char === '"') {
             insideString = !insideString;
             continue;
         }
         
-        // Delimiter matching
         if (!insideString) {
-            if (char === openChar) {
-                depth++;
-            } else if (char === closeChar) {
-                depth--;
-                if (depth === 0) {
-                    endIndex = i;
-                    break;
+            if (char === '{' || char === '[') {
+                stack.push(char);
+            } else if (char === '}' || char === ']') {
+                const last = stack[stack.length - 1];
+                if ((char === '}' && last === '{') || (char === ']' && last === '[')) {
+                    stack.pop();
+                    if (stack.length === 0) {
+                        endIndex = i;
+                        break;
+                    }
                 }
             }
         }
     }
     
-    if (depth !== 0 || endIndex === -1) {
-        return { extracted: null, reason: "UNBALANCED_DELIMITERS" };
+    const repairs: string[] = [];
+    let extracted = text.substring(startIndex, endIndex !== -1 ? endIndex + 1 : text.length);
+    
+    if (endIndex === -1 || stack.length > 0) {
+        // Unbalanced, attempt to repair by closing open structures
+        if (insideString) {
+            extracted += '"';
+            repairs.push("Closed unterminated string");
+        }
+        while (stack.length > 0) {
+            const last = stack.pop();
+            extracted += last === '{' ? '}' : ']';
+            repairs.push(`Appended missing closing ${last === '{' ? '}' : ']'}`);
+        }
     }
     
-    return { 
-        extracted: text.substring(startIndex, endIndex + 1),
-        reason: null 
-    };
+    return { extracted, reason: null, repairs };
+};
+
+export const repairJson = (text: string): { repaired: string, repairs: string[] } => {
+    let repaired = text;
+    const repairs: string[] = [];
+
+    // 2. Normalize quotes
+    if (repaired.includes('“') || repaired.includes('”') || repaired.includes("‘") || repaired.includes("’")) {
+        repaired = repaired.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+        repairs.push("Replaced smart quotes");
+    }
+
+    const singleQuotedValueRegex = /:\s*'([^']*)'/g;
+    if (singleQuotedValueRegex.test(repaired)) {
+        repaired = repaired.replace(singleQuotedValueRegex, ': "$1"');
+        repairs.push("Fixed single-quoted string values");
+    }
+
+    const singleQuotedRegex = /([{,]\s*)'([a-zA-Z0-9_]+)'\s*:/g;
+    if (singleQuotedRegex.test(repaired)) {
+        repaired = repaired.replace(singleQuotedRegex, '$1"$2":');
+        repairs.push("Fixed single-quoted property names");
+    }
+    
+    // Unescaped quotes and newlines inside string values (heuristic for object properties)
+    const stringValueRegex = /:\s*"([\s\S]*?)"\s*(?=[,}])/g;
+    repaired = repaired.replace(stringValueRegex, (match, inner) => {
+        let fixed = inner;
+        if (fixed.includes('"')) {
+            fixed = fixed.replace(/\\?"/g, '\\"');
+            repairs.push("Fixed unescaped quotes in string values");
+        }
+        if (fixed.includes('\n')) {
+            fixed = fixed.replace(/\n/g, '\\n');
+            repairs.push("Fixed newlines in string values");
+        }
+        return `: "${fixed}"`;
+    });
+
+    // 3. Repair unquoted keys
+    const unquotedRegex = /([{,]\s*)([a-zA-Z0-9_]+)\s*:/g;
+    const repairedKeys: string[] = [];
+    if (unquotedRegex.test(repaired)) {
+        unquotedRegex.lastIndex = 0;
+        repaired = repaired.replace(unquotedRegex, (match, p1, p2) => {
+            repairedKeys.push(p2);
+            return `${p1}"${p2}":`;
+        });
+        
+        if (repairedKeys.length > 0) {
+            repairs.push(`Fixed unquoted property names: ${repairedKeys.join(', ')}`);
+            console.log(`\n===== JSON KEY REPAIR =====\nUnquoted keys repaired:\n${repairedKeys.join('\n')}\n===========================`);
+        }
+    }
+
+    // 4. Remove trailing commas
+    const trailingCommaRegex = /,\s*([\]}])/g;
+    if (trailingCommaRegex.test(repaired)) {
+        repaired = repaired.replace(trailingCommaRegex, '$1');
+        repairs.push("Removed trailing commas");
+    }
+
+    // 5. Balance braces/brackets
+    const extractedAfterRepair = extract(repaired);
+    if (extractedAfterRepair.extracted && extractedAfterRepair.extracted !== repaired) {
+        repaired = extractedAfterRepair.extracted;
+        repairs.push(...extractedAfterRepair.repairs);
+    }
+
+    return { repaired, repairs };
 };
 
 export const parseAndExtract = (text: string): ParseResult => {
@@ -137,36 +210,52 @@ export const parseAndExtract = (text: string): ParseResult => {
     }
 
     const sanitized = sanitize(text);
-    const { extracted, reason } = extract(sanitized);
+    const { extracted, reason, repairs: extractRepairs } = extract(sanitized);
     
     if (!extracted) {
         if (reason === "NO_JSON_FOUND") ParserMetrics.no_json++;
-        else if (reason === "UNBALANCED_DELIMITERS") ParserMetrics.unbalanced++;
+        console.log(`[JSON Parser Trace] RAW JSON ↓ EXTRACT FAILED ↓ STRICT RETRY TRIGGERED`);
         return { success: false, reason: reason! };
     }
     
     try {
         const value = JSON.parse(extracted);
-        
-        // Track if it required recovery
-        if (sanitized.length !== extracted.length || text.length !== sanitized.length) {
+        console.log(`[JSON Parser Trace] RAW JSON ↓ EXTRACT SUCCESS ↓ DIRECT PARSE SUCCESS`);
+        if (extractRepairs.length > 0 || sanitized.length !== extracted.length || text.length !== sanitized.length) {
             ParserMetrics.recovered++;
+        } else {
+            ParserMetrics.success++;
         }
-        ParserMetrics.success++;
-        
         return {
             success: true,
             value,
             extracted,
-            repairs: []
+            repairs: extractRepairs
         };
     } catch (e: any) {
-        ParserMetrics.invalid_json++;
-        return {
-            success: false,
-            reason: "INVALID_JSON",
-            extracted,
-            error: e?.message || String(e)
-        };
+        // Deterministic repair
+        const { repaired, repairs: syntaxRepairs } = repairJson(extracted);
+        try {
+            const value = JSON.parse(repaired);
+            ParserMetrics.recovered++;
+            ParserMetrics.success++;
+            console.log(`[JSON Parser Trace] RAW JSON ↓ EXTRACT SUCCESS ↓ PARSE FAILED ↓ REPAIR ATTEMPTED ↓ REPAIR SUCCESS ↓ PARSE SUCCESS`);
+            return {
+                success: true,
+                value,
+                extracted: repaired,
+                repairs: [...extractRepairs, ...syntaxRepairs, "Repaired JSON parsing error"]
+            };
+        } catch (repairError: any) {
+            ParserMetrics.invalid_json++;
+            console.log(`[JSON Parser Trace] RAW JSON ↓ EXTRACT SUCCESS ↓ PARSE FAILED ↓ REPAIR ATTEMPTED ↓ REPAIR FAILED`);
+            console.log(`[JSON Parser Trace] RAW JSON ↓ REPAIR FAILED ↓ STRICT RETRY TRIGGERED`);
+            return {
+                success: false,
+                reason: "INVALID_JSON",
+                extracted: repaired,
+                error: repairError?.message || String(repairError)
+            };
+        }
     }
 };

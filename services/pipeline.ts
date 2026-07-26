@@ -1,5 +1,5 @@
-import { LocationInfo, QueryIntent, isValidCoordinates } from '../types';
-import { routeIntentAndExtractEntity, resolveLocationQuery, sanitizeLocationInfo, recoverCoordinatesFromAi, recoverLocationMetadata, getUserSettings } from './geminiService';
+import { LocationInfo, QueryIntent, isValidCoordinates, Waypoint } from '../types';
+import { routeIntentAndExtractEntity, resolveLocationQuery, sanitizeLocationInfo, recoverCoordinatesFromAi, recoverLocationMetadata, getUserSettings, generateRoute } from './geminiService';
 import { enrichLocationInfo } from './locationService';
 
 // --- PIPELINE TYPES ---
@@ -40,10 +40,12 @@ export interface MetadataResult {
 }
 
 export interface FinalLocationResult {
-  metadataResult: MetadataResult;
+  mode: "location" | "route";
+  metadataResult?: MetadataResult;
   isValid: boolean;
-  finalData: LocationInfo | undefined;
-  error: string | undefined;
+  finalData?: LocationInfo;
+  waypoints?: Waypoint[];
+  error?: string;
 }
 
 // --- PIPELINE ADAPTERS ---
@@ -209,6 +211,7 @@ export const MetadataStage = (metadataResult: MetadataResult): FinalLocationResu
 
   console.log("=== PIPELINE STAGE: FINAL RESULT ===");
   const finalResult: FinalLocationResult = {
+    mode: "location",
     metadataResult,
     isValid,
     finalData,
@@ -222,6 +225,49 @@ export const MetadataStage = (metadataResult: MetadataResult): FinalLocationResu
 
 export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLocationResult> => {
   const entityResult = IntentStage(request);
+  
+  // 2. Routing Guard: If intent is route, bypass coordinate resolution
+  if (entityResult.intentResult.intent === 'route' || entityResult.intentResult.intent === 'EXPLORATORY' as any) {
+     console.log(`[Pipeline] Routing Guard activated for intent: ${entityResult.intentResult.intent}`);
+     const waypoints = await generateRoute(request.rawQuery, 'route');
+     console.log(`[Pipeline] WAYPOINTS AFTER GENERATEROUTE (Main guard):`);
+     waypoints.forEach(wp => console.log(`  - ${wp.name} (ID: ${wp.id}, parentId: ${wp.parentId})`));
+     return {
+        mode: "route",
+        isValid: waypoints.length > 0,
+        waypoints
+     };
+  }
+
   const metadataResult = await ResolutionStage(entityResult);
+  
+  // 3. Fallback Intent Correction
+  const resolvedType = metadataResult.coordinateResult.resolvedData?.type;
+  const entityType = (metadataResult.coordinateResult.resolvedData as any)?.entityType;
+  
+  const isRouteFallback = 
+    (resolvedType as string) === 'Route' || 
+    entityType === 'historical_trade_route' ||
+    entityType === 'historical_network' ||
+    entityType === 'empire' ||
+    entityType === 'civilization';
+    
+  if (isRouteFallback) {
+      console.log(`=== INTENT ROUTING CORRECTION ===`);
+      console.log(`Original Intent: ${entityResult.intentResult.intent}`);
+      console.log(`Entity Type: ${entityType || resolvedType}`);
+      console.log(`Correction: MULTI_LOCATION_EXPLORATION`);
+      console.log(`Recovery: generateRoute()`);
+      
+      const waypoints = await generateRoute(request.rawQuery, 'route');
+      console.log(`[Pipeline] WAYPOINTS AFTER GENERATEROUTE (Intent fallback):`);
+      waypoints.forEach(wp => console.log(`  - ${wp.name} (ID: ${wp.id}, parentId: ${wp.parentId})`));
+      return {
+         mode: "route",
+         isValid: waypoints.length > 0,
+         waypoints
+      };
+  }
+
   return MetadataStage(metadataResult);
 };

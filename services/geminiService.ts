@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { LocationInfo, QueryIntent, Waypoint, UserSettings, LocationType, EntityType, SearchResult, MapMarker, GeoCoordinates, isValidCoordinates } from '../types';
+import { LocationInfo, QueryIntent, Waypoint, Route, UserSettings, LocationType, EntityType, SearchResult, MapMarker, GeoCoordinates, isValidCoordinates, ProvenanceRecord } from '../types';
 import { runRoutePipeline } from './routePipeline';
+import { PIPELINE_DEBUG, logWaypointSnapshot, logFieldDiff, logEnrichmentJsonPipeline } from '../utils/pipelineDebug';
 import { parseAndExtract } from '../utils/jsonParser';
 import { enrichLocationInfo } from './locationService';
 
@@ -180,6 +181,7 @@ const mainInfoSchemaConfig = {
     name: { type: Type.STRING },
     type: { type: Type.STRING },
     entityType: { type: Type.STRING },
+    metadataMode: { type: Type.STRING },
     coordinates: {
       type: Type.OBJECT,
       properties: {
@@ -433,15 +435,19 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
         - 'name': The canonical name of the location or event site.
         - 'entityType': Choose ONE from: city, country, state, ocean, natural_feature, mountain, landmark, museum, historical_event_site, archaeological_site, discovery_site, shipwreck_site, artifact, battlefield, festival_site.
         - 'type': Choose ONE from: Continent, Country, State, City, Ocean, Point of Interest.
+        - 'metadataMode': MUST be exactly one of: "historical_site", "modern_place", or "natural_feature".
+          - Use "historical_site" for ruins, ancient cities, archaeological locations, battlefields, historical events.
+          - Use "modern_place" for current cities, towns, countries.
+          - Use "natural_feature" for rivers, mountains, oceans.
         - 'suggestedZoom': 0-10 scale. 8-10 for specific sites/cities, 4-6 for regions.
         - 'description': Detailed summary (approx 80 words).
-        - 'population': Object containing 'current' and 'historical' population estimates. For historical events, always distinguish historical population from modern population.
-        - 'climate': Object containing 'name' (e.g. "Oceanic climate"), 'description' (plain language summary), and 'koppenCode' (treat scientific classifications as supporting metadata, not primary).
-        - 'contextNotes': Array of 3 string facts that provide meaningful historical or geographic context. Do not output generic trivia.
+        - 'population': Object containing 'current' and 'historical' population estimates. For historical events, always distinguish historical from modern.
+        - 'climate': Object containing 'name' (e.g. "Oceanic climate"), 'description' (plain language summary), and 'koppenCode'.
+        - 'contextNotes': Array of 3 string facts that provide meaningful historical or geographic context.
         - 'coordinates': Precise decimal lat/lng.
-        - 'relatedEntities': Array of entities that provide meaningful context about the location or event. Categorize by type (person, group, place, institution, artifact, event). Do not include generic associated concepts.
+        - 'relatedEntities': Array of entities that provide meaningful context. Categorize by type (person, group, place, institution, artifact, event).
 
-        Output strictly valid JSON.
+        CRITICAL INSTRUCTION: Return ONLY a valid JSON object. Do not output markdown code blocks (\`\`\`json), explanations, or any other text. Output strict raw JSON.
       `;
 
       const executeAiCall = async (promptText: string) => {
@@ -605,26 +611,92 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
   if (data.climate !== undefined) {
     if (typeof data.climate === 'string') {
       const rawClimate = (data.climate as string).trim();
-      let name = "Unknown climate classification";
+      let name = "Unknown climate";
       let koppenCode = "";
+      let description = "";
       
-      // Attempt to extract Koppen code (e.g. "Cfb (Oceanic climate)")
-      const match = rawClimate.match(/^([A-Za-z]{2,3})\s*\((.*?)\)$/);
-      if (match) {
-        koppenCode = match[1];
-        name = match[2];
-      } else if (/^[A-Za-z]{2,3}$/.test(rawClimate)) {
-        koppenCode = rawClimate;
+      const koppenMap: Record<string, string> = {
+        'Af': 'Tropical rainforest',
+        'Am': 'Tropical monsoon',
+        'Aw': 'Tropical savanna',
+        'As': 'Tropical savanna',
+        'BWh': 'Hot desert',
+        'BWk': 'Cold desert',
+        'BSh': 'Hot semi-arid',
+        'BSk': 'Cold semi-arid',
+        'Csa': 'Mediterranean',
+        'Csb': 'Warm-summer Mediterranean',
+        'Csc': 'Cold-summer Mediterranean',
+        'Cfa': 'Humid subtropical',
+        'Cfb': 'Oceanic',
+        'Cfc': 'Subpolar oceanic',
+        'Cwa': 'Monsoon-influenced humid subtropical',
+        'Cwb': 'Subtropical highland',
+        'Cwc': 'Cold subtropical highland',
+        'Dsa': 'Hot-summer Mediterranean continental',
+        'Dsb': 'Warm-summer Mediterranean continental',
+        'Dsc': 'Subarctic',
+        'Dsd': 'Subarctic',
+        'Dwa': 'Monsoon-influenced hot-summer humid continental',
+        'Dwb': 'Monsoon-influenced warm-summer humid continental',
+        'Dwc': 'Monsoon-influenced subarctic',
+        'Dwd': 'Monsoon-influenced subarctic',
+        'Dfa': 'Hot-summer humid continental',
+        'Dfb': 'Warm-summer humid continental',
+        'Dfc': 'Subarctic',
+        'Dfd': 'Subarctic',
+        'ET': 'Tundra',
+        'EF': 'Ice cap'
+      };
+
+      // Remove prefixes
+      let raw = rawClimate.replace(/^(K[öo]ppen climate classification|K[öo]ppen classification|K[öo]ppen|Climate classification|Climate)s?[:\-]?\s*/i, '');
+      
+      // Attempt to extract Koppen code
+      const codeMatch = raw.match(/\b([A-Z][a-z]{1,2})\b/);
+      if (codeMatch && koppenMap[codeMatch[1]]) {
+          koppenCode = codeMatch[1];
+      }
+
+      // Check if it's just a code
+      if (/^[A-Z][a-z]{1,2}$/.test(raw) && koppenMap[raw]) {
+          name = koppenMap[raw];
       } else {
-        name = rawClimate;
+          // e.g. "Cfb (Oceanic climate)" -> extract Oceanic climate
+          const parenMatch = raw.match(/^[A-Z][a-z]{1,2}\s*\((.*?)\)$/);
+          if (parenMatch) {
+              name = parenMatch[1];
+          } else {
+              // Split by comma or "characterized by"
+              const parts = raw.split(/,\s*characterized by\s*|,\s*with\s*|,\s*(?=[a-z])|\.\s*/i);
+              name = parts[0].trim();
+              
+              if (parts.length > 1) {
+                  description = parts.slice(1).join(', ').trim();
+                  // Remove trailing commas in description, capitalize first letter
+                  description = description.replace(/,+$/, '').trim();
+                  if (description) {
+                     description = description.charAt(0).toUpperCase() + description.slice(1);
+                  }
+              }
+              
+              if (koppenCode && name === koppenCode) {
+                  name = koppenMap[koppenCode];
+              }
+          }
       }
       
+      // Add "climate" if missing
+      if (!name.toLowerCase().includes('climate')) {
+          name = name + " climate";
+      }
+
       data.climate = {
         name,
-        description: "",
+        description,
         koppenCode
       } as any;
-      console.warn(`[Normalization] Converted string climate to structured object: ${JSON.stringify(data.climate)}`);
+      console.log(`\n===== CLIMATE NORMALIZATION =====\nOriginal: ${rawClimate}\nNormalized: ${JSON.stringify(data.climate, null, 2)}\n=================================`);
     } else if (data.climate && typeof data.climate === 'object') {
       const c = data.climate as any;
       if (!c.name || !c.description) {
@@ -703,7 +775,34 @@ export const getInfoFromFeature = async (name: string, lat: number, lng: number)
     });
 
     const mainResponse = await mainRequest;
+    
     let parsed = parseAndExtract(mainResponse.text);
+    
+    logEnrichmentJsonPipeline(mainResponse.text, parsed, false);
+
+    // 1-Time Strict Retry for Formatting Failures
+    if (!parsed.success && ((parsed as any).reason === "NO_JSON_FOUND" || (parsed as any).reason === "INVALID_JSON" || (parsed as any).reason === "UNBALANCED_DELIMITERS")) {
+       EnrichmentMetrics.retry++;
+       console.warn(`[RECOVERY] Parse failed (${(parsed as any).reason}): ${(parsed as any).error}. Triggering 1-time strict retry.`);
+       const retryPrompt = mainPrompt + "\n\nCRITICAL INSTRUCTION: Return ONLY a single valid JSON object. Do not include markdown, explanations, code fences, comments, or any text before or after the JSON.";
+       const retryRequest = generateContentWithRetry({
+         model: modelName,
+         contents: retryPrompt,
+         config: {
+           responseMimeType: "application/json",
+           responseSchema: mainInfoSchemaConfig,
+           maxOutputTokens: 4000,
+         }
+       });
+       const retryResponse = await retryRequest;
+       parsed = parseAndExtract(retryResponse.text);
+       logEnrichmentJsonPipeline(retryResponse.text, parsed, true);
+       
+       if (parsed.success) {
+           EnrichmentMetrics.retry_success++;
+       }
+    }
+
     let data = parsed.success ? (parsed.value as any) : null;
 
     if (!data) {
@@ -741,17 +840,22 @@ export const getInfoFromFeature = async (name: string, lat: number, lng: number)
   }
 };
 
-export const getInfoFromCoordinates = async (lat: number, lng: number): Promise<LocationInfo | null> => {
+export const getInfoFromCoordinates = async (lat: number, lng: number, waypoint?: Waypoint): Promise<LocationInfo | null> => {
   try {
     const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
     
     const mainPrompt = `
       Identify the most significant human settlement or geographic feature at or extremely close to coordinates: ${lat}, ${lng}.
+      ${waypoint ? `IMPORTANT: The user selected the location "${waypoint.name}". Ensure your response accurately reflects this specific location.` : ""}
       Current Date: ${currentDate}
       
       Return a JSON object with:
       - name: Common name of the location
       - type: Continent, Country, State, City, Ocean, or Point of Interest.
+      - metadataMode: MUST be exactly one of: "historical_site", "modern_place", or "natural_feature".
+        - Use "historical_site" for ruins, ancient cities, archaeological locations, battlefields.
+        - Use "modern_place" for current cities, towns, countries.
+        - Use "natural_feature" for rivers, mountains, deserts.
       - description: Detailed Wikipedia-style encyclopedia entry (approx 80 words).
       - population: Recent estimate (if applicable).
       - climate: Köppen climate classification.
@@ -759,7 +863,7 @@ export const getInfoFromCoordinates = async (lat: number, lng: number): Promise<
       - coordinates: The exact input coordinates {lat: ${lat}, lng: ${lng}}
       - 'notable': Array of 3 objects, each with 'name' (person's name) and 'significance' (descriptive sentence).
       
-      Output ONLY the JSON object.
+      CRITICAL INSTRUCTION: Return ONLY a valid JSON object. Do not output markdown code blocks (\`\`\`json), explanations, or any other text. Output strict raw JSON.
     `;
 
     const mainRequest = generateContentWithRetry({
@@ -773,7 +877,10 @@ export const getInfoFromCoordinates = async (lat: number, lng: number): Promise<
     });
 
     let mainResponse = await mainRequest;
+    
     let parsed = parseAndExtract(mainResponse.text);
+    
+    logEnrichmentJsonPipeline(mainResponse.text, parsed, false);
     
     // 1-Time Strict Retry for Formatting Failures
     if (!parsed.success && ((parsed as any).reason === "NO_JSON_FOUND" || (parsed as any).reason === "INVALID_JSON" || (parsed as any).reason === "UNBALANCED_DELIMITERS")) {
@@ -791,6 +898,8 @@ export const getInfoFromCoordinates = async (lat: number, lng: number): Promise<
        });
        mainResponse = await retryRequest;
        parsed = parseAndExtract(mainResponse.text);
+       logEnrichmentJsonPipeline(mainResponse.text, parsed, true);
+       
        if (parsed.success) {
            EnrichmentMetrics.retry_success++;
        }
@@ -815,7 +924,7 @@ export const getInfoFromCoordinates = async (lat: number, lng: number): Promise<
             console.warn(`[Enrichment] STRICT RETRY FAILED (${(parsed as any).reason}): ${(parsed as any).error}`);
         }
         data = {
-            name: "Unknown Location",
+            name: "", // Prevent "Unknown Location" from overriding waypoint name
             type: "Point of Interest",
             description: "Information unavailable.",
             coordinates: { lat, lng },
@@ -836,6 +945,9 @@ export const getInfoFromCoordinates = async (lat: number, lng: number): Promise<
     if (!data.funFacts) data.funFacts = [];
     if (!data.notable) data.notable = [];
     if (!data.type) data.type = LocationType.POI;
+    if (waypoint) {
+        data.waypoint = waypoint;
+    }
     return enrichLocationInfo(data as LocationInfo);
 
   } catch (error: any) {
@@ -931,43 +1043,91 @@ export const getNearbyPlaces = async (lat: number, lng: number, radius: number =
 
 
 
-export const generateRoute = async (text: string): Promise<Waypoint[]> => {
+export const generateRoute = async (text: string, intent?: string): Promise<Route> => {
   const isUrl = text.startsWith('http');
   
-  const generateRawRoute = async (t: string, url: boolean): Promise<any[]> => {
+  const generateRawRoute = async (t: string, url: boolean): Promise<{ waypoints: any[], title?: string, routeConfidence?: any, routeType?: string }> => {
     const prompt = `
-      Task: Trace a geographical route from the text.
+      Task: Trace a geographical route or extract locations from the text.
       ${url ? `URL: "${t}". Trace locations mentioned in the page content.` : `Text: "${t}"`}
 
       Instructions:
-      1. Identify a name for this route/expedition (e.g. "Lewis and Clark Expedition", "Magellan's Circumnavigation", "The Silk Road"). If no specific name exists, create a short descriptive title.
+      1. Identify a name for this route/expedition or event (e.g. "Battle of Midway", "The Silk Road"). If no specific name exists, create a short descriptive title.
       2. Extract every significant physical location (City, Country, Landmark) in narrative order.
-      3. Use HIGH PRECISION coordinates (at least 4 decimal places).
-      4. For each location, provide rich historical context:
-         - "context": A brief 10-word reason why it's on the route.
-         - "description": A 2-4 sentence detailed narrative of what happened here regarding the queried event.
-         - "significance": Why this specific location matters to the event.
-         - "highlights": An array of 2-4 key historical facts or events here.
-         - "historicalPeriod": The time period (e.g. "8th-11th century").
-         - "entities": Relevant people, cultures, kingdoms, or groups.
-      5. Schema: 
+      3. Identify the primary location where the event occurred.
+      4. Classify every location by its relationship to the query using 'role': "primary", "related", "administrative", or "historical_context".
+      5. Do not create separate primary waypoints for parent administrative regions. Assign them the "administrative" role and set their 'parentId' to the id of the location they contain.
+      6. Do not treat cities, states, countries, or regions containing the primary location as separate equal waypoints.
+      7. Include related locations only when they have a direct historical, geographic, or strategic relationship.
+      8. Administrative parents should provide context, not compete with the primary location.
+      9. For specific historical events, prioritize the event location over associated locations.
+      10. For historical routes, prioritize specific named stops, cities, ports, crossings, and settlements.
+      11. Historical routes must consist of specific, physical stops. NEVER use modern political borders, vast empires (like 'Persian Empire', 'Roman Empire'), continents (like 'Europe'), or generic regions as waypoints. The waypoints must be exact, point-like locations that were physically traversed.
+      12. Avoid generic containers such as: "Central Asia", "The Balkans", "Europe", "China". Convert these into contextual relationships or administrative parents.
+      13. Use HIGH PRECISION coordinates (at least 4 decimal places).
+      14. For each location, provide rich historical context:
+          - "context": A brief 10-word reason why it's on the route.
+          - "description": A 2-4 sentence detailed narrative explaining why this location is included.
+          - "significance": Why this specific location matters to the event.
+          - "highlights": An array of 2-4 key historical facts or events here.
+          - "historicalPeriod": The time period (e.g. "8th-11th century").
+          - "entities": Relevant people, cultures, kingdoms, or groups.
+      15. Separate the location name into distinct fields:
+          - "name": Clean display label. NEVER include translations, parenthetical notes, historical annotations, "(modern-day)", "(ancient city)", "(起点)", or explanatory suffixes.
+          - "alternateNames": Array of strings for translations, historical labels, or annotations (e.g. ["起点", "Ancient Bactra"]).
+          - "canonicalName": The strict historical name of the specific location (e.g. "Karakoram Pass").
+          - "historicalRegion": The broader historical region (e.g. "Central Asia").
+          - "modernLocation": The modern-day equivalent (e.g. "Xinjiang, China").
+      16. Historical accuracy rules:
+          - Do not claim a definitive origin for distributed networks, trade systems, migrations, or cultural movements unless historically undisputed.
+          - For concepts like the Silk Road, use representative locations and explain uncertainty.
+          - Prefer wording such as: "representative starting point", "key trade corridor", "important node", "historically significant location".
+          - Never output false certainty.
+          - For distributed networks, do not evaluate confidence of the existence of the route. Evaluate confidence of the specific traversal. 
+          - Example bad routeConfidence: "Silk Road was historically documented"
+          - Example good routeConfidence: "The Silk Road existed as a network of routes. This sequence represents one historically plausible east-to-west traversal rather than a single fixed path."
+      17. Route Ordering:
+          - Require every waypoint to include a "sequence" integer.
+          - Sequence must begin at 1 and increment by 1 for the narrative path.
+      18. Route Type Classification:
+          - Classify the routeType as one of: "fixed_path", "network", or "conceptual".
+          - If the query describes distributed networks like the Silk Road, Roman roads, Viking trade routes, migration routes, or exploration networks, classify as "network".
+          - If routeType is "network", routeConfidence.level cannot automatically default to "high" unless the specific traversal is well-supported.
+      19. Schema: 
       {
-        "title": "Name of Route",
+        "title": "Name of Route or Event",
+        "routeType": "fixed_path" | "network" | "conceptual",
+        "routeConfidence": {
+          "level": "high" | "medium" | "low",
+          "reasoning": "Explanation of certainty for the overall route..."
+        },
         "route": [
           {
-            "name": "Location Name", 
+            "id": "unique-kebab-case-id",
+            "name": "Clean Display Name", 
+            "alternateNames": ["Alternate 1", "Alternate 2"],
+            "canonicalName": "Historical Name",
+            "historicalRegion": "Region",
+            "modernLocation": "Modern Name",
             "lat": 0.0000, 
-            "lng": 0.0000, 
+            "lng": 0.0000,
+            "role": "primary",
+            "parentId": "",
+            "sequence": 1,
             "context": "Brief context",
             "description": "Full narrative description...",
             "significance": "Historical importance...",
             "highlights": ["Fact 1", "Fact 2"],
             "historicalPeriod": "Time period",
-            "entities": ["Person A", "Culture B"]
+            "entities": ["Person A", "Culture B"],
+            "historicalConfidence": {
+              "level": "high" | "medium" | "low",
+              "reasoning": "..."
+            }
           }
         ]
       }
-      6. Output a strict JSON Object.
+      19. Output a strict JSON Object.
     `;
     
     const tools = url ? [{ googleSearch: {} }] : undefined;
@@ -980,41 +1140,82 @@ export const generateRoute = async (text: string): Promise<Waypoint[]> => {
         maxOutputTokens: 8192,
       }
     });
-    
+    if (PIPELINE_DEBUG) {
+        console.log(`[RAW AI JSON RESPONSE]:\n${response.text}`);
+    }
     const result = parseAndExtract(response.text);
+    
     if (!result.success) {
         console.error(
             `[Route Generation] JSON extraction failed: ${(result as any).reason}`,
             (result as any).error
         );
-        return [];
+        // Implement 1-time strict retry for route generation
+        console.warn(`[RECOVERY] Parse failed after deterministic repair. Triggering 1-time strict retry for Route Generation.`);
+        const retryPrompt = prompt + "\n\nCRITICAL INSTRUCTION: Return ONLY a single valid JSON object. Do not include markdown, explanations, code fences, comments, or any text before or after the JSON.";
+        const retryResponse = await generateContentWithRetry({
+          model: modelName,
+          contents: retryPrompt,
+          config: {
+            tools: tools,
+            maxOutputTokens: 8192,
+          }
+        });
+        const retryResult = parseAndExtract(retryResponse.text);
+        if (!retryResult.success) {
+             return { waypoints: [] };
+        }
+        return processParsedRouteResult(retryResult.value, text);
     }
-    const data = result.value as any;
-    
-    let items: any[] = [];
-    let title: string | undefined = undefined;
+    return processParsedRouteResult(result.value, text);
+  };
+  
+    const processParsedRouteResult = (data: any, originalText: string) => {
+      let items: any[] = [];
+      let title: string | undefined = undefined;
+      let routeConfidence: any = undefined;
+  
+      if (data && typeof data === 'object') {
+          if (data.title) title = data.title;
+          if (data.routeConfidence) routeConfidence = data.routeConfidence;
+          if (data.route && Array.isArray(data.route)) items = data.route;
+          else if (data.locations && Array.isArray(data.locations)) items = data.locations;
+          else if (data.waypoints && Array.isArray(data.waypoints)) items = data.waypoints;
+          else if (Array.isArray(data)) items = data;
+      } else if (Array.isArray(data)) {
+          items = data;
+      }
 
-    if (data && typeof data === 'object') {
-        if (data.title) title = data.title;
-        if (data.route && Array.isArray(data.route)) items = data.route;
-        else if (data.locations && Array.isArray(data.locations)) items = data.locations;
-        else if (data.waypoints && Array.isArray(data.waypoints)) items = data.waypoints;
-        else if (Array.isArray(data)) items = data;
-    } else if (Array.isArray(data)) {
-        items = data;
+    const mappedItems = items.map((item, idx) => {
+       const mapped = {
+         ...item,
+         routeTitle: title
+       };
+       if (idx === 0) logFieldDiff('generateRawRoute', item, mapped);
+       if (idx === 0 && mapped.id) logWaypointSnapshot('RAW AI (After generateRawRoute map)', mapped as Waypoint);
+       return mapped;
+    });
+
+    if (PIPELINE_DEBUG) {
+      console.log(`\n===== GENERATE RAW ROUTE SUCCESS =====`);
+      console.log(`Title: ${title}`);
+      console.log(`Route Type: ${data.routeType || 'unknown'}`);
+      console.log(`Waypoint Count: ${mappedItems.length}`);
+      if (mappedItems.length > 0) {
+        console.log(`Waypoint Fields: ${Object.keys(mappedItems[0]).length}`);
+      }
+      console.log(`======================================\n`);
     }
 
-    return items.map(item => ({
-       ...item,
-       routeTitle: title
-    }));
+    return { waypoints: mappedItems, title, routeConfidence, routeType: data.routeType };
   };
 
   try {
-    return await runRoutePipeline(text, isUrl, generateRawRoute);
+    const route = await runRoutePipeline(text, isUrl, generateRawRoute, intent);
+    return route;
   } catch (error) {
     console.error("Error generating route with pipeline:", error);
-    return [];
+    return { waypoints: [] };
   }
 };
 
@@ -1028,7 +1229,22 @@ export interface ExtractedQuery {
 export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
   const clean = query.trim();
   
-  // 1. Check for Discovery / Recovery patterns first
+  // 1. Check for Route / Expansion patterns
+  const routePatterns = [
+    /\b(?:follow|trace|journey|path|route|expansion|migration|trade network)\b/i,
+    /\bfrom\b.*?\bto\b/i
+  ];
+  for (const pattern of routePatterns) {
+    if (pattern.test(clean)) {
+      return { 
+        intent: 'route' as any, 
+        entity: clean,
+        resolutionMode: 'MULTI_LOCATION_EXPLORATION'
+      };
+    }
+  }
+
+  // 2. Check for Discovery / Recovery patterns first
   const discoveryPatterns = [
     /^\s*where\s+(?:was|were)\s+(?:the\s+)?(.+?)\s+(?:found|discovered|recovered|unearthed|excavated|located)\s*\??\s*$/i,
     /^\s*where\s+did\s+(?:they|researchers|archaeologists)?\s*(?:find|discover|recover|unearth|excavate)\s+(?:the\s+)?(.+?)\s*\??\s*$/i,
