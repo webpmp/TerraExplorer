@@ -16,7 +16,11 @@ const testQueries = [
   "Where did the Boston Massacre take place?",
   "Where did Woodstock take place?",
   "Where were the Dead Sea Scrolls discovered?",
-  "Where was the Vasa found?"
+  "Where was the Vasa found?",
+  
+  // 4. Intent filtering regressions
+  "Where is Hagia Sophia?",
+  "Where is Iguazu Falls?"
 ];
 
 async function runRecoveryTests() {
@@ -82,7 +86,7 @@ async function runRecoveryTests() {
       }
   });
   
-  const mockRecoverCoordinatesFromAi = async () => ({
+  const mockRecoverCoordinatesFromAi = async (rawQuery: string, intent: string, entity: string) => ({
       lat: 31.5590, lng: 35.4732
   });
 
@@ -95,7 +99,11 @@ async function runRecoveryTests() {
   
   const allowedErrors = ["NO_GEOGRAPHIC_DATA", "LOCATION_SYSTEM_UNAVAILABLE", "UNABLE_TO_RESOLVE"];
   if (error && allowedErrors.includes(error) && resolvedData && resolvedData.name && !resolvedData.coordinates) {
-    const recoveryCoords = await mockRecoverCoordinatesFromAi();
+    const recoveryCoords = await mockRecoverCoordinatesFromAi(
+        entityResult.intentResult.normalized.request.rawQuery,
+        entityResult.intentResult.intent,
+        resolvedData.name || entityResult.entity
+    );
     if (recoveryCoords) {
       resolvedData.coordinates = recoveryCoords;
       error = undefined; 
@@ -120,6 +128,23 @@ async function runRecoveryTests() {
     console.error("\n❌ Some tests failed.");
     process.exit(1);
   }
+
+  console.log("\n=== REGRESSION TEST: Viking Age Skips Recovery ===");
+  const request2: SearchRequest = { rawQuery: "Where did the Viking Age take place?" };
+  const entityResult2 = IntentStage(request2);
+  const rawResolverResult2 = await mockResolveLocationQuery();
+  let error2 = rawResolverResult2.error;
+  let resolvedData2: any = rawResolverResult2.locationInfo;
+  
+  const isGeographicIntent2 = !['EXPLORATORY', 'HISTORICAL_EVENT', 'BROAD_CULTURAL_QUERY'].includes(entityResult2.intentResult.intent);
+  
+  if (error2 && allowedErrors.includes(error2) && entityResult2.entity && isGeographicIntent2 && (!resolvedData2 || !resolvedData2.coordinates)) {
+    console.error(`❌ Regression test failed. Viking Age attempted recovery despite being HISTORICAL_EVENT.`);
+    process.exit(1);
+  } else {
+    console.log(`✅ Viking Age successfully bypassed recovery.`);
+  }
+
 }
 
 runRecoveryTests().catch(console.error);

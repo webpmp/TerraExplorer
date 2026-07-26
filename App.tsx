@@ -11,8 +11,10 @@ import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import SettingsPanel from './components/SettingsPanel';
 import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint, GeoCoordinates, UserSettings, AIProvider, NewsProvider } from './types';
-import { getInfoFromCoordinates, getInfoFromFeature, getNearbyPlaces, getMoreNews, fetchLiveNews, generateRoute, extractEntityFromQuery } from './services/geminiService';
+import { getInfoFromCoordinates, getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity } from './services/geminiService';
+import { fetchLiveNews } from './services/newsService';
 import { runSearchPipeline } from './services/pipeline';
+import { ENTITY_SCHEMAS } from './entitySchema';
 import logoImageBlack from './assets/logo-terra-explorer-black.png';
 import logoImageGreen from './assets/logo-terra-explorer-green.png';
 import logoImageAmber from './assets/logo-terra-explorer-amber.png';
@@ -273,8 +275,11 @@ const App: React.FC = () => {
     return {
       aiProvider: 'gemini',
       lmStudioUrl: 'http://localhost:1234/v1',
+      lmStudioModel: 'local-model',
       newsProvider: 'gemini',
-      newsApiKey: ''
+      newsApiKey: '',
+      nytApiKey: '',
+      newsDataApiKey: ''
     };
   });
 
@@ -835,38 +840,107 @@ const App: React.FC = () => {
         });
      }
 
-     // Fetch full info
-     const data = await getInfoFromCoordinates(wp.lat, wp.lng);
-     
-     if (data) {
-        if (wp.context) {
-            const routeLabel = wp.routeTitle || "From Route";
-            data.routeContext = {
-                title: routeLabel,
-                text: wp.context
-            };
-        }
+     // 1. Log Waypoint Selection
+     console.log(`=== WAYPOINT SELECTION ===`);
+     console.log(`Index: ${routeWaypoints?.findIndex(w => w.id === wp.id) ?? -1}`);
+     console.log(`Raw waypoint: ${JSON.stringify(wp, null, 2)}`);
 
-        // Add default note for specific Genghis Khan waypoint
-        if (wp.id === 'wp-genghis-1') {
-            data.defaultNote = "Waypoints from https://www.worldhistory.org/image/11221/map-of-the-campaigns-of-genghis-khan/";
-        }
+     // 1. Initial Data Setup (Render immediately)
+     let data: any = { 
+         name: wp.name,
+         coordinates: { lat: wp.lat, lng: wp.lng },
+         waypoint: wp,
+         description: wp.description,
+         significance: wp.significance,
+         highlights: wp.highlights,
+         historicalPeriod: wp.historicalPeriod,
+         entities: wp.entities,
+         entityType: "historical_waypoint"
+     };
 
-        setLocationInfo(data);
-        setIsLoading(false);
-
-        if (data.name) {
-            setIsNewsFetching(true);
-            const news = await fetchLiveNews(data.name);
-            setLocationInfo(prev => {
-                if (!prev || prev.name !== data.name) return prev;
-                return { ...prev, news };
-            });
-            setIsNewsFetching(false);
-        }
-     } else {
-         setIsLoading(false);
+     // Inject the route context so it's always available as historical context
+     if (wp.context) {
+         const routeLabel = wp.routeTitle || "From Route";
+         data.routeContext = {
+             title: routeLabel,
+             text: wp.context
+         };
      }
+
+     // Add default note for specific Genghis Khan waypoint
+     if (wp.id === 'wp-genghis-1') {
+         data.defaultNote = "Waypoints from https://www.worldhistory.org/image/11221/map-of-the-campaigns-of-genghis-khan/";
+     }
+
+     console.log(`=== WAYPOINT PAYLOAD BEFORE INFOPANEL ===`);
+     console.log(JSON.stringify(data, null, 2));
+     console.log(`=========================================`);
+
+     setLocationInfo(data);
+     setIsLoading(false);
+
+     // 2. Background Geographic Enrichment
+     const schema = ENTITY_SCHEMAS[data.entityType || 'city'] || ENTITY_SCHEMAS['city'];
+     const fetchGeographicMetadata = schema.capabilities.supportsPopulation || schema.capabilities.supportsClimate;
+     const overwriteNarrative = schema.enrichment.overwriteNarrative;
+     
+     console.log(`=== WAYPOINT ENRICHMENT DECISION ===`);
+     console.log(`Waypoint: ${wp.name}`);
+     console.log(`Entity Type: ${data.entityType || 'city'}`);
+     console.log(`Fetch Metadata: ${fetchGeographicMetadata}`);
+     console.log(`Overwrite Narrative: ${overwriteNarrative}`);
+     console.log(`===============================`);
+
+     if (fetchGeographicMetadata) {
+         // Fetch non-blocking
+         getInfoFromCoordinates(wp.lat, wp.lng).then(enrichedData => {
+             if (enrichedData) {
+                 const enrichmentIsUseful = Boolean(
+                     enrichedData.population || 
+                     enrichedData.climate || 
+                     enrichedData.contextNotes?.length || 
+                     enrichedData.relatedEntities?.length || 
+                     enrichedData.news?.length
+                 );
+
+                 if (!enrichmentIsUseful) {
+                     console.log(`Enrichment Result: NOT USEFUL for ${wp.name}, skipping merge.`);
+                     return;
+                 }
+
+                 console.log(`Enrichment Result: Successfully fetched generic geographic metadata for ${wp.name}`);
+                 setLocationInfo(prev => {
+                     // Make sure we are still looking at the same waypoint!
+                     if (!prev || prev.waypoint?.id !== wp.id) return prev;
+                     
+                     const desc = overwriteNarrative ? (enrichedData.description || wp.description || wp.significance || wp.context) : (wp.description || wp.significance || wp.context || enrichedData.description);
+
+                     console.log(`=== WAYPOINT ENRICHMENT MERGE ===`);
+                     console.log(`Protected Fields:`);
+                     console.log(`name: ${wp.name}`);
+                     console.log(`coordinates: lat ${wp.lat}, lng ${wp.lng}`);
+                     console.log(`description: ${desc}`);
+                     console.log(`Supplemental Fields Added: population, climate, relatedEntities, contextNotes`);
+                     console.log(`===============================`);
+
+                     const nextState = {
+                         ...prev,
+                         ...enrichedData, // Enrichment fills in the blanks
+                         name: wp.name, // Protected
+                         coordinates: { lat: wp.lat, lng: wp.lng }, // Protected
+                         description: desc, // Protected
+                         waypoint: wp // Protected
+                     };
+                     
+                     return nextState;
+                 });
+             } else {
+                 console.log(`Enrichment Result: FAILED OR EMPTY for ${wp.name}`);
+             }
+         }).catch(err => console.error(`Background enrichment failed for ${wp.name}:`, err));
+     }
+
+
   }, [isZoomLocked, lockedZoomDistance, reconcileCameraState]);
   const handleMarkerClick = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint, point: THREE.Vector3) => {
     setInteractionState('PIN_SELECTED');
@@ -914,13 +988,13 @@ const App: React.FC = () => {
         name: marker.name,
         type: LocationType.POI, 
         description: "",
-        population: "",
-        climate: "",
-        funFacts: [],
+        population: null,
+        climate: null,
+        contextNotes: [],
         coordinates: { lat: marker.lat, lng: marker.lng },
         news: [],
-        notable: []
-    });
+        relatedEntities: []
+    } as any);
 
     setIsLoading(true);
     setIsNewsFetching(false);
@@ -943,15 +1017,7 @@ const App: React.FC = () => {
     setLocationInfo(data);
     setIsLoading(false);
 
-    if (data && data.name) {
-       setIsNewsFetching(true);
-       const news = await fetchLiveNews(data.name);
-       setLocationInfo(prev => {
-         if (!prev || prev.name !== data.name) return prev; 
-         return { ...prev, news };
-       });
-       setIsNewsFetching(false);
-     }
+
   }, [routeWaypoints, loadWaypointData, activeRouteId, isZoomLocked, lockedZoomDistance, reconcileCameraState]);  
   
   const setScanStatus = useCallback((text: string | null) => {
@@ -1192,6 +1258,11 @@ const App: React.FC = () => {
     // 1. Intent routing & entity extraction
     const parsedQuery = routeIntentAndExtractEntity(cleanQuery);
 
+    if (parsedQuery.intent === 'EXPLORATORY' || parsedQuery.resolutionMode === 'MULTI_LOCATION_EXPLORATION') {
+        handleTraceRoute(cleanQuery);
+        return;
+    }
+
     setInteractionState('PIN_SELECTED');
     setIsLoading(true);
     setIsNewsFetching(false);
@@ -1212,16 +1283,11 @@ const App: React.FC = () => {
     setScanningStatusText(`LOCATING ${parsedQuery.entity.toUpperCase()}`);
 
     // 3. Unified entity resolver lookup
-    const pipelineResult = await runSearchPipeline(query);
-
-    console.log(`=== SEARCH PIPELINE TRACE ===
-Raw Query: ${query}
-Normalized Query: ${cleanQuery}
-Intent: ${parsedQuery.intent}
-Extracted Entity: ${parsedQuery.entity}
-Resolver Input: ${parsedQuery.entity}
-Resolver Output: ${JSON.stringify(pipelineResult)}
-=============================`);
+    const pipelineResult = await runSearchPipeline({
+        rawQuery: cleanQuery,
+        intent: parsedQuery.intent,
+        entity: parsedQuery.entity
+    });
 
     setScanningStatusText(null);
 
@@ -1252,15 +1318,7 @@ Resolver Output: ${JSON.stringify(pipelineResult)}
          reconcileCameraState();
       });
 
-      if (pipelineResult.finalData!.name) {
-        setIsNewsFetching(true);
-        const news = await fetchLiveNews(pipelineResult.finalData!.name);
-        setLocationInfo(prev => {
-          if (!prev || prev.name !== pipelineResult.finalData!.name) return prev;
-          return { ...prev, news };
-        });
-        setIsNewsFetching(false);
-      }
+
 
     } else {
       const errorData = pipelineResult.metadataResult.enrichedData;
@@ -1607,12 +1665,12 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
   const handleLoadMoreNews = useCallback(async () => {
     if (!locationInfo) return;
     
-    const currentHeadlines = locationInfo.news.map(n => n.headline);
-    const newNews = await getMoreNews(locationInfo.name, currentHeadlines);
+    const currentTitles = locationInfo.news.map(n => n.title);
+    const newNews = await fetchLiveNews(locationInfo.name);
     
     setLocationInfo(prev => {
        if(!prev) return null;
-       const uniqueNewNews = newNews.filter(n => !prev.news.some(pn => pn.headline === n.headline));
+       const uniqueNewNews = newNews.filter(n => !prev.news.some(pn => pn.title === n.title));
        return {
           ...prev,
           news: [...prev.news, ...uniqueNewNews]

@@ -23,6 +23,8 @@ export const isValidCoordinates = (coords: any): boolean => {
   return true;
 };
 
+export type QueryIntent = 'DIRECT' | 'NATURAL_LOCATION' | 'EXPLORATORY' | 'HISTORICAL_EVENT' | 'DISCOVERY_LOCATION';
+
 export enum LocationType {
   CONTINENT = 'Continent',
   COUNTRY = 'Country',
@@ -50,16 +52,50 @@ export type EntityType =
   | 'festival_site';
 
 export interface NewsItem {
-  headline: string;
+  title: string;
   source: string;
   url?: string;
+  publishedAt?: string;
   summary?: string;
 }
 
-export interface NotableItem {
+export interface PopulationInfo {
+  value?: number;
+  formattedValue: string;
+  timeframe: string;
+  description: string;
+  sourceType?: "census" | "estimate" | "historical_record" | "ai_inference";
+}
+
+export interface ClimateInfo {
   name: string;
-  significance: string;
-  category?: string; // e.g. "Literature", "Space", "Sports", "Music"
+  description: string;
+  koppenCode?: string;
+}
+
+export interface RelatedEntity {
+  name: string;
+  type: "person" | "group" | "place" | "institution" | "artifact" | "event";
+}
+
+export interface ProvenanceRecord {
+  stage: 'route_generation' | 'normalization' | 'structural_validation' | 'deterministic_repair' | 'historical_validation' | 'patch' | 'recovery';
+  source: 'ai' | 'deterministic' | 'llm';
+  timestamp: string;
+  confidence?: number;
+  summary?: string;
+}
+
+export interface HistoricalIssue {
+  waypointId: string;
+  operation: 'replace' | 'insert' | 'remove';
+  severity: 'error' | 'warning' | 'info';
+  confidence: number;
+  field: string;
+  originalValue: unknown;
+  replacement: unknown;
+  reason: string;
+  source: 'deterministic' | 'historical_llm';
 }
 
 export interface LocationInfo {
@@ -67,18 +103,24 @@ export interface LocationInfo {
   type: LocationType;
   entityType?: string;
   description: string;
-  population?: string | null;
-  climate?: string | null;
-  funFacts: string[];
+  population?: {
+    current?: PopulationInfo;
+    historical?: PopulationInfo;
+  } | null;
+  climate?: ClimateInfo | null;
+  relatedEntities?: RelatedEntity[];
+  contextNotes?: string[];
   coordinates: GeoCoordinates;
   boundary?: GeoCoordinates[];
   news: NewsItem[];
-  notable: NotableItem[];
   routeContext?: {
     title: string;
     text: string;
   };
   defaultNote?: string;
+  provenance?: ProvenanceRecord[];
+  newsError?: string;
+  waypoint?: Waypoint;
 }
 
 export interface MapMarker {
@@ -105,6 +147,8 @@ export interface UserSettings {
   lmStudioModel: string;
   newsProvider: NewsProvider;
   newsApiKey: string;
+  nytApiKey: string;
+  newsDataApiKey: string;
 }
 
 export interface Waypoint {
@@ -114,6 +158,14 @@ export interface Waypoint {
   lng: number;
   context: string;
   routeTitle?: string;
+  description?: string;
+  significance?: string;
+  highlights?: string[];
+  historicalPeriod?: string;
+  entities?: string[];
+  relatedEntities?: RelatedEntity[];
+  metadata?: any;
+  provenance?: ProvenanceRecord[];
 }
 
 export interface FavoriteLocation {

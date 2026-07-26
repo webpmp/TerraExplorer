@@ -1,10 +1,13 @@
 import { LocationInfo, QueryIntent, isValidCoordinates } from '../types';
-import { routeIntentAndExtractEntity, resolveLocationQuery, sanitizeLocationInfo, recoverCoordinatesFromAi } from './geminiService';
+import { routeIntentAndExtractEntity, resolveLocationQuery, sanitizeLocationInfo, recoverCoordinatesFromAi, recoverLocationMetadata, getUserSettings } from './geminiService';
+import { enrichLocationInfo } from './locationService';
 
 // --- PIPELINE TYPES ---
 
 export interface SearchRequest {
   rawQuery: string;
+  intent?: QueryIntent;
+  entity?: string;
 }
 
 export interface NormalizedQuery {
@@ -49,7 +52,14 @@ export const IntentStage = (request: SearchRequest): EntityResolutionResult => {
   console.log("=== PIPELINE STAGE: SEARCH REQUEST ===");
   console.log(`Raw Query: "${request.rawQuery}"`);
   
-  const extracted = routeIntentAndExtractEntity(request.rawQuery);
+  let intent = request.intent;
+  let entity = request.entity;
+  
+  if (!intent || !entity) {
+    const extracted = routeIntentAndExtractEntity(request.rawQuery);
+    intent = intent || extracted.intent;
+    entity = entity || extracted.entity;
+  }
   
   const normalized: NormalizedQuery = {
     request,
@@ -60,14 +70,14 @@ export const IntentStage = (request: SearchRequest): EntityResolutionResult => {
 
   const intentResult: IntentResult = {
     normalized,
-    intent: extracted.intent
+    intent
   };
   console.log("=== PIPELINE STAGE: INTENT ===");
   console.log(`Classified Intent: ${intentResult.intent}`);
 
   const entityResult: EntityResolutionResult = {
     intentResult,
-    entity: extracted.entity
+    entity
   };
   console.log("=== PIPELINE STAGE: ENTITY ===");
   console.log(`Extracted Entity: "${entityResult.entity}"`);
@@ -78,7 +88,11 @@ export const IntentStage = (request: SearchRequest): EntityResolutionResult => {
 export const ResolutionStage = async (entityResult: EntityResolutionResult): Promise<MetadataResult> => {
   console.log("=== PIPELINE STAGE: COORDINATE RESOLUTION ===");
   
-  const rawResolverResult = await resolveLocationQuery(entityResult.entity, entityResult.intentResult.intent);
+  const rawResolverResult = await resolveLocationQuery(
+    entityResult.entity, 
+    entityResult.intentResult.intent,
+    entityResult.intentResult.normalized.request.rawQuery
+  );
   
   let error = rawResolverResult.error;
   let resolvedData = rawResolverResult.locationInfo;
@@ -92,16 +106,51 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   console.log(`Initial Resolver Error: ${error || 'None'}`);
   
   const allowedErrors = ["NO_GEOGRAPHIC_DATA", "LOCATION_SYSTEM_UNAVAILABLE", "UNABLE_TO_RESOLVE"];
-  if (error && allowedErrors.includes(error) && resolvedData && resolvedData.name && !resolvedData.coordinates) {
+  const nonGeographicIntents = ['EXPLORATORY', 'HISTORICAL_EVENT', 'BROAD_CULTURAL_QUERY'];
+  const isGeographicIntent = !nonGeographicIntents.includes(entityResult.intentResult.intent);
+
+  if (error && allowedErrors.includes(error) && entityResult.entity && isGeographicIntent && (!resolvedData || !resolvedData.coordinates)) {
     console.log(`Recovery Attempted: Yes`);
     console.log(`Recovery Function: recoverCoordinatesFromAi`);
-    const recoveryCoords = await recoverCoordinatesFromAi(resolvedData.name);
+    
+    console.log("Recovery merge input type:", typeof resolvedData);
+    console.log("Recovery merge input:", JSON.stringify(resolvedData));
+
+    if (!resolvedData || typeof resolvedData !== 'object' || Array.isArray(resolvedData)) {
+      resolvedData = { 
+        name: entityResult.entity 
+      };
+    }
+
+    const recoveryCoords = await recoverCoordinatesFromAi(
+      entityResult.intentResult.normalized.request.rawQuery,
+      entityResult.intentResult.intent,
+      entityResult.entity
+    );
     console.log(`Coordinates Returned: ${recoveryCoords ? JSON.stringify(recoveryCoords) : 'None'}`);
     if (recoveryCoords) {
-      resolvedData.coordinates = recoveryCoords;
-      error = undefined; 
-      recoveryUsed = true;
       console.log(`Recovery Success: Yes`);
+      
+      try {
+        const fullInfo = await recoverLocationMetadata(entityResult.entity, recoveryCoords);
+        if (fullInfo) {
+           resolvedData = await enrichLocationInfo(fullInfo);
+           error = undefined; 
+           recoveryUsed = true;
+        } else {
+           // Do not continue with coordinate-only data.
+           // Keep the original error if full metadata recovery fails.
+        }
+        
+        console.log(`=== RECOVERY ENRICHMENT TRACE ===`);
+        console.log(`Metadata Present: ${!!fullInfo}`);
+        console.log(`Enrichment Executed: ${!!fullInfo}`);
+        console.log(`News Count: ${resolvedData?.news?.length || 0}`);
+        console.log(`Description Present: ${!!resolvedData?.description}`);
+        console.log(`===============================`);
+      } catch (err) {
+        console.error("Failed to generate metadata for recovered coordinates:", err);
+      }
     } else {
       console.log(`Recovery Success: No`);
     }
@@ -171,9 +220,8 @@ export const MetadataStage = (metadataResult: MetadataResult): FinalLocationResu
   return finalResult;
 };
 
-export const runSearchPipeline = async (rawQuery: string): Promise<FinalLocationResult> => {
-  const searchRequest: SearchRequest = { rawQuery };
-  const entityResult = IntentStage(searchRequest);
+export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLocationResult> => {
+  const entityResult = IntentStage(request);
   const metadataResult = await ResolutionStage(entityResult);
   return MetadataStage(metadataResult);
 };

@@ -13,7 +13,7 @@ async function runMigrationTests() {
   let allPassed = true;
 
   for (const query of testQueries) {
-    const result = await runSearchPipeline(query);
+    const result = await runSearchPipeline({ rawQuery: query });
     if (!result.isValid || !result.finalData || result.error) {
        console.error(`❌ Migration Test Failed for ${query}`);
        allPassed = false;

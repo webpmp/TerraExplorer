@@ -1,6 +1,16 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
-import { LocationInfo, LocationType, SearchResult, MapMarker, NewsItem, Waypoint, isValidCoordinates } from "../types";
+import { LocationInfo, QueryIntent, Waypoint, UserSettings, LocationType, EntityType, SearchResult, MapMarker, GeoCoordinates, isValidCoordinates } from '../types';
+import { runRoutePipeline } from './routePipeline';
+import { parseAndExtract } from '../utils/jsonParser';
+import { enrichLocationInfo } from './locationService';
+
+export const EnrichmentMetrics = {
+    retry: 0,
+    retry_success: 0,
+    schema_failure: 0,
+    accepted: 0,
+    rejected: 0
+};
 
 // Ensure API key is available
 const apiKey = process.env.API_KEY;
@@ -10,9 +20,9 @@ if (!apiKey) {
 
 const ai = new GoogleGenAI({ apiKey: apiKey || 'dummy-key-for-ts-check' });
 
-const modelName = "gemini-2.5-flash";
+export const modelName = process.env.VITE_AI_MODEL || "gemini-2.5-flash";
 
-const getUserSettings = (): any => {
+export const getUserSettings = (): any => {
   if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
     try {
       const saved = localStorage.getItem('terraExplorerSettings');
@@ -26,14 +36,12 @@ const getUserSettings = (): any => {
   return {
     aiProvider: 'gemini',
     lmStudioUrl: 'http://localhost:1234/v1',
-    lmStudioModel: 'local-model',
-    newsProvider: 'gemini',
-    newsApiKey: ''
+    lmStudioModel: 'local-model'
   };
 };
 
 // Helper for exponential backoff retry
-const generateContentWithRetry = async (params: any, retries = 3): Promise<any> => {
+export const generateContentWithRetry = async (params: any, retries = 3): Promise<any> => {
   const settings = getUserSettings();
   
   if (settings.aiProvider === 'lmstudio') {
@@ -153,6 +161,18 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
   }
 };
 
+const populationInfoSchema = {
+  type: Type.OBJECT,
+  properties: {
+    value: { type: Type.NUMBER },
+    formattedValue: { type: Type.STRING },
+    timeframe: { type: Type.STRING },
+    description: { type: Type.STRING },
+    sourceType: { type: Type.STRING }
+  },
+  required: ["formattedValue", "timeframe", "description"]
+};
+
 // Schema for the static/encyclopedic data
 const mainInfoSchemaConfig = {
   type: Type.OBJECT,
@@ -169,260 +189,70 @@ const mainInfoSchemaConfig = {
       required: ["lat", "lng"]
     },
     description: { type: Type.STRING },
-    population: { type: Type.STRING },
-    climate: { type: Type.STRING },
-    funFacts: {
-      type: Type.ARRAY,
-      items: { type: Type.STRING }
+    population: {
+      type: Type.OBJECT,
+      properties: {
+        current: populationInfoSchema,
+        historical: populationInfoSchema
+      }
     },
-    suggestedZoom: { type: Type.NUMBER },
-    notable: {
+    climate: {
+      type: Type.OBJECT,
+      properties: {
+        name: { type: Type.STRING },
+        description: { type: Type.STRING },
+        koppenCode: { type: Type.STRING }
+      },
+      required: ["name", "description"]
+    },
+    relatedEntities: {
       type: Type.ARRAY,
       items: {
         type: Type.OBJECT,
         properties: {
           name: { type: Type.STRING },
-          significance: { type: Type.STRING },
-          category: { type: Type.STRING }
+          type: { type: Type.STRING }
         },
-        required: ["name", "significance"]
+        required: ["name", "type"]
       }
+    },
+    suggestedZoom: { type: Type.NUMBER },
+    contextNotes: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING }
     }
   },
-  required: ["name", "type", "coordinates", "description", "population", "climate", "funFacts", "notable"]
+  required: ["name", "type", "coordinates", "description"]
 };
 
-import { jsonrepair } from 'jsonrepair';
-
-// Helper to cleanup JSON string before parsing
-const cleanJsonString = (str: string): string => {
-  if (!str) return "";
-  let cleaned = str;
+// Helper to normalize coordinates (handle AI returning [lat, lng] instead of {lat, lng})
+export const normalizeCoordinates = (coordsData: any): { lat: number, lng: number } | undefined => {
+  if (!coordsData) return undefined;
   
-  // Remove markdown code blocks
-  cleaned = cleaned.replace(/```json/gi, '');
-  cleaned = cleaned.replace(/```/g, '');
+  // Format D: { coordinates: [...] }
+  if (coordsData.coordinates !== undefined) {
+    return normalizeCoordinates(coordsData.coordinates);
+  }
+
+  // Format C: [lat, lng]
+  if (Array.isArray(coordsData) && coordsData.length >= 2) {
+    if (typeof coordsData[0] === 'number' && typeof coordsData[1] === 'number') {
+      return { lat: coordsData[0], lng: coordsData[1] };
+    }
+  } 
+  // Format A: { lat, lng }
+  else if (typeof coordsData.lat === 'number' && typeof coordsData.lng === 'number') {
+    return { lat: coordsData.lat, lng: coordsData.lng };
+  }
+  // Format B: { latitude, longitude }
+  else if (typeof coordsData.latitude === 'number' && typeof coordsData.longitude === 'number') {
+    return { lat: coordsData.latitude, lng: coordsData.longitude };
+  }
   
-  // Remove literal ellipses "..." or unicode ellipses which models sometimes use to indicate truncation
-  cleaned = cleaned.replace(/\.\.\./g, '');
-  cleaned = cleaned.replace(/\u2026/g, '');
-  
-  return cleaned.trim();
-};
-
-// Helper to safely parse JSON that might be wrapped in markdown or truncated
-const safeJsonParse = (text: string) => {
-  if (!text) return null;
-
-  // 1. Clean markdown first
-  let cleaned = cleanJsonString(text);
-
-  // 2. Suppress conversational refusals early if there are no brackets at all
-  const lower = cleaned.toLowerCase().trim();
-  if (lower.startsWith("i am") || lower.startsWith("sorry") || lower.startsWith("i cannot")) {
-      return null;
-  }
-
-  // 3. Brute force extraction as fallback if the cleaned string has conversational text around it
-  const firstOpenBrace = cleaned.indexOf('{');
-  const firstOpenBracket = cleaned.indexOf('[');
-  let jsonCandy = cleaned;
-
-  if (firstOpenBrace !== -1 || firstOpenBracket !== -1) {
-    let startIdx = -1;
-    let endIdx = -1;
-
-    if (firstOpenBrace !== -1 && (firstOpenBracket === -1 || firstOpenBrace < firstOpenBracket)) {
-        startIdx = firstOpenBrace;
-        endIdx = cleaned.lastIndexOf('}');
-    } else {
-        startIdx = firstOpenBracket;
-        endIdx = cleaned.lastIndexOf(']');
-    }
-
-    if (startIdx !== -1) {
-      if (endIdx !== -1 && endIdx > startIdx) {
-        // If we found both, extract that portion
-        jsonCandy = cleaned.substring(startIdx, endIdx + 1);
-      } else {
-        // If truncated, take everything from startIdx
-        jsonCandy = cleaned.substring(startIdx);
-      }
-    }
-  }
-
-  // 4. Parse & Repair
-  try {
-    return JSON.parse(jsonCandy);
-  } catch (e1: any) {
-    try {
-      // Use powerful jsonrepair module
-      const repaired = jsonrepair(jsonCandy);
-      return JSON.parse(repaired);
-    } catch (e2: any) {
-      // If the extracted candy failed, try repairing the entire cleaned text as an absolute last resort
-      try {
-        const repairedFull = jsonrepair(cleaned);
-        return JSON.parse(repairedFull);
-      } catch (e3: any) {
-         console.error("JSON Parse failed for text:", text.substring(0, 100) + "...", "Errors:", e1.message, e2.message);
-         return null;
-      }
-    }
-  }
-};
-
-const fetchCustomNews = async (query: string, exclude: string[], settings: any): Promise<NewsItem[]> => {
-  try {
-    let items: NewsItem[] = [];
-    const encodedQuery = encodeURIComponent(query);
-    
-    if (settings.newsProvider === 'newsapi') {
-      const res = await fetch(`https://newsapi.org/v2/everything?q=${encodedQuery}&sortBy=publishedAt&language=en&apiKey=${settings.newsApiKey}`);
-      const data = await res.json();
-      if (data.articles) {
-        items = data.articles.map((a: any) => ({
-          headline: a.title,
-          summary: a.description || "",
-          source: a.source?.name || "NewsAPI",
-          url: a.url
-        }));
-      }
-    } else if (settings.newsProvider === 'newsdata') {
-      const res = await fetch(`https://newsdata.io/api/1/news?apikey=${settings.newsApiKey}&q=${encodedQuery}&language=en`);
-      const data = await res.json();
-      if (data.results) {
-        items = data.results.map((a: any) => ({
-          headline: a.title,
-          summary: a.description || "",
-          source: a.source_id || "NewsData",
-          url: a.link
-        }));
-      }
-    } else if (settings.newsProvider === 'nyt') {
-      const res = await fetch(`https://api.nytimes.com/svc/search/v2/articlesearch.json?q=${encodedQuery}&api-key=${settings.newsApiKey}`);
-      const data = await res.json();
-      if (data.response?.docs) {
-        items = data.response.docs.map((a: any) => ({
-          headline: a.headline?.main || "NYT Article",
-          summary: a.abstract || a.snippet || "",
-          source: "The New York Times",
-          url: a.web_url
-        }));
-      }
-    }
-
-    // Filter out excluded headlines
-    if (exclude && exclude.length > 0) {
-      items = items.filter(item => {
-         const headlineNorm = (item.headline || "").toLowerCase();
-         return !exclude.some(ex => headlineNorm.includes(ex.toLowerCase()));
-      });
-    }
-
-    // Take top 5
-    return items.slice(0, 5).filter(n => {
-       if (!n.url) return false;
-       if (n.url.length < 10) return false;
-       if (!n.url.startsWith('http')) return false;
-       return true;
-    });
-
-  } catch (error) {
-    console.error("Custom News API fetch failed", error);
-    return [];
-  }
+  return undefined;
 };
 
 
-export const fetchLiveNews = async (query: string, exclude: string[] = []): Promise<NewsItem[]> => {
-  const settings = getUserSettings();
-  if (settings.newsProvider !== 'gemini' && settings.newsApiKey) {
-    return fetchCustomNews(query, exclude, settings);
-  }
-
-  try {
-    const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
-    const count = exclude.length > 0 ? 5 : 3;
-    const excludeList = exclude.slice(0, 10).map(s => `"${s.substring(0, 50)}..."`).join(', ');
-
-    const prompt = `
-      Current Date: ${currentDate}
-      Task: Find ${count} distinct news articles related to: "${query}".
-      
-      Priority: 
-      1. Live/Recent news (last 48 hours).
-      2. If no breaking news is found, find interesting recent feature stories, travel updates, or cultural articles about this location from the last few months.
-      3. If absolutely no stories exist, return an empty array [].
-      
-      ${exclude.length > 0 ? `IMPORTANT: The user has already seen stories with these headlines: [${excludeList}]. You MUST find DIFFERENT stories.` : ''}
-      
-      Instructions:
-      1. Use the Google Search tool to find real articles. Search for "${query} news" or "${query} recent stories".
-      2. Return a strict JSON array of objects.
-      3. For 'url', use the actual link found in the search results. CRITICAL: Ensure the URL is valid, complete, and NOT truncated (do not end with '...'). If the URL is truncated in the source, try to find the full link or omit the article.
-      4. **If the headline is in a foreign language, TRANSLATE it into English.**
-      5. 'summary': A short, engaging 1-2 sentence summary of what the article is about.
-      6. Output ONLY the JSON array.
-      
-      Format:
-      [
-        {
-          "headline": "Headline text",
-          "summary": "Short summary of the article.",
-          "source": "News Source Name",
-          "url": "Full URL to the article"
-        }
-      ]
-    `;
-
-    const response = await generateContentWithRetry({
-      model: modelName,
-      contents: prompt,
-      config: {
-        tools: [{ googleSearch: {} }],
-        maxOutputTokens: 4000,
-      }
-    });
-
-    const text = response.text;
-    const data = safeJsonParse(text);
-
-    let items: NewsItem[] = [];
-    if (Array.isArray(data)) {
-      items = data;
-    } else if (data && data.news && Array.isArray(data.news)) {
-      items = data.news;
-    }
-
-    return items.map((n: any) => ({
-      headline: n.headline || "News Update",
-      summary: n.summary || "",
-      source: n.source || "Unknown",
-      url: n.url || ""
-    })).filter(n => {
-       if (!n.url) return false;
-       if (n.url.length < 10) return false;
-       if (n.url.includes('...')) return false; 
-       if (!n.url.startsWith('http')) return false;
-       return true;
-    });
-
-  } catch (error: any) {
-    const isQuota = error?.message?.includes('429') || error?.message?.includes('Quota') || (error?.error && error.error.code === 429);
-    if (isQuota) {
-        console.warn("Live news fetch skipped due to quota limits.");
-        return [{
-            headline: "News unavailable due to high traffic.",
-            source: "System",
-            url: "#",
-            summary: "Please try again in a few moments."
-        }];
-    }
-    console.error("Error fetching live news:", error);
-    return [];
-  }
-};
 
 /**
  * Model-independent location normalization layer.
@@ -516,7 +346,7 @@ const DETERMINISTIC_LOCATION_DB: Record<string, { name: string; type: LocationTy
   "taj mahal": { name: "Taj Mahal", type: LocationType.POI, entityType: "landmark", lat: 27.1751, lng: 78.0421, suggestedZoom: 9 },
   "the taj mahal": { name: "Taj Mahal", type: LocationType.POI, entityType: "landmark", lat: 27.1751, lng: 78.0421, suggestedZoom: 9 },
 
-  "mount fuji": { name: "Mount Fuji", type: LocationType.POI, entityType: "mountain", lat: 35.3606, lng: 138.7274, suggestedZoom: 8, climate: "Tundra (ET) / Alpine" },
+  "mount fuji": { name: "Mount Fuji", type: LocationType.POI, entityType: "mountain", lat: 35.3606, lng: 138.7274, suggestedZoom: 8 },
   "titanic wreck site": { name: "Titanic Wreck Site", type: LocationType.POI, entityType: "shipwreck_site", lat: 41.7325, lng: -49.9469, suggestedZoom: 7 },
   "titanic": { name: "Titanic Wreck Site", type: LocationType.POI, entityType: "shipwreck_site", lat: 41.7325, lng: -49.9469, suggestedZoom: 7 },
   "the vasa": { name: "Vasa Shipwreck Discovery Site", type: LocationType.POI, entityType: "shipwreck_site", lat: 59.3275, lng: 18.0911, suggestedZoom: 9 },
@@ -532,14 +362,15 @@ const DETERMINISTIC_LOCATION_DB: Record<string, { name: string; type: LocationTy
   "boston massacre": { name: "Boston Massacre Site", type: LocationType.POI, entityType: "historical_event_site", lat: 42.3588, lng: -71.0578, suggestedZoom: 9 }
 };
 
-export const resolveLocationQuery = async (query: string, intent?: QueryIntent): Promise<SearchResult | null> => {
+export const resolveLocationQuery = async (query: string, intent?: QueryIntent, rawQuery?: string): Promise<SearchResult | null> => {
+  let normalizedQuery = query;
   try {
     const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
     const settings = getUserSettings();
     const activeProvider = settings.aiProvider || 'gemini';
 
     // Step 1: Model-independent location normalization
-    const normalizedQuery = normalizeLocationEntity(query);
+    normalizedQuery = normalizeLocationEntity(query);
     const lookupKey = (normalizedQuery || query).toLowerCase().trim();
 
     // Step 2: Deterministic geographic resolution before AI provider call
@@ -566,8 +397,7 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent):
         coordinates: { lat: deterministicRes.lat, lng: deterministicRes.lng },
         description: `Information on ${deterministicRes.name}.`,
         funFacts: [],
-        notable: [],
-        news: []
+        notable: []
       };
       suggestedZoom = deterministicRes.suggestedZoom || 8;
     }
@@ -580,7 +410,7 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent):
       const mainPrompt = `
         You are an intelligent geographic knowledge engine and unified semantic entity resolver.
         Current Date: ${currentDate}
-        Input geographic query: "${targetSearchTerm}" (Raw query: "${query}")
+        Input geographic query: "${targetSearchTerm}" (Raw query: "${rawQuery || query}")
         Query Intent: ${intent || 'NATURAL_LOCATION'}
 
         CRITICAL INPUT GUIDELINES:
@@ -605,11 +435,11 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent):
         - 'type': Choose ONE from: Continent, Country, State, City, Ocean, Point of Interest.
         - 'suggestedZoom': 0-10 scale. 8-10 for specific sites/cities, 4-6 for regions.
         - 'description': Detailed summary (approx 80 words).
-        - 'population': Population estimate for cities/countries; write "N/A" or null if not applicable.
-        - 'climate': Köppen climate classification for places/natural features; write "Varies" or null for event/discovery sites.
-        - 'funFacts': List 3 interesting facts.
+        - 'population': Object containing 'current' and 'historical' population estimates. For historical events, always distinguish historical population from modern population.
+        - 'climate': Object containing 'name' (e.g. "Oceanic climate"), 'description' (plain language summary), and 'koppenCode' (treat scientific classifications as supporting metadata, not primary).
+        - 'contextNotes': Array of 3 string facts that provide meaningful historical or geographic context. Do not output generic trivia.
         - 'coordinates': Precise decimal lat/lng.
-        - 'notable': Array of 3 objects with 'name' and 'significance'.
+        - 'relatedEntities': Array of entities that provide meaningful context about the location or event. Categorize by type (person, group, place, institution, artifact, event). Do not include generic associated concepts.
 
         Output strictly valid JSON.
       `;
@@ -628,7 +458,8 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent):
 
       let mainResponse = await executeAiCall(mainPrompt);
       rawAiText = mainResponse.text;
-      let data = safeJsonParse(rawAiText);
+      let parsed = parseAndExtract(rawAiText);
+      let data = parsed.success ? (parsed.value as any) : null;
 
       if (Array.isArray(data) && data.length > 0) {
         data = data[0];
@@ -640,6 +471,7 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent):
       }
 
       if (data.coordinates) {
+         data.coordinates = normalizeCoordinates(data.coordinates) || data.coordinates;
          const lat = data.coordinates.lat;
          const lng = data.coordinates.lng;
          
@@ -666,14 +498,13 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent):
       suggestedZoom = data.suggestedZoom || 5;
     }
 
-    // Step 5: Fill defaults & sanitize metadata
+    // Step 5: Fill defaults & enrich metadata
     if (!resolvedData.description) resolvedData.description = "Detailed description unavailable.";
     if (!resolvedData.funFacts) resolvedData.funFacts = [];
     if (!resolvedData.notable) resolvedData.notable = [];
     if (!resolvedData.type) resolvedData.type = LocationType.POI;
-    resolvedData.news = [];
-
-    const finalLocationInfo = sanitizeLocationInfo(resolvedData);
+    
+    const finalLocationInfo = await enrichLocationInfo(resolvedData);
 
     console.log(`=== LOCATION RESOLUTION TRACE ===
 AI Provider: ${activeProvider}
@@ -749,12 +580,92 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
     name.includes('volcano') ||
     name.includes('peak');
 
-  if (!isPopulationAllowed || isHiddenEntityType) {
-    data.population = null as any;
+  // Normalize new population schema
+  if (data.population !== undefined) {
+    if (typeof data.population === 'number' || typeof data.population === 'string') {
+      console.warn(`[Normalization] Discarding legacy flat population value: ${data.population}`);
+      data.population = null as any;
+    } else if (data.population && typeof data.population === 'object') {
+      const p = data.population as any;
+      const hasCurrent = p.current && p.current.formattedValue && p.current.description;
+      const hasHistorical = p.historical && p.historical.formattedValue && p.historical.description;
+      
+      if (!hasCurrent && !hasHistorical) {
+        data.population = null as any;
+      } else if (isHiddenEntityType && !hasHistorical) {
+         // Force historical contexts to only show population if historical data exists
+         data.population = null as any;
+      }
+    } else {
+      data.population = null as any;
+    }
   }
 
-  if ((!isClimateAllowed && !isGeographicFeatureName) || isHiddenEntityType) {
-    data.climate = null as any;
+  // Normalize new climate schema
+  if (data.climate !== undefined) {
+    if (typeof data.climate === 'string') {
+      const rawClimate = (data.climate as string).trim();
+      let name = "Unknown climate classification";
+      let koppenCode = "";
+      
+      // Attempt to extract Koppen code (e.g. "Cfb (Oceanic climate)")
+      const match = rawClimate.match(/^([A-Za-z]{2,3})\s*\((.*?)\)$/);
+      if (match) {
+        koppenCode = match[1];
+        name = match[2];
+      } else if (/^[A-Za-z]{2,3}$/.test(rawClimate)) {
+        koppenCode = rawClimate;
+      } else {
+        name = rawClimate;
+      }
+      
+      data.climate = {
+        name,
+        description: "",
+        koppenCode
+      } as any;
+      console.warn(`[Normalization] Converted string climate to structured object: ${JSON.stringify(data.climate)}`);
+    } else if (data.climate && typeof data.climate === 'object') {
+      const c = data.climate as any;
+      if (!c.name || !c.description) {
+        data.climate = null as any;
+      } else if (isHiddenEntityType) {
+         // Historically, we hid climate for events. Let's keep it if AI found it useful, but if it says "Varies" clear it
+         if (c.name.toLowerCase().includes('varies') || c.name.toLowerCase().includes('n/a')) {
+           data.climate = null as any;
+         }
+      }
+    } else {
+      data.climate = null as any;
+    }
+  }
+  
+  // Normalize relatedEntities
+  if (data.relatedEntities) {
+    if (!Array.isArray(data.relatedEntities) || data.relatedEntities.length === 0) {
+       data.relatedEntities = [] as any;
+    } else {
+       const genericEntityBlacklist = [
+         "history",
+         "historical",
+         "culture",
+         "civilization",
+         "europe",
+         "asia",
+         "the world",
+         "ancient world"
+       ];
+       
+       data.relatedEntities = data.relatedEntities.filter((e: any) => {
+         if (!e.name || !e.type) return false;
+         if (e.name.length < 2) return false;
+         
+         const lowerName = e.name.toLowerCase().trim();
+         if (genericEntityBlacklist.includes(lowerName)) return false;
+         
+         return true;
+       }) as any;
+    }
   }
 
   return data;
@@ -772,11 +683,11 @@ export const getInfoFromFeature = async (name: string, lat: number, lng: number)
       - name: The specific name provided: "${name}". Do not change this name or summarize a region unless absolutely necessary.
       - type: Continent, Country, State, City, Ocean, or Point of Interest.
       - description: Detailed Wikipedia-style encyclopedia entry about ${name} (approx 80 words).
-      - population: Recent estimate (if applicable).
-      - climate: Köppen climate classification.
-      - funFacts: 3 interesting facts.
+      - population: Object containing 'current' and 'historical' population estimates. For historical events, always distinguish historical population from modern population.
+      - climate: Object containing 'name' (e.g. "Oceanic climate"), 'description' (plain language summary), and 'koppenCode' (treat scientific classifications as supporting metadata, not primary).
+      - contextNotes: Array of 3 string facts that provide meaningful historical or geographic context. Do not output generic trivia.
       - coordinates: The exact input coordinates {lat: ${lat}, lng: ${lng}}
-      - 'notable': Array of 3 objects, each with 'name' (person's name) and 'significance' (descriptive sentence).
+      - relatedEntities: Array of entities that provide meaningful context about the location or event. Categorize by type (person, group, place, institution, artifact, event). Do not include generic associated concepts.
       
       Output ONLY the JSON object.
     `;
@@ -792,7 +703,8 @@ export const getInfoFromFeature = async (name: string, lat: number, lng: number)
     });
 
     const mainResponse = await mainRequest;
-    let data = safeJsonParse(mainResponse.text);
+    let parsed = parseAndExtract(mainResponse.text);
+    let data = parsed.success ? (parsed.value as any) : null;
 
     if (!data) {
         data = {
@@ -800,17 +712,19 @@ export const getInfoFromFeature = async (name: string, lat: number, lng: number)
             type: "Point of Interest",
             description: "Information unavailable.",
             coordinates: { lat, lng },
-            funFacts: [],
-            news: [],
-            notable: []
+            contextNotes: [],
+            relatedEntities: []
         };
     }
     
     // Ensure the name returned is the one requested
     data.name = name;
+    
+    if (data.coordinates) {
+        data.coordinates = normalizeCoordinates(data.coordinates) || data.coordinates;
+    }
 
-    data.news = [];
-    return sanitizeLocationInfo(data as LocationInfo);
+    return enrichLocationInfo(data as LocationInfo);
 
   } catch (error: any) {
     console.error("Error resolving feature info:", error);
@@ -822,7 +736,6 @@ export const getInfoFromFeature = async (name: string, lat: number, lng: number)
             : "Could not retrieve information at this time.",
         coordinates: { lat, lng },
         funFacts: [],
-        news: [],
         notable: []
     } as unknown as LocationInfo);
   }
@@ -859,19 +772,60 @@ export const getInfoFromCoordinates = async (lat: number, lng: number): Promise<
       }
     });
 
-    const mainResponse = await mainRequest;
-    let data = safeJsonParse(mainResponse.text);
+    let mainResponse = await mainRequest;
+    let parsed = parseAndExtract(mainResponse.text);
+    
+    // 1-Time Strict Retry for Formatting Failures
+    if (!parsed.success && ((parsed as any).reason === "NO_JSON_FOUND" || (parsed as any).reason === "INVALID_JSON" || (parsed as any).reason === "UNBALANCED_DELIMITERS")) {
+       EnrichmentMetrics.retry++;
+       console.warn(`[RECOVERY] Parse failed (${(parsed as any).reason}): ${(parsed as any).error}. Triggering 1-time strict retry.`);
+       const retryPrompt = mainPrompt + "\n\nCRITICAL INSTRUCTION: Return ONLY a single valid JSON object. Do not include markdown, explanations, code fences, comments, or any text before or after the JSON.";
+       const retryRequest = generateContentWithRetry({
+         model: modelName,
+         contents: retryPrompt,
+         config: {
+           responseMimeType: "application/json",
+           responseSchema: mainInfoSchemaConfig,
+           maxOutputTokens: 4000,
+         }
+       });
+       mainResponse = await retryRequest;
+       parsed = parseAndExtract(mainResponse.text);
+       if (parsed.success) {
+           EnrichmentMetrics.retry_success++;
+       }
+    }
+
+    let data: any = parsed.success ? parsed.value : null;
+
+    if (data) {
+        // Validate schema
+        if (!data.name || !data.type) {
+            EnrichmentMetrics.schema_failure++;
+            console.log(`[Enrichment] Metadata enrichment skipped. Reason: SCHEMA_INVALID`);
+            data = null;
+        } else {
+            EnrichmentMetrics.accepted++;
+        }
+    }
 
     if (!data) {
+        if (!parsed.success) {
+            EnrichmentMetrics.rejected++;
+            console.warn(`[Enrichment] STRICT RETRY FAILED (${(parsed as any).reason}): ${(parsed as any).error}`);
+        }
         data = {
             name: "Unknown Location",
             type: "Point of Interest",
             description: "Information unavailable.",
             coordinates: { lat, lng },
             funFacts: [],
-            news: [],
             notable: []
         };
+    }
+
+    if (data.coordinates) {
+        data.coordinates = normalizeCoordinates(data.coordinates) || data.coordinates;
     }
 
     if (!data.coordinates || typeof data.coordinates.lat !== 'number') {
@@ -882,9 +836,7 @@ export const getInfoFromCoordinates = async (lat: number, lng: number): Promise<
     if (!data.funFacts) data.funFacts = [];
     if (!data.notable) data.notable = [];
     if (!data.type) data.type = LocationType.POI;
-    data.news = [];
-
-    return sanitizeLocationInfo(data);
+    return enrichLocationInfo(data as LocationInfo);
 
   } catch (error: any) {
     const isQuota = error?.message?.includes('429') || error?.message?.includes('Quota') || (error?.error && error.error.code === 429);
@@ -897,7 +849,6 @@ export const getInfoFromCoordinates = async (lat: number, lng: number): Promise<
             : "Could not retrieve information at this time.",
         coordinates: { lat, lng },
         funFacts: [],
-        news: [],
         notable: []
     } as unknown as LocationInfo);
   }
@@ -966,7 +917,8 @@ export const getNearbyPlaces = async (lat: number, lng: number, radius: number =
       }
     });
 
-    const data = safeJsonParse(response.text);
+    const parsed = parseAndExtract(response.text);
+    const data = parsed.success ? (parsed.value as any) : null;
     if (Array.isArray(data)) return data;
     if (data && data.places && Array.isArray(data.places)) return data.places;
     return [];
@@ -977,40 +929,48 @@ export const getNearbyPlaces = async (lat: number, lng: number, radius: number =
   }
 };
 
-export const getMoreNews = async (locationName: string, existingHeadlines: string[]): Promise<NewsItem[]> => {
-  const settings = getUserSettings();
-  if (settings.newsProvider !== 'gemini' && settings.newsApiKey) {
-    return fetchCustomNews(locationName, existingHeadlines, settings);
-  }
 
-  try { return fetchLiveNews(locationName, existingHeadlines); } catch (e) { return []; }
-}
 
 export const generateRoute = async (text: string): Promise<Waypoint[]> => {
-  try {
-    const isUrl = text.startsWith('http');
-    
+  const isUrl = text.startsWith('http');
+  
+  const generateRawRoute = async (t: string, url: boolean): Promise<any[]> => {
     const prompt = `
       Task: Trace a geographical route from the text.
-      ${isUrl ? `URL: "${text}". Trace locations mentioned in the page content.` : `Text: "${text}"`}
+      ${url ? `URL: "${t}". Trace locations mentioned in the page content.` : `Text: "${t}"`}
 
       Instructions:
       1. Identify a name for this route/expedition (e.g. "Lewis and Clark Expedition", "Magellan's Circumnavigation", "The Silk Road"). If no specific name exists, create a short descriptive title.
       2. Extract every significant physical location (City, Country, Landmark) in narrative order.
-      3. Use HIGH PRECISION coordinates (at least 4 decimal places) to ensure locations (like coastal cities) are mapped accurately on land, not in the ocean.
-      4. If vague, use nearest major city but prioritize accurate coordinates.
+      3. Use HIGH PRECISION coordinates (at least 4 decimal places).
+      4. For each location, provide rich historical context:
+         - "context": A brief 10-word reason why it's on the route.
+         - "description": A 2-4 sentence detailed narrative of what happened here regarding the queried event.
+         - "significance": Why this specific location matters to the event.
+         - "highlights": An array of 2-4 key historical facts or events here.
+         - "historicalPeriod": The time period (e.g. "8th-11th century").
+         - "entities": Relevant people, cultures, kingdoms, or groups.
       5. Schema: 
       {
         "title": "Name of Route",
         "route": [
-          {"name": "Location Name", "lat": 0.0000, "lng": 0.0000, "context": "Very brief reason (max 10 words)"}
+          {
+            "name": "Location Name", 
+            "lat": 0.0000, 
+            "lng": 0.0000, 
+            "context": "Brief context",
+            "description": "Full narrative description...",
+            "significance": "Historical importance...",
+            "highlights": ["Fact 1", "Fact 2"],
+            "historicalPeriod": "Time period",
+            "entities": ["Person A", "Culture B"]
+          }
         ]
       }
-      6. Remove consecutive duplicates.
-      7. Output a strict JSON Object.
+      6. Output a strict JSON Object.
     `;
     
-    const tools = isUrl ? [{ googleSearch: {} }] : undefined;
+    const tools = url ? [{ googleSearch: {} }] : undefined;
 
     const response = await generateContentWithRetry({
       model: modelName,
@@ -1021,43 +981,48 @@ export const generateRoute = async (text: string): Promise<Waypoint[]> => {
       }
     });
     
-    const data = safeJsonParse(response.text);
+    const result = parseAndExtract(response.text);
+    if (!result.success) {
+        console.error(
+            `[Route Generation] JSON extraction failed: ${(result as any).reason}`,
+            (result as any).error
+        );
+        return [];
+    }
+    const data = result.value as any;
     
     let items: any[] = [];
     let title: string | undefined = undefined;
 
-    // Robust parsing for different possible JSON structures
     if (data && typeof data === 'object') {
         if (data.title) title = data.title;
-        
         if (data.route && Array.isArray(data.route)) items = data.route;
         else if (data.locations && Array.isArray(data.locations)) items = data.locations;
         else if (data.waypoints && Array.isArray(data.waypoints)) items = data.waypoints;
-        else if (Array.isArray(data)) items = data; // Fallback if just an array in root
+        else if (Array.isArray(data)) items = data;
     } else if (Array.isArray(data)) {
         items = data;
     }
 
-    return items.map((item, i) => ({
-      id: `wp-${i}-${Date.now()}`,
-      name: item.name || "Unknown Waypoint",
-      lat: item.lat || 0,
-      lng: item.lng || 0,
-      context: item.context || "",
-      routeTitle: title // Include title in Waypoint
-    })).filter(w => w.lat !== 0 || w.lng !== 0);
+    return items.map(item => ({
+       ...item,
+       routeTitle: title
+    }));
+  };
 
+  try {
+    return await runRoutePipeline(text, isUrl, generateRawRoute);
   } catch (error) {
-    console.error("Error generating route:", error);
+    console.error("Error generating route with pipeline:", error);
     return [];
   }
 };
 
-export type QueryIntent = 'DIRECT' | 'NATURAL_LOCATION' | 'EXPLORATORY' | 'HISTORICAL_EVENT' | 'DISCOVERY_LOCATION';
 
 export interface ExtractedQuery {
   intent: QueryIntent;
   entity: string;
+  resolutionMode?: 'SINGLE_POINT' | 'MULTI_LOCATION_EXPLORATION';
 }
 
 export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
@@ -1096,9 +1061,13 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
     if (match && match[1]) {
       const entityStr = match[1].replace(/[?.,!]+$/, "").trim();
       const cleanedEntity = entityStr.replace(/^the\s+/i, "");
+      
+      console.log(`Intent:\nHISTORICAL_EVENT\nRouting decision:\nMULTI_LOCATION_EXPLORATION\nCoordinate validation:\nBYPASSED (non-point intent)`);
+      
       return {
         intent: 'HISTORICAL_EVENT',
-        entity: cleanedEntity || entityStr
+        entity: cleanedEntity || entityStr,
+        resolutionMode: 'MULTI_LOCATION_EXPLORATION'
       };
     }
   }
@@ -1109,6 +1078,7 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
     /\baround\b/i,
     /\bshipwrecks\b/i,
     /\bplaces\s+in\b/i,
+    /\bplaces\s+related\s+to\b/i,
     /\bhistory\s+of\b/i,
     /\bimportant\s+places\b/i,
     /\bevents\s+of\b/i,
@@ -1117,7 +1087,11 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
   
   for (const pattern of exploratoryPatterns) {
     if (pattern.test(clean)) {
-      return { intent: 'EXPLORATORY', entity: clean };
+      return { 
+        intent: 'EXPLORATORY', 
+        entity: clean,
+        resolutionMode: 'MULTI_LOCATION_EXPLORATION'
+      };
     }
   }
 
@@ -1157,38 +1131,99 @@ export const extractEntityFromQuery = (query: string): string => {
   return extracted.entity;
 };
 
-export const recoverCoordinatesFromAi = async (entity: string): Promise<{ lat: number, lng: number } | null> => {
-  const promptText = `Provide only the precise real-world decimal latitude and longitude coordinates for: "${entity}".`;
+export const recoverCoordinatesFromAi = async (rawQuery: string, intent: string, entity: string): Promise<{ lat: number, lng: number } | null> => {
+  const promptText = `Provide only the precise real-world decimal latitude and longitude coordinates for: "${entity}" (extracted from query: "${rawQuery}", intent: ${intent}).
+  Return a strictly valid JSON object exactly like this:
+  {
+    "lat": 12.345,
+    "lng": 67.890
+  }
+  Output ONLY the JSON object.`;
   
   try {
     const response = await generateContentWithRetry({
       model: modelName,
       contents: promptText,
       config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "OBJECT",
-          properties: {
-            lat: { type: "NUMBER" },
-            lng: { type: "NUMBER" }
-          },
-          required: ["lat", "lng"]
-        },
         maxOutputTokens: 200, 
       }
     });
 
-    const data = safeJsonParse(response.text);
+    const parsed = parseAndExtract(response.text);
+    const data = parsed.success ? parsed.value : null;
     let valid = false;
-    let coords = null;
-
-    if (data && typeof data.lat === 'number' && typeof data.lng === 'number') {
-      coords = { lat: data.lat, lng: data.lng };
-      valid = isValidCoordinates(coords);
+    
+    // Check both root and nested coordinates property
+    let parsedCoords = normalizeCoordinates(data) || (data && normalizeCoordinates((data as any).coordinates));
+    
+    console.log("=== DEBUG: recoverCoordinatesFromAi ===");
+    console.log("Prompt:", promptText);
+    console.log("Raw Response:", response.text);
+    console.log("parseAndExtract(data):", JSON.stringify(data));
+    console.log("normalizeCoordinates(data):", JSON.stringify(parsedCoords));
+    console.log("=======================================");
+    
+    if (parsedCoords) {
+      valid = isValidCoordinates(parsedCoords);
     }
     
-    return valid ? coords : null;
+    return valid ? parsedCoords : null;
   } catch (err) {
+    return null;
+  }
+};
+
+export const recoverLocationMetadata = async (entityName: string, coordinates: GeoCoordinates): Promise<LocationInfo | null> => {
+  try {
+    const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
+    
+    const prompt = `
+      Provide encyclopedic information for the location named "${entityName}" located precisely at coordinates: ${coordinates.lat}, ${coordinates.lng}.
+      Current Date: ${currentDate}
+      
+      Return a JSON object with:
+      - name: The normalized, canonical name of the location (e.g. "Dallas, Texas"). DO NOT output lowercase names.
+      - entityType: Choose ONE from: city, country, state, ocean, natural_feature, mountain, landmark, museum, historical_event_site, archaeological_site, discovery_site, shipwreck_site, artifact, battlefield, festival_site.
+      - type: Continent, Country, State, City, Ocean, or Point of Interest.
+      - description: Detailed Wikipedia-style encyclopedia entry about ${entityName} (approx 80 words).
+      - population: Object containing 'current' and 'historical' population estimates. For historical events, always distinguish historical population from modern population.
+      - climate: Object containing 'name' (e.g. "Oceanic climate"), 'description' (plain language summary), and 'koppenCode' (treat scientific classifications as supporting metadata, not primary).
+      - contextNotes: Array of 3 string facts that provide meaningful historical or geographic context. Do not output generic trivia.
+      - coordinates: The exact input coordinates {lat: ${coordinates.lat}, lng: ${coordinates.lng}}
+      - relatedEntities: Array of entities that provide meaningful context about the location or event. Categorize by type (person, group, place, institution, artifact, event). Do not include generic associated concepts.
+      
+      Output strictly valid JSON matching this structure.
+    `;
+
+    const response = await generateContentWithRetry({
+      model: modelName,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: mainInfoSchemaConfig,
+        maxOutputTokens: 4000,
+      }
+    });
+
+    console.log(`=== RECOVER METADATA RAW RESPONSE ===`);
+    console.log(response.text);
+    console.log(`====================================`);
+
+    const parsed = parseAndExtract(response.text);
+    let data = parsed.success ? (parsed.value as any) : null;
+    
+    if (Array.isArray(data) && data.length > 0) {
+       data = data[0];
+    }
+    
+    if (!data) return null;
+    
+    const finalData = data as LocationInfo;
+    finalData.coordinates = coordinates;
+    
+    return finalData;
+  } catch (e) {
+    console.error("recoverLocationMetadata failed:", e);
     return null;
   }
 };

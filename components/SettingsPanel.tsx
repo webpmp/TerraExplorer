@@ -73,9 +73,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
       if (settings.newsProvider === 'newsapi') {
         url = `https://newsapi.org/v2/everything?q=test&pageSize=1&apiKey=${settings.newsApiKey}`;
       } else if (settings.newsProvider === 'newsdata') {
-        url = `https://newsdata.io/api/1/news?apikey=${settings.newsApiKey}&q=test&language=en`;
+        url = `https://newsdata.io/api/1/news?apikey=${settings.newsDataApiKey}&q=test&language=en`;
       } else if (settings.newsProvider === 'nyt') {
-        url = `https://api.nytimes.com/svc/search/v2/articlesearch.json?q=test&api-key=${settings.newsApiKey}`;
+        url = `https://api.nytimes.com/svc/search/v2/articlesearch.json?q=test&api-key=${settings.nytApiKey}`;
       }
       
       const res = await fetch(url);
@@ -340,11 +340,16 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
             {settings.newsProvider !== 'gemini' && (
               <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div>
-                  <label className={labelClasses}>API Key</label>
+                  <label className={labelClasses}>{settings.newsProvider === 'nyt' ? 'NYT API Key' : settings.newsProvider === 'newsapi' ? 'NewsAPI.org Key' : 'NewsData.io Key'}</label>
                   <input
                     type="password"
-                    value={settings.newsApiKey}
-                    onChange={(e) => onUpdateSettings({ ...settings, newsApiKey: e.target.value })}
+                    value={(settings.newsProvider === 'nyt' ? settings.nytApiKey : settings.newsProvider === 'newsapi' ? settings.newsApiKey : settings.newsDataApiKey) || ''}
+                    onChange={(e) => onUpdateSettings({ 
+                        ...settings, 
+                        ...(settings.newsProvider === 'nyt' ? { nytApiKey: e.target.value } : 
+                            settings.newsProvider === 'newsapi' ? { newsApiKey: e.target.value } : 
+                            { newsDataApiKey: e.target.value })
+                    })}
                     className={inputClasses}
                     placeholder={`Enter ${settings.newsProvider === 'nyt' ? 'NYT' : settings.newsProvider === 'newsapi' ? 'NewsAPI' : 'NewsData'} API Key`}
                   />
@@ -353,7 +358,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                 <div className="flex items-center gap-3">
                   <button
                     onClick={handleTestNewsConnection}
-                    disabled={newsTestStatus === 'testing' || !settings.newsApiKey}
+                    disabled={newsTestStatus === 'testing' || !(settings.newsProvider === 'nyt' ? settings.nytApiKey : settings.newsProvider === 'newsapi' ? settings.newsApiKey : settings.newsDataApiKey)}
                     className={`px-4 py-2 rounded-lg text-sm border font-medium transition-colors
                       ${isParchment ? 'border-[#8b5a2b] bg-[#8b5a2b]/10 hover:bg-[#8b5a2b]/20 text-[#8b5a2b]' : ''}
                       ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20' : ''}

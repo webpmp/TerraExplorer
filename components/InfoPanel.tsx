@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { LocationInfo, SkinType, NotableItem, isValidCoordinates } from '../types';
+import { ENTITY_SCHEMAS } from '../entitySchema';
+import { LocationInfo, SkinType, isValidCoordinates, LocationType } from '../types';
 import { 
   X, Users, Thermometer, Info, Newspaper, Crown, Map, Pin, ExternalLink, Loader2,
   BookOpen, Rocket, Trophy, Music, FlaskConical, Palette, Clapperboard, Image as ImageIcon,
@@ -9,7 +10,7 @@ import {
 } from 'lucide-react';
 
 interface InfoPanelProps {
-  info: LocationInfo | null;
+  info: any; // Raw input (can be LocationInfo or waypoint wrapper)
   onClose: () => void;
   isLoading: boolean;
   isNewsFetching: boolean;
@@ -54,6 +55,58 @@ const isValidData = (val: string | null | undefined) => {
   ].includes(v);
 };
 
+// Helper to safely convert mixed array elements to plain strings (useful for Copy buttons)
+const getSafeTextString = (item: any): string => {
+  if (item === null || item === undefined) return "";
+  if (typeof item === 'string' || typeof item === 'number') return String(item);
+  
+  if (typeof item === 'object') {
+    if (item.name && item.significance) {
+      return `${item.name}: ${item.significance}`;
+    }
+    if (item.name) return String(item.name);
+    if (item.text) return String(item.text);
+    if (item.description) return String(item.description);
+    
+    try {
+      const values = Object.values(item).filter(v => typeof v === 'string');
+      if (values.length > 0) return values.join(': ');
+      return JSON.stringify(item);
+    } catch {
+      return "Invalid data";
+    }
+  }
+  return String(item);
+};
+
+// Helper to safely render mixed array elements (strings or structured objects)
+const renderSafeText = (item: any): React.ReactNode => {
+  if (item === null || item === undefined) return null;
+  if (typeof item === 'string' || typeof item === 'number') return String(item);
+  
+  if (typeof item === 'object') {
+    if (item.name && item.significance) {
+      return (
+        <span className="block">
+          <span className="font-bold">{item.name}</span>: {item.significance}
+        </span>
+      );
+    }
+    if (item.name) return String(item.name);
+    if (item.text) return String(item.text);
+    if (item.description) return String(item.description);
+    
+    try {
+      const values = Object.values(item).filter(v => typeof v === 'string');
+      if (values.length > 0) return values.join(': ');
+      return JSON.stringify(item);
+    } catch {
+      return "Invalid data";
+    }
+  }
+  return String(item);
+};
+
   const CopyButton: React.FC<{ text: string; className?: string; skin: SkinType }> = ({ text, className = "", skin }) => {
   const [copied, setCopied] = useState(false);
   const isRetro = skin === 'retro-green' || skin === 'retro-amber';
@@ -83,96 +136,141 @@ const isValidData = (val: string | null | undefined) => {
   );
 };
 
-const getNotableIcon = (category: string = "General") => {
-  const c = category?.toLowerCase() || "";
-  if (c.includes('lit') || c.includes('writ') || c.includes('author') || c.includes('poet')) return <BookOpen size={16} />;
-  if (c.includes('space') || c.includes('astro')) return <Rocket size={16} />;
-  if (c.includes('sport') || c.includes('athl')) return <Trophy size={16} />;
-  if (c.includes('music') || c.includes('sing') || c.includes('band')) return <Music size={16} />;
-  if (c.includes('sci') || c.includes('phys') || c.includes('chem')) return <FlaskConical size={16} />;
-  if (c.includes('art') || c.includes('paint')) return <Palette size={16} />;
-  if (c.includes('film') || c.includes('act') || c.includes('direct')) return <Clapperboard size={16} />;
-  // Default
-  return <Crown size={16} />;
-};
-
-const NotablePersonCard: React.FC<{ 
-  item: NotableItem; 
-  theme: any; 
-  skin: SkinType; 
-  bodySize: string; 
-  subtextSize: string 
-}> = ({ item, theme, skin, bodySize, subtextSize }) => {
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const isRetro = skin === 'retro-green' || skin === 'retro-amber';
-  const isParchment = skin === 'parchment';
-
-  useEffect(() => {
-    // Safety check if item or name is missing
-    if (!item || !item.name) return;
-
-    let active = true;
-    const fetchImage = async () => {
-      try {
-        const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(item.name)}&prop=pageimages&format=json&pithumbsize=100&origin=*&redirects=1`);
-        const data = await res.json();
-        const pages = data.query?.pages;
-        if (pages && active) {
-            const pageId = Object.keys(pages)[0];
-            if (pageId !== "-1") {
-                setImageUrl(pages[pageId]?.thumbnail?.source || null);
-            }
-        }
-      } catch (e) {
-        // ignore
-      }
-    };
-    fetchImage();
-    return () => { active = false; };
-  }, [item?.name]);
-
-  // Guard against null item rendering
-  if (!item || !item.name) return null;
-
-  return (
-    <div className={`p-3 ${theme.card} flex items-start gap-3 group/item relative`}>
-      <div className={`shrink-0 mt-0.5 ${theme.icon} flex items-center justify-center w-10`}>
-        {imageUrl ? (
-           <img 
-             src={imageUrl} 
-             alt={item.name} 
-             className={`w-10 h-10 object-cover ${skin === 'modern' ? 'rounded-full' : 'rounded-none grayscale contrast-125'} border ${skin === 'modern' ? 'border-white/20' : 'border-current'}`} 
-           />
-        ) : (
-           <div className={`w-10 h-10 flex items-center justify-center ${skin === 'modern' ? 'bg-white/5 rounded-full' : 'border border-current'}`}>
-              {getNotableIcon(item.category)}
-           </div>
-        )}
-      </div>
-      <div className="flex-1 min-w-0">
-          <a 
-              href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.name.replace(/ /g, '_'))}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`${bodySize} font-bold ${theme.headerTitle} hover:underline decoration-1 underline-offset-2 block truncate`}
-          >
-              {item.name}
-          </a>
-          <p className={`${subtextSize} mt-0.5 ${theme.bodyText} line-clamp-4`}>{item.significance}</p>
-      </div>
-      <div className="opacity-0 group-hover/item:opacity-100 transition-opacity shrink-0 flex items-start">
-         <CopyButton text={`${item.name} - ${item.significance}`} skin={skin} />
-      </div>
-    </div>
-  );
-};
 
 const InfoPanel: React.FC<InfoPanelProps> = ({ 
-  info, onClose, isLoading, isNewsFetching, skin, 
-  isFavorite, onSaveFavorite, onRemoveFavorite, currentFavoriteName,
-  onLoadMoreNews, routeNav 
-}) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'news' | 'notable'>('overview');
+  info: rawInfo, 
+  onClose, 
+  isLoading, 
+  isNewsFetching, 
+  skin, 
+  isFavorite, 
+  onSaveFavorite, 
+  onRemoveFavorite, 
+  currentFavoriteName, 
+  onLoadMoreNews, 
+  routeNav 
+}: InfoPanelProps) => {
+  const info = React.useMemo(() => {
+    console.log("=== INFOPANEL BOUNDARY: Before Normalization ===");
+    console.log("rawInfo keys:", rawInfo ? Object.keys(rawInfo) : "null");
+
+    if (!rawInfo) return null;
+
+    const wp = rawInfo.waypoint || {};
+    
+    // 1. Name
+    const name = wp.name || rawInfo.name || "Unknown Location";
+
+    // 2. Description fallback
+    // Priority: rawInfo.description > wp.description > wp.significance > routeContext
+    const geographicDesc = rawInfo.description && rawInfo.description !== "Information unavailable." ? rawInfo.description : null;
+    const historicalDesc = wp.description || null;
+    const routeContextText = rawInfo.routeContext?.text || null;
+    
+    let desc = "Detailed description unavailable.";
+    let descSource = "Fallback";
+    
+    if (geographicDesc) {
+      desc = geographicDesc;
+      descSource = "rawInfo.description";
+    } else if (historicalDesc) {
+      desc = historicalDesc;
+      descSource = "wp.description";
+    } else if (wp.significance) {
+      desc = wp.significance;
+      descSource = "wp.significance";
+    } else if (routeContextText) {
+      desc = routeContextText;
+      descSource = "rawInfo.routeContext.text";
+    }
+
+    // 3. Context Notes
+    const contextNotes: any[] = [];
+    let contextNotesSource = "None";
+    
+    if (rawInfo.contextNotes && Array.isArray(rawInfo.contextNotes) && rawInfo.contextNotes.length > 0) {
+      contextNotes.push(...rawInfo.contextNotes);
+      contextNotesSource = "rawInfo.contextNotes";
+    } else if (wp.contextNotes && Array.isArray(wp.contextNotes) && wp.contextNotes.length > 0) {
+      contextNotes.push(...wp.contextNotes);
+      contextNotesSource = "wp.contextNotes";
+    }
+
+    // 3b. Significance
+    const significance = rawInfo.significance || wp.significance || null;
+
+    // 4. Coordinates
+    const coordinates = wp.coordinates || rawInfo.coordinates;
+    
+    // 5. Population and Climate
+    const population = rawInfo.population || null;
+    const populationSource = population ? "Enriched Geographic Metadata (rawInfo.population)" : "None";
+    
+    const climate = rawInfo.climate || null;
+    const climateSource = climate ? "Enriched Geographic Metadata (rawInfo.climate)" : "None";
+
+    console.log("=== INFOPANEL FIELD TRACING ===");
+    console.log("Description Source:", descSource);
+    console.log("Context Notes Source:", contextNotesSource);
+    console.log("Population Source:", populationSource);
+    console.log("Climate Source:", climateSource);
+    console.log("News Source:", rawInfo.news ? "rawInfo.news" : "None");
+    console.log("News Type:", Array.isArray(rawInfo.news) ? 'array' : typeof rawInfo.news);
+    console.log("News Count:", Array.isArray(rawInfo.news) ? rawInfo.news.length : (rawInfo.news ? 1 : 0));
+    console.log("News Renderable:", true);
+    console.log("===============================");
+
+    console.log("=== INFOPANEL BOUNDARY: After Normalization ===");
+    console.log("Name:", name);
+    console.log("Description:", desc);
+    console.log("Coordinates:", coordinates);
+    console.log("Normalized keys:", Object.keys({
+      ...rawInfo,
+      name,
+      description: desc,
+      contextNotes,
+      coordinates
+    }));
+    console.log("=================================================");
+
+    // 6. Safe Arrays
+    let news: any[] = [];
+    if (Array.isArray(rawInfo.news)) {
+      news = rawInfo.news;
+    } else if (rawInfo.news && typeof rawInfo.news === 'object') {
+      news = [rawInfo.news];
+    } else if (typeof rawInfo.news === 'string') {
+      news = [{ title: "Latest News", summary: rawInfo.news }];
+    }
+    
+    // Fallback normalizer for news items
+    news = news.map(n => ({
+       title: n.title || n.headline || "News Update",
+       summary: n.summary || n.description || "",
+       url: n.url || n.link || "#",
+       source: n.source || n.publisher || "News Source"
+    }));
+
+    const relatedEntities = (rawInfo.relatedEntities && rawInfo.relatedEntities.length > 0) ? rawInfo.relatedEntities : [];
+    
+    return {
+      ...rawInfo,
+      name,
+      type: wp.type || rawInfo.type || LocationType.POI,
+      entityType: wp.entityType || rawInfo.entityType,
+      description: desc,
+      population,
+      climate,
+      contextNotes,
+      significance,
+      coordinates: wp.coordinates || rawInfo.coordinates || { lat: 0, lng: 0 },
+      boundary: rawInfo.boundary,
+      news,
+      relatedEntities
+    };
+  }, [rawInfo]);
+  
+  const [activeTab, setActiveTab] = useState<'overview' | 'news' | 'entities'>('overview');
   const [isMoreNewsLoading, setIsMoreNewsLoading] = useState(false);
   const [wikiImage, setWikiImage] = useState<string | null>(null);
   const [expandedImage, setExpandedImage] = useState(false);
@@ -518,6 +616,232 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   // Removed Full Skeleton for Sidebar during initial load
 
   // If no info, don't render anything (Wait until data is resolved before showing sidebar)
+
+  const schema = ENTITY_SCHEMAS[info?.entityType || 'city'] || ENTITY_SCHEMAS['city'];
+
+  const SECTION_RENDERERS: Record<string, () => React.ReactNode> = {
+    overview: () => (
+      <div className="space-y-5">
+          {info.routeContext && (
+              <div className="mb-2">
+                   <h3 className={`text-sm font-bold uppercase tracking-widest mb-1 ${isRetro ? 'text-current' : isParchment ? 'text-[#8b5a2b]' : 'text-cyan-400'}`}>
+                      {info.routeContext.title}
+                  </h3>
+                  <p className={`leading-relaxed ${bodySize} font-medium ${theme.bodyText} mb-4 border-b ${isRetro ? 'border-current/30' : isParchment ? 'border-[#8b5a2b]/30' : 'border-white/10'} pb-4`}>
+                      {info.routeContext.text}
+                  </p>
+              </div>
+          )}
+          <div className="relative group/desc">
+            <p className={`leading-relaxed ${bodySize} font-medium ${theme.bodyText} pr-8`}>
+            {info.description || "Description unavailable."}
+            </p>
+            <div className="absolute top-0 right-0 opacity-0 group-hover/desc:opacity-100 transition-opacity">
+              <CopyButton text={info.description || ""} skin={skin} />
+            </div>
+          </div>
+      </div>
+    ),
+    historicalContext: () => null,
+    historicalPeriod: () => (
+      info.historicalPeriod ? (
+        <div className={`p-3 ${theme.card}`}>
+            <div className="flex items-center gap-2 mb-1 text-current opacity-80">
+                <Crown size={16} />
+                <span className={`${smallTextSize} font-bold uppercase`}>Historical Period</span>
+            </div>
+            <p className={`${isRetro ? 'text-base' : 'text-sm'} font-bold`}>{info.historicalPeriod}</p>
+        </div>
+      ) : null
+    ),
+    keyFigures: () => (
+      info.entities && info.entities.length > 0 ? (
+        <div className="relative group/facts">
+          <div className={`flex items-center justify-between mb-2 ${theme.icon}`}>
+              <div className="flex items-center gap-2">
+                <Users size={16} />
+                <span className={`${isRetro ? 'text-sm' : 'text-xs'} font-bold uppercase`}>Key Entities</span>
+              </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {info.entities.map((e: string, i: number) => (
+               <span key={i} className={`px-2 py-1 text-xs rounded-full border ${isRetro ? 'border-current text-current' : isParchment ? 'border-[#8b5a2b] bg-[#d2b48c] text-[#3e2723]' : 'border-cyan-500/30 bg-cyan-900/30 text-cyan-300'}`}>{e}</span>
+            ))}
+          </div>
+        </div>
+      ) : null
+    ),
+    importantEvents: () => (
+      info.contextNotes && info.contextNotes.length > 0 ? (
+        <div className="relative group/facts">
+          <div className={`flex items-center justify-between mb-2 ${theme.icon}`}>
+              <div className="flex items-center gap-2">
+                <Info size={16} />
+                <span className={`${isRetro ? 'text-sm' : 'text-xs'} font-bold uppercase`}>Context Notes</span>
+              </div>
+          </div>
+          <ul className="space-y-2">
+              {info.contextNotes.map((fact: any, idx: number) => (
+              <li key={idx} className={`flex gap-3 ${bodySize} ${theme.bodyText}`}>
+                  <span className={`block w-1.5 h-1.5 mt-2 flex-shrink-0 ${theme.listDot}`} />
+                  {fact}
+              </li>
+              ))}
+          </ul>
+        </div>
+      ) : null
+    ),
+    modernContext: () => (
+      (info.population || info.climate || wikiImage) ? (
+        <div className={`grid ${((info.population || wikiImage) && info.climate) ? 'grid-cols-2' : 'grid-cols-1'} gap-3`}>
+          {info.population ? (
+            <div className={`p-3 ${theme.card}`}>
+                <div className={`flex items-center justify-between mb-2`}>
+                  <div className={`flex items-center gap-2 ${theme.icon}`}>
+                      <Users size={16} />
+                      <span className={`${smallTextSize} font-bold uppercase`}>Population Context</span>
+                  </div>
+                </div>
+                {info.population.historical && (
+                  <div className="mb-2">
+                    <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Historical</span>
+                    <p className={`${isRetro ? 'text-base' : 'text-sm'} font-bold font-mono`}>{info.population.historical.formattedValue}</p>
+                    {info.population.historical.timeframe && info.population.historical.timeframe !== "Unknown" && (
+                      <p className="text-xs opacity-70 font-mono mt-0.5">{info.population.historical.timeframe}</p>
+                    )}
+                  </div>
+                )}
+                {info.population.current && (
+                  <div>
+                    <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Modern</span>
+                    <p className={`${isRetro ? 'text-base' : 'text-sm'} font-bold font-mono`}>{info.population.current.formattedValue}</p>
+                  </div>
+                )}
+            </div>
+          ) : wikiImage ? (
+            <div 
+              className={`p-0 overflow-hidden relative h-28 ${theme.card} group cursor-pointer`}
+              onClick={() => setExpandedImage(true)}
+            >
+               <img src={wikiImage} alt={info.name} className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-110 ${isRetro ? 'grayscale contrast-125' : ''}`} />
+               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-1.5 flex items-center gap-1">
+                  <ImageIcon size={12} className="text-white/80" />
+               </div>
+            </div>
+          ) : null}
+
+          {info.climate && (
+            <div className={`p-3 ${theme.card}`}>
+                <div className={`flex items-center justify-between mb-2`}>
+                  <div className={`flex items-center gap-2 ${theme.icon}`}>
+                      <Thermometer size={16} />
+                      <span className={`${smallTextSize} font-bold uppercase`}>Climate</span>
+                  </div>
+                </div>
+                <p className={`${isRetro ? 'text-base' : 'text-sm'} font-bold leading-tight`}>{info.climate.name}</p>
+                {info.climate.koppenCode && (
+                  <p className="text-xs opacity-70 mt-1 font-mono">Köppen: {info.climate.koppenCode}</p>
+                )}
+            </div>
+          )}
+        </div>
+      ) : null
+    ),
+    relatedEntities: () => {
+      if (!info.relatedEntities || info.relatedEntities.length === 0) {
+        return null;
+      }
+
+      // Group entities by type
+      const groups = info.relatedEntities.reduce((acc: any, entity: any) => {
+        const typeLabel = entity.type ? entity.type.charAt(0).toUpperCase() + entity.type.slice(1) + 's' : 'Other';
+        if (!acc[typeLabel]) acc[typeLabel] = [];
+        acc[typeLabel].push(entity);
+        return acc;
+      }, {});
+
+      return (
+        <div className="space-y-6">
+            <div className={`flex items-center gap-2 mb-2 ${theme.icon} border-b ${isRetro ? 'border-current/30' : isParchment ? 'border-[#8b5a2b]/30' : 'border-white/10'} pb-2`}>
+                <Crown size={20} />
+                <span className={`${isRetro ? 'text-base' : 'text-sm'} font-bold uppercase tracking-wider`}>Notable</span>
+            </div>
+            {Object.keys(groups).map((type: string) => (
+               <div key={type} className="space-y-3">
+                 <h4 className={`${isRetro ? 'text-sm' : 'text-xs'} font-bold uppercase opacity-80 ${theme.headerTitle}`}>{type}</h4>
+                 <div className="grid gap-2">
+                   {groups[type].map((item: any, idx: number) => (
+                       <div key={idx} className={`p-3 ${theme.card} flex items-center gap-3 relative group/notable`}>
+                           <span className={`block w-1.5 h-1.5 flex-shrink-0 ${theme.listDot}`} />
+                           <span className={`${bodySize} font-bold ${theme.headerTitle}`}>{item.name}</span>
+                           <div className="absolute top-1/2 -translate-y-1/2 right-2 opacity-0 group-hover/notable:opacity-100 transition-opacity">
+                              <CopyButton text={item.name} skin={skin} />
+                           </div>
+                       </div>
+                   ))}
+                 </div>
+               </div>
+            ))}
+        </div>
+      );
+    },
+    liveNews: () => (
+      <div className="space-y-4">
+        <div className={`flex items-center gap-2 mb-2 ${theme.icon}`}>
+            <Newspaper size={16} />
+            <span className={`${isRetro ? 'text-sm' : 'text-xs'} font-bold uppercase`}>Live News</span>
+        </div>
+        {isNewsFetching && !isMoreNewsLoading && info.news.length === 0 ? (
+           <div className="flex flex-col items-center justify-center py-8 opacity-50 animate-pulse">
+              <Loader2 size={24} className="animate-spin mb-2 text-current" />
+              <p className={smallTextSize}>Updating news...</p>
+           </div>
+        ) : info.news && info.news.length > 0 ? (
+           <>
+             {info.news.map((item: any, idx: number) => (
+                <div key={idx} className={`p-4 ${theme.card} flex flex-col gap-2 group/news`}>
+                   <div className="flex justify-between items-start gap-2">
+                     <span className={`text-[10px] uppercase tracking-wider opacity-70 ${theme.subtext}`}>{item.source}</span>
+                     <a href={item.url} target="_blank" rel="noopener noreferrer" className="opacity-0 group-hover/news:opacity-100 transition-opacity p-1 hover:bg-white/10 rounded">
+                        <ExternalLink size={14} className={theme.icon} />
+                     </a>
+                   </div>
+                   <a href={item.url} target="_blank" rel="noopener noreferrer" className={`${bodySize} font-bold leading-tight ${theme.headerTitle} hover:underline decoration-1 underline-offset-2`}>
+                     {item.title}
+                   </a>
+                   {item.summary && (
+                      <p className={`${subtextSize} ${theme.bodyText} opacity-90 leading-relaxed`}>
+                        {item.summary}
+                      </p>
+                   )}
+                </div>
+             ))}
+             <button 
+               onClick={handleLoadMore} 
+               disabled={isMoreNewsLoading}
+               className={`w-full py-3 mt-2 transition-colors ${theme.loadMoreBtn}`}
+             >
+               {isMoreNewsLoading ? "Scanning..." : "Load More News"}
+             </button>
+           </>
+        ) : (
+           <div className="text-center py-10 opacity-60">
+              <Newspaper size={32} className="mx-auto mb-2 opacity-50" />
+              {info.entityType === 'historical_waypoint' ? (
+                 <>
+                   <p className={theme.bodyText}>No current news available.</p>
+                   <p className={`${smallTextSize} mt-2`}>This waypoint represents a historical location and is not eligible for live news retrieval.</p>
+                 </>
+              ) : (
+                 <p className={theme.bodyText}>No recent transmissions found.</p>
+              )}
+           </div>
+        )}
+      </div>
+    )
+  };
+
+
   if (!info) return null;
 
   const showContentSkeleton = isLoading && (!info?.description || info.description === "");
@@ -623,194 +947,28 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             </div>
           )}
 
-          {/* Tabs */}
-          <div className={`flex ${isRetro ? 'border-b border-current opacity-60' : isParchment ? '' : 'border-b border-white/10'}`}>
-            <button onClick={() => setActiveTab('overview')} className={`flex-1 py-2 ${tabTextSize} font-bold uppercase transition-colors flex items-center justify-center gap-1 ${activeTab === 'overview' ? `${theme.tabActive} border-l-0` : theme.tabInactive}`}>
-              <Map size={tabIconSize} /> Overview
-            </button>
-            <button onClick={() => setActiveTab('notable')} className={`flex-1 py-2 ${tabTextSize} font-bold uppercase transition-colors flex items-center justify-center gap-1 ${activeTab === 'notable' ? theme.tabActive : theme.tabInactive}`}>
-              <Crown size={tabIconSize} /> Notable
-            </button>
-            <button onClick={() => setActiveTab('news')} className={`flex-1 py-2 ${tabTextSize} font-bold uppercase transition-colors flex items-center justify-center gap-1 ${activeTab === 'news' ? `${theme.tabActive} border-r-0` : theme.tabInactive}`}>
-              <Newspaper size={tabIconSize} /> News
-            </button>
-          </div>
-
+          
           {/* Scrollable Content */}
           <div className="p-5 overflow-y-auto custom-scrollbar flex-1 relative">
             {showContentSkeleton ? (
                <div className="space-y-6 animate-pulse mt-2">
-                 {/* Body lines */}
                  <div className="space-y-3">
                     <div className={`h-4 w-full ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
                     <div className={`h-4 w-[90%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
-                    <div className={`h-4 w-[85%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
-                    <div className={`h-4 w-[60%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
-                 </div>
-
-                 {/* Grid blocks */}
-                 <div className="grid grid-cols-2 gap-3">
-                    <div className={`h-24 ${isRetro ? 'bg-current opacity-20' : isParchment ? 'bg-[#8b5a2b]/10' : 'bg-white/5'} rounded-sm`}></div>
-                    <div className={`h-24 ${isRetro ? 'bg-current opacity-20' : isParchment ? 'bg-[#8b5a2b]/10' : 'bg-white/5'} rounded-sm`}></div>
-                    <div className={`h-24 ${isRetro ? 'bg-current opacity-20' : isParchment ? 'bg-[#8b5a2b]/10' : 'bg-white/5'} rounded-sm`}></div>
-                    <div className={`h-24 ${isRetro ? 'bg-current opacity-20' : isParchment ? 'bg-[#8b5a2b]/10' : 'bg-white/5'} rounded-sm`}></div>
                  </div>
                </div>
             ) : (
-                <>
-                {activeTab === 'overview' && (
-                <div className="space-y-5 animate-in fade-in duration-300">
-                    {info.routeContext && (
-                        <div className="mb-2">
-                             <h3 className={`text-sm font-bold uppercase tracking-widest mb-1 ${isRetro ? 'text-current' : isParchment ? 'text-[#8b5a2b]' : 'text-cyan-400'}`}>
-                                {info.routeContext.title}
-                            </h3>
-                            <p className={`leading-relaxed ${bodySize} font-medium ${theme.bodyText} mb-4 border-b ${isRetro ? 'border-current/30' : isParchment ? 'border-[#8b5a2b]/30' : 'border-white/10'} pb-4`}>
-                                {info.routeContext.text}
-                            </p>
-                        </div>
-                    )}
-
-                    <div className="relative group/desc">
-                      <p className={`leading-relaxed ${bodySize} font-medium ${theme.bodyText} pr-8`}>
-                      {info.description || "Description unavailable."}
-                      </p>
-                      <div className="absolute top-0 right-0 opacity-0 group-hover/desc:opacity-100 transition-opacity">
-                        <CopyButton text={info.description || ""} skin={skin} />
-                      </div>
-                    </div>
-
-                    {(isValidData(info.population) || isValidData(info.climate) || wikiImage) && (
-                      <div className={`grid ${((isValidData(info.population) || wikiImage) && isValidData(info.climate)) ? 'grid-cols-2' : 'grid-cols-1'} gap-3`}>
-                        {isValidData(info.population) ? (
-                          <div className={`p-3 ${theme.card}`}>
-                              <div className={`flex items-center justify-between mb-1`}>
-                                <div className={`flex items-center gap-2 ${theme.icon}`}>
-                                    <Users size={16} />
-                                    <span className={`${smallTextSize} font-bold uppercase`}>Population</span>
-                                </div>
-                                <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <CopyButton text={info.population || ""} skin={skin} />
-                                </div>
-                              </div>
-                              <p className={`${isRetro ? 'text-base' : 'text-sm'} font-bold font-mono`}>{info.population}</p>
-                          </div>
-                        ) : wikiImage ? (
-                          <div 
-                            className={`p-0 overflow-hidden relative h-28 ${theme.card} group cursor-pointer`}
-                            onClick={() => setExpandedImage(true)}
-                          >
-                             <img src={wikiImage} alt={info.name} className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-110 ${isRetro ? 'grayscale contrast-125' : ''}`} />
-                             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-1.5 flex items-center gap-1">
-                                <ImageIcon size={12} className="text-white/80" />
-                             </div>
-                             <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 p-1 rounded-full text-white">
-                                <ExternalLink size={12} />
-                             </div>
-                          </div>
-                        ) : null}
-
-                        {isValidData(info.climate) && (
-                          <div className={`p-3 ${theme.card}`}>
-                              <div className={`flex items-center justify-between mb-1`}>
-                                <div className={`flex items-center gap-2 ${theme.icon}`}>
-                                    <Thermometer size={16} />
-                                    <span className={`${smallTextSize} font-bold uppercase`}>Climate</span>
-                                </div>
-                                <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <CopyButton text={info.climate || ""} skin={skin} />
-                                </div>
-                              </div>
-                              <p className={`${isRetro ? 'text-base' : 'text-sm'} font-bold`}>{info.climate}</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {info.funFacts && info.funFacts.length > 0 && (
-                      <div className="relative group/facts">
-                      <div className={`flex items-center justify-between mb-2 ${theme.icon}`}>
-                          <div className="flex items-center gap-2">
-                            <Info size={16} />
-                            <span className={`${isRetro ? 'text-sm' : 'text-xs'} font-bold uppercase`}>Quick Facts</span>
-                          </div>
-                          <div className="opacity-0 group-hover/facts:opacity-100 transition-opacity">
-                            <CopyButton text={info.funFacts.join('\n')} skin={skin} />
-                          </div>
-                      </div>
-                      <ul className="space-y-2">
-                          {info.funFacts.map((fact, idx) => (
-                          <li key={idx} className={`flex gap-3 ${bodySize} ${theme.bodyText}`}>
-                              <span className={`block w-1.5 h-1.5 mt-2 flex-shrink-0 ${theme.listDot}`} />
-                              {fact}
-                          </li>
-                          ))}
-                      </ul>
-                      </div>
-                    )}
+                <div className="space-y-8 animate-in fade-in duration-300">
+                    {schema.ui.sections.map((section: any) => {
+                        const renderer = SECTION_RENDERERS[section.id];
+                        if (renderer) return <React.Fragment key={section.id}>{renderer()}</React.Fragment>;
+                        return null;
+                    })}
                 </div>
-                )}
-
-                {activeTab === 'news' && (
-                  <div className="space-y-4 animate-in fade-in duration-300">
-                    {isNewsFetching && !isMoreNewsLoading && info.news.length === 0 ? (
-                       <div className="flex flex-col items-center justify-center py-8 opacity-50 animate-pulse">
-                          <Loader2 size={24} className="animate-spin mb-2 text-current" />
-                          <p className={smallTextSize}>Updating news...</p>
-                       </div>
-                    ) : info.news && info.news.length > 0 ? (
-                       <>
-                         {info.news.map((item, idx) => (
-                            <div key={idx} className={`p-4 ${theme.card} flex flex-col gap-2 group/news`}>
-                               <div className="flex justify-between items-start gap-2">
-                                 <span className={`text-[10px] uppercase tracking-wider opacity-70 ${theme.subtext}`}>{item.source}</span>
-                                 <a href={item.url} target="_blank" rel="noopener noreferrer" className="opacity-0 group-hover/news:opacity-100 transition-opacity p-1 hover:bg-white/10 rounded">
-                                    <ExternalLink size={14} className={theme.icon} />
-                                 </a>
-                               </div>
-                               <a href={item.url} target="_blank" rel="noopener noreferrer" className={`${bodySize} font-bold leading-tight ${theme.headerTitle} hover:underline decoration-1 underline-offset-2`}>
-                                 {item.headline}
-                               </a>
-                               {item.summary && (
-                                  <p className={`${subtextSize} ${theme.bodyText} opacity-90 leading-relaxed`}>
-                                    {item.summary}
-                                  </p>
-                               )}
-                            </div>
-                         ))}
-                         <button 
-                           onClick={handleLoadMore} 
-                           disabled={isMoreNewsLoading}
-                           className={`w-full py-3 mt-2 transition-colors ${theme.loadMoreBtn}`}
-                         >
-                           {isMoreNewsLoading ? "Scanning..." : "Load More News"}
-                         </button>
-                       </>
-                    ) : (
-                       <div className="text-center py-10 opacity-60">
-                          <Newspaper size={32} className="mx-auto mb-2 opacity-50" />
-                          <p className={theme.bodyText}>No recent transmissions found.</p>
-                       </div>
-                    )}
-                  </div>
-                )}
-
-                {activeTab === 'notable' && (
-                <div className="space-y-4 animate-in fade-in duration-300">
-                    {info.notable && info.notable.length > 0 ? (
-                    info.notable.filter(item => item && item.name).map((item, idx) => (
-                        <NotablePersonCard key={idx} item={item} theme={theme} skin={skin} bodySize={bodySize} subtextSize={subtextSize} />
-                    ))
-                    ) : (
-                    <p className={`${bodySize} italic ${theme.bodyText}`}>No notable figures found for {info.name}.</p>
-                    )}
-                </div>
-                )}
-                </>
             )}
           </div>
         </div>
-
+        
         {/* My Notes Section */}
         {hasNotes ? (
           <div className={`pointer-events-auto shrink-0 transition-all duration-300 ${theme.container} ${!isNotesExpanded ? 'hover:brightness-110 cursor-pointer' : ''}`}>
