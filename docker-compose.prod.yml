@@ -1,0 +1,12 @@
+services:
+  terraexplorer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GEMINI_API_KEY: ${GEMINI_API_KEY}
+    image: terraexplorer-ai:latest
+    container_name: terraexplorer-ai-container
+    ports:
+      - "3004:3004"
+    restart: always
