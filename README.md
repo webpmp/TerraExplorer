@@ -56,3 +56,11 @@ Terra Explorer is an interactive 3D globe application that lets users freely nav
 2. **Interact**: Click on any landmass to identify it, or click on specific markers (dots) to see details.
 3. **Search**: Use the search bar to find cities, landmarks, or historical events.
 4. **Customize**: Toggle between Modern and Retro skins using the buttons in the top right.
+
+## AI Development Context
+
+Before making architectural changes, review:
+
+`docs/AI_CONTEXT.md`
+
+This file contains project architecture, conventions, data models, debugging history, and design decisions.
