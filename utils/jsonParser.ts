@@ -137,6 +137,27 @@ export const repairJson = (text: string): { repaired: string, repairs: string[] 
     let repaired = text;
     const repairs: string[] = [];
 
+    // 0. Fix Python literals
+    const pythonLiteralRegex = /\b(None|True|False)\b/g;
+    if (pythonLiteralRegex.test(repaired)) {
+        repaired = repaired.replace(pythonLiteralRegex, (match) => {
+            if (match === 'None') return 'null';
+            if (match === 'True') return 'true';
+            if (match === 'False') return 'false';
+            return match;
+        });
+        repairs.push("Replaced Python literals (None, True, False) with JSON equivalents");
+    }
+
+    // 1. Fix numeric separators (e.g., 1_670_000 -> 1670000)
+    const numericSeparatorRegex = /([:\s\[,])([0-9]+(?:_[0-9]+)+)(?=[\s,\}\]])/g;
+    if (numericSeparatorRegex.test(repaired)) {
+        repaired = repaired.replace(numericSeparatorRegex, (match, prefix, num) => {
+            return prefix + num.replace(/_/g, '');
+        });
+        repairs.push("Removed numeric separators");
+    }
+
     // 2. Normalize quotes
     if (repaired.includes('“') || repaired.includes('”') || repaired.includes("‘") || repaired.includes("’")) {
         repaired = repaired.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
@@ -203,6 +224,17 @@ export const repairJson = (text: string): { repaired: string, repairs: string[] 
     return { repaired, repairs };
 };
 
+function repairTruncatedJson(input: string): string {
+  let repaired = input.trim();
+  const openBraces = (repaired.match(/{/g) || []).length;
+  const closeBraces = (repaired.match(/}/g) || []).length;
+  const openBrackets = (repaired.match(/\[/g) || []).length;
+  const closeBrackets = (repaired.match(/\]/g) || []).length;
+  repaired += "]".repeat(Math.max(0, openBrackets - closeBrackets));
+  repaired += "}".repeat(Math.max(0, openBraces - closeBraces));
+  return repaired;
+}
+
 export const parseAndExtract = (text: string): ParseResult => {
     if (!text) {
         ParserMetrics.no_json++;
@@ -210,12 +242,21 @@ export const parseAndExtract = (text: string): ParseResult => {
     }
 
     const sanitized = sanitize(text);
-    const { extracted, reason, repairs: extractRepairs } = extract(sanitized);
+    let { extracted, reason, repairs: extractRepairs } = extract(sanitized);
     
     if (!extracted) {
-        if (reason === "NO_JSON_FOUND") ParserMetrics.no_json++;
-        console.log(`[JSON Parser Trace] RAW JSON ↓ EXTRACT FAILED ↓ STRICT RETRY TRIGGERED`);
-        return { success: false, reason: reason! };
+        // Attempt basic truncation repair before giving up
+        const basicRepaired = repairTruncatedJson(sanitized);
+        const retryExtract = extract(basicRepaired);
+        if (retryExtract.extracted) {
+            extracted = retryExtract.extracted;
+            extractRepairs = [...extractRepairs, ...retryExtract.repairs, "Repaired truncation before extraction"];
+            reason = null;
+        } else {
+            if (reason === "NO_JSON_FOUND") ParserMetrics.no_json++;
+            console.log(`[JSON Parser Trace] RAW JSON ↓ EXTRACT FAILED ↓ STRICT RETRY TRIGGERED`);
+            return { success: false, reason: reason! };
+        }
     }
     
     try {
@@ -234,7 +275,9 @@ export const parseAndExtract = (text: string): ParseResult => {
         };
     } catch (e: any) {
         // Deterministic repair
-        const { repaired, repairs: syntaxRepairs } = repairJson(extracted);
+        let textToRepair = extracted || text;
+        textToRepair = repairTruncatedJson(textToRepair);
+        const { repaired, repairs: syntaxRepairs } = repairJson(textToRepair);
         try {
             const value = JSON.parse(repaired);
             ParserMetrics.recovered++;

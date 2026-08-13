@@ -23,15 +23,7 @@ interface EarthProps {
   scanningArea?: GeoCoordinates | null;
 }
 
-// Helper to convert Lat/Lng to 3D Cartesian coordinates
-const latLngToVector3 = (lat: number, lng: number, radius: number = 1) => {
-  const phi = (90 - lat) * (Math.PI / 180);
-  const theta = (lng + 180) * (Math.PI / 180);
-  const x = -(radius * Math.sin(phi) * Math.cos(theta));
-  const z = (radius * Math.sin(phi) * Math.sin(theta));
-  const y = (radius * Math.cos(phi));
-  return new THREE.Vector3(x, y, z);
-};
+import { latLngToVector3, vector3ToLatLng } from '../utils/globeCoordinates';
 
 // Custom Shader for Retro Effect
 const RetroShader = {
@@ -695,22 +687,22 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
         group.forEach(item => finalPosMap.set(item.id, item.position));
     });
 
-    // Telemetry logger for scan result markers
+    // Telemetry logger removed to avoid React StrictMode log spam
+
+    // 4. Final Processing & Deduplication
+    const uniqueMarkers = new Map();
     itemsWithPos.forEach(item => {
-        if (item.type === 'marker') {
-            console.log(`[Scan Result Marker] ID: ${item.id}, Input Lat/Lng: ${item.lat}, ${item.lng}, Final Projected Position: [${item.position.x.toFixed(4)}, ${item.position.y.toFixed(4)}, ${item.position.z.toFixed(4)}]`);
+        if (!uniqueMarkers.has(item.id)) {
+            uniqueMarkers.set(item.id, {
+                ...item,
+                visualSize: item.baseSize,
+                // Reduced hitbox to allow clicking individual items in tight clusters
+                hitSize: Math.max(item.baseSize, 0.015)
+            });
         }
     });
 
-    // 4. Final Processing (Hitbox Size)
-    const result = itemsWithPos.map(item => ({
-        ...item,
-        visualSize: item.baseSize,
-        // Reduced hitbox to allow clicking individual items in tight clusters
-        hitSize: Math.max(item.baseSize, 0.015)
-    }));
-
-    return { processedMarkers: result, adjustedPositions: finalPosMap };
+    return { processedMarkers: Array.from(uniqueMarkers.values()), adjustedPositions: finalPosMap };
 
   }, [markers, favorites, showFavorites, markerColor, favoriteColor, outlineColor, routeWaypoints, waypointColor]);
 
@@ -942,10 +934,32 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     // Prevent click if user was dragging (delta is distance in pixels)
     if (e.delta > 5) return;
 
-    const uv = e.uv;
-    if (!uv) return;
-    const lat = (uv.y - 0.5) * 180;
-    const lng = (uv.x - 0.5) * 360;
+    if (!innerMeshRef.current || !e.point) return;
+
+    // Convert world intersection point to local coordinates of the Earth mesh
+    const localPoint = innerMeshRef.current.worldToLocal(e.point.clone());
+    
+    // Normalize and convert using shared spherical inverse
+    const { lat, lng } = vector3ToLatLng(localPoint);
+
+    console.log("===== GLOBE CLICK COORDINATE =====");
+    console.log("World point:");
+    console.log(`x: ${e.point.x}`);
+    console.log(`y: ${e.point.y}`);
+    console.log(`z: ${e.point.z}`);
+    console.log("\nLocal point:");
+    console.log(`x: ${localPoint.x}`);
+    console.log(`y: ${localPoint.y}`);
+    console.log(`z: ${localPoint.z}`);
+    console.log(`\nResolved lat: ${lat}`);
+    console.log(`lng: ${lng}`);
+    console.log("===============================");
+
+    console.log("===== COORDINATE PIPELINE =====");
+    console.log(`Stage: Globe intersection`);
+    console.log(`coordinate: ${lat}, ${lng}`);
+    console.log("===============================");
+
     props.onLocationClick(lat, lng, e.point);
   };
 
@@ -1018,13 +1032,15 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
       </mesh>
 
       {/* Render All Markers */}
-      {processedMarkers.map((marker) => (
+      {processedMarkers.map((marker, index) => {
+        const markerKey = marker.id ?? `${marker.data?.name}-${marker.lat}-${marker.lng}-${index}`;
+        return (
         <UniversalMarker
-          key={marker.id}
+          key={markerKey}
           position={marker.position}
-          color={marker.color}
+          color={marker.isAnchor ? (isModern ? '#3b82f6' : '#ffffff') : marker.color}
           outlineColor={outlineColor}
-          size={marker.visualSize}
+          size={marker.isAnchor ? 0.022 : marker.visualSize}
           hitSize={marker.hitSize}
           isRetro={!isModern}
           isSelected={selectedMarkerId === marker.id}
@@ -1037,7 +1053,8 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
           markerId={marker.id}
           scanOffsetsRef={scanOffsetsRef}
         />
-      ))}
+        );
+      })}
 
       {/* Clouds Sphere - Hide for Green */}
       {!isGreen && (

@@ -22,6 +22,7 @@ export const fetchGeminiGroundedNews = async (locationName: string): Promise<New
     4. **If the headline is in a foreign language, TRANSLATE it into English.**
     5. 'summary': A short, engaging 1-2 sentence summary of what the article is about.
     6. Output ONLY the JSON array.
+    7. CRITICAL: Do NOT generate fictional articles, placeholder sources, or invented event names. Never use "example.com" or "Local News Hub". If real news is unavailable, return an empty array [].
     
     Format:
     [
@@ -54,18 +55,53 @@ export const fetchGeminiGroundedNews = async (locationName: string): Promise<New
       items = data.news;
     }
 
-    return items.map((n: any) => ({
+    const receivedCount = items.length;
+    let rejectedCount = 0;
+
+    const filteredNews = items.map((n: any) => ({
       title: n.title || n.headline || "News Update",
       summary: n.summary || "",
       source: n.source || "Unknown",
       url: n.url || ""
-    })).filter(n => {
-       if (!n.url) return false;
-       if (n.url.length < 10) return false;
-       if (n.url.includes('...')) return false; 
-       if (!n.url.startsWith('http')) return false;
+    })).filter((n: any) => {
+       if (!n.url) { rejectedCount++; return false; }
+       if (n.url.length < 10) { rejectedCount++; return false; }
+       if (n.url.includes('...')) { rejectedCount++; return false; } 
+       if (!n.url.startsWith('http')) { rejectedCount++; return false; }
+       
+       // Strict production guards against fake/placeholder content
+       const forbiddenStrings = [
+         'example.com', 'local news hub', 'local news', 'placeholder', 
+         'localhost', 'sample', 'fictional', 'city council press release', 
+         'economic growth initiative'
+       ];
+       const urlLower = n.url.toLowerCase();
+       const sourceLower = n.source.toLowerCase();
+       const titleLower = n.title.toLowerCase();
+       const summaryLower = n.summary.toLowerCase();
+       
+       if (forbiddenStrings.some(f => urlLower.includes(f) || sourceLower.includes(f) || titleLower.includes(f) || summaryLower.includes(f))) {
+           rejectedCount++;
+           return false;
+       }
+       
+       // Reject generic fake event names
+       if (titleLower.includes("new community center opens") || titleLower.includes("seaside festival")) {
+           rejectedCount++;
+           return false;
+       }
+       
        return true;
     });
+
+    console.log(JSON.stringify({
+      stage: "news-filter",
+      received: receivedCount,
+      rejected: rejectedCount,
+      returned: filteredNews.length
+    }));
+
+    return filteredNews;
 
   } catch (error: any) {
     const isQuota = error?.message?.includes('429') || error?.message?.includes('Quota') || (error?.error && error.error.code === 429);

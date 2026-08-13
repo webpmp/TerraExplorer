@@ -7,11 +7,14 @@ import { ChevronDown, Loader2 } from 'lucide-react';
 
 import Earth from './components/Earth';
 import InfoPanel from './components/InfoPanel';
+import MapLabel from './components/MapLabel';
 import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import SettingsPanel from './components/SettingsPanel';
 import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint, GeoCoordinates, UserSettings, AIProvider, NewsProvider } from './types';
-import { getInfoFromCoordinates, getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity } from './services/geminiService';
+import { getInfoFromCoordinates, getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, EnrichmentMetrics, cancelFeatureInfoRequests } from './services/geminiService';
+import { getEstimatedClimate } from './services/geographic/climateEstimator';
+import { enrichLocationInfo, mergeRichestFields } from './services/locationService';
 import { generateStory, playAudioContext } from './services/ttsService';
 import { logWaypointSnapshot } from './utils/pipelineDebug';
 import { fetchLiveNews } from './services/newsService';
@@ -223,6 +226,9 @@ const App: React.FC = () => {
   const [scanningArea, setScanningArea] = useState<GeoCoordinates | null>(null);
   const [isScanningArea, setIsScanningArea] = useState(false);
   const [scanningStatusText, setScanningStatusText] = useState<string | null>(null);
+  
+  const activeMarkerRequestRef = useRef<number>(0);
+  const processingMarkerRef = useRef<string | null>(null);
 
   useEffect(() => {
     const handleResize = () => {
@@ -269,7 +275,9 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('terraExplorerSettings');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (parsed.newsProvider === 'gemini') parsed.newsProvider = 'nyt';
+        return parsed;
       } catch (e) {
         // Ignore
       }
@@ -278,7 +286,7 @@ const App: React.FC = () => {
       aiProvider: 'gemini',
       lmStudioUrl: 'http://localhost:1234/v1',
       lmStudioModel: 'local-model',
-      newsProvider: 'gemini',
+      newsProvider: 'nyt',
       newsApiKey: '',
       nytApiKey: '',
       newsDataApiKey: ''
@@ -928,9 +936,19 @@ const App: React.FC = () => {
                      console.log(`description: ${desc}`);
                      console.log(`Metadata Mode: ${enrichedData.metadataMode || 'modern_place'}`);
 
+                     console.log("[FINAL DISCOVERY PAYLOAD]", JSON.stringify({
+                         name: wp.name,
+                         description: desc,
+                         notable: enrichedData.notable,
+                         entityType: enrichedData.entityType,
+                         provenance: enrichedData.provenance,
+                         discoverySignals: enrichedData.discoverySignals || wp.discoverySignals
+                     }, null, 2));
+
                      let nextState = {
                          ...prev,
                          ...enrichedData, // Enrichment fills in the blanks
+                         news: (enrichedData.news && enrichedData.news.length > 0) ? enrichedData.news : (prev.news || []),
                          name: wp.name, // Protected
                          coordinates: { lat: wp.lat, lng: wp.lng }, // Protected
                          description: desc, // Protected
@@ -963,84 +981,211 @@ const App: React.FC = () => {
 
 
   }, [isZoomLocked, lockedZoomDistance, reconcileCameraState]);
-  const handleMarkerClick = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint, point: THREE.Vector3) => {
-    setInteractionState('PIN_SELECTED');
-    setSearchError(null);
-    setAutoRotate(false);
-    setSelectedMarkerId(marker.id);
-    setIsFocused(true);
-    
-    // Check if this is a Route Favorite
-    const fav = marker as FavoriteLocation;
-    if (fav.type === 'route' && fav.waypoints) {
-        // Load the saved route
-        setRouteWaypoints(fav.waypoints);
-        setActiveRouteId(fav.id); // Mark as active
-        cameraStateRef.current.activeRoute = fav.id; // Synchronous update for reconcileCameraState
-        setCurrentWaypointIndex(0);
-        if (fav.waypoints.length > 0) {
-            loadWaypointData(fav.waypoints[0]);
-        }
-        return;
-    }
-
-    const isRoutePoint = 'context' in marker || 'routeTitle' in marker;
-
-    if (isRoutePoint) {
-        const wp = marker as Waypoint;
-        // Even if we don't find it in routeWaypoints, we should still load it!
-        const idx = routeWaypoints.findIndex(w => w.id === wp.id);
-        if (idx !== -1) {
-            setCurrentWaypointIndex(idx);
-        }
-        loadWaypointData(wp);
-        return;
-    } else {
-        // If clicking a normal marker, only clear route if it wasn't a "checked" route
-        if (!activeRouteId) {
-            setRouteWaypoints([]);
-            setCurrentWaypointIndex(-1);
-        } else {
-              setCurrentWaypointIndex(-1);
-        }
-    }
-    
-    setLocationInfo({
-        name: marker.name,
-        type: LocationType.POI, 
-        description: "",
-        population: null,
-        climate: null,
-        contextNotes: [],
-        coordinates: { lat: marker.lat, lng: marker.lng },
-        news: [],
-        relatedEntities: []
-    } as any);
-
-    setIsLoading(true);
-    setIsNewsFetching(false);
-
-    if (cameraControlsRef.current) {
-        const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.5;
-        
-        cameraStateRef.current.routeSuggestedDistance = targetDist;
-        cameraStateRef.current.targetRotation = { lat: marker.lat, lng: marker.lng };
-        
-        requestAnimationFrame(() => {
-           reconcileCameraState();
-        });
-    }
-
-    const data = await getInfoFromFeature(marker.name, marker.lat, marker.lng);
-    
-    console.log(`[Click Debug] featureId: ${marker.id}, label text: ${marker.name}, resolved entity name: ${data?.name}`);
-    
-    setLocationInfo(data);
-    setIsLoading(false);
-
-
-  }, [routeWaypoints, loadWaypointData, activeRouteId, isZoomLocked, lockedZoomDistance, reconcileCameraState]);  
   
+  const selectEntity = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint) => {
+    const targetKey = marker.id || marker.name;
+    const now = Date.now();
+    
+    if (processingMarkerRef.current === targetKey) {
+        return;
+    }
+    
+    processingMarkerRef.current = targetKey;
+
+    try {
+        setInteractionState('PIN_SELECTED');
+        setSearchError(null);
+        setAutoRotate(false);
+        setSelectedMarkerId(marker.id);
+        setIsFocused(true);
+        
+        // Check if this is a Route Favorite
+        const fav = marker as FavoriteLocation;
+        if (fav.type === 'route' && fav.waypoints) {
+            // Load the saved route
+            setRouteWaypoints(fav.waypoints);
+            setActiveRouteId(fav.id);
+            cameraStateRef.current.activeRoute = fav.id;
+            setCurrentWaypointIndex(0);
+            if (fav.waypoints.length > 0) {
+                loadWaypointData(fav.waypoints[0]);
+            }
+            return;
+        }
+
+        const isRoutePoint = 'context' in marker || 'routeTitle' in marker;
+
+        if (isRoutePoint) {
+            const wp = marker as Waypoint;
+            const idx = routeWaypoints.findIndex(w => w.id === wp.id);
+            if (idx !== -1) {
+                setCurrentWaypointIndex(idx);
+            }
+            loadWaypointData(wp);
+            return;
+        } else {
+            if (!activeRouteId) {
+                setRouteWaypoints([]);
+                setCurrentWaypointIndex(-1);
+            } else {
+                  setCurrentWaypointIndex(-1);
+            }
+        }
+        
+        const enrichmentRequestId = ++activeMarkerRequestRef.current;
+
+        const identity = {
+            id: marker.id,
+            name: marker.name,
+            entityType: marker.type || "generic",
+            type: marker.type,
+            coordinates: { lat: marker.lat, lng: marker.lng }
+        };
+
+        const basePayload = {
+            ...identity,
+            description: "",
+            population: null,
+            climate: getEstimatedClimate(marker.lat, marker.lng, "", ""),
+            contextNotes: [],
+            news: [],
+            relatedEntities: [],
+            sectionState: { description: "loading", news: "loading" }
+        } as any;
+
+        setLocationInfo(basePayload);
+        setIsLoading(true);
+        setIsNewsFetching(false);
+
+        if (cameraControlsRef.current) {
+            const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.5;
+            
+            cameraStateRef.current.routeSuggestedDistance = targetDist;
+            cameraStateRef.current.targetRotation = { lat: marker.lat, lng: marker.lng };
+            
+            requestAnimationFrame(() => {
+               reconcileCameraState();
+            });
+        }
+
+        // Asynchronous enrichment logic without awaiting it to block UI flow
+        // Protected fields that must never be overwritten with undefined
+        const IMMUTABLE_ENRICHMENT_FIELDS = ["name", "entityType", "coordinates", "climate"];
+        const mergeProtected = (prev: any, next: any) => {
+            const merged = { ...prev, ...next };
+            for (const field of IMMUTABLE_ENRICHMENT_FIELDS) {
+                if (prev[field] !== undefined) {
+                    merged[field] = prev[field] ?? next[field];
+                }
+            }
+            return merged;
+        };
+
+        // Stage 3: Description & Notable
+        (async () => {
+            try {
+                const data = await getInfoFromFeature(marker);
+                
+                if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
+                
+                if (data) {
+                    console.log(`[ENRICHMENT FLOW TRACE]\n{\n stage: "Before App.tsx state update",\n description: "${(data.description || "").substring(0,20)}",\n notable: ${data.notable?.length || 0},\n contextNotes: ${data.contextNotes?.length || 0}\n}`);
+                    setLocationInfo((prev: any) => {
+                        if (!prev) return data;
+                        return mergeProtected(prev, {
+                            description: data.description || prev.description,
+                            notable: data.notable || prev.notable,
+                            contextNotes: data.contextNotes || prev.contextNotes,
+                            relatedEntities: data.relatedEntities || prev.relatedEntities,
+                            imageSearchTerm: data.imageSearchTerm || prev.imageSearchTerm,
+                            sectionState: { ...prev.sectionState, description: "complete" }
+                        });
+                    });
+                } else {
+                    setLocationInfo((prev: any) => {
+                        if (!prev) return prev;
+                        return {
+                            ...prev,
+                            description: "Additional information unavailable.",
+                            sectionState: { ...prev.sectionState, description: "error" }
+                        };
+                    });
+                }
+            } catch (err) {
+                console.error(`Background enrichment failed for ${marker.name}:`, err);
+                if (enrichmentRequestId === activeMarkerRequestRef.current) {
+                    setLocationInfo((prev: any) => {
+                        if (!prev) return prev;
+                        return {
+                            ...prev,
+                            description: "Additional information unavailable.",
+                            sectionState: { ...prev.sectionState, description: "error" }
+                        };
+                    });
+                }
+            } finally {
+                if (enrichmentRequestId === activeMarkerRequestRef.current) {
+                    setIsLoading(false);
+                }
+            }
+        })();
+
+        // Stage 4: News
+        (async () => {
+            try {
+                // Wait for a short delay so news doesn't block the UI thread during the description fetch
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
+                setIsNewsFetching(true);
+                
+                const dataWithNews = await enrichLocationInfo(basePayload);
+                
+                if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
+                
+                if (dataWithNews && dataWithNews.news) {
+                    setLocationInfo((prev: any) => {
+                        if (!prev) return prev;
+                        return mergeProtected(prev, {
+                            news: dataWithNews.news,
+                            newsError: dataWithNews.newsError,
+                            sectionState: { ...prev.sectionState, news: "complete" }
+                        });
+                    });
+                } else {
+                    setLocationInfo((prev: any) => {
+                        if (!prev) return prev;
+                        return {
+                            ...prev,
+                            sectionState: { ...prev.sectionState, news: "error" }
+                        };
+                    });
+                }
+            } catch (err) {
+                 if (enrichmentRequestId === activeMarkerRequestRef.current) {
+                    setLocationInfo((prev: any) => {
+                        if (!prev) return prev;
+                        return {
+                            ...prev,
+                            sectionState: { ...prev.sectionState, news: "error" }
+                        };
+                    });
+                }
+            } finally {
+                if (enrichmentRequestId === activeMarkerRequestRef.current) {
+                    setIsNewsFetching(false);
+                }
+            }
+        })();
+    } finally {
+        processingMarkerRef.current = null;
+    }
+  }, [isZoomLocked, lockedZoomDistance, reconcileCameraState, loadWaypointData, activeRouteId, routeWaypoints]);
+
+  const handleMarkerClick = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint, point?: THREE.Vector3) => {
+      selectEntity(marker);
+  }, [selectEntity]);
+
   const setScanStatus = useCallback((text: string | null) => {
      setScanningStatusText(text);
      scanStatusRef.current = text;
@@ -1085,7 +1230,7 @@ const App: React.FC = () => {
      }
   }, [activeRouteId, isZoomLocked, lockedZoomDistance, reconcileCameraState, setScanStatus]);
 
-  const resolveScan = useCallback(async (result: { type: "results", data: MapMarker[] } | { type: "empty", message: string }) => {
+  const resolveScan = useCallback(async (result: { type: "results", data: MapMarker[] } | { type: "empty", status: "NO_RESULTS" | "PROVIDER_FAILURE", coords: { lat: number, lng: number }, diagnostics: any, environment?: string }) => {
      const currentScanId = activeScanIdRef.current;
      if (scanResolvedRef.current) return;
 
@@ -1099,10 +1244,33 @@ const App: React.FC = () => {
      console.log("SCAN RESOLVED");
 
      if (result.type === "results") {
+        console.log(JSON.stringify({
+            stage: "marker-mapping",
+            received: result.data.length,
+            mapped: result.data.length, // No additional filtering here
+            returned: result.data.length
+        }));
         setScanStatus("Scan complete");
+        console.log("[DEBUG] setMarkers called with length:", result.data.length); 
         setMarkers(result.data);
+        
+        if (result.data.length === 1) {
+            selectEntity(result.data[0]);
+        }
      } else {
-        setScanStatus(result.message);
+        console.log(`[SCAN EMPTY RESULT]\nStatus: ${result.status}\nCoordinates: ${result.coords.lat}, ${result.coords.lng}\nEnvironment: ${result.diagnostics?.environment || 'unknown'}\nCandidates Received: ${result.diagnostics?.candidatesReceived || 0}\nCandidates Rejected: ${result.diagnostics?.rejectedByDistance || 0}\nFinal Candidate Count: 0\nUser Notification: true`);
+        setScanStatus(null);
+        setMarkers([]);
+        setLocationInfo(null);
+        setSelectedMarkerId(null);
+        
+        if (result.status === 'PROVIDER_FAILURE') {
+            setSearchError("Unable to search this location right now.");
+        } else {
+            setSearchError("No locations found near this point.");
+        }
+        
+        // We let the interactionState revert to GLOBE_IDLE naturally at the end of resolveScan.
      }
 
      // Keep scan rings briefly, then fade out
@@ -1119,7 +1287,7 @@ const App: React.FC = () => {
      if (result.type === "results") {
         setInteractionState('PINS_RENDERED');
      }
-  }, [setScanStatus]);
+  }, [setScanStatus, selectEntity]);
 
   const failScan = useCallback(async (error: string) => {
      const currentScanId = activeScanIdRef.current;
@@ -1195,7 +1363,9 @@ const App: React.FC = () => {
          // 2. Parallel API Fetch
          try {
             console.log("scan_data_requested");
-            let result = await getNearbyPlaces(lat, lng, 25);
+            let result = await getNearbyPlaces(lat, lng, 100);
+            console.log("[App] Raw getNearbyPlaces result", result);
+            let places = result.places || [];
 
             if (currentScanId !== activeScanIdRef.current) return;
 
@@ -1208,26 +1378,17 @@ const App: React.FC = () => {
             await new Promise(resolve => setTimeout(resolve, 800));
             if (currentScanId !== activeScanIdRef.current) return;
 
-            // Fallback enrichment flow: if raw results are empty, fetch 100km radius places
-            if (!result || result.length === 0) {
-               setScanStatus("Finalizing results");
-               result = await getNearbyPlaces(lat, lng, 100);
-               if (currentScanId !== activeScanIdRef.current) return;
-
-               await new Promise(resolve => setTimeout(resolve, 800));
-               if (currentScanId !== activeScanIdRef.current) return;
-            } else {
-               setScanStatus("Finalizing results");
-               await new Promise(resolve => setTimeout(resolve, 500));
-               if (currentScanId !== activeScanIdRef.current) return;
-            }
+            setScanStatus("Finalizing results");
+            await new Promise(resolve => setTimeout(resolve, 500));
+            if (currentScanId !== activeScanIdRef.current) return;
 
             // Pipeline fully complete - trigger completion gate
             scanFullyProcessedRef.current = true;
 
-            if (result && result.length > 0) {
+            if (result.status === "SUCCESS") {
                console.log("scan_results_received");
-               const finalMarkers = result.map(m => ({
+               const finalMarkers = places.map((m: any) => ({
+                  ...m,
                   id: m.id,
                   name: m.name,
                   lat: m.lat,
@@ -1237,8 +1398,12 @@ const App: React.FC = () => {
                await resolveScan({ type: "results", data: finalMarkers });
             } else {
                 console.log("scan_results_empty");
-                const emptyMsg = "No information found in this area";
-                await resolveScan({ type: "empty", message: emptyMsg });
+                await resolveScan({ 
+                  type: "empty", 
+                  status: result.status, 
+                  coords: { lat, lng }, 
+                  diagnostics: result.diagnostics
+                });
              }
 
          } catch (err: any) {
@@ -1326,24 +1491,24 @@ const App: React.FC = () => {
       return;
     }
 
-    const hasValidCoords = pipelineResult.isValid && pipelineResult.finalData && !pipelineResult.error;
+    const hasValidCoords = pipelineResult.isValid && (pipelineResult as any).finalData && !pipelineResult.error;
 
     if (hasValidCoords) {
-      const { lat, lng } = pipelineResult.finalData!.coordinates;
+      const { lat, lng } = (pipelineResult as any).finalData!.coordinates;
       
       const searchMarker: MapMarker = {
         id: `search-${Date.now()}`,
-        name: pipelineResult.finalData!.name,
+        name: (pipelineResult as any).finalData!.name,
         lat: lat,
         lng: lng,
         populationClass: 'large'
       };
       setMarkers([searchMarker]);
       setSelectedMarkerId(searchMarker.id);
-      setLocationInfo(pipelineResult.finalData!);
+      setLocationInfo((pipelineResult as any).finalData!);
       setIsLoading(false);
 
-      const zoom = pipelineResult.metadataResult.coordinateResult.suggestedZoom || 5;
+      const zoom = (pipelineResult as any).metadataResult?.coordinateResult?.suggestedZoom || 5;
       const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : Math.max(1.3, 4.5 - ((zoom / 10) * (4.5 - 1.2)));
       
       cameraStateRef.current.routeSuggestedDistance = targetDist;
@@ -1356,7 +1521,7 @@ const App: React.FC = () => {
 
 
     } else {
-      const errorData = pipelineResult.metadataResult.enrichedData;
+      const errorData = (pipelineResult as any).metadataResult?.enrichedData;
       if (errorData) {
         console.log(`=== INVALID COORDINATE BLOCKED ===
 Query: ${query}
@@ -1930,9 +2095,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
             onClose={() => setIsSettingsOpen(false)}
             skin={skin}
           />
-        )}
-      </div>
-
+        )}      </div>
 
       {interactionState === 'PIN_SELECTED' && (
         <InfoPanel 

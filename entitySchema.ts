@@ -50,8 +50,8 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
         { id: "historicalContext", required: true },
         { id: "historicalPeriod", required: false },
         { id: "keyFigures", required: false },
-        { id: "importantEvents", required: false },
-        { id: "modernContext", required: false }
+        { id: "modernContext", required: false },
+        { id: "relatedPlaces", required: false }
       ]
     }
   },
@@ -65,8 +65,8 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
       sections: [
         { id: "overview", required: true },
         { id: "modernContext", required: true },
-        { id: "relatedEntities", required: false },
-        { id: "liveNews", required: false }
+        { id: "liveNews", required: false },
+        { id: "relatedPlaces", required: false }
       ]
     }
   },
@@ -80,8 +80,8 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
       sections: [
         { id: "overview", required: true },
         { id: "modernContext", required: true },
-        { id: "relatedEntities", required: false },
-        { id: "liveNews", required: false }
+        { id: "liveNews", required: false },
+        { id: "relatedPlaces", required: false }
       ]
     }
   },
@@ -95,7 +95,8 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
       sections: [
         { id: "overview", required: true },
         { id: "modernContext", required: true },
-        { id: "liveNews", required: false }
+        { id: "liveNews", required: false },
+        { id: "relatedPlaces", required: false }
       ]
     }
   }

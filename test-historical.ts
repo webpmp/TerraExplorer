@@ -21,13 +21,14 @@ async function run() {
     console.log(`\n\n=== TESTING: ${query} ===\n`);
     try {
       const result = await runSearchPipeline({ rawQuery: query });
-      if (!result.error && result.finalData) {
-         console.log("Population:", JSON.stringify(result.finalData.population, null, 2));
-         console.log("Climate:", JSON.stringify(result.finalData.climate, null, 2));
-         console.log("Related Entities:", JSON.stringify(result.finalData.relatedEntities, null, 2));
+      if (!result.error && result.entity) {
+         const { population, climate, notable } = result.entity.metadata;
+         console.log("Population:", JSON.stringify(population, null, 2));
+         console.log("Climate:", JSON.stringify(climate, null, 2));
+         console.log("Related Entities:", JSON.stringify(notable, null, 2));
          
          // Assertions
-         const locInfo = result.finalData as any;
+         const locInfo = result.entity as any;
          
          // Generic Structural Assertions
          if (locInfo.population) {
@@ -40,27 +41,27 @@ async function run() {
            assert(!locInfo.climate?.name?.startsWith("Cfb") && !locInfo.climate?.name?.startsWith("Dfb"), "Climate should not expose Köppen code as primary name");
          }
          
-         if (locInfo.relatedEntities && locInfo.relatedEntities.length > 0) {
-           assert(locInfo.relatedEntities[0].type !== undefined, "Related entity must have a type");
-           assert(locInfo.relatedEntities[0].name !== undefined, "Related entity must have a name");
-           assert(locInfo.relatedEntities[0].name.length >= 2, "Related entity name must be >= 2 chars");
+         if (locInfo.notable && locInfo.notable.length > 0) {
+           assert(locInfo.notable[0].type !== undefined, "Related entity must have a type");
+           assert(locInfo.notable[0].name !== undefined, "Related entity must have a name");
+           assert(locInfo.notable[0].name.length >= 2, "Related entity name must be >= 2 chars");
          }
 
          // Specific Acceptance Criteria
          if (query === "Where did the Viking Age take place?") {
            assert(locInfo.population?.historical !== undefined, "Viking Age should have historical population");
-           assert(locInfo.relatedEntities?.some(e => e.type === "group" || e.type === "institution" || e.type === "place"), "Viking Age should have groups/institutions/places");
+           assert(locInfo.notable?.some(e => e.type === "group" || e.type === "institution" || e.type === "place"), "Viking Age should have groups/institutions/places");
          } else if (query === "Roman Empire at its height") {
            assert(locInfo.population?.historical !== undefined, "Roman Empire should have historical population");
            assert(locInfo.population?.current === undefined, "Roman Empire should not have current population");
          } else if (query === "Ancient Athens") {
            assert(locInfo.population?.historical !== undefined, "Ancient Athens should have historical population");
            const genericTerms = ["History", "Europe", "Ancient world"];
-           const hasGeneric = locInfo.relatedEntities?.some(e => genericTerms.includes(e.name));
+           const hasGeneric = locInfo.notable?.some(e => genericTerms.includes(e.name));
            assert(!hasGeneric, "Ancient Athens should not have generic entities");
          } else if (query === "Battle of Gettysburg") {
            assert(locInfo.population?.current !== undefined, "Gettysburg Battlefield should have modern population context");
-           assert(locInfo.relatedEntities?.some(e => e.type === "event" || e.type === "person" || e.type === "group"), "Gettysburg should have event/military context");
+           assert(locInfo.notable?.some(e => e.type === "event" || e.type === "person" || e.type === "group"), "Gettysburg should have event/military context");
          }
 
       } else {

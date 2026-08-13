@@ -30,5 +30,12 @@ runTest('Format D nested: { coordinates: { latitude, longitude } }', { coordinat
 runTest('Invalid: null', null, undefined);
 runTest('Invalid: {}', {}, undefined);
 runTest('Invalid: { lat: string }', { lat: '39' }, undefined);
+runTest('Invalid: 0,0', { lat: 0, lng: 0 }, undefined);
+
+// Regression Tests
+runTest('Grand Canyon swapped (-112, 36) -> (36, -112)', { lat: -112.064857, lng: 36.094481 }, { lat: 36.094481, lng: -112.064857 });
+runTest('Dead Sea valid (31, 35) -> unchanged', { lat: 31.5590, lng: 35.4732 }, { lat: 31.5590, lng: 35.4732 });
+runTest('Paris valid (48, 2) -> unchanged', { lat: 48.8566, lng: 2.3522 }, { lat: 48.8566, lng: 2.3522 });
+runTest('Invalid: latitude too high after swap', { lat: 100, lng: 100 }, undefined);
 
 console.log(`\nTests passed: ${passed}, failed: ${failed}`);

@@ -112,9 +112,16 @@ export const runRoutePipeline = async (text: string, isUrl: boolean, generateRaw
     return true;
   });
   
-  if (normalizedItems.length < 2) {
-    console.warn(`[Pipeline ${pipelineId}] Structural Validation failed: Route must have at least 2 valid waypoints. Found ${normalizedItems.length}`);
-    return { waypoints: [], title: rawTitle, routeConfidence: rawRouteConfidence, routeType: rawRouteType as any };
+  if (rawRouteType === 'point') {
+    if (normalizedItems.length < 1) {
+      console.warn(`[Pipeline ${pipelineId}] Structural Validation failed: 'point' routeType must have at least 1 valid waypoint. Found ${normalizedItems.length}`);
+      return { waypoints: [], title: rawTitle, routeConfidence: rawRouteConfidence, routeType: rawRouteType as any };
+    }
+  } else {
+    if (normalizedItems.length < 2) {
+      console.warn(`[Pipeline ${pipelineId}] Structural Validation failed: Multi-location routeType '${rawRouteType}' must have at least 2 valid waypoints. Found ${normalizedItems.length}`);
+      return { waypoints: [], title: rawTitle, routeConfidence: rawRouteConfidence, routeType: rawRouteType as any };
+    }
   }
 
   // Sequence Validation (Stage 3 continuation)
@@ -235,7 +242,7 @@ export const runRoutePipeline = async (text: string, isUrl: boolean, generateRaw
     console.log(`\n===== LLM AUDIT JSON PIPELINE =====`);
     console.log(`Extraction: ${parseResult.extracted ? 'SUCCESS' : 'FAILED'}`);
     console.log(`Parse: ${parseResult.success ? 'SUCCESS' : 'FAILED'}`);
-    console.log(`Repair: ${parseResult.repairs && parseResult.repairs.length > 0 ? 'SUCCESS' : (parseResult.success ? 'SKIPPED' : 'FAILED')}`);
+    console.log(`Repair: ${parseResult.success && parseResult.repairs && parseResult.repairs.length > 0 ? 'SUCCESS' : (parseResult.success ? 'SKIPPED' : 'FAILED')}`);
     console.log(`Fallback: ${!parseResult.success ? 'USED' : 'SKIPPED'}`);
     console.log(`===================================\n`);
     

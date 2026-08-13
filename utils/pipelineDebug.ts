@@ -2,8 +2,12 @@ import { Waypoint } from '../types';
 
 export const PIPELINE_DEBUG = true;
 
-export function logWaypointSnapshot(stage: string, waypoint: Waypoint) {
+export function logWaypointSnapshot(stage: string, waypoint?: Waypoint) {
     if (!PIPELINE_DEBUG) return;
+    if (!waypoint) {
+        console.log(`\n[${stage}]\nWaypoint is undefined/null\n`);
+        return;
+    }
     const fields = Object.keys(waypoint).sort();
     console.log(`
 [${stage}]

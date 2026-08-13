@@ -1,6 +1,12 @@
 import { LocationInfo, QueryIntent, isValidCoordinates, Waypoint } from '../types';
-import { routeIntentAndExtractEntity, resolveLocationQuery, sanitizeLocationInfo, recoverCoordinatesFromAi, recoverLocationMetadata, getUserSettings, generateRoute } from './geminiService';
+import { ResolvedEntity, EnrichmentResult } from '../domain';
+import { routeIntentAndExtractEntity, resolveLocationQuery, sanitizeLocationInfo, recoverCoordinatesFromAi, recoverLocationMetadata, getUserSettings, generateRoute, normalizeCoordinates } from './geminiService';
 import { enrichLocationInfo } from './locationService';
+import { createIdentity, createResolvedSubject, createResolvedEntity } from './entityFactory';
+import { validateResolvedEntity } from './entityValidation';
+import { mergeCoordinates } from './coordinateAuthority';
+import { CanonicalGeographicEntity } from '../domain';
+import { classifyGeographicEntity } from './classifierService';
 
 // --- PIPELINE TYPES ---
 
@@ -41,9 +47,9 @@ export interface MetadataResult {
 
 export interface FinalLocationResult {
   mode: "location" | "route";
-  metadataResult?: MetadataResult;
+  entity?: ResolvedEntity;
+  finalData?: Partial<LocationInfo>;
   isValid: boolean;
-  finalData?: LocationInfo;
   waypoints?: Waypoint[];
   error?: string;
 }
@@ -87,7 +93,7 @@ export const IntentStage = (request: SearchRequest): EntityResolutionResult => {
   return entityResult;
 };
 
-export const ResolutionStage = async (entityResult: EntityResolutionResult): Promise<MetadataResult> => {
+export const ResolutionStage = async (entityResult: EntityResolutionResult): Promise<FinalLocationResult> => {
   console.log("=== PIPELINE STAGE: COORDINATE RESOLUTION ===");
   
   const rawResolverResult = await resolveLocationQuery(
@@ -111,17 +117,11 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   const nonGeographicIntents = ['EXPLORATORY', 'HISTORICAL_EVENT', 'BROAD_CULTURAL_QUERY'];
   const isGeographicIntent = !nonGeographicIntents.includes(entityResult.intentResult.intent);
 
-  if (error && allowedErrors.includes(error) && entityResult.entity && isGeographicIntent && (!resolvedData || !resolvedData.coordinates)) {
-    console.log(`Recovery Attempted: Yes`);
-    console.log(`Recovery Function: recoverCoordinatesFromAi`);
-    
-    console.log("Recovery merge input type:", typeof resolvedData);
-    console.log("Recovery merge input:", JSON.stringify(resolvedData));
-
+  let coordinatesValid = resolvedData?.coordinates && isValidCoordinates(normalizeCoordinates(resolvedData.coordinates) || normalizeCoordinates(resolvedData));
+  
+  if (!coordinatesValid && error && allowedErrors.includes(error) && entityResult.entity && isGeographicIntent) {
     if (!resolvedData || typeof resolvedData !== 'object' || Array.isArray(resolvedData)) {
-      resolvedData = { 
-        name: entityResult.entity 
-      };
+      resolvedData = { name: entityResult.entity };
     }
 
     const recoveryCoords = await recoverCoordinatesFromAi(
@@ -129,98 +129,186 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
       entityResult.intentResult.intent,
       entityResult.entity
     );
-    console.log(`Coordinates Returned: ${recoveryCoords ? JSON.stringify(recoveryCoords) : 'None'}`);
-    if (recoveryCoords) {
-      console.log(`Recovery Success: Yes`);
+    
+    let recoveredValid = false;
+    let source = "ai_recovery";
+    if (recoveryCoords && isValidCoordinates(recoveryCoords)) {
+      const incoming = {
+         lat: recoveryCoords.lat,
+         lng: recoveryCoords.lng,
+         source: (recoveryCoords as any).source || 'ai_recovery'
+      } as any;
       
+      const existing = resolvedData.coordinates ? {
+         lat: resolvedData.coordinates.lat,
+         lng: resolvedData.coordinates.lng,
+         source: (resolvedData as any).coordinateSource || 'deterministic'
+      } as any : null;
+      
+      resolvedData.coordinates = mergeCoordinates(existing, incoming);
+      error = undefined;
+      recoveryUsed = true;
+      recoveredValid = true;
+      source = incoming.source;
+    }
+    
+    console.log(`[COORDINATE RECOVERY]\nRecovery success: ${recoveredValid ? 'Yes' : 'No'}\nRecovered coordinates: ${recoveryCoords ? JSON.stringify(recoveryCoords) : 'None'}\nSource: ${source}`);
+  }
+
+  // Normalize whatever coordinates we have at this point
+  if (resolvedData && resolvedData.coordinates) {
+     const inputCoords = JSON.stringify(resolvedData.coordinates);
+     const normalized = normalizeCoordinates(resolvedData.coordinates) || normalizeCoordinates(resolvedData);
+     if (normalized) {
+         resolvedData.coordinates = normalized;
+     }
+     
+     console.log(`[COORDINATE NORMALIZATION]\nInput: ${inputCoords}\nNormalized coordinates: ${JSON.stringify(resolvedData.coordinates)}`);
+     
+     const finalValid = isValidCoordinates(resolvedData.coordinates);
+     coordinatesValid = finalValid;
+     
+     const source = (resolvedData.coordinates as any)?.source || (recoveryUsed ? 'ai_recovery' : 'deterministic');
+     
+     console.log(`[FINAL COORDINATE VALIDATION]\nCoordinates: ${JSON.stringify(resolvedData.coordinates)}\nSource: ${source}\nValid: ${finalValid}`);
+  }
+
+  // 1. CANONICAL ENTITY LOCK
+  // After coordinates are successfully recovered and normalized, establish identity
+  let canonicalEntity: CanonicalGeographicEntity | null = null;
+  let identity: ReturnType<typeof createIdentity> | null = null;
+  let entityType: any;
+
+  if (coordinatesValid && resolvedData && resolvedData.coordinates) {
+      const canonicalName = resolvedData.name || entityResult.entity;
+      
+      const providerSignals = (resolvedData as any).discoverySignals || [];
+      const adminContext = {
+          country: (resolvedData as any).country,
+          state: (resolvedData as any).state,
+          county: (resolvedData as any).county
+      };
+
+      entityType = await classifyGeographicEntity(
+          canonicalName,
+          resolvedData.coordinates,
+          providerSignals,
+          adminContext
+      );
+
+      canonicalEntity = {
+          canonicalName,
+          entityType,
+          coordinates: resolvedData.coordinates,
+          providerSignals,
+          adminContext
+      };
+
+      console.log(`[CANONICAL ENTITY]\nRequested entity: ${entityResult.intentResult.normalized.request.rawQuery}\nResolved name: ${canonicalEntity.canonicalName}\nCanonical name: ${canonicalEntity.canonicalName}\nEntity type: ${canonicalEntity.entityType}\nCoordinates: ${canonicalEntity.coordinates.lat}, ${canonicalEntity.coordinates.lng}\nCoordinate source: ${(canonicalEntity.coordinates as any).source || 'deterministic'}\nProvider classifications: ${providerSignals.join(',') || 'none'}\nFinal classification: ${canonicalEntity.entityType}\nClassification confidence: 1.0\nAdministrative context: ${JSON.stringify(adminContext)}`);
+
+      identity = createIdentity(
+          entityResult.intentResult.normalized.request.rawQuery,
+          canonicalName,
+          "place",
+          entityType,
+          {}
+      );
+  }
+
+  // 3. METADATA RECOVERY (Short-circuit if description exists)
+  if (coordinatesValid && canonicalEntity && !resolvedData?.description) {
       try {
-        const fullInfo = await recoverLocationMetadata(entityResult.entity, recoveryCoords);
-        if (fullInfo) {
-           resolvedData = await enrichLocationInfo(fullInfo);
-           error = undefined; 
-           recoveryUsed = true;
+        const metadataRecovery = await recoverLocationMetadata(canonicalEntity.canonicalName, canonicalEntity.coordinates);
+        if (metadataRecovery) {
+           console.log(`=== RECOVERY ENRICHMENT TRACE ===`);
+           console.log(`Metadata Present: true`);
+           console.log(`Enrichment Executed: true`);
+           
+           // Strip AI entity categorization to preserve canonical identity
+           delete (metadataRecovery as any).type;
+           delete (metadataRecovery as any).entityType;
+           delete (metadataRecovery as any).name; // NEVER overwrite name
+           
+           // Attach the recovered metadata directly to resolvedData for now
+           (resolvedData as any)._recoveredMetadata = metadataRecovery;
         } else {
-           // Do not continue with coordinate-only data.
-           // Keep the original error if full metadata recovery fails.
+           console.warn(`=== RECOVER METADATA WARN ===\nMetadata recovery returned empty.`);
         }
-        
-        console.log(`=== RECOVERY ENRICHMENT TRACE ===`);
-        console.log(`Metadata Present: ${!!fullInfo}`);
-        console.log(`Enrichment Executed: ${!!fullInfo}`);
-        console.log(`News Count: ${resolvedData?.news?.length || 0}`);
-        console.log(`Description Present: ${!!resolvedData?.description}`);
-        console.log(`===============================`);
       } catch (err) {
         console.error("Failed to generate metadata for recovered coordinates:", err);
       }
-    } else {
-      console.log(`Recovery Success: No`);
-    }
   } else {
-    console.log(`Recovery Attempted: No`);
-    console.log(`Recovery Function: N/A`);
-    console.log(`Recovery Success: N/A`);
+      console.log(`Metadata Recovery Attempted: No (Description exists)`);
   }
 
-  console.log(`Final Coordinates: ${resolvedData?.coordinates ? JSON.stringify(resolvedData.coordinates) : 'None'}`);
-  console.log(`Failure Reason: ${error || 'None'}`);
-  console.log(`===============================`);
+  // Construct the ResolvedEntity Domain Object
+  let entity: ResolvedEntity | undefined = undefined;
   
-  const coordinateResult: CoordinateResolutionResult = {
-    entityResult,
-    aiUsed: false, 
-    deterministicMatch: false,
-    resolvedData,
-    suggestedZoom,
-    error
-  };
-
-  console.log(`Error Status: ${error}`);
-
-  console.log("=== PIPELINE STAGE: METADATA ===");
-  const metadataResult: MetadataResult = {
-    coordinateResult,
-    enrichedData: resolvedData
-  };
-  
-  console.log(`Entity Type: ${resolvedData?.entityType || 'None'}`);
-
-  return metadataResult;
-};
-
-export const MetadataStage = (metadataResult: MetadataResult): FinalLocationResult => {
-  console.log("=== PIPELINE STAGE: VALIDATION ===");
-  
-  let isValid = false;
-  let finalData: LocationInfo | undefined;
-  let error = metadataResult.coordinateResult.error;
-
-  const data = metadataResult.enrichedData;
-  if (data && data.coordinates) {
-    isValid = isValidCoordinates(data.coordinates);
-    if (!isValid && !error) {
-       error = "NO_GEOGRAPHIC_DATA";
-    }
+  if (resolvedData && resolvedData.coordinates && identity && canonicalEntity) {
+     const primaryLocation = {
+         label: canonicalEntity.canonicalName,
+         featureType: canonicalEntity.entityType,
+         location: {
+             coordinates: canonicalEntity.coordinates,
+             boundingBox: resolvedData.boundary as any
+         },
+         provenance: {
+             provider: recoveryUsed ? "Gemini Recovery" : "Gemini Resolution",
+             timestamp: Date.now(),
+             cache: false
+         },
+         diagnostics: {}
+     };
+     
+     const subject = createResolvedSubject(
+         identity,
+         primaryLocation
+     );
+     
+     const recoveredMetadata = (resolvedData as any)._recoveredMetadata as Partial<EnrichmentResult> | undefined;
+     
+     // Merge deterministic/initial metadata with recovered metadata
+     const finalMetadata: any = {
+         description: resolvedData.description,
+         climate: (resolvedData as any).climate,
+         population: (resolvedData as any).population,
+         notable: (resolvedData as any).notable || [],
+         news: resolvedData.news || [],
+         contextNotes: (resolvedData as any).contextNotes || [],
+         ...recoveredMetadata
+     };
+     
+     entity = createResolvedEntity(
+         subject,
+         finalMetadata
+     );
+     
+     if (recoveryUsed) {
+         console.log(`=== RECOVERY MERGE RESULT ===`);
+         console.log(`canonicalName: ${entity.subject.identity.canonicalName}`);
+         console.log(`entityType: ${entity.subject.identity.entityType}`);
+         console.log(`locationLabel: ${entity.subject.primaryLocation.label}`);
+         console.log(`coordinates: ${entity.subject.primaryLocation.location.coordinates.lat},${entity.subject.primaryLocation.location.coordinates.lng}`);
+         console.log(`metadataKeys: ${Object.keys(entity.metadata).join(',')}`);
+         console.log(`===============================`);
+     }
   }
 
-  console.log(`Coordinates Valid: ${isValid}`);
-
-  if (isValid && data) {
-    finalData = sanitizeLocationInfo(data as LocationInfo);
+  const isValid = validateResolvedEntity(entity);
+  if (!isValid && !error && !coordinatesValid) {
+     error = "NO_GEOGRAPHIC_DATA";
+  } else if (isValid) {
+     error = undefined;
   }
 
-  console.log("=== PIPELINE STAGE: FINAL RESULT ===");
-  const finalResult: FinalLocationResult = {
+  console.log(`[FINAL GEOGRAPHIC VALIDATION]\nCoordinates valid: ${coordinatesValid}\nEntity identity valid: ${!!(entity?.subject?.identity?.canonicalName && entity?.subject?.identity?.entityType)}\nMetadata available: ${!!(entity?.metadata && Object.keys(entity.metadata).length > 0)}\nFinal valid: ${isValid}\nFinal Error: ${error || 'none'}`);
+
+  return {
     mode: "location",
-    metadataResult,
+    entity,
     isValid,
-    finalData,
     error
   };
-
-  console.log(`Final Error: ${finalResult.error}`);
-
-  return finalResult;
 };
 
 export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLocationResult> => {
@@ -229,37 +317,38 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
   // 2. Routing Guard: If intent is route, bypass coordinate resolution
   if (entityResult.intentResult.intent === 'route' || entityResult.intentResult.intent === 'EXPLORATORY' as any) {
      console.log(`[Pipeline] Routing Guard activated for intent: ${entityResult.intentResult.intent}`);
-     const waypoints = await generateRoute(request.rawQuery, 'route');
-     console.log(`[Pipeline] WAYPOINTS AFTER GENERATEROUTE (Main guard):`);
-     waypoints.forEach(wp => console.log(`  - ${wp.name} (ID: ${wp.id}, parentId: ${wp.parentId})`));
-     return {
-        mode: "route",
-        isValid: waypoints.length > 0,
-        waypoints
-     };
+      const route = await generateRoute(request.rawQuery, 'route');
+      const waypoints = route.waypoints;
+      console.log(`[Pipeline] WAYPOINTS AFTER GENERATEROUTE (Main guard):`);
+      waypoints.forEach(wp => console.log(`  - ${wp.name} (ID: ${wp.id}, parentId: ${wp.parentId})`));
+      return {
+         mode: "route",
+         isValid: waypoints.length > 0,
+         waypoints
+      };
   }
 
-  const metadataResult = await ResolutionStage(entityResult);
+  const locationResult = await ResolutionStage(entityResult);
   
   // 3. Fallback Intent Correction
-  const resolvedType = metadataResult.coordinateResult.resolvedData?.type;
-  const entityType = (metadataResult.coordinateResult.resolvedData as any)?.entityType;
+  const entityType = locationResult.entity?.subject?.identity?.entityType;
   
   const isRouteFallback = 
-    (resolvedType as string) === 'Route' || 
     entityType === 'historical_trade_route' ||
     entityType === 'historical_network' ||
     entityType === 'empire' ||
-    entityType === 'civilization';
+    entityType === 'civilization' ||
+    entityType === 'route';
     
   if (isRouteFallback) {
       console.log(`=== INTENT ROUTING CORRECTION ===`);
       console.log(`Original Intent: ${entityResult.intentResult.intent}`);
-      console.log(`Entity Type: ${entityType || resolvedType}`);
+      console.log(`Entity Type: ${entityType}`);
       console.log(`Correction: MULTI_LOCATION_EXPLORATION`);
       console.log(`Recovery: generateRoute()`);
       
-      const waypoints = await generateRoute(request.rawQuery, 'route');
+      const route = await generateRoute(request.rawQuery, 'route');
+      const waypoints = route.waypoints;
       console.log(`[Pipeline] WAYPOINTS AFTER GENERATEROUTE (Intent fallback):`);
       waypoints.forEach(wp => console.log(`  - ${wp.name} (ID: ${wp.id}, parentId: ${wp.parentId})`));
       return {
@@ -269,5 +358,23 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
       };
   }
 
-  return MetadataStage(metadataResult);
+  if (locationResult.entity) {
+      const e = locationResult.entity;
+      (locationResult as any).finalData = {
+          name: e.subject.identity.canonicalName,
+          entityType: e.subject.identity.entityType,
+          type: e.subject.identity.entityType,
+          coordinates: e.subject.primaryLocation.location.coordinates,
+          description: e.metadata.description,
+          climate: e.metadata.climate,
+          population: e.metadata.population,
+          notable: e.metadata.notable,
+          news: e.metadata.news,
+          contextNotes: e.metadata.contextNotes
+      };
+  }
+
+  console.log(`[NATURAL LOCATION RESULT]\nname: ${(locationResult as any).finalData?.name || 'none'}\ncoordinates: ${JSON.stringify((locationResult as any).finalData?.coordinates || 'none')}\nentityType: ${(locationResult as any).finalData?.entityType || 'none'}\nmetadataAvailable: ${!!locationResult.entity?.metadata}\nvalid: ${locationResult.isValid}`);
+
+  return locationResult;
 };

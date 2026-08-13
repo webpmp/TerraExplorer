@@ -5,6 +5,13 @@ export interface GeoCoordinates {
   lng: number;
 }
 
+export interface ResolvedCoordinates {
+  lat: number;
+  lng: number;
+  source: "deterministic" | "geocoder" | "ai_recovery";
+  confidence?: "high" | "medium" | "low";
+}
+
 export const isValidCoordinates = (coords: any): boolean => {
   if (!coords || typeof coords !== 'object') return false;
   const lat = Number(coords.lat);
@@ -23,7 +30,7 @@ export const isValidCoordinates = (coords: any): boolean => {
   return true;
 };
 
-export type QueryIntent = 'DIRECT' | 'NATURAL_LOCATION' | 'EXPLORATORY' | 'HISTORICAL_EVENT' | 'DISCOVERY_LOCATION' | 'exploration' | 'specific_location' | 'historical_event' | 'route';
+export type QueryIntent = 'DIRECT' | 'NATURAL_LOCATION' | 'EXPLORATORY' | 'HISTORICAL_EVENT' | 'DISCOVERY_LOCATION' | 'DISCOVERY_OBJECT_LOCATION' | 'exploration' | 'specific_location' | 'historical_event' | 'route';
 
 export enum LocationType {
   CONTINENT = 'Continent',
@@ -34,22 +41,7 @@ export enum LocationType {
   POI = 'Point of Interest'
 }
 
-export type EntityType = 
-  | 'city'
-  | 'country'
-  | 'state'
-  | 'ocean'
-  | 'natural_feature'
-  | 'mountain'
-  | 'landmark'
-  | 'museum'
-  | 'historical_event_site'
-  | 'archaeological_site'
-  | 'discovery_site'
-  | 'shipwreck_site'
-  | 'artifact'
-  | 'battlefield'
-  | 'festival_site';
+export type { EntityType } from './domain';
 
 export interface NewsItem {
   title: string;
@@ -95,7 +87,14 @@ export interface HistoricalIssue {
   originalValue: unknown;
   replacement: unknown;
   reason: string;
-  source: 'deterministic' | 'historical_llm';
+  source: 'deterministic' | 'historical_llm' | 'structural_validation';
+}
+
+export interface NotableItem {
+  title: string;
+  summary: string;
+  entityType: string;
+  wikipediaUrl?: string;
 }
 
 export interface LocationInfo {
@@ -108,11 +107,19 @@ export interface LocationInfo {
     historical?: PopulationInfo;
   } | null;
   climate?: ClimateInfo | null;
-  relatedEntities?: RelatedEntity[];
+  notable?: NotableItem[];
   contextNotes?: string[];
+  locationString?: string;
+  imageCaption?: string;
+  imageSearchTerm?: string;
+  discoverySignals?: string[];
+  relatedEntities?: any[];
   metadataMode?: 'historical_site' | 'modern_place' | 'natural_feature';
   coordinates: GeoCoordinates;
   boundary?: GeoCoordinates[];
+  pipelineVersion?: number;
+  status?: "loading" | "success" | "error";
+  errorMessage?: string;
   news: NewsItem[];
   routeContext?: {
     title: string;
@@ -122,6 +129,12 @@ export interface LocationInfo {
   provenance?: ProvenanceRecord[];
   newsError?: string;
   waypoint?: Waypoint;
+  sectionState?: {
+    description: "loading" | "ready" | "failed";
+    news: "loading" | "ready" | "failed";
+    images: "loading" | "ready" | "failed";
+    nearby: "loading" | "ready" | "failed";
+  };
 }
 
 export interface MapMarker {
@@ -131,12 +144,74 @@ export interface MapMarker {
   lng: number;
   populationClass: 'large' | 'medium' | 'small'; // Affects dot size
   type?: string;
+  country?: string;
+  state?: string;
+  discoverySignals?: string[];
+  city?: string;
+  metadataMode?: string;
+  population?: any;
+  climate?: any;
+  funFacts?: string[];
+  isAnchor?: boolean;
+  provenance?: string;
+  wikidataId?: string;
+  populationStatus?: string;
+  populationSource?: string;
 }
 
+export interface Candidate {
+  id: string;
+  name: string;
+  coordinates: { lat: number; lng: number };
+  type: string;
+  isAnchor?: boolean;
+  providers: string[];
+  rawProviders: Record<string, any>;
+  
+  importanceScore?: number;
+  confidenceScore?: number;
+  scoreBreakdown?: any;
+
+  pipelineStatus: "collected" | "normalized" | "merged" | "scored" | "quality_gated" | "selected" | "rejected";
+  rejectionReason?: string;
+  
+  tier?: number;
+  entityClass?: string;
+  distanceBand?: 'local' | 'regional' | 'extended';
+  distanceKm?: number;
+  settlementConfidence?: number;
+  population?: any;
+  populationClass?: 'large' | 'medium' | 'small';
+  country?: string;
+  state?: string;
+  city?: string;
+  discoverySignals?: string[];
+  identifiers?: {
+    wikipediaId?: string;
+    wikidataId?: string;
+    osmId?: string;
+    [key: string]: string | undefined;
+  };
+}
 export interface SearchResult {
   locationInfo?: LocationInfo | Partial<LocationInfo>;
   suggestedZoom?: number;
   error?: "NOT_FOUND" | "AMBIGUOUS" | "TEMP_FAILURE" | "NO_GEOGRAPHIC_DATA" | "UNABLE_TO_RESOLVE" | "LOCATION_SYSTEM_UNAVAILABLE";
+}
+
+export interface ResolverResult {
+    strategy: string;
+    confidence: number;
+    subjectType: string;
+    canonicalName: string;
+    resolvedName: string;
+    displayName: string;
+    coordinates: { lat: number; lng: number };
+    geographicSource?: string;
+    originalEntityType?: string;
+    suggestedZoom?: number;
+    metadataMode?: string;
+    diagnostics: any;
 }
 
 export type AIProvider = 'gemini' | 'lmstudio';
@@ -154,7 +229,7 @@ export interface UserSettings {
 
 export interface Route {
   title?: string;
-  routeType?: 'fixed_path' | 'network' | 'conceptual';
+  routeType?: 'single_location' | 'regional_event' | 'multi_location_campaign' | 'fixed_path' | 'network' | 'conceptual' | 'point';
   waypoints: Waypoint[];
   routeConfidence?: {
     level: 'high' | 'medium' | 'low';
@@ -171,6 +246,8 @@ export interface Waypoint {
   lat: number;
   lng: number;
   context: string;
+  entityType?: string;
+  discoverySignals?: string[];
   role?: "primary" | "related" | "administrative" | "historical_context";
   parentId?: string;
   sequence?: number;
@@ -181,7 +258,7 @@ export interface Waypoint {
   highlights?: string[];
   historicalPeriod?: string;
   entities?: string[];
-  relatedEntities?: RelatedEntity[];
+  notable?: NotableItem[];
   historicalConfidence?: {
     level: 'high' | 'medium' | 'low';
     reasoning: string;
@@ -199,6 +276,8 @@ export interface FavoriteLocation {
   waypoints?: Waypoint[];
   notes?: string;
 }
+
+import { ResolvedEntity } from './domain';
 
 export type SkinType = 'modern' | 'retro-green' | 'retro-amber' | 'parchment';
 

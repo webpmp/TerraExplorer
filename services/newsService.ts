@@ -1,6 +1,6 @@
 import { NewsItem } from '../types';
 import { getUserSettings } from './geminiService';
-import { fetchGeminiGroundedNews } from './providers/geminiNewsProvider';
+
 import { fetchNYTNews } from './providers/nytNewsProvider';
 import { fetchNewsApiNews } from './providers/newsApiProvider';
 import { fetchNewsDataNews } from './providers/newsDataProvider';
@@ -22,27 +22,39 @@ const fetchWithTimeout = async (promise: Promise<NewsItem[]>): Promise<NewsItem[
   }
 };
 
+import { newsCache } from './cacheService';
+
 export const fetchLiveNews = async (locationName: string): Promise<NewsItem[]> => {
+  const cacheKey = locationName.toLowerCase();
+  if (newsCache.has(cacheKey)) {
+      return newsCache.get(cacheKey)!;
+  }
+
   const settings = getUserSettings();
   
   let providerPromise: Promise<NewsItem[]>;
-  
-  switch(settings.newsProvider) {
-    case "gemini":
-      providerPromise = fetchGeminiGroundedNews(locationName);
+  const getEnv = () => typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env : (typeof process !== 'undefined' ? process.env : {});
+
+  switch (settings.newsProvider) {
+
+    case 'nyt':
+      providerPromise = fetchNYTNews(locationName, settings.nytApiKey || getEnv().VITE_NYT_API_KEY);
       break;
-    case "nyt":
-      providerPromise = fetchNYTNews(locationName, settings.nytApiKey || import.meta.env.VITE_NYT_API_KEY);
+    case 'newsapi':
+      providerPromise = fetchNewsApiNews(locationName, settings.newsApiKey || getEnv().VITE_NEWS_API_KEY);
       break;
-    case "newsapi":
-      providerPromise = fetchNewsApiNews(locationName, settings.newsApiKey || import.meta.env.VITE_NEWS_API_KEY);
-      break;
-    case "newsdata":
-      providerPromise = fetchNewsDataNews(locationName, settings.newsDataApiKey || import.meta.env.VITE_NEWS_DATA_API_KEY);
+    case 'newsdata':
+      providerPromise = fetchNewsDataNews(locationName, settings.newsDataApiKey || getEnv().VITE_NEWS_DATA_API_KEY);
       break;
     default:
       return [];
   }
   
-  return fetchWithTimeout(providerPromise);
+  try {
+    const results = await fetchWithTimeout(providerPromise);
+    newsCache.set(cacheKey, results);
+    return results;
+  } catch (error) {
+    throw error;
+  }
 };

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ENTITY_SCHEMAS } from '../entitySchema';
 import { LocationInfo, SkinType, isValidCoordinates, LocationType } from '../types';
 import { 
@@ -8,6 +8,24 @@ import {
   Copy, Check, ChevronDown, ChevronUp, Plus, Trash2, Edit2, Save, StickyNote, ChevronLeft, ChevronRight,
   MapPin, Route as RouteIcon
 } from 'lucide-react';
+
+
+const normalizeDisplayText = (value: any): string => {
+  let str = '';
+  if (typeof value === 'string') {
+    str = value;
+  } else if (value && typeof value === 'object') {
+    if (typeof value.text === 'string') str = value.text;
+    else if (typeof value.summary === 'string') str = value.summary;
+    else if (typeof value.title === 'string') str = value.title;
+    else if (typeof value.name === 'string') str = value.name;
+    else if (typeof value.description === 'string') str = value.description;
+  }
+  
+  if (!str) return '';
+
+  return str.replace(/^#{1,6}\s+/gm, '').trim();
+};
 
 interface InfoPanelProps {
   info: any; // Raw input (can be LocationInfo or waypoint wrapper)
@@ -26,6 +44,9 @@ interface InfoPanelProps {
     onNext: () => void;
     onPrev: () => void;
   };
+  isError?: boolean;
+  errorMessage?: string;
+  onRetry?: () => void;
 }
 
 interface Note {
@@ -35,10 +56,15 @@ interface Note {
 }
 
 // Helper to validate data availability
-const isValidData = (val: string | null | undefined) => {
+const isValidData = (val: string | null | undefined, isDescription: boolean = false) => {
   if (val === null || val === undefined) return false;
   const v = val.toString().toLowerCase().trim();
   if (v === '' || v === 'undefined' || v === 'null') return false;
+  
+  if (isDescription) {
+    if (v === 'n/a' || v === 'not applicable' || v === 'not available' || v === 'unknown') return false;
+    return true;
+  }
   
   // Check for keywords appearing within the string (substring match)
   if (v.includes('n/a') || v.includes('not applicable') || v.includes('not available') || v.includes('unknown') || v.includes('varies') || v.includes('historical')) {
@@ -148,12 +174,12 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   onRemoveFavorite, 
   currentFavoriteName, 
   onLoadMoreNews, 
-  routeNav 
+  routeNav,
+  isError,
+  errorMessage,
+  onRetry
 }: InfoPanelProps) => {
   const info = React.useMemo(() => {
-    console.log("=== INFOPANEL BOUNDARY: Before Normalization ===");
-    console.log("rawInfo keys:", rawInfo ? Object.keys(rawInfo) : "null");
-
     if (!rawInfo) return null;
 
     const wp = rawInfo.waypoint || {};
@@ -163,36 +189,79 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
     // 2. Description fallback
     // Priority: rawInfo.description > wp.description > wp.significance > routeContext
-    const geographicDesc = rawInfo.description && rawInfo.description !== "Information unavailable." ? rawInfo.description : null;
-    const historicalDesc = wp.description || null;
+    const extractText = (val: any): string => {
+       if (!val) return "";
+       if (typeof val === "string") return normalizeDisplayText(val);
+       if (typeof val === "object") {
+           let text = "";
+           const h = val.heading || val.heading1 || val.title;
+           const t = val.text || val.text1 || val.description || val.summary || val.value || val.body;
+           
+           if (h) {
+               text += `${normalizeDisplayText(h)}\n\n`;
+           }
+           if (t) {
+               text += normalizeDisplayText(t);
+           } else {
+               // Fallback: concatenate string values, explicitly excluding other metadata sections
+               const excludedKeys = ['notable', 'notableFacts', 'notable_facts', 'climate', 'population', 'news', 'contextNotes', 'entities', 'historicalPeriod'];
+               const vals = Object.entries(val)
+                 .filter(([k, v]) => typeof v === 'string' && !excludedKeys.includes(k) && !k.toLowerCase().includes('notable'))
+                 .map(([k, v]) => normalizeDisplayText(v));
+               if (vals.length > 0 && !h) {
+                   text += vals.join('\n\n');
+               }
+           }
+           return text.trim();
+       }
+       return normalizeDisplayText(String(val));
+    };
+
+    const geographicDesc = extractText(rawInfo.description) || null;
+    const historicalDesc = extractText(wp.description) || null;
     const routeContextText = rawInfo.routeContext?.text || null;
     
-    let desc = "Detailed description unavailable.";
-    let descSource = "Fallback";
-    
-    if (geographicDesc) {
-      desc = geographicDesc;
-      descSource = "rawInfo.description";
-    } else if (historicalDesc) {
-      desc = historicalDesc;
-      descSource = "wp.description";
-    } else if (wp.significance) {
-      desc = wp.significance;
-      descSource = "wp.significance";
-    } else if (routeContextText) {
-      desc = routeContextText;
-      descSource = "rawInfo.routeContext.text";
+    let combinedDescParts: string[] = [];
+    let descSource = "combined";
+
+    const rawDesc = geographicDesc || historicalDesc || routeContextText;
+    if (rawDesc) {
+      let cleanDesc = rawDesc;
+      if (/^#+\s+description/i.test(cleanDesc.trim())) {
+        cleanDesc = cleanDesc.replace(/^#+\s+description/i, '').trim();
+      }
+      combinedDescParts.push(cleanDesc);
     }
+
+    if (wp.significance) {
+      combinedDescParts.push(`## Significance\n\n${wp.significance}`);
+    }
+
+    if ((rawInfo as any).historicalBackground) {
+      combinedDescParts.push(`## Historical Background\n\n${(rawInfo as any).historicalBackground}`);
+    } else if (wp.historicalRegion) {
+      combinedDescParts.push(`## Historical Region\n\n${wp.historicalRegion}`);
+    }
+    
+    let desc = combinedDescParts.join('\n\n');
 
     // 3. Context Notes
     const contextNotes: any[] = [];
     let contextNotesSource = "None";
     
-    if (rawInfo.contextNotes && Array.isArray(rawInfo.contextNotes) && rawInfo.contextNotes.length > 0) {
-      contextNotes.push(...rawInfo.contextNotes);
+    const normalizeContextNotes = (notes: any) => {
+        if (!notes) return [];
+        if (Array.isArray(notes)) {
+            return notes.map(n => (typeof n === 'object' && n.text) ? n.text : String(n));
+        }
+        return [typeof notes === 'object' && notes.text ? notes.text : String(notes)];
+    };
+
+    if (rawInfo.contextNotes) {
+      contextNotes.push(...normalizeContextNotes(rawInfo.contextNotes));
       contextNotesSource = "rawInfo.contextNotes";
-    } else if (wp.contextNotes && Array.isArray(wp.contextNotes) && wp.contextNotes.length > 0) {
-      contextNotes.push(...wp.contextNotes);
+    } else if (wp.contextNotes) {
+      contextNotes.push(...normalizeContextNotes(wp.contextNotes));
       contextNotesSource = "wp.contextNotes";
     }
 
@@ -203,35 +272,63 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     const coordinates = wp.coordinates || rawInfo.coordinates;
     
     // 5. Population and Climate
-    const population = rawInfo.population || null;
+    let population = null;
+    if (rawInfo.population) {
+        let currentText = "";
+        let historicalText = "";
+        let timeframe = "";
+        
+        if (typeof rawInfo.population === "string" || typeof rawInfo.population === "number") {
+            currentText = String(rawInfo.population);
+        } else if (typeof rawInfo.population === "object") {
+            if (rawInfo.population.current) {
+                if (typeof rawInfo.population.current === "object") {
+                    currentText = rawInfo.population.current.formattedValue || rawInfo.population.current.value || String(rawInfo.population.current.value || "");
+                } else {
+                    currentText = String(rawInfo.population.current);
+                }
+            }
+            if (rawInfo.population.historical) {
+                if (typeof rawInfo.population.historical === "object") {
+                    historicalText = rawInfo.population.historical.formattedValue || rawInfo.population.historical.value || String(rawInfo.population.historical.value || "");
+                    timeframe = rawInfo.population.historical.timeframe || "";
+                } else {
+                    historicalText = String(rawInfo.population.historical);
+                }
+            }
+            if (!currentText && rawInfo.population.value) {
+                currentText = String(rawInfo.population.value);
+            }
+        }
+        
+        if (currentText === "[object Object]") currentText = "";
+        if (historicalText === "[object Object]") historicalText = "";
+        
+        if (currentText || historicalText) {
+            population = {
+                current: currentText ? { formattedValue: currentText } : null,
+                historical: historicalText ? { formattedValue: historicalText, timeframe } : null
+            };
+        }
+    }
     const populationSource = population ? "Enriched Geographic Metadata (rawInfo.population)" : "None";
     
-    const climate = rawInfo.climate || null;
+    let climate = null;
+    if (rawInfo.climate) {
+        if (rawInfo.climate.name && rawInfo.climate.description) {
+            climate = rawInfo.climate; // Legacy format
+        } else if (typeof rawInfo.climate === 'object' && rawInfo.climate.value) {
+            climate = { name: rawInfo.climate.value, description: rawInfo.climate.description || "" };
+        } else {
+            climate = { name: String(rawInfo.climate), description: "" };
+        }
+    }
     const climateSource = climate ? "Enriched Geographic Metadata (rawInfo.climate)" : "None";
 
-    console.log("=== INFOPANEL FIELD TRACING ===");
-    console.log("Description Source:", descSource);
-    console.log("Context Notes Source:", contextNotesSource);
-    console.log("Population Source:", populationSource);
-    console.log("Climate Source:", climateSource);
-    console.log("News Source:", rawInfo.news ? "rawInfo.news" : "None");
-    console.log("News Type:", Array.isArray(rawInfo.news) ? 'array' : typeof rawInfo.news);
-    console.log("News Count:", Array.isArray(rawInfo.news) ? rawInfo.news.length : (rawInfo.news ? 1 : 0));
-    console.log("News Renderable:", true);
-    console.log("===============================");
-
-    console.log("=== INFOPANEL BOUNDARY: After Normalization ===");
-    console.log("Name:", name);
-    console.log("Description:", desc);
-    console.log("Coordinates:", coordinates);
-    console.log("Normalized keys:", Object.keys({
-      ...rawInfo,
-      name,
-      description: desc,
-      contextNotes,
-      coordinates
-    }));
-    console.log("=================================================");
+    // console.log("=== INFOPANEL FIELD TRACING ===");
+    // console.log("Description Source:", descSource);
+    // console.log("Context Notes Source:", contextNotesSource);
+    // console.log("Population Source:", populationSource);
 
     // 6. Safe Arrays
     let news: any[] = [];
@@ -243,13 +340,39 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       news = [{ title: "Latest News", summary: rawInfo.news }];
     }
     
-    // Fallback normalizer for news items
     news = news.map(n => ({
        title: n.title || n.headline || "News Update",
-       summary: n.summary || n.description || "",
+       summary: n.summary || n.description || n.snippet || "",
        url: n.url || n.link || "#",
        source: n.source || n.publisher || "News Source"
     }));
+
+    let notable: any[] = [];
+    if (Array.isArray(rawInfo.notable)) {
+        notable = rawInfo.notable.map((n: any) => {
+            if (typeof n === 'string') {
+                const splitIndex = n.indexOf(':');
+                if (splitIndex !== -1 && splitIndex < 50) {
+                    return { title: n.substring(0, splitIndex).trim(), summary: n.substring(splitIndex + 1).trim() };
+                }
+                return { title: n, summary: "" };
+            }
+            if (typeof n === 'object') {
+                if (n.name && !n.title && !n.summary) {
+                    const splitIndex = n.name.indexOf(':');
+                    if (splitIndex !== -1 && splitIndex < 50) {
+                        return { title: n.name.substring(0, splitIndex).trim(), summary: n.name.substring(splitIndex + 1).trim() };
+                    }
+                    return { title: n.name, summary: "" };
+                }
+            }
+            return n;
+        });
+    } else if (rawInfo.notable && typeof rawInfo.notable === 'object') {
+        notable = [rawInfo.notable];
+    } else if (typeof rawInfo.notable === 'string') {
+        notable = [{ title: rawInfo.notable, summary: "" }];
+    }
 
     const relatedEntities = (rawInfo.relatedEntities && rawInfo.relatedEntities.length > 0) ? rawInfo.relatedEntities : [];
     
@@ -266,6 +389,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       coordinates: wp.coordinates || rawInfo.coordinates || { lat: 0, lng: 0 },
       boundary: rawInfo.boundary,
       news,
+      notable,
       relatedEntities
     };
   }, [rawInfo]);
@@ -275,28 +399,23 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const [wikiImage, setWikiImage] = useState<string | null>(null);
   const [expandedImage, setExpandedImage] = useState(false);
 
-  // Favorite Dialog State
   const [showFavoriteDialog, setShowFavoriteDialog] = useState(false);
   const [favoriteNameInput, setFavoriteNameInput] = useState("");
 
-  // Notes State
   const [notes, setNotes] = useState<Note[]>([]);
   const [isNotesExpanded, setIsNotesExpanded] = useState(false);
   const [newNote, setNewNote] = useState("");
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editNoteText, setEditNoteText] = useState("");
   
-  // Ref to track if we've initialized the expanded state for the current location
   const locationInitializedRef = useRef<string | null>(null);
 
-  // Clean up wiki image and reset tab when location changes
   useEffect(() => {
     setWikiImage(null);
     setActiveTab('overview');
     setShowFavoriteDialog(false);
   }, [info?.name]);
 
-  // Load Notes
   useEffect(() => {
     if (!info) {
         setNotes([]);
@@ -305,8 +424,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
     const locationKey = `notes_${info.name}_${(info.coordinates?.lat || 0).toFixed(4)}_${(info.coordinates?.lng || 0).toFixed(4)}`;
     
-    // Check if we already initialized this location to prevent overriding user toggle
-    // If it's a new location, we set default expanded state
     const isNewLocation = locationInitializedRef.current !== locationKey;
     
     if (isNewLocation) {
@@ -316,7 +433,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             try {
                 const parsed = JSON.parse(savedNotes);
                 setNotes(parsed);
-                // If notes exist, expand by default for new location
                 if (parsed.length > 0) setIsNotesExpanded(true);
                 else setIsNotesExpanded(false);
             } catch (e) {
@@ -324,7 +440,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                 setIsNotesExpanded(false);
             }
         } else if (info.defaultNote) {
-            // Initialize with default note
             const defNote: Note = {
                 id: `default-${Date.now()}`,
                 text: info.defaultNote,
@@ -341,7 +456,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     }
   }, [info]);
 
-  // Save Notes Helper
   const saveNotesToStorage = (updatedNotes: Note[]) => {
     if (!info) return;
     const locationKey = `notes_${info.name}_${(info.coordinates?.lat || 0).toFixed(4)}_${(info.coordinates?.lng || 0).toFixed(4)}`;
@@ -416,19 +530,15 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
   const hasNotes = notes && notes.length > 0;
 
-  // Handle Favorite Click
   const handleFavoriteClick = () => {
     if (showFavoriteDialog) {
         setShowFavoriteDialog(false);
         return;
     }
     
-    // Initial name suggestion
     if (isFavorite && currentFavoriteName) {
         setFavoriteNameInput(currentFavoriteName);
     } else {
-        // For route: Use route title or just info name
-        // info.name usually has the waypoint name. 
         if (routeNav && info?.routeContext?.title) {
             setFavoriteNameInput(info.routeContext.title);
         } else {
@@ -446,21 +556,20 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     }
   };
 
-  // Fetch image if population is missing
   useEffect(() => {
     const hasPopulation = isValidData(info?.population);
     
     if (info?.name && !hasPopulation) {
       const fetchImage = async () => {
         try {
-          const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(info.name)}&prop=pageimages&format=json&pithumbsize=400&origin=*&redirects=1`);
+          const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(info.imageSearchTerm || info.name)}&gsrlimit=1&prop=pageimages&format=json&pithumbsize=400&origin=*`);
           const data = await res.json();
           const pages = data.query?.pages;
           if (pages) {
             const pageId = Object.keys(pages)[0];
-            if (pageId !== "-1") {
-                const url = pages[pageId]?.thumbnail?.source;
-                setWikiImage(url || null);
+            if (pageId !== "-1" && pages[pageId]?.thumbnail?.source) {
+                const url = pages[pageId].thumbnail.source;
+                setWikiImage(url);
             } else {
                 setWikiImage(null);
             }
@@ -482,10 +591,10 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     setIsMoreNewsLoading(false);
   };
 
-  // Theme configuration
   const themes = {
     'modern': {
       container: "bg-black/75 backdrop-blur-md border border-cyan-400/30 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] text-white font-sans",
+      panelBg: "bg-transparent",
       header: "bg-gradient-to-r from-blue-900 to-cyan-900",
       headerTitle: "brand-font text-white",
       tag: "text-cyan-300 border-cyan-400/50 bg-cyan-900/60 rounded-full",
@@ -506,6 +615,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     },
     'retro-green': {
       container: "bg-black/85 backdrop-blur-sm border-2 border-green-400 shadow-[0_0_20px_rgba(74,222,128,0.2)] text-green-300 font-retro tracking-widest",
+      panelBg: "bg-transparent",
       header: "bg-green-900/30",
       headerTitle: "text-green-300 uppercase",
       tag: "text-black bg-green-400 border-green-400 rounded-none font-bold",
@@ -526,6 +636,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     },
     'retro-amber': {
       container: "bg-black/85 backdrop-blur-sm border-2 border-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.2)] text-amber-300 font-retro tracking-widest",
+      panelBg: "bg-transparent",
       header: "bg-amber-900/30",
       headerTitle: "text-amber-300 uppercase",
       tag: "text-black bg-amber-400 border-amber-400 rounded-none font-bold",
@@ -546,6 +657,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     },
     'parchment': {
       container: "bg-[#f4ead5] border border-[#8b5a2b] shadow-[4px_4px_10px_rgba(0,0,0,0.3)] text-[#3e2723] font-sans",
+      panelBg: "bg-transparent",
       header: "bg-[#e8d5b5]/30",
       headerTitle: "text-[#8b5a2b] font-bold uppercase tracking-wider brand-font",
       tag: "text-[#3e2723] bg-[#d2b48c] border border-[#8b5a2b] rounded-sm font-bold shadow-sm",
@@ -570,7 +682,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const isRetro = skin === 'retro-green' || skin === 'retro-amber';
   const isParchment = skin === 'parchment';
 
-  // Reduced font size for retro to avoid wrapping issues (matches modern size 2xl instead of 3xl)
   const titleSize = isRetro ? 'text-2xl' : 'text-2xl';
   const subtextSize = isRetro ? 'text-sm' : 'text-xs';
   const bodySize = isRetro ? 'text-lg' : 'text-sm';
@@ -579,7 +690,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const tabIconSize = isRetro ? 18 : 14;
 
   const renderNoteText = (text: string) => {
-    // Detect URLs starting with http:// or https://
     const parts = text.split(/(https?:\/\/[^\s]+)/g);
     return parts.map((part, i) => {
       if (part.match(/^https?:\/\//)) {
@@ -600,49 +710,164 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     });
   };
 
-  if (expandedImage && wikiImage) {
-      return (
-          <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setExpandedImage(false)}>
-              <div className="relative max-w-full max-h-full">
-                  <img src={wikiImage} alt={info?.name} className={`max-w-full max-h-[90vh] object-contain ${isRetro ? 'grayscale contrast-125' : (isParchment ? 'sepia brightness-90 contrast-110' : '')}`} />
-                  <button className={`absolute top-4 right-4 p-2 bg-black/50 text-white rounded-full hover:bg-white/20`}>
-                      <X size={24} />
-                  </button>
-              </div>
-          </div>
-      )
-  }
 
-  // Removed Full Skeleton for Sidebar during initial load
-
-  // If no info, don't render anything (Wait until data is resolved before showing sidebar)
 
   const schema = ENTITY_SCHEMAS[info?.entityType || 'city'] || ENTITY_SCHEMAS['city'];
 
-  const SECTION_RENDERERS: Record<string, () => React.ReactNode> = {
-    overview: () => (
+  interface SectionRenderer {
+    render: () => React.ReactNode;
+    copyText?: () => string;
+  }
+
+  const getCleanDescriptionLines = (info: any) => {
+      if (!info || !info.description) return [];
+      const lines = info.description.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0);
+      
+      const nameParts = (info.name || '').split(' ').filter((p: string) => p.length > 0);
+      if (lines.length > 0) {
+          const firstLineClean = lines[0].replace(/^#+\s/, '');
+          if (nameParts.some((part: string) => firstLineClean.toLowerCase().includes(part.toLowerCase()))) {
+              lines.shift();
+          }
+      }
+      
+      if (lines.length > 0) {
+          const firstLineClean = lines[0].replace(/^#+\s/, '').toLowerCase();
+          if (firstLineClean === 'overview' || firstLineClean === 'description') {
+              lines.shift();
+          }
+      }
+      
+      return lines;
+  };
+
+  const SECTION_RENDERERS: Record<string, SectionRenderer> = {
+    overview: {
+      copyText: () => {
+        if (!info) return '';
+        const lines = getCleanDescriptionLines(info);
+        const cleanText = lines.map(line => line.replace(/^#{1,3}\s/, '').replace(/\*\*(.*?)\*\*/g, '$1').replace(/__(.*?)__/g, '$1')).join('\n');
+        let txt = `${cleanText}\n`;
+        if (Array.isArray(info.notable) && info.notable.length > 0) {
+            txt += `\nNotable Facts\n`;
+            txt += info.notable.map((n: any) => `- ${normalizeDisplayText(n.title)}${n.summary ? `: ${normalizeDisplayText(n.summary)}` : ''}`).join('\n');
+        }
+        return txt.trim();
+      },
+      render: () => (
       <div className="space-y-5">
           {info.routeContext && (
               <div className="mb-2">
                    <h3 className={`text-sm font-bold uppercase tracking-widest mb-1 ${isRetro ? 'text-current' : isParchment ? 'text-[#8b5a2b]' : 'text-cyan-400'}`}>
                       {info.routeContext.title}
                   </h3>
-                  <p className={`leading-relaxed ${bodySize} font-medium ${theme.bodyText} mb-4 border-b ${isRetro ? 'border-current/30' : isParchment ? 'border-[#8b5a2b]/30' : 'border-white/10'} pb-4`}>
+                  <p className={`leading-relaxed ${bodySize} font-normal ${theme.bodyText} mb-4 border-b ${isRetro ? 'border-current/30' : isParchment ? 'border-[#8b5a2b]/30' : 'border-white/10'} pb-4`}>
                       {info.routeContext.text}
                   </p>
               </div>
           )}
-          <div className="relative group/desc">
-            <p className={`leading-relaxed ${bodySize} font-medium ${theme.bodyText} pr-8`}>
-            {info.description || "Description unavailable."}
-            </p>
-            <div className="absolute top-0 right-0 opacity-0 group-hover/desc:opacity-100 transition-opacity">
-              <CopyButton text={info.description || ""} skin={skin} />
+          {(info.description || (Array.isArray(info.notable) && info.notable.length > 0)) && (
+            <div className="relative group/desc">
+              <div className="absolute top-0 -right-2 opacity-0 group-hover/desc:opacity-100 transition-opacity z-10">
+                <CopyButton text={fullCopyText} skin={skin} className={`p-1.5 transition-colors ${theme.actionBtn}`} />
+              </div>
+              <div className={`leading-relaxed ${bodySize} font-normal ${theme.bodyText} pr-8 space-y-4`}>
+                {(() => {
+                    const lines = getCleanDescriptionLines(info);
+                    
+                    const blocks: React.ReactNode[] = [];
+                    let currentList: string[] = [];
+                    
+                    const flushList = (keyPrefix: number) => {
+                        if (currentList.length > 0) {
+                            blocks.push(
+                                <ul key={`list-${keyPrefix}`} className="list-disc pl-5 space-y-1">
+                                    {currentList.map((b, bIdx) => (
+                                        <li key={bIdx}>{b}</li>
+                                    ))}
+                                </ul>
+                            );
+                            currentList = [];
+                        }
+                    };
+
+                    lines.forEach((line: string, i: number) => {
+                        let text = line.replace(/\*\*(.*?)\*\*/g, '$1').replace(/__(.*?)__/g, '$1'); 
+                        
+                        if (text.match(/^[-*]\s/)) {
+                            currentList.push(text.replace(/^[-*]\s/, ''));
+                            return;
+                        }
+                        
+                        flushList(i);
+                        
+                        const isMarkdownHeading = text.startsWith('## ') || text.startsWith('# ');
+                        const cleanedText = text.replace(/^#{1,3}\s/, '');
+                        const isHeuristicHeading = cleanedText.split(' ').length <= 8 && cleanedText.length < 60 && !cleanedText.match(/[.!?:;]$/) && !cleanedText.match(/^[a-z]/) && lines[i+1] && !lines[i+1].match(/^[-*]\s/);
+                        
+                        if (isMarkdownHeading || isHeuristicHeading) {
+                            blocks.push(
+                                <h3 key={`h-${i}`} 
+                                    className={`mt-4 mb-2 ${isParchment ? 'text-[#8b5a2b] font-bold text-lg' : 'font-bold'}`}>
+                                    {cleanedText}
+                                </h3>
+                            );
+                        } else {
+                            const isFirstParagraph = !blocks.some(b => (b as any).type === 'p');
+                            if (isParchment && isFirstParagraph && cleanedText.length > 0) {
+                                blocks.push(
+                                    <p key={`p-${i}`} className="clear-both">
+                                        <span 
+                                            className="float-left text-5xl mr-2 font-bold text-[#8b5a2b] leading-[0.75] pt-1" 
+                                            style={{ fontFamily: '"IM Fell Double Pica", serif' }}
+                                        >
+                                            {cleanedText.charAt(0)}
+                                        </span>
+                                        {cleanedText.slice(1)}
+                                    </p>
+                                );
+                            } else {
+                                blocks.push(<p key={`p-${i}`}>{cleanedText}</p>);
+                            }
+                        }
+                    });
+                    
+                    flushList(lines.length);
+                    
+                    if (Array.isArray(info.notable) && info.notable.length > 0) {
+                        blocks.push(
+                            <h3 key={`h-notable`} 
+                                className={`mt-6 mb-2 ${isParchment ? 'text-[#8b5a2b] font-bold text-lg' : 'font-bold'}`}>
+                                Notable Facts
+                            </h3>
+                        );
+                        blocks.push(
+                            <ul key={`list-notable`} className="list-disc pl-5 space-y-3">
+                              {info.notable.map((n: any, i: number) => (
+                                <li key={`notable-${i}`} className={`font-normal ${bodySize} ${theme.bodyText} opacity-90 leading-relaxed`}>
+                                  {n.title}
+                                  {n.summary && <span className="block mt-1 opacity-80 text-sm">{n.summary}</span>}
+                                  {n.wikipediaUrl && (
+                                    <a href={n.wikipediaUrl} target="_blank" rel="noopener noreferrer" className={`text-xs flex items-center gap-1 mt-1 hover:opacity-80 transition-opacity ${theme.actionText || 'text-blue-400'}`}>
+                                      Learn more →
+                                    </a>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                        );
+                    }
+                    
+                    return blocks;
+                })()}
+              </div>
             </div>
-          </div>
+          )}
       </div>
-    ),
-    historicalContext: () => (
+      )
+    },
+    historicalContext: {
+      render: () => (
       (info.waypoint?.canonicalName || (info.waypoint?.alternateNames && info.waypoint.alternateNames.length > 0)) ? (
         <div className={`p-3 ${theme.card}`}>
             <div className="flex items-center gap-2 mb-2 text-current opacity-80">
@@ -667,19 +892,23 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             )}
         </div>
       ) : null
-    ),
-    historicalPeriod: () => (
+      )
+    },
+    historicalPeriod: {
+      render: () => (
       info.historicalPeriod ? (
         <div className={`p-3 ${theme.card}`}>
             <div className="flex items-center gap-2 mb-1 text-current opacity-80">
                 <Crown size={16} />
                 <span className={`${smallTextSize} font-bold uppercase`}>Historical Period</span>
             </div>
-            <p className={`${isRetro ? 'text-base' : 'text-sm'} font-bold`}>{info.historicalPeriod}</p>
+            <p className={`${isRetro ? 'text-base' : 'text-sm'} font-normal`}>{info.historicalPeriod}</p>
         </div>
       ) : null
-    ),
-    keyFigures: () => (
+      )
+    },
+    keyFigures: {
+      render: () => (
       info.entities && info.entities.length > 0 ? (
         <div className="relative group/facts">
           <div className={`flex items-center justify-between mb-2 ${theme.icon}`}>
@@ -689,34 +918,41 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
               </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            {info.entities.map((e: string, i: number) => (
-               <span key={i} className={`px-2 py-1 text-xs rounded-full border ${isRetro ? 'border-current text-current' : isParchment ? 'border-[#8b5a2b] bg-[#d2b48c] text-[#3e2723]' : 'border-cyan-500/30 bg-cyan-900/30 text-cyan-300'}`}>{e}</span>
-            ))}
+            {info.entities.map((e: any, i: number) => {
+               const text = normalizeDisplayText(e);
+               if (!text) return null;
+               return <span key={i} className={`px-2 py-1 text-xs rounded-full border ${isRetro ? 'border-current text-current' : isParchment ? 'border-[#8b5a2b] bg-[#d2b48c] text-[#3e2723]' : 'border-cyan-500/30 bg-cyan-900/30 text-cyan-300'}`}>{text}</span>
+            })}
           </div>
         </div>
       ) : null
-    ),
-    importantEvents: () => (
-      info.contextNotes && info.contextNotes.length > 0 ? (
-        <div className="relative group/facts">
-          <div className={`flex items-center justify-between mb-2 ${theme.icon}`}>
-              <div className="flex items-center gap-2">
-                <Info size={16} />
-                <span className={`${isRetro ? 'text-sm' : 'text-xs'} font-bold uppercase`}>Context Notes</span>
-              </div>
-          </div>
-          <ul className="space-y-2">
-              {info.contextNotes.map((fact: any, idx: number) => (
-              <li key={idx} className={`flex gap-3 ${bodySize} ${theme.bodyText}`}>
-                  <span className={`block w-1.5 h-1.5 mt-2 flex-shrink-0 ${theme.listDot}`} />
-                  {fact}
-              </li>
-              ))}
-          </ul>
-        </div>
-      ) : null
-    ),
-    modernContext: () => (
+      )
+    },
+
+    modernContext: {
+      copyText: () => {
+         if (!info) return '';
+         let txt = '';
+         if (info.population) {
+             txt += `Population\n`;
+             if (info.population.historical) {
+                 txt += `Historical: ${info.population.historical.formattedValue}`;
+                 if (info.population.historical.timeframe && info.population.historical.timeframe !== "Unknown") {
+                     txt += ` (${info.population.historical.timeframe})`;
+                 }
+                 txt += `\n`;
+             }
+             if (info.population.current) {
+                 txt += `Modern: ${info.population.current.formattedValue}\n`;
+             }
+             txt += `\n`;
+         }
+         if (info.climate) {
+             txt += `Climate\n${info.climate.name}\n${info.climate.description || ''}\n\n`;
+         }
+         return txt.trim();
+      },
+      render: () => (
       (info.population || info.climate || wikiImage) ? (
         <div className={`grid ${((info.population || wikiImage) && info.climate) ? 'grid-cols-2' : 'grid-cols-1'} gap-3`}>
           {info.population ? (
@@ -724,13 +960,13 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                 <div className={`flex items-center justify-between mb-2`}>
                   <div className={`flex items-center gap-2 ${theme.icon}`}>
                       <Users size={16} />
-                      <span className={`${smallTextSize} font-bold uppercase`}>Population Context</span>
+                      <span className={`${smallTextSize} font-bold uppercase`}>Population</span>
                   </div>
                 </div>
                 {info.population.historical && (
                   <div className="mb-2">
                     <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Historical</span>
-                    <p className={`${isRetro ? 'text-base' : 'text-sm'} font-bold font-mono`}>{info.population.historical.formattedValue}</p>
+                    <p className={`${isRetro ? 'text-base' : 'text-sm'} font-normal font-mono`}>{info.population.historical.formattedValue}</p>
                     {info.population.historical.timeframe && info.population.historical.timeframe !== "Unknown" && (
                       <p className="text-xs opacity-70 font-mono mt-0.5">{info.population.historical.timeframe}</p>
                     )}
@@ -739,18 +975,23 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                 {info.population.current && (
                   <div>
                     <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Modern</span>
-                    <p className={`${isRetro ? 'text-base' : 'text-sm'} font-bold font-mono`}>{info.population.current.formattedValue}</p>
+                    <p className={`${isRetro ? 'text-base' : 'text-sm'} font-normal font-mono`}>{info.population.current.formattedValue}</p>
                   </div>
                 )}
             </div>
-          ) : wikiImage ? (
+           ) : wikiImage ? (
             <div 
               className={`p-0 overflow-hidden relative h-28 ${theme.card} group cursor-pointer`}
               onClick={() => setExpandedImage(true)}
             >
                <img src={wikiImage} alt={info.name} className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-110 ${isRetro ? 'grayscale contrast-125' : ''}`} />
-               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-1.5 flex items-center gap-1">
-                  <ImageIcon size={12} className="text-white/80" />
+               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-2 pt-4 flex items-end gap-2">
+                  <ImageIcon size={14} className="text-white/80 shrink-0" />
+                  {info.imageCaption && (
+                    <span className="text-white/90 text-xs truncate font-medium">
+                      {info.imageCaption}
+                    </span>
+                  )}
                </div>
             </div>
           ) : null}
@@ -763,117 +1004,125 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                       <span className={`${smallTextSize} font-bold uppercase`}>Climate</span>
                   </div>
                 </div>
-                <p className={`${isRetro ? 'text-base' : 'text-sm'} font-bold leading-tight`}>{info.climate.name}</p>
-                {info.climate.koppenCode && (
-                  <p className="text-xs opacity-70 mt-1 font-mono">Köppen: {info.climate.koppenCode}</p>
+                <p className={`${isRetro ? 'text-base' : 'text-sm'} font-normal leading-tight`}>{info.climate.name}</p>
+                {info.climate.description && (
+                  <p className="text-xs opacity-90 mt-2 font-normal leading-relaxed">{info.climate.description}</p>
                 )}
             </div>
           )}
         </div>
       ) : null
-    ),
-    relatedEntities: () => {
-      if (!info.relatedEntities || info.relatedEntities.length === 0) {
-        return null;
-      }
-
-      // Group entities by type
-      const groups = info.relatedEntities.reduce((acc: any, entity: any) => {
-        const typeLabel = entity.type ? entity.type.charAt(0).toUpperCase() + entity.type.slice(1) + 's' : 'Other';
-        if (!acc[typeLabel]) acc[typeLabel] = [];
-        acc[typeLabel].push(entity);
-        return acc;
-      }, {});
-
-      return (
-        <div className="space-y-6">
-            <div className={`flex items-center gap-2 mb-2 ${theme.icon} border-b ${isRetro ? 'border-current/30' : isParchment ? 'border-[#8b5a2b]/30' : 'border-white/10'} pb-2`}>
-                <Crown size={20} />
-                <span className={`${isRetro ? 'text-base' : 'text-sm'} font-bold uppercase tracking-wider`}>Notable</span>
-            </div>
-            {Object.keys(groups).map((type: string) => (
-               <div key={type} className="space-y-3">
-                 <h4 className={`${isRetro ? 'text-sm' : 'text-xs'} font-bold uppercase opacity-80 ${theme.headerTitle}`}>{type}</h4>
-                 <div className="grid gap-2">
-                   {groups[type].map((item: any, idx: number) => (
-                       <div key={idx} className={`p-3 ${theme.card} flex items-center gap-3 relative group/notable`}>
-                           <span className={`block w-1.5 h-1.5 flex-shrink-0 ${theme.listDot}`} />
-                           <span className={`${bodySize} font-bold ${theme.headerTitle}`}>{item.name}</span>
-                           <div className="absolute top-1/2 -translate-y-1/2 right-2 opacity-0 group-hover/notable:opacity-100 transition-opacity">
-                              <CopyButton text={item.name} skin={skin} />
-                           </div>
-                       </div>
-                   ))}
-                 </div>
-               </div>
-            ))}
-        </div>
-      );
+      )
     },
-    liveNews: () => (
+    liveNews: {
+      copyText: () => {
+         if (!info || !info.news || info.news.length === 0) return '';
+         let txt = `News\n`;
+         info.news.forEach((item: any) => {
+             txt += `- ${normalizeDisplayText(item.title)}\n`;
+         });
+         return txt.trim();
+      },
+      render: () => {
+      if (!info.news || info.news.length === 0) {
+         return null;
+      }
+      
+      return (
       <div className="space-y-4">
         <div className={`flex items-center gap-2 mb-2 ${theme.icon}`}>
             <Newspaper size={16} />
-            <span className={`${isRetro ? 'text-sm' : 'text-xs'} font-bold uppercase`}>Live News</span>
+            <span className={`${isRetro ? 'text-sm' : 'text-xs'} font-bold uppercase`}>News</span>
         </div>
-        {isNewsFetching && !isMoreNewsLoading && info.news.length === 0 ? (
-           <div className="flex flex-col items-center justify-center py-8 opacity-50 animate-pulse">
-              <Loader2 size={24} className="animate-spin mb-2 text-current" />
-              <p className={smallTextSize}>Updating news...</p>
-           </div>
-        ) : info.news && info.news.length > 0 ? (
-           <>
-             {info.news.map((item: any, idx: number) => (
-                <div key={idx} className={`p-4 ${theme.card} flex flex-col gap-2 group/news`}>
-                   <div className="flex justify-between items-start gap-2">
-                     <span className={`text-[10px] uppercase tracking-wider opacity-70 ${theme.subtext}`}>{item.source}</span>
-                     <a href={item.url} target="_blank" rel="noopener noreferrer" className="opacity-0 group-hover/news:opacity-100 transition-opacity p-1 hover:bg-white/10 rounded">
-                        <ExternalLink size={14} className={theme.icon} />
-                     </a>
-                   </div>
-                   <a href={item.url} target="_blank" rel="noopener noreferrer" className={`${bodySize} font-bold leading-tight ${theme.headerTitle} hover:underline decoration-1 underline-offset-2`}>
-                     {item.title}
-                   </a>
-                   {item.summary && (
-                      <p className={`${subtextSize} ${theme.bodyText} opacity-90 leading-relaxed`}>
-                        {item.summary}
-                      </p>
-                   )}
+        <>
+          {info.news.map((item: any, idx: number) => (
+             <div key={idx} className={`p-4 ${theme.card} flex flex-col gap-2 group/news`}>
+                <div className="flex justify-between items-start gap-2">
+                  <span className={`text-[10px] uppercase tracking-wider opacity-70 ${theme.subtext}`}>{item.source}</span>
+                  <a href={item.url} target="_blank" rel="noopener noreferrer" className="opacity-0 group-hover/news:opacity-100 transition-opacity p-1 hover:bg-white/10 rounded">
+                     <ExternalLink size={14} className={theme.icon} />
+                  </a>
                 </div>
-             ))}
-             <button 
-               onClick={handleLoadMore} 
-               disabled={isMoreNewsLoading}
-               className={`w-full py-3 mt-2 transition-colors ${theme.loadMoreBtn}`}
-             >
-               {isMoreNewsLoading ? "Scanning..." : "Load More News"}
-             </button>
-           </>
-        ) : (
-           <div className="text-center py-10 opacity-60">
-              <Newspaper size={32} className="mx-auto mb-2 opacity-50" />
-              {info.entityType === 'historical_waypoint' ? (
-                 <>
-                   <p className={theme.bodyText}>No current news available.</p>
-                   <p className={`${smallTextSize} mt-2`}>This waypoint represents a historical location and is not eligible for live news retrieval.</p>
-                 </>
-              ) : (
-                 <p className={theme.bodyText}>No recent transmissions found.</p>
-              )}
-           </div>
-        )}
+                <a href={item.url} target="_blank" rel="noopener noreferrer" className={`${bodySize} font-normal leading-tight ${theme.headerTitle} hover:underline decoration-1 underline-offset-2`}>
+                  {normalizeDisplayText(item.title)}
+                </a>
+                {normalizeDisplayText(item.summary) && (
+                   <p className={`${subtextSize} ${theme.bodyText} opacity-90 leading-relaxed`}>
+                     {normalizeDisplayText(item.summary)}
+                   </p>
+                )}
+             </div>
+          ))}
+          <button 
+            onClick={handleLoadMore} 
+            disabled={isMoreNewsLoading}
+            className={`w-full py-3 mt-2 transition-colors ${theme.loadMoreBtn}`}
+          >
+            {isMoreNewsLoading ? "Scanning..." : "Load More News"}
+          </button>
+        </>
       </div>
-    )
+      );
+      }
+    },
+    relatedPlaces: {
+      render: () => {
+      if (!info.relatedEntities || info.relatedEntities.length === 0) return null;
+      return (
+        <div className="space-y-4">
+            <div className={`flex items-center gap-2 mb-2 ${theme.icon} border-b ${isRetro ? 'border-current/30' : isParchment ? 'border-[#8b5a2b]/30' : 'border-white/10'} pb-2`}>
+                <MapPin size={20} />
+                <span className={`${isRetro ? 'text-base' : 'text-sm'} font-bold uppercase tracking-wider`}>Related Places</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {info.relatedEntities.map((place: any, i: number) => {
+                 const text = normalizeDisplayText(place);
+                 if (!text) return null;
+                 return <span key={i} className={`px-2 py-1 text-xs rounded-full border ${isRetro ? 'border-current text-current' : isParchment ? 'border-[#8b5a2b] bg-[#d2b48c] text-[#3e2723]' : 'border-cyan-500/30 bg-cyan-900/30 text-cyan-300'}`}>{text}</span>
+              })}
+            </div>
+        </div>
+      );
+      }
+    }
   };
 
+  const fullCopyText = useMemo(() => {
+      if (!info) return '';
+      let txt = `${info.name || 'Location'}\n\n`;
+      schema.ui.sections.forEach((section: any) => {
+          const renderer = SECTION_RENDERERS[section.id];
+          if (renderer && renderer.copyText) {
+              const copyData = renderer.copyText();
+              if (copyData) txt += copyData + '\n\n';
+          }
+      });
+      return txt.trim();
+  }, [info, schema]);
 
   if (!info) return null;
 
-  const showContentSkeleton = isLoading && (!info?.description || info.description === "");
+  const showContentSkeleton = isLoading && (!info?.description);
+  const contextItems = info.contextNotes;
 
   return (
-    <div className="absolute top-[282px] right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-342px)] flex flex-col gap-3 animate-in slide-in-from-right-12 fade-in duration-500 pointer-events-none">
-        
+    <>
+      {expandedImage && wikiImage && (
+          <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center p-4 pointer-events-auto" onClick={() => setExpandedImage(false)}>
+              <div className="relative max-w-full max-h-[85vh] flex flex-col items-center">
+                  <img src={wikiImage} alt={info?.name} className={`max-w-full max-h-full object-contain ${isRetro ? 'grayscale contrast-125' : (isParchment ? 'sepia brightness-90 contrast-110' : '')}`} />
+                  {info?.imageCaption && (
+                      <div className="mt-4 text-white/90 text-sm md:text-base max-w-2xl text-center bg-black/50 px-4 py-2 rounded">
+                          {info.imageCaption}
+                      </div>
+                  )}
+                  <button className={`absolute -top-4 -right-4 p-2 bg-black text-white rounded-full hover:bg-white/20`} onClick={(e) => { e.stopPropagation(); setExpandedImage(false); }}>
+                      <X size={24} />
+                  </button>
+              </div>
+          </div>
+      )}
+      <div className="absolute top-[282px] right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-342px)] flex flex-col gap-3 animate-in slide-in-from-right-12 fade-in duration-500 pointer-events-none">
         {/* Main Info Box */}
         <div className={`${theme.container} flex flex-col shrink min-h-0 overflow-hidden pointer-events-auto`}>
           {/* Header */}
@@ -883,8 +1132,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
               <X size={20} />
             </button>
             
-            {/* 2. Save Location icon button */}
-            <div className="flex justify-center w-full -mt-[10px] mb-[26px] relative z-10">
+            {/* 2. Save Location and Copy text buttons */}
+            <div className="flex justify-center w-full -mt-[10px] mb-[26px] relative z-10 gap-2">
               <button 
                 onClick={handleFavoriteClick} 
                 className={`p-2 transition-colors ${theme.actionBtn}`} 
@@ -945,7 +1194,14 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                  <h2 className={`${titleSize} font-bold text-center ${theme.headerTitle}`}>
                    {routeNav ? `${routeNav.current}. ` : ''}{info.name}
                  </h2>
-                 <span className={`${smallTextSize} uppercase px-2 py-0.5 ${theme.tag}`}>{info.type}</span>
+                 <span className={`${smallTextSize} uppercase px-2 py-0.5 ${theme.tag}`}>
+                   {info.entityType ? info.entityType.replace(/_/g, ' ').toUpperCase() : (info.type === 'Point of Interest' ? 'POINT OF INTEREST' : info.type.toUpperCase())}
+                 </span>
+                 {info.locationString && (
+                   <div className={`mt-1 text-sm font-medium ${isRetro ? 'text-current opacity-90' : isParchment ? 'text-[#5a3e1b]' : 'text-slate-300'}`}>
+                     Location: {info.locationString}
+                   </div>
+                 )}
               </div>
               <p className={`${subtextSize} font-mono ${theme.subtext}`}>
                 {isValidCoordinates(info.coordinates)
@@ -974,19 +1230,33 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
           
           {/* Scrollable Content */}
-          <div className="p-5 overflow-y-auto custom-scrollbar flex-1 relative">
-            {showContentSkeleton ? (
-               <div className="space-y-6 animate-pulse mt-2">
-                 <div className="space-y-3">
-                    <div className={`h-4 w-full ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
+          <div className={`flex-1 overflow-y-auto ${theme.panelBg} relative pointer-events-auto`}>
+            {isError ? (
+               <div className="p-6 flex flex-col items-center justify-center h-48 text-center space-y-3">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center mb-1 ${isRetro ? 'bg-red-900/40 text-red-400' : 'bg-red-500/20 text-red-400'}`}>
+                      <X size={20} />
+                  </div>
+                  <p className={`font-medium ${theme.headerTitle}`}>{errorMessage || "Unable to retrieve location details"}</p>
+                  {onRetry && (
+                     <button onClick={onRetry} className={`px-4 py-1.5 mt-2 text-xs uppercase tracking-wider font-bold rounded transition-colors bg-white/10 hover:bg-white/20 ${theme.bodyText}`}>
+                        Retry
+                     </button>
+                  )}
+               </div>
+            ) : showContentSkeleton ? (
+               <div className="p-6 space-y-8 animate-pulse">
+                  {/* skeleton content */}
+                  <div className="space-y-3">
+                    <div className={`h-4 ${isRetro ? 'bg-green-500/20' : 'bg-white/10'} rounded w-3/4`}></div>
+                    <div className={`h-4 ${isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
                     <div className={`h-4 w-[90%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
                  </div>
                </div>
             ) : (
-                <div className="space-y-8 animate-in fade-in duration-300">
+                <div className="p-5 space-y-8 animate-in fade-in duration-300">
                     {schema.ui.sections.map((section: any) => {
                         const renderer = SECTION_RENDERERS[section.id];
-                        if (renderer) return <React.Fragment key={section.id}>{renderer()}</React.Fragment>;
+                        if (renderer && renderer.render) return <React.Fragment key={section.id}>{renderer.render()}</React.Fragment>;
                         return null;
                     })}
                 </div>
@@ -1081,6 +1351,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           </div>
         )}
     </div>
+    </>
   );
 };
 
