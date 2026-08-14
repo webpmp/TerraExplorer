@@ -2,15 +2,16 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ENTITY_SCHEMAS } from '../entitySchema';
 import { LocationInfo, SkinType, isValidCoordinates, LocationType } from '../types';
+import { formatUserFacingCategory, formatClimateName } from '../utils/categoryFormatting';
 import { 
-  X, Users, Thermometer, Info, Newspaper, Crown, Map, Pin, ExternalLink, Loader2,
+  X, Users, Info, Crown, Map, Pin, ExternalLink, Loader2,
   BookOpen, Rocket, Trophy, Music, FlaskConical, Palette, Clapperboard, Image as ImageIcon,
   Copy, Check, ChevronDown, ChevronUp, Plus, Trash2, Edit2, Save, StickyNote, ChevronLeft, ChevronRight,
   MapPin, Route as RouteIcon
 } from 'lucide-react';
 
 
-const normalizeDisplayText = (value: any): string => {
+export const normalizeDisplayText = (value: any): string => {
   let str = '';
   if (typeof value === 'string') {
     str = value;
@@ -55,30 +56,36 @@ interface Note {
   timestamp: number;
 }
 
+// Helper to check for placeholder / unavailable strings that must NEVER be displayed in the UI
+export const isPlaceholderString = (val: any): boolean => {
+  if (val === null || val === undefined) return true;
+  const s = String(val).trim().toLowerCase();
+  return (
+    s === '' ||
+    s === 'unknown' ||
+    s === 'unavailable' ||
+    s === 'n/a' ||
+    s === 'na' ||
+    s === 'not available' ||
+    s === 'not applicable' ||
+    s === 'no data' ||
+    s === 'none' ||
+    s === 'null' ||
+    s === 'undefined' ||
+    s === '0' ||
+    s === 'uninhabited' ||
+    s === 'no permanent population' ||
+    s.startsWith('climate data unavailable') ||
+    s.startsWith('climate data is unavailable') ||
+    s.startsWith('specific climate data is unavailable')
+  );
+};
+
 // Helper to validate data availability
 const isValidData = (val: string | null | undefined, isDescription: boolean = false) => {
   if (val === null || val === undefined) return false;
-  const v = val.toString().toLowerCase().trim();
-  if (v === '' || v === 'undefined' || v === 'null') return false;
-  
-  if (isDescription) {
-    if (v === 'n/a' || v === 'not applicable' || v === 'not available' || v === 'unknown') return false;
-    return true;
-  }
-  
-  // Check for keywords appearing within the string (substring match)
-  if (v.includes('n/a') || v.includes('not applicable') || v.includes('not available') || v.includes('unknown') || v.includes('varies') || v.includes('historical')) {
-      return false;
-  }
-
-  // Exact matches for specific states
-  return ![
-    'none', 
-    '', 
-    'uninhabited', 
-    '0', 
-    'no permanent population'
-  ].includes(v);
+  if (isPlaceholderString(val)) return false;
+  return true;
 };
 
 // Helper to safely convert mixed array elements to plain strings (useful for Copy buttons)
@@ -162,6 +169,23 @@ const renderSafeText = (item: any): React.ReactNode => {
   );
 };
 
+export const SectionHeader: React.FC<{
+  title: string;
+  icon?: React.ReactNode;
+  theme?: any;
+  isRetro?: boolean;
+  isParchment?: boolean;
+  className?: string;
+}> = ({ title, icon, theme = {}, isRetro = false, isParchment = false, className = "" }) => {
+  return (
+    <div className={`info-panel-section-header flex items-center gap-2 mt-5 mb-2 ${theme.icon || ''} ${className}`}>
+      {icon && <span className="shrink-0 opacity-80">{icon}</span>}
+      <h3 className={`font-bold uppercase tracking-wider leading-tight ${isRetro ? 'text-lg text-current' : isParchment ? 'text-lg text-[#8b5a2b]' : 'text-base text-white/95'}`}>
+        {title}
+      </h3>
+    </div>
+  );
+};
 
 const InfoPanel: React.FC<InfoPanelProps> = ({ 
   info: rawInfo, 
@@ -273,7 +297,10 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     
     // 5. Population and Climate
     let population = null;
-    if (rawInfo.population) {
+    const rawEntityType = (wp.entityType || rawInfo.entityType || rawInfo.type || '').toString().toLowerCase();
+    const isSettlement = rawEntityType === 'city' || rawEntityType === 'town' || rawEntityType === 'village' || rawEntityType === 'municipality' || rawEntityType === 'settlement' || rawEntityType === 'country' || rawEntityType === 'state';
+
+    if (rawInfo.population && isSettlement) {
         let currentText = "";
         let historicalText = "";
         let timeframe = "";
@@ -301,13 +328,13 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             }
         }
         
-        if (currentText === "[object Object]") currentText = "";
-        if (historicalText === "[object Object]") historicalText = "";
+        if (isPlaceholderString(currentText)) currentText = "";
+        if (isPlaceholderString(historicalText)) historicalText = "";
         
         if (currentText || historicalText) {
             population = {
                 current: currentText ? { formattedValue: currentText } : null,
-                historical: historicalText ? { formattedValue: historicalText, timeframe } : null
+                historical: historicalText ? { formattedValue: historicalText, timeframe: isPlaceholderString(timeframe) ? "" : timeframe } : null
             };
         }
     }
@@ -315,12 +342,21 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     
     let climate = null;
     if (rawInfo.climate) {
-        if (rawInfo.climate.name && rawInfo.climate.description) {
-            climate = rawInfo.climate; // Legacy format
-        } else if (typeof rawInfo.climate === 'object' && rawInfo.climate.value) {
-            climate = { name: rawInfo.climate.value, description: rawInfo.climate.description || "" };
-        } else {
-            climate = { name: String(rawInfo.climate), description: "" };
+        let cName = "";
+        let cDesc = "";
+        if (typeof rawInfo.climate === 'string') {
+            cName = rawInfo.climate;
+        } else if (typeof rawInfo.climate === 'object') {
+            cName = rawInfo.climate.name || rawInfo.climate.value || "";
+            cDesc = rawInfo.climate.description || "";
+        }
+        
+        if (!isPlaceholderString(cName)) {
+            climate = {
+                name: cName,
+                description: isPlaceholderString(cDesc) ? "" : cDesc,
+                koppenCode: rawInfo.climate.koppenCode || ""
+            };
         }
     }
     const climateSource = climate ? "Enriched Geographic Metadata (rawInfo.climate)" : "None";
@@ -396,6 +432,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   
   const [activeTab, setActiveTab] = useState<'overview' | 'news' | 'entities'>('overview');
   const [isMoreNewsLoading, setIsMoreNewsLoading] = useState(false);
+  const [images, setImages] = useState<string[]>([]);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [wikiImage, setWikiImage] = useState<string | null>(null);
   const [expandedImage, setExpandedImage] = useState(false);
 
@@ -411,6 +449,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const locationInitializedRef = useRef<string | null>(null);
 
   useEffect(() => {
+    setImages([]);
+    setCurrentImageIndex(0);
     setWikiImage(null);
     setActiveTab('overview');
     setShowFavoriteDialog(false);
@@ -557,33 +597,54 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   };
 
   useEffect(() => {
-    const hasPopulation = isValidData(info?.population);
-    
-    if (info?.name && !hasPopulation) {
-      const fetchImage = async () => {
-        try {
-          const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(info.imageSearchTerm || info.name)}&gsrlimit=1&prop=pageimages&format=json&pithumbsize=400&origin=*`);
-          const data = await res.json();
-          const pages = data.query?.pages;
-          if (pages) {
-            const pageId = Object.keys(pages)[0];
-            if (pageId !== "-1" && pages[pageId]?.thumbnail?.source) {
-                const url = pages[pageId].thumbnail.source;
-                setWikiImage(url);
-            } else {
-                setWikiImage(null);
+    if (!info?.name) {
+      setImages([]);
+      setWikiImage(null);
+      return;
+    }
+
+    const fetchImages = async () => {
+      try {
+        const foundUrls: string[] = [];
+
+        // 1. Existing image fields on info
+        if (info.primaryImage && typeof info.primaryImage === 'string' && !foundUrls.includes(info.primaryImage)) {
+          foundUrls.push(info.primaryImage);
+        }
+        if (Array.isArray(info.images)) {
+          for (const img of info.images) {
+            if (typeof img === 'string' && !foundUrls.includes(img)) {
+              foundUrls.push(img);
             }
           }
-        } catch (e) {
-          console.error("Failed to fetch image", e);
-          setWikiImage(null);
         }
-      };
-      fetchImage();
-    } else if (info?.name && hasPopulation) {
+
+        // 2. Fetch images from Wikipedia
+        const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(info.imageSearchTerm || info.name)}&gsrlimit=4&prop=pageimages&format=json&pithumbsize=600&origin=*`);
+        const data = await res.json();
+        const pages = data.query?.pages;
+        if (pages) {
+          const sortedPageIds = Object.keys(pages).sort((a, b) => ((pages[a] as any).index || 0) - ((pages[b] as any).index || 0));
+          for (const pageId of sortedPageIds) {
+            if (pageId !== "-1" && pages[pageId]?.thumbnail?.source) {
+              const url = pages[pageId].thumbnail.source;
+              if (!foundUrls.includes(url)) {
+                foundUrls.push(url);
+              }
+            }
+          }
+        }
+
+        setImages(foundUrls);
+        setWikiImage(foundUrls[0] || null);
+      } catch (e) {
+        console.error("Failed to fetch image", e);
+        setImages([]);
         setWikiImage(null);
-    }
-  }, [info?.name, info?.population]);
+      }
+    };
+    fetchImages();
+  }, [info?.name, info?.imageSearchTerm, info?.primaryImage]);
 
   const handleLoadMore = async () => {
     setIsMoreNewsLoading(true);
@@ -721,19 +782,18 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
   const getCleanDescriptionLines = (info: any) => {
       if (!info || !info.description) return [];
-      const lines = info.description.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0);
+      const descText = typeof info.description === 'string'
+        ? info.description
+        : (info.description?.text || (Array.isArray(info.description?.paragraphs) ? info.description.paragraphs.join('\n\n') : ''));
       
-      const nameParts = (info.name || '').split(' ').filter((p: string) => p.length > 0);
-      if (lines.length > 0) {
-          const firstLineClean = lines[0].replace(/^#+\s/, '');
-          if (nameParts.some((part: string) => firstLineClean.toLowerCase().includes(part.toLowerCase()))) {
-              lines.shift();
-          }
-      }
+      const lines = descText.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0);
       
       if (lines.length > 0) {
-          const firstLineClean = lines[0].replace(/^#+\s/, '').toLowerCase();
-          if (firstLineClean === 'overview' || firstLineClean === 'description') {
+          const firstLineClean = lines[0].replace(/^#+\s*/, '').trim().toLowerCase();
+          const infoNameClean = (info.name || '').trim().toLowerCase();
+          
+          // Only shift if the first line is strictly a standalone title header matching name, 'overview', or 'description'
+          if (firstLineClean === infoNameClean || firstLineClean === 'overview' || firstLineClean === 'description') {
               lines.shift();
           }
       }
@@ -749,8 +809,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         const cleanText = lines.map(line => line.replace(/^#{1,3}\s/, '').replace(/\*\*(.*?)\*\*/g, '$1').replace(/__(.*?)__/g, '$1')).join('\n');
         let txt = `${cleanText}\n`;
         if (Array.isArray(info.notable) && info.notable.length > 0) {
-            txt += `\nNotable Facts\n`;
-            txt += info.notable.map((n: any) => `- ${normalizeDisplayText(n.title)}${n.summary ? `: ${normalizeDisplayText(n.summary)}` : ''}`).join('\n');
+            txt += `\nNotable Facts\n\n`;
+            txt += info.notable.map((n: any) => `${normalizeDisplayText(n.title)}${n.summary ? `\n${normalizeDisplayText(n.summary)}` : ''}`).join('\n\n');
         }
         return txt.trim();
       },
@@ -816,14 +876,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                             const isFirstParagraph = !blocks.some(b => (b as any).type === 'p');
                             if (isParchment && isFirstParagraph && cleanedText.length > 0) {
                                 blocks.push(
-                                    <p key={`p-${i}`} className="clear-both">
-                                        <span 
-                                            className="float-left text-5xl mr-2 font-bold text-[#8b5a2b] leading-[0.75] pt-1" 
-                                            style={{ fontFamily: '"IM Fell Double Pica", serif' }}
-                                        >
-                                            {cleanedText.charAt(0)}
-                                        </span>
-                                        {cleanedText.slice(1)}
+                                    <p key={`p-${i}`} className="clear-both parchment-drop-cap">
+                                        {cleanedText}
                                     </p>
                                 );
                             } else {
@@ -836,25 +890,38 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                     
                     if (Array.isArray(info.notable) && info.notable.length > 0) {
                         blocks.push(
-                            <h3 key={`h-notable`} 
-                                className={`mt-6 mb-2 ${isParchment ? 'text-[#8b5a2b] font-bold text-lg' : 'font-bold'}`}>
-                                Notable Facts
-                            </h3>
+                            <SectionHeader 
+                                key={`h-notable`}
+                                title="Notable Facts"
+                                theme={theme}
+                                isRetro={isRetro}
+                                isParchment={isParchment}
+                            />
                         );
                         blocks.push(
-                            <ul key={`list-notable`} className="list-disc pl-5 space-y-3">
-                              {info.notable.map((n: any, i: number) => (
-                                <li key={`notable-${i}`} className={`font-normal ${bodySize} ${theme.bodyText} opacity-90 leading-relaxed`}>
-                                  {n.title}
-                                  {n.summary && <span className="block mt-1 opacity-80 text-sm">{n.summary}</span>}
-                                  {n.wikipediaUrl && (
-                                    <a href={n.wikipediaUrl} target="_blank" rel="noopener noreferrer" className={`text-xs flex items-center gap-1 mt-1 hover:opacity-80 transition-opacity ${theme.actionText || 'text-blue-400'}`}>
-                                      Learn more →
-                                    </a>
-                                  )}
-                                </li>
-                              ))}
-                            </ul>
+                            <div key={`list-notable`} className="space-y-4 mt-3">
+                              {info.notable.map((n: any, i: number) => {
+                                const title = n.title || (typeof n === 'string' ? n : '');
+                                const summary = n.summary || (n.text && n.text !== title ? n.text : '');
+                                return (
+                                  <div key={`notable-${i}`} className={`space-y-1 font-normal ${bodySize} ${theme.bodyText} leading-relaxed`}>
+                                    <h4 className={`font-bold tracking-normal ${isRetro ? 'text-current text-sm' : isParchment ? 'text-[#8b5a2b] text-sm' : 'text-white/95 text-sm'}`}>
+                                      {title}
+                                    </h4>
+                                    {summary ? (
+                                      <p className="opacity-90 leading-relaxed text-sm">
+                                        {summary}
+                                      </p>
+                                    ) : null}
+                                    {n.wikipediaUrl && (
+                                      <a href={n.wikipediaUrl} target="_blank" rel="noopener noreferrer" className={`text-xs inline-flex items-center gap-1 mt-1 hover:opacity-80 transition-opacity ${(theme as any).actionText || 'text-blue-400'}`}>
+                                        Learn more →
+                                      </a>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
                         );
                     }
                     
@@ -870,10 +937,14 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       render: () => (
       (info.waypoint?.canonicalName || (info.waypoint?.alternateNames && info.waypoint.alternateNames.length > 0)) ? (
         <div className={`p-3 ${theme.card}`}>
-            <div className="flex items-center gap-2 mb-2 text-current opacity-80">
-                <Info size={16} />
-                <span className={`${smallTextSize} font-bold uppercase`}>Historical Identity</span>
-            </div>
+            <SectionHeader 
+                title="Historical Identity" 
+                icon={<Info size={16} />} 
+                theme={theme} 
+                isRetro={isRetro} 
+                isParchment={isParchment} 
+                className="!mt-0 !mb-2" 
+            />
             {info.waypoint?.canonicalName && (
                <div className="mb-2">
                    <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Canonical Name</span>
@@ -898,10 +969,14 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       render: () => (
       info.historicalPeriod ? (
         <div className={`p-3 ${theme.card}`}>
-            <div className="flex items-center gap-2 mb-1 text-current opacity-80">
-                <Crown size={16} />
-                <span className={`${smallTextSize} font-bold uppercase`}>Historical Period</span>
-            </div>
+            <SectionHeader 
+                title="Historical Period" 
+                icon={<Crown size={16} />} 
+                theme={theme} 
+                isRetro={isRetro} 
+                isParchment={isParchment} 
+                className="!mt-0 !mb-1" 
+            />
             <p className={`${isRetro ? 'text-base' : 'text-sm'} font-normal`}>{info.historicalPeriod}</p>
         </div>
       ) : null
@@ -911,12 +986,14 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       render: () => (
       info.entities && info.entities.length > 0 ? (
         <div className="relative group/facts">
-          <div className={`flex items-center justify-between mb-2 ${theme.icon}`}>
-              <div className="flex items-center gap-2">
-                <Users size={16} />
-                <span className={`${isRetro ? 'text-sm' : 'text-xs'} font-bold uppercase`}>Key Entities</span>
-              </div>
-          </div>
+          <SectionHeader 
+              title="Key Entities" 
+              icon={<Users size={16} />} 
+              theme={theme} 
+              isRetro={isRetro} 
+              isParchment={isParchment} 
+              className="!mt-0 !mb-2" 
+          />
           <div className="flex flex-wrap gap-2">
             {info.entities.map((e: any, i: number) => {
                const text = normalizeDisplayText(e);
@@ -935,84 +1012,136 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
          let txt = '';
          if (info.population) {
              txt += `Population\n`;
-             if (info.population.historical) {
+             if (info.population.historical && !isPlaceholderString(info.population.historical.formattedValue)) {
                  txt += `Historical: ${info.population.historical.formattedValue}`;
-                 if (info.population.historical.timeframe && info.population.historical.timeframe !== "Unknown") {
+                 if (info.population.historical.timeframe && !isPlaceholderString(info.population.historical.timeframe)) {
                      txt += ` (${info.population.historical.timeframe})`;
                  }
                  txt += `\n`;
              }
-             if (info.population.current) {
+             if (info.population.current && !isPlaceholderString(info.population.current.formattedValue)) {
                  txt += `Modern: ${info.population.current.formattedValue}\n`;
              }
              txt += `\n`;
          }
-         if (info.climate) {
-             txt += `Climate\n${info.climate.name}\n${info.climate.description || ''}\n\n`;
+         if (info.climate && !isPlaceholderString(info.climate.name)) {
+             txt += `Climate\n${info.climate.name}\n${!isPlaceholderString(info.climate.description) ? info.climate.description : ''}\n\n`;
          }
          return txt.trim();
       },
-      render: () => (
-      (info.population || info.climate || wikiImage) ? (
-        <div className={`grid ${((info.population || wikiImage) && info.climate) ? 'grid-cols-2' : 'grid-cols-1'} gap-3`}>
-          {info.population ? (
-            <div className={`p-3 ${theme.card}`}>
-                <div className={`flex items-center justify-between mb-2`}>
-                  <div className={`flex items-center gap-2 ${theme.icon}`}>
-                      <Users size={16} />
-                      <span className={`${smallTextSize} font-bold uppercase`}>Population</span>
-                  </div>
-                </div>
-                {info.population.historical && (
-                  <div className="mb-2">
-                    <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Historical</span>
-                    <p className={`${isRetro ? 'text-base' : 'text-sm'} font-normal font-mono`}>{info.population.historical.formattedValue}</p>
-                    {info.population.historical.timeframe && info.population.historical.timeframe !== "Unknown" && (
-                      <p className="text-xs opacity-70 font-mono mt-0.5">{info.population.historical.timeframe}</p>
-                    )}
-                  </div>
+      render: () => {
+        const hasPop = info.population && ((info.population.historical && !isPlaceholderString(info.population.historical.formattedValue)) || (info.population.current && !isPlaceholderString(info.population.current.formattedValue)));
+        const hasClimate = info.climate && !isPlaceholderString(info.climate.name);
+        const hasImages = images.length > 0 || !!wikiImage;
+        const currentImgUrl = images[currentImageIndex] || wikiImage;
+        
+        if (!hasPop && !hasClimate && !hasImages) return null;
+        
+        return (
+         <div className="flex flex-col gap-3">
+           {hasImages && currentImgUrl && (
+             <div 
+               className={`p-0 overflow-hidden relative h-32 ${theme.card} group cursor-pointer select-none`}
+               onClick={() => setExpandedImage(true)}
+             >
+                <img 
+                  src={currentImgUrl} 
+                  alt={`${info.name} - ${currentImageIndex + 1}`} 
+                  className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${isRetro ? 'grayscale contrast-125' : ''}`} 
+                />
+                
+                {/* Multi-image gallery controls */}
+                {images.length > 1 && (
+                  <>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCurrentImageIndex((prev) => (prev > 0 ? prev - 1 : images.length - 1));
+                      }}
+                      className="absolute left-1.5 top-1/2 -translate-y-1/2 p-1 rounded-full bg-black/60 hover:bg-black/85 text-white/90 transition-all opacity-80 group-hover:opacity-100 shadow-md"
+                      title="Previous image"
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCurrentImageIndex((prev) => (prev < images.length - 1 ? prev + 1 : 0));
+                      }}
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded-full bg-black/60 hover:bg-black/85 text-white/90 transition-all opacity-80 group-hover:opacity-100 shadow-md"
+                      title="Next image"
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                    <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-sm text-white/90 text-[10px] font-mono px-2 py-0.5 rounded-full border border-white/10 shadow-sm pointer-events-none">
+                      {currentImageIndex + 1} / {images.length}
+                    </div>
+                  </>
                 )}
-                {info.population.current && (
-                  <div>
-                    <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Modern</span>
-                    <p className={`${isRetro ? 'text-base' : 'text-sm'} font-normal font-mono`}>{info.population.current.formattedValue}</p>
-                  </div>
-                )}
-            </div>
-           ) : wikiImage ? (
-            <div 
-              className={`p-0 overflow-hidden relative h-28 ${theme.card} group cursor-pointer`}
-              onClick={() => setExpandedImage(true)}
-            >
-               <img src={wikiImage} alt={info.name} className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-110 ${isRetro ? 'grayscale contrast-125' : ''}`} />
-               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-2 pt-4 flex items-end gap-2">
-                  <ImageIcon size={14} className="text-white/80 shrink-0" />
-                  {info.imageCaption && (
-                    <span className="text-white/90 text-xs truncate font-medium">
-                      {info.imageCaption}
-                    </span>
-                  )}
-               </div>
-            </div>
-          ) : null}
 
-          {info.climate && (
-            <div className={`p-3 ${theme.card}`}>
-                <div className={`flex items-center justify-between mb-2`}>
-                  <div className={`flex items-center gap-2 ${theme.icon}`}>
-                      <Thermometer size={16} />
-                      <span className={`${smallTextSize} font-bold uppercase`}>Climate</span>
-                  </div>
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-2 pt-4 flex items-end gap-2 pointer-events-none">
+                   <ImageIcon size={14} className="text-white/80 shrink-0" />
+                   {info.imageCaption && !isPlaceholderString(info.imageCaption) ? (
+                     <span className="text-white/90 text-xs truncate font-medium">
+                       {info.imageCaption}
+                     </span>
+                   ) : (
+                     <span className="text-white/80 text-[11px] truncate font-medium">
+                       {info.name}
+                     </span>
+                   )}
                 </div>
-                <p className={`${isRetro ? 'text-base' : 'text-sm'} font-normal leading-tight`}>{info.climate.name}</p>
-                {info.climate.description && (
-                  <p className="text-xs opacity-90 mt-2 font-normal leading-relaxed">{info.climate.description}</p>
-                )}
-            </div>
-          )}
-        </div>
-      ) : null
-      )
+             </div>
+           )}
+
+           {hasPop && (
+             <div className="space-y-1 pt-1">
+                 <SectionHeader 
+                     title="Population" 
+                     icon={<Users size={16} />} 
+                     theme={theme} 
+                     isRetro={isRetro} 
+                     isParchment={isParchment} 
+                     className="!mt-1 !mb-1" 
+                 />
+                 {info.population.historical && !isPlaceholderString(info.population.historical.formattedValue) && (
+                   <div className="mb-1">
+                     <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Historical</span>
+                     <p className={`${isRetro ? 'text-base' : 'text-sm'} font-normal font-mono`}>{info.population.historical.formattedValue}</p>
+                     {info.population.historical.timeframe && !isPlaceholderString(info.population.historical.timeframe) && (
+                       <p className="text-xs opacity-70 font-mono mt-0.5">{info.population.historical.timeframe}</p>
+                     )}
+                   </div>
+                 )}
+                 {info.population.current && !isPlaceholderString(info.population.current.formattedValue) && (
+                   <div>
+                     <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Modern</span>
+                     <p className={`${isRetro ? 'text-base' : 'text-sm'} font-normal font-mono`}>{info.population.current.formattedValue}</p>
+                   </div>
+                 )}
+             </div>
+           )}
+
+           {hasClimate && (
+             <div className="space-y-1 pt-1">
+                 <SectionHeader 
+                     title="Climate" 
+                     theme={theme} 
+                     isRetro={isRetro} 
+                     isParchment={isParchment} 
+                     className="!mt-1 !mb-1" 
+                 />
+                 <p className={`${isRetro ? 'text-base' : 'text-sm'} font-medium leading-tight ${theme.bodyText}`} style={{ textTransform: 'none' }}>
+                   {formatClimateName(info.climate.name)}
+                 </p>
+                 {info.climate.description && !isPlaceholderString(info.climate.description) && (
+                   <p className={`text-xs opacity-90 font-normal leading-relaxed ${theme.bodyText}`}>{info.climate.description}</p>
+                 )}
+             </div>
+           )}
+         </div>
+        );
+      }
     },
     liveNews: {
       copyText: () => {
@@ -1030,10 +1159,13 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       
       return (
       <div className="space-y-4">
-        <div className={`flex items-center gap-2 mb-2 ${theme.icon}`}>
-            <Newspaper size={16} />
-            <span className={`${isRetro ? 'text-sm' : 'text-xs'} font-bold uppercase`}>News</span>
-        </div>
+        <SectionHeader 
+            title="News" 
+            theme={theme} 
+            isRetro={isRetro} 
+            isParchment={isParchment} 
+            className="!mt-0 !mb-2" 
+        />
         <>
           {info.news.map((item: any, idx: number) => (
              <div key={idx} className={`p-4 ${theme.card} flex flex-col gap-2 group/news`}>
@@ -1107,12 +1239,43 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
   return (
     <>
-      {expandedImage && wikiImage && (
-          <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center p-4 pointer-events-auto" onClick={() => setExpandedImage(false)}>
-              <div className="relative max-w-full max-h-[85vh] flex flex-col items-center">
-                  <img src={wikiImage} alt={info?.name} className={`max-w-full max-h-full object-contain ${isRetro ? 'grayscale contrast-125' : (isParchment ? 'sepia brightness-90 contrast-110' : '')}`} />
+      {expandedImage && (images.length > 0 || wikiImage) && (
+          <div className="fixed inset-0 z-[100] bg-black/95 flex flex-col items-center justify-center p-4 pointer-events-auto select-none" onClick={() => setExpandedImage(false)}>
+              <div className="relative max-w-full max-h-[85vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
+                  <img 
+                    src={images[currentImageIndex] || wikiImage || ''} 
+                    alt={`${info?.name} - ${currentImageIndex + 1}`} 
+                    className={`max-w-full max-h-[75vh] object-contain rounded ${isRetro ? 'grayscale contrast-125' : ''}`} 
+                  />
+                  {images.length > 1 && (
+                    <>
+                      <button 
+                        className="absolute left-2 top-1/2 -translate-y-1/2 p-2.5 bg-black/70 hover:bg-black text-white rounded-full transition-colors shadow-lg"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCurrentImageIndex((prev) => (prev > 0 ? prev - 1 : images.length - 1));
+                        }}
+                        title="Previous image"
+                      >
+                        <ChevronLeft size={24} />
+                      </button>
+                      <button 
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 bg-black/70 hover:bg-black text-white rounded-full transition-colors shadow-lg"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCurrentImageIndex((prev) => (prev < images.length - 1 ? prev + 1 : 0));
+                        }}
+                        title="Next image"
+                      >
+                        <ChevronRight size={24} />
+                      </button>
+                      <div className="mt-2 text-white/75 text-xs font-mono">
+                        {currentImageIndex + 1} of {images.length}
+                      </div>
+                    </>
+                  )}
                   {info?.imageCaption && (
-                      <div className="mt-4 text-white/90 text-sm md:text-base max-w-2xl text-center bg-black/50 px-4 py-2 rounded">
+                      <div className="mt-2 text-white/90 text-sm md:text-base max-w-2xl text-center bg-black/60 px-4 py-2 rounded">
                           {info.imageCaption}
                       </div>
                   )}
@@ -1192,10 +1355,10 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             <div className="flex flex-col gap-2 items-center text-center">
               <div className="flex flex-col items-center justify-center gap-1">
                  <h2 className={`${titleSize} font-bold text-center ${theme.headerTitle}`}>
-                   {routeNav ? `${routeNav.current}. ` : ''}{info.name}
+                   {routeNav ? `${routeNav.current}. ` : ''}{(info as any).displayName || info.name}
                  </h2>
                  <span className={`${smallTextSize} uppercase px-2 py-0.5 ${theme.tag}`}>
-                   {info.entityType ? info.entityType.replace(/_/g, ' ').toUpperCase() : (info.type === 'Point of Interest' ? 'POINT OF INTEREST' : info.type.toUpperCase())}
+                   {formatUserFacingCategory(info.entityType, info.name, info.type).toUpperCase()}
                  </span>
                  {info.locationString && (
                    <div className={`mt-1 text-sm font-medium ${isRetro ? 'text-current opacity-90' : isParchment ? 'text-[#5a3e1b]' : 'text-slate-300'}`}>

@@ -1,8 +1,11 @@
 import { MapMarker } from '../../../types';
 import { DiscoveryProvider, DiscoveryContext } from './DiscoveryProvider';
+import { isLowSignificancePoi } from '../classification';
 
 export class WikipediaProvider implements DiscoveryProvider {
   name = "Wikipedia";
+  lastStatus?: 'SUCCESS_WITH_RESULTS' | 'SUCCESS_EMPTY' | 'RATE_LIMITED' | 'TIMEOUT' | 'FAILED';
+  lastStatusMessage?: string;
 
   async searchNearby(context: DiscoveryContext): Promise<MapMarker[]> {
     const { lat, lng, radiusKm } = context;
@@ -12,35 +15,52 @@ export class WikipediaProvider implements DiscoveryProvider {
     const startTime = Date.now();
     try {
       const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) {
+        this.lastStatus = response.status === 429 ? 'RATE_LIMITED' : 'FAILED';
+        this.lastStatusMessage = `HTTP ${response.status}`;
+        return [];
+      }
       const data = await response.json();
-      
-      const elapsed = Date.now() - startTime;
-      console.log(`[WIKIPEDIA TRACE] {\n  endpoint: "geosearch",\n  elapsedMs: ${elapsed},\n  resultCount: ${data.query?.geosearch?.length || 0},\n  status: "SUCCESS"\n}`);
 
       if (!data || !data.query || !data.query.geosearch) {
+        this.lastStatus = 'SUCCESS_EMPTY';
         return [];
       }
 
-      const places: MapMarker[] = data.query.geosearch.map((item: any) => {
+      const places: MapMarker[] = [];
+      for (const item of data.query.geosearch) {
+        if (!item.title || isLowSignificancePoi(item.title)) {
+          continue;
+        }
+
+        let wType = "landmark";
+        if (item.title.match(/,\s*(Texas|Washington|California|Oregon|Hawaii|BC|British Columbia|[A-Z]{2})$/i)) {
+          wType = "settlement";
+        } else if (item.title.match(/\b(National Park|State Park|Mountain|Mount|Peak|River|Lake|Island|Volcano|Canyon)\b/i)) {
+          wType = "natural";
+        } else if (item.title.match(/\b(Museum|Monument|Memorial|Castle|Fort|Ruins|Archaeological)\b/i)) {
+          wType = "historic";
+        }
+
         const mBaseId = item.title.replace(/\s+/g, '-').toLowerCase();
-        return {
+        places.push({
           id: `wiki-${mBaseId}-${item.lat.toFixed(4)}-${item.lon.toFixed(4)}`,
           name: item.title,
           lat: item.lat,
           lng: item.lon,
-          type: "landmark",
+          type: wType,
           populationClass: "small",
           provenance: "Wikipedia",
           discoverySignals: ["wikipedia article available"]
-        };
-      });
+        });
+      }
 
+      this.lastStatus = places.length > 0 ? 'SUCCESS_WITH_RESULTS' : 'SUCCESS_EMPTY';
       return places;
     } catch (error: any) {
-      const elapsed = Date.now() - startTime;
-      console.warn(`[WIKIPEDIA TRACE] {\n  endpoint: "geosearch",\n  elapsedMs: ${elapsed},\n  error: "${error.message}",\n  status: "FAILURE"\n}`);
-      throw error;
+      this.lastStatus = 'FAILED';
+      this.lastStatusMessage = error?.message || 'Request failed';
+      return [];
     }
   }
 }

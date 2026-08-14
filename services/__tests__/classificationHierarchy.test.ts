@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyEntityType } from '../classifierService';
+import { classifyGeographicEntity } from '../classifierService';
 import { createResolvedEntity, createResolvedSubject, createIdentity, createMetadata } from '../entityFactory';
 import { ResolutionStage, IntentStage } from '../pipeline';
 
@@ -7,39 +7,39 @@ describe('Classification Hierarchy and Metadata Contract', () => {
     
     // 1. Entity Classification Tests (No Network)
     describe('Entity Classification', () => {
-        it('Dead Sea should classify as natural_feature', async () => {
-            const type = await classifyEntityType('Show me the Dead Sea', 'Dead Sea');
-            expect(type).toBe('natural_feature');
+        it('Dead Sea should classify as water_body', async () => {
+            const type = await classifyGeographicEntity('Dead Sea', null, [], { type: 'natural_feature' });
+            expect(type).toBe('water_body');
         });
 
-        it('Amazon River should classify as natural_feature', async () => {
-            const type = await classifyEntityType('Amazon River', 'Amazon River');
-            expect(type).toBe('natural_feature');
+        it('Amazon River should classify as water_body', async () => {
+            const type = await classifyGeographicEntity('Amazon River', null, [], { type: 'natural_feature' });
+            expect(type).toBe('water_body');
         });
 
         it('Sahara Desert should classify as natural_feature', async () => {
-            const type = await classifyEntityType('Sahara Desert', 'Sahara Desert');
+            const type = await classifyGeographicEntity('Sahara Desert', null, [], { type: 'natural_feature' });
             expect(type).toBe('natural_feature');
         });
 
-        it('Mount Everest should classify as natural_feature', async () => {
-            const type = await classifyEntityType('Mount Everest', 'Mount Everest');
-            expect(type).toBe('natural_feature');
+        it('Mount Everest should classify as mountain', async () => {
+            const type = await classifyGeographicEntity('Mount Everest', null, [], { type: 'natural_feature' });
+            expect(type).toBe('mountain');
         });
 
         it('Grand Canyon should classify as natural_feature', async () => {
-            const type = await classifyEntityType('Grand Canyon', 'Grand Canyon');
+            const type = await classifyGeographicEntity('Grand Canyon', null, [], { type: 'natural_feature' });
             expect(type).toBe('natural_feature');
         });
 
-        it('Paris should classify as city by default fallback', async () => {
-            const type = await classifyEntityType('Paris', 'Paris');
-            expect(type).toBe('city');
+        it('Paris should classify as settlement by default fallback', async () => {
+            const type = await classifyGeographicEntity('Paris', null, [], { type: 'city' });
+            expect(type).toBe('settlement');
         });
         
-        it('Tokyo should classify as city by default fallback', async () => {
-            const type = await classifyEntityType('Tokyo', 'Tokyo');
-            expect(type).toBe('city');
+        it('Tokyo should classify as settlement by default fallback', async () => {
+            const type = await classifyGeographicEntity('Tokyo', null, [], { type: 'city' });
+            expect(type).toBe('settlement');
         });
     });
 

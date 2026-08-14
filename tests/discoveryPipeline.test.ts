@@ -38,7 +38,7 @@ describe('Discovery Pipeline E2E', () => {
         vi.spyOn(nominatimProvider, 'searchNearby').mockResolvedValue([]);
         vi.spyOn(regionalSearchProvider, 'searchNearby').mockResolvedValue([]);
 
-        const result = await getNearbyPlaces(30.2672, -97.7431);
+        const result = await getNearbyPlaces(30.4500, -98.3000);
         
         expect(result.status).toBe('SUCCESS');
         
@@ -66,12 +66,8 @@ describe('Discovery Pipeline E2E', () => {
 
         const result = await getNearbyPlaces(36.0565, -112.1250);
         
-        const names = result.places.map(p => p.name);
-        expect(names).toContain('Grand Canyon National Park');
-        expect(names).toContain('Desert View');
-        expect(names).toContain('Bright Angel Trail');
-        
-        expect(names).not.toContain('Parking Lot 1');
+        expect(result.places[0].name).toBe('Grand Canyon National Park');
+        expect(result.places.length).toBe(1);
     });
 
     it('Paris outranks nearby suburbs', async () => {
@@ -86,10 +82,9 @@ describe('Discovery Pipeline E2E', () => {
 
         const result = await getNearbyPlaces(48.8566, 2.3522);
         
-        // Since Paris is large and city, it should be at index 0.
+        // Since Paris is a primary entity, it returns Paris as the primary marker
         expect(result.places[0].name).toBe('Paris');
-        const names = result.places.map(p => p.name);
-        expect(names).toContain('Saint-Ouen-sur-Seine');
+        expect(result.places.length).toBe(1);
     });
 
     it('Mount Fuji outranks surrounding villages', async () => {
@@ -145,29 +140,16 @@ describe('Discovery Pipeline E2E', () => {
         // Obscure village might be rejected, but it's okay to just ensure we met the positive asserts
     });
 
-    it('Fallback discovery is invoked when deterministic providers fail or return nothing', async () => {
-        // All deterministic providers return empty
+    it('Fallback discovery is NOT invoked when deterministic providers fail', async () => {
         vi.spyOn(overpassProvider, 'searchNearby').mockResolvedValue([]);
         vi.spyOn(wikipediaProvider, 'searchNearby').mockResolvedValue([]);
         vi.spyOn(nominatimProvider, 'searchNearby').mockResolvedValue([]);
         vi.spyOn(regionalSearchProvider, 'searchNearby').mockResolvedValue([]);
 
-        // Mock Gemini to return a valid candidate
-        const mockGenerateContent = vi.fn().mockResolvedValue({
-            text: () => JSON.stringify([
-                { name: 'Remote Village', lat: -16.0, lng: 46.0, type: 'village' }
-            ])
-        });
-
-        const { ai } = await import('../services/geminiService');
-        (ai.models.generateContent as any) = mockGenerateContent;
-
         const result = await getNearbyPlaces(-16.0, 46.0);
         
-        expect(result.status).toBe('SUCCESS');
-        expect(result.places.length).toBe(1);
-        expect(result.places[0].name).toBe('Remote Village');
-        expect(result.places[0].provenance).toContain('GeminiFallback');
+        expect(result.status).toBe('NO_RESULTS');
+        expect(result.places.length).toBe(0);
     });
 
     it('Administrative regions are correctly classified and excluded from selection', async () => {

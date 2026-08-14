@@ -46,7 +46,7 @@ Avoid: population statistics unless historically important, administrative bound
 
 ## Counties / Administrative Regions
 Prioritize: why this administrative area exists, economic identity, agriculture, mining, industry, tourism, major natural resources, environmental importance, historical events, famous people connected to the area.
-Avoid: "located in", "serves surrounding communities", "regional feature", geographic hierarchy.
+Avoid: repetitive administrative boundaries, vacuous filler.
 
 ## National Parks / Natural Areas
 Prioritize: why it was protected, geological formation, ecosystems, wildlife, conservation history, scientific importance, exploration history, indigenous connections.
@@ -65,18 +65,40 @@ Prioritize: engineering achievement, historical events, design significance, rec
 
 ---
 
-# 4. NOTABLE FACTS REQUIREMENTS
+# 4. NOTABLE FACTS REQUIREMENTS: FACTS MUST EXPLAIN WHY THEY MATTER
 
-The Notable section is NOT a geographic summary. It should provide facts that make a user say: "I didn't know that."
-Generate 3-6 facts.
-Allowed categories: Historical events, Famous people, Scientific discoveries, Records (largest, oldest, first, unusual), Cultural traditions, Architecture and engineering, Archaeology, Media appearances, Indigenous history.
+The Notable Facts section must provide genuine educational value, NOT generic category or topic labels.
 
-Never repeat Overview content.
-Never generate facts about: latitude, longitude, region names, administrative relationships, generic geography.
+DO NOT output empty headings or standalone topic labels like:
+- "Geological Formation"
+- "Historical Contention"
+- "Strategic Oil Transit"
+- "Unique Ecosystems"
+- "Conservation Milestone"
+- "Economic Importance"
+- "Cultural Significance"
+- "Archaeological Significance"
 
-Fallback: If no meaningful facts exist, return exactly:
-["No widely documented historical or cultural facts were found."]
-Do not invent filler.
+Every notable fact MUST contain:
+1. "title": A concise, descriptive heading that identifies the specific topic or feature.
+2. "summary": A 1–3 sentence substantive explanation providing concrete facts, context, scale, measurements, events, discoveries, or history, and explicitly explaining WHY this fact is significant, distinctive, or interesting (answers "So what?").
+
+Concrete Examples of Desired Facts:
+- title: "Strategic Maritime Chokepoint"
+  summary: "The Strait of Hormuz is a narrow marine passage between Iran and the Arabian Peninsula connecting the Persian Gulf with the Gulf of Oman. As the only sea passage from the Persian Gulf to the open ocean, roughly one-fifth of global petroleum consumption passes through this constrained waterway, making it a critical global maritime chokepoint."
+- title: "Recurring Geopolitical Flashpoint"
+  summary: "Because all maritime traffic entering or leaving the oil-rich Persian Gulf must traverse its narrow shipping lanes, control and security of the strait have been a persistent source of international military and diplomatic tension for decades."
+- title: "Seasonal Wetland Hydrology"
+  summary: "Paynes Prairie is a large freshwater wetland basin whose water levels fluctuate substantially with seasonal rainfall, alternating between dry savannah and a sprawling lake. These changing hydrology conditions support hundreds of bird species, wild horses, bison, and alligators."
+
+Rules:
+- Heading identifies the topic; body explains it with specific, educational detail.
+- Prefer 3 to 5 genuinely informative, educational facts based on verifiable information.
+- If only 2 or 3 substantive facts can be supported, return fewer facts. Do NOT output generic filler or empty categories just to reach a target count.
+- Do not invent fabricated statistics or unverified claims.
+
+Fallback: If no meaningful facts exist, return:
+[{"title": "Documentation", "summary": "No widely documented historical or cultural facts were found."}]
 
 ---
 
@@ -99,8 +121,8 @@ Caption requirements: 1 sentence, explain what is shown, explain why it represen
 ---
 
 # 7. CONTENT QUALITY RULES
-Reject Overview if it contains: "is a location", "located in", "situated in", "serves surrounding communities", "regional feature", "area known as", "part of the region", "geographic significance".
-Reject Notable facts if they are only: location, borders, administrative information, coordinates, climate descriptions.
+Avoid purely generic boilerplate or placeholder text. Focus on substantive historical, cultural, and environmental details.
+Reject Notable facts if they are only: coordinates, borders, climate descriptions.
 
 The final InfoPanel should feel like a museum exhibit, documentary narration, or expert tour guide. The goal is not to describe where something is. The goal is to explain why it matters.
 

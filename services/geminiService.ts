@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { reverseGeocode, ReverseGeocodeContext } from "./geographic/geographicResolver";
-import { getEstimatedClimate, getClimateDescription } from './geographic/climateEstimator';
+import { reverseGeocode, ReverseGeocodeContext, resolveGeographicMetadata, resolveGeographicEntity, GeographicSource, resolvePrimaryGeographicEntity } from "./geographic/geographicResolver";
+import { getEstimatedClimate, getClimateDescription, isClimateGeographicallyValid } from './geographic/climateEstimator';
 import { providerRegistry } from './geographic/providers/providerRegistry';
 import { applySelection } from './geographic/selection';
 import { applyQualityGate } from './geographic/qualityGate';
@@ -8,12 +8,14 @@ import { applyCategoryBalance } from './geographic/categoryBalancer';
 import { computeImportanceScore } from './geographic/scoring';
 import { Candidate } from '../types';
 import { getDiscoveryPrompt } from "./promptBuilder";
-import { LocationInfo, QueryIntent, Waypoint, Route, UserSettings, LocationType, EntityType, SearchResult, MapMarker, GeoCoordinates, isValidCoordinates, ProvenanceRecord } from '../types';
+import { LocationInfo, QueryIntent, Waypoint, Route, UserSettings, LocationType, EntityType, SearchResult, MapMarker, GeoCoordinates, isValidCoordinates, ProvenanceRecord, CoordinateSource, GeographicIdentityStatus } from '../types';
 import { runRoutePipeline } from './routePipeline';
 import { PIPELINE_DEBUG, logWaypointSnapshot, logFieldDiff, logEnrichmentJsonPipeline } from '../utils/pipelineDebug';
-import { EnrichmentResult } from '../domain';
+import { EnrichmentResult, CanonicalGeographicEntity } from '../domain';
 import { parseAndExtract } from '../utils/jsonParser';
 import { enrichLocationInfo, mergeRichestFields } from './locationService';
+import { isGenericPlaceholderDescription, isEnglishText } from './entityValidation';
+import { isPlaceholderString } from '../components/InfoPanel';
 
 export const EnrichmentMetrics = {
     retry: 0,
@@ -22,6 +24,8 @@ export const EnrichmentMetrics = {
     accepted: 0,
     rejected: 0
 };
+
+export const cancelFeatureInfoRequests = () => {};
 
 // Ensure API key is available
 const apiKey = process.env.API_KEY;
@@ -204,6 +208,7 @@ const mainInfoSchemaConfig = {
       },
       required: ["lat", "lng"]
     },
+    population: { type: Type.NUMBER },
     description: { type: Type.STRING },
     climate: { 
       type: Type.OBJECT,
@@ -232,16 +237,24 @@ const mainInfoSchemaConfig = {
 };
 
 // Helper to normalize coordinates (handle AI returning [lat, lng] instead of {lat, lng})
-export const normalizeCoordinates = (coordsData: any): { lat: number, lng: number } | undefined => {
+export const normalizeCoordinates = (coordsData: any): { lat: number, lng: number, source?: CoordinateSource, confidence?: "high" | "medium" | "low" } | undefined => {
   if (!coordsData) return undefined;
   
   // Format D: { coordinates: [...] }
   if (coordsData.coordinates !== undefined) {
-    return normalizeCoordinates(coordsData.coordinates);
+    const res = normalizeCoordinates(coordsData.coordinates);
+    if (res) {
+      if (!res.source && coordsData.source) res.source = coordsData.source;
+      if (!res.confidence && coordsData.confidence) res.confidence = coordsData.confidence;
+      return res;
+    }
+    return undefined;
   }
 
   let lat: number | undefined;
   let lng: number | undefined;
+  const source: CoordinateSource | undefined = coordsData.source;
+  const confidence = coordsData.confidence;
 
   // Format C: [lat, lng]
   if (Array.isArray(coordsData) && coordsData.length >= 2) {
@@ -282,7 +295,11 @@ export const normalizeCoordinates = (coordsData: any): { lat: number, lng: numbe
       return undefined;
   }
 
-  return { lat, lng };
+  const result: { lat: number; lng: number; source?: CoordinateSource; confidence?: "high" | "medium" | "low" } = { lat, lng };
+  if (source) result.source = source;
+  if (confidence) result.confidence = confidence;
+
+  return result;
 };
 
 
@@ -358,7 +375,7 @@ export const normalizeLocationEntity = (entity: string | null | undefined | any)
  * Deterministic geographic resolution database for major cities, states, and landmarks.
  * Resolves exact coordinates and canonical names without relying on LLMs.
  */
-const DETERMINISTIC_LOCATION_DB: Record<string, { name: string; type: LocationType; entityType: EntityType; lat: number; lng: number; suggestedZoom?: number }> = {
+const DETERMINISTIC_LOCATION_DB: Record<string, { name: string; type: LocationType; entityType: EntityType; lat: number; lng: number; suggestedZoom?: number; country?: string; state?: string; city?: string }> = {
   "plano, texas": { name: "Plano, Texas", type: LocationType.CITY, entityType: "city", lat: 33.0198, lng: -96.6989, suggestedZoom: 8 },
   "plano, tx": { name: "Plano, Texas", type: LocationType.CITY, entityType: "city", lat: 33.0198, lng: -96.6989, suggestedZoom: 8 },
   "plano tx": { name: "Plano, Texas", type: LocationType.CITY, entityType: "city", lat: 33.0198, lng: -96.6989, suggestedZoom: 8 },
@@ -396,18 +413,18 @@ const DETERMINISTIC_LOCATION_DB: Record<string, { name: string; type: LocationTy
   
   // Expanded Global Cities for Deterministic Fallback
   "cape town": { name: "Cape Town, South Africa", type: LocationType.CITY, entityType: "city", lat: -33.9249, lng: 18.4241, suggestedZoom: 8 },
-  "cape town, south africa": { name: "Cape Town, South Africa", type: LocationType.CITY, entityType: "city", lat: -33.9249, lng: 18.4241, suggestedZoom: 8 },
-  "sydney": { name: "Sydney, Australia", type: LocationType.CITY, entityType: "city", lat: -33.8688, lng: 151.2093, suggestedZoom: 8 },
-  "sydney, australia": { name: "Sydney, Australia", type: LocationType.CITY, entityType: "city", lat: -33.8688, lng: 151.2093, suggestedZoom: 8 },
-  "london": { name: "London, UK", type: LocationType.CITY, entityType: "city", lat: 51.5074, lng: -0.1278, suggestedZoom: 8 },
-  "london, uk": { name: "London, UK", type: LocationType.CITY, entityType: "city", lat: 51.5074, lng: -0.1278, suggestedZoom: 8 },
-  "london, england": { name: "London, UK", type: LocationType.CITY, entityType: "city", lat: 51.5074, lng: -0.1278, suggestedZoom: 8 },
-  "new york": { name: "New York, USA", type: LocationType.CITY, entityType: "city", lat: 40.7128, lng: -74.0060, suggestedZoom: 8 },
-  "new york city": { name: "New York, USA", type: LocationType.CITY, entityType: "city", lat: 40.7128, lng: -74.0060, suggestedZoom: 8 },
-  "nyc": { name: "New York, USA", type: LocationType.CITY, entityType: "city", lat: 40.7128, lng: -74.0060, suggestedZoom: 8 },
-  "cliffs of moher": { name: "Cliffs of Moher", type: LocationType.POI, entityType: "natural_landmark", lat: 52.9715, lng: -9.4265, suggestedZoom: 10 },
-  "statue of liberty": { name: "Statue of Liberty", type: LocationType.POI, entityType: "landmark", lat: 40.6892, lng: -74.0445, suggestedZoom: 12 },
-  "sydney opera house": { name: "Sydney Opera House", type: LocationType.POI, entityType: "landmark", lat: -33.8568, lng: 151.2153, suggestedZoom: 12 }
+  "cape town, south africa": { name: "Cape Town, South Africa", type: LocationType.CITY, entityType: "city", lat: -33.9249, lng: 18.4241, suggestedZoom: 8, country: "South Africa", city: "Cape Town" },
+  "sydney": { name: "Sydney, Australia", type: LocationType.CITY, entityType: "city", lat: -33.8688, lng: 151.2093, suggestedZoom: 8, country: "Australia", state: "New South Wales", city: "Sydney" },
+  "sydney, australia": { name: "Sydney, Australia", type: LocationType.CITY, entityType: "city", lat: -33.8688, lng: 151.2093, suggestedZoom: 8, country: "Australia", state: "New South Wales", city: "Sydney" },
+  "london": { name: "London, UK", type: LocationType.CITY, entityType: "city", lat: 51.5074, lng: -0.1278, suggestedZoom: 8, country: "United Kingdom", city: "London" },
+  "london, uk": { name: "London, UK", type: LocationType.CITY, entityType: "city", lat: 51.5074, lng: -0.1278, suggestedZoom: 8, country: "United Kingdom", city: "London" },
+  "london, england": { name: "London, UK", type: LocationType.CITY, entityType: "city", lat: 51.5074, lng: -0.1278, suggestedZoom: 8, country: "United Kingdom", city: "London" },
+  "new york": { name: "New York, USA", type: LocationType.CITY, entityType: "city", lat: 40.7128, lng: -74.0060, suggestedZoom: 8, country: "United States", state: "New York", city: "New York" },
+  "new york city": { name: "New York, USA", type: LocationType.CITY, entityType: "city", lat: 40.7128, lng: -74.0060, suggestedZoom: 8, country: "United States", state: "New York", city: "New York" },
+  "nyc": { name: "New York, USA", type: LocationType.CITY, entityType: "city", lat: 40.7128, lng: -74.0060, suggestedZoom: 8, country: "United States", state: "New York", city: "New York" },
+  "cliffs of moher": { name: "Cliffs of Moher", type: LocationType.POI, entityType: "natural_landmark", lat: 52.9715, lng: -9.4265, suggestedZoom: 10, country: "Ireland", state: "County Clare" },
+  "statue of liberty": { name: "Statue of Liberty", type: LocationType.POI, entityType: "landmark", lat: 40.6892, lng: -74.0445, suggestedZoom: 12, country: "United States", state: "New York", city: "New York" },
+  "sydney opera house": { name: "Sydney Opera House", type: LocationType.POI, entityType: "landmark", lat: -33.8568, lng: 151.2153, suggestedZoom: 12, country: "Australia", state: "New South Wales", city: "Sydney" }
 };
 
 export const resolveLocationQuery = async (query: string, intent?: QueryIntent, rawQuery?: string): Promise<SearchResult | null> => {
@@ -426,13 +443,6 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
     let aiUsed = false;
     let rawAiText = "";
 
-    // Pre-flight capability check: If API key is invalid or missing AND we are using Gemini AND no deterministic match exists
-    const currentApiKey = process.env.API_KEY;
-    if (!deterministicRes && settings.aiProvider === 'gemini' && (!currentApiKey || currentApiKey === 'dummy-key-for-ts-check')) {
-       console.log("[DEBUG] Failure reason code: LOCATION_SYSTEM_UNAVAILABLE");
-       return { error: "LOCATION_SYSTEM_UNAVAILABLE", locationInfo: { name: normalizedQuery || query } };
-    }
-
     let resolvedData: any = null;
     let suggestedZoom = 5;
 
@@ -442,7 +452,12 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
         type: deterministicRes.type,
         entityType: deterministicRes.entityType,
         climate: (deterministicRes as any).climate,
-        coordinates: { lat: deterministicRes.lat, lng: deterministicRes.lng },
+        coordinates: { lat: deterministicRes.lat, lng: deterministicRes.lng, source: "deterministic" as CoordinateSource },
+        coordinateSource: "deterministic" as CoordinateSource,
+        identityStatus: "verified" as GeographicIdentityStatus,
+        country: deterministicRes.country,
+        state: deterministicRes.state,
+        city: deterministicRes.city,
         description: `Information on ${deterministicRes.name}.`,
         funFacts: [],
         notable: []
@@ -450,7 +465,56 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
       suggestedZoom = deterministicRes.suggestedZoom || 8;
     }
 
-    // Step 3: AI resolution / enrichment fallback if deterministic layer didn't find coordinates
+    // Step 2.5: Authoritative Nominatim / OSM Resolution before AI
+    if (!resolvedData || !resolvedData.coordinates) {
+      try {
+        console.log(`COORDINATE_VERIFICATION_ATTEMPT\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}`);
+        const geoEntity = await resolveGeographicEntity(normalizedQuery || query);
+        if (geoEntity && !('status' in geoEntity) && geoEntity.coordinates && isValidCoordinates(geoEntity.coordinates)) {
+          console.log(`COORDINATE_VERIFICATION_SUCCESS\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}\ncoordinates: ${geoEntity.coordinates.lat}, ${geoEntity.coordinates.lng}`);
+          
+          resolvedData = {
+            name: geoEntity.name.split(',')[0].trim(),
+            locationString: geoEntity.name,
+            type: geoEntity.entityType === 'city' ? LocationType.CITY : (geoEntity.entityType === 'country' ? LocationType.COUNTRY : LocationType.POI),
+            entityType: geoEntity.entityType,
+            coordinates: {
+              lat: geoEntity.coordinates.lat,
+              lng: geoEntity.coordinates.lng,
+              source: (geoEntity.source === GeographicSource.NOMINATIM ? "geocoder" : "deterministic") as CoordinateSource
+            },
+            coordinateSource: (geoEntity.source === GeographicSource.NOMINATIM ? "geocoder" : "deterministic") as CoordinateSource,
+            identityStatus: (geoEntity.identityStatus || "verified") as GeographicIdentityStatus,
+            country: geoEntity.context?.country,
+            state: geoEntity.context?.state,
+            city: geoEntity.context?.city,
+            county: geoEntity.context?.county,
+            region: geoEntity.context?.region,
+            osmId: geoEntity.osmId,
+            osmType: geoEntity.osmType,
+            wikidataId: geoEntity.wikidataId,
+            wikipedia: geoEntity.wikipedia,
+            description: `Information on ${geoEntity.name.split(',')[0].trim()}.`,
+            funFacts: [],
+            notable: []
+          };
+          suggestedZoom = geoEntity.suggestedZoom || 8;
+        } else {
+          console.log(`COORDINATE_VERIFICATION_FAILED\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}\nreason: no_authoritative_match`);
+        }
+      } catch (err: any) {
+        console.warn(`[Nominatim Resolution Error]:`, err.message);
+      }
+    }
+
+    // Pre-flight capability check: If API key is invalid or missing AND we are using Gemini AND no deterministic/geocoder match exists
+    const currentApiKey = process.env.API_KEY;
+    if (!resolvedData && settings.aiProvider === 'gemini' && (!currentApiKey || currentApiKey === 'dummy-key-for-ts-check')) {
+       console.log("[DEBUG] Failure reason code: LOCATION_SYSTEM_UNAVAILABLE");
+       return { error: "LOCATION_SYSTEM_UNAVAILABLE", locationInfo: { name: normalizedQuery || query } };
+    }
+
+    // Step 3: AI resolution / enrichment fallback if deterministic layer and Nominatim didn't find coordinates
     if (!resolvedData || !resolvedData.coordinates) {
       aiUsed = true;
       const targetSearchTerm = normalizedQuery || query;
@@ -489,10 +553,9 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
           - Use "natural_feature" for rivers, mountains, oceans.
         - 'suggestedZoom': 0-10 scale. 8-10 for specific sites/cities, 4-6 for regions.
         - 'description': Write 2-4 concise paragraphs explaining what this place is, why it exists, why it is significant, and why someone should care. The first sentence must immediately identify what makes the place distinctive. Use Markdown headings. The Description and Notable Facts must NEVER overlap. Forbidden phrases: "is a location in", "is situated in", "serves surrounding communities", "an important regional feature". Do not output a single generic paragraph.
-        - 'population': Object containing 'current' and 'historical' population estimates. For historical events, always distinguish historical from modern.
+        - 'population': A number representing the population. Omit if not applicable.
         - 'climate': Object containing 'name' (e.g. "Oceanic climate"), 'description' (plain language summary), and 'koppenCode'.
-        - 'contextNotes': Array of 3 string facts that provide meaningful historical or geographic context.
-        - 'notable': Generate 3-6 highly specific facts. Prioritize History, Science, Culture, People, Economy, Records. Do not repeat information from the overview. Do not describe where the place is unless relevant.
+        - 'notable': Generate 3-5 genuinely informative notable facts. Every fact MUST contain a concise heading ('title') AND a 1-3 sentence substantive explanation ('summary') explaining what the fact is, specific context/scale/history, and why it matters. Never output empty generic topic labels without substantive explanation.
         - 'imageCaption': A concise caption (10-25 words) for an iconic photograph of this feature. Do not merely restate the title.
         - 'imageSearchTerm': A highly specific Wikipedia search term to fetch the best iconic image of this feature.
 
@@ -533,9 +596,12 @@ Return only JSON:
                   config: { responseMimeType: "application/json" }
               }, 1);
               const histParsed = parseAndExtract(histRes.text);
-              if (histParsed.success && histParsed.value.lat !== undefined && histParsed.value.lng !== undefined) {
-                  historicalCoords = { lat: histParsed.value.lat, lng: histParsed.value.lng };
-                  console.log(`[HISTORICAL LOCATION RESOLUTION]\n{\n  "entity": "${targetSearchTerm}",\n  "resolved location": "${histParsed.value.location}",\n  "coordinates": ${JSON.stringify(historicalCoords)},\n  "confidence": "${histParsed.value.confidence}"\n}`);
+              if (histParsed.success) {
+                  const val = histParsed.value as any;
+                  if (val.lat !== undefined && val.lng !== undefined) {
+                      historicalCoords = { lat: val.lat, lng: val.lng };
+                      console.log(`[HISTORICAL LOCATION RESOLUTION]\n{\n  "entity": "${targetSearchTerm}",\n  "resolved location": "${val.location}",\n  "coordinates": ${JSON.stringify(historicalCoords)},\n  "confidence": "${val.confidence}"\n}`);
+                  }
               }
           } catch (e) {
               console.error("Historical discovery pre-resolution failed", e);
@@ -654,34 +720,34 @@ export const validateEnrichmentPayload = (data: any, entityName: string, coordin
     if (isBadClimate) {
         if (lat !== undefined && lng !== undefined && !isNaN(Number(lat)) && !isNaN(Number(lng))) {
              const fallbackCountry = data.country || data.waypoint?.country || "";
-             const fallbackRegion = data.region || data.waypoint?.region || data.waypoint?.state || "";
-             const estClimate = getEstimatedClimate(Number(lat), Number(lng), fallbackRegion, fallbackCountry);
-             if (estClimate.confidence === "low") {
-                 data.climate = null;
-             } else {
-                 data.climate = {
-                     name: estClimate.climateName,
-                     description: `Specific climate data is unavailable. The geographic location has been deterministically estimated as ${estClimate.climateName} (${estClimate.confidence} confidence).`,
-                     koppenCode: estClimate.koppenCode
-                 };
-             }
+             const fallbackRegion = data.region || data.state || data.waypoint?.region || data.waypoint?.state || "";
+             const fallbackEntityType = data.entityType || data.type || data.waypoint?.entityType || "";
+             const estClimate = getEstimatedClimate(Number(lat), Number(lng), fallbackRegion, fallbackCountry, fallbackEntityType);
+             const desc = getClimateDescription(estClimate.koppenCode, estClimate.climateName);
+             data.climate = {
+                 name: estClimate.climateName,
+                 description: `Specific climate data is unavailable. The geographic location has been deterministically estimated as ${estClimate.climateName} (${estClimate.confidence} confidence). ${desc}`,
+                 koppenCode: estClimate.koppenCode
+             };
         } else {
             data.climate = null;
         }
     }
     console.log(`[CLIMATE VALIDATION] after validation: ${JSON.stringify(data.climate)}`);
-    if (data.news && Array.isArray(data.news)) {
-        const validNews = data.news.filter((n: any) => 
-            n && typeof n.title === 'string' && (n.summary || n.source || n.url)
-        );
-        data.news = validNews as any;
-    } else {
-        data.news = [];
+    if (data.news !== undefined && data.news !== null) {
+        if (Array.isArray(data.news)) {
+            const validNews = data.news.filter((n: any) => 
+                n && typeof n.title === 'string' && (n.summary || n.source || n.url)
+            );
+            data.news = validNews as any;
+        } else {
+            data.news = undefined as any;
+        }
     }
     console.log("[ENRICHMENT VALIDATION]");
     console.log(`description: PASS`);
     console.log(`climate: PASS`);
-    console.log(`newsSource: ${data.news.length > 0 ? 'ACCEPTED' : 'EMPTY'}`);
+    console.log(`newsSource: ${(data.news && data.news.length > 0) ? 'ACCEPTED' : 'EMPTY'}`);
     
     return data;
 };
@@ -705,7 +771,9 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
       }).filter(Boolean) as string[];
   };
 
-  data.news = (Array.isArray(data.news) ? data.news : []) as any;
+  if (data.news !== undefined && data.news !== null) {
+      data.news = (Array.isArray(data.news) ? data.news : undefined) as any;
+  }
   data.notable = normalizeArray(data.notable as any) as any;
   data.contextNotes = normalizeArray(data.contextNotes as any) as any;
 
@@ -776,22 +844,36 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
     name.includes('peak');
 
   // Normalize new population schema
-  if (data.population !== undefined) {
-    if (typeof data.population === 'number' || typeof data.population === 'string') {
-      console.warn(`[Normalization] Discarding legacy flat population value: ${data.population}`);
-      data.population = null as any;
-    } else if (data.population && typeof data.population === 'object') {
-      const p = data.population as any;
-      const hasCurrent = p.current && p.current.formattedValue && p.current.description;
-      const hasHistorical = p.historical && p.historical.formattedValue && p.historical.description;
-      
-      if (!hasCurrent && !hasHistorical) {
+  if (data.population !== undefined && data.population !== null) {
+    if (typeof data.population === 'object') {
+      const pObj = data.population as any;
+      if (typeof pObj.value === 'number') {
+        data.population = {
+          value: pObj.value,
+          source: pObj.source || 'Wikidata P1082',
+          status: pObj.status || 'available',
+          current: pObj.current || { formattedValue: pObj.value.toLocaleString() },
+          historical: pObj.historical
+        } as any;
+      } else if (pObj.value === null || pObj.status === 'not_applicable' || pObj.status === 'lookup_failed') {
+        data.population = {
+          value: null,
+          source: pObj.source || null,
+          status: pObj.status || 'not_applicable'
+        } as any;
+      } else {
+        console.warn(`[Normalization] Discarding invalid population value:`, data.population);
         data.population = null as any;
-      } else if (isHiddenEntityType && !hasHistorical) {
-         // Force historical contexts to only show population if historical data exists
-         data.population = null as any;
       }
+    } else if (typeof data.population === 'number') {
+      data.population = {
+        value: data.population,
+        source: 'AI/Deterministic',
+        status: 'available',
+        current: { formattedValue: Number(data.population).toLocaleString() }
+      } as any;
     } else {
+      console.warn(`[Normalization] Discarding invalid population value:`, data.population);
       data.population = null as any;
     }
   }
@@ -899,11 +981,22 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
     } else if (data.climate && typeof data.climate === 'object') {
       const c = data.climate as any;
       if (!c.name || !c.description || c.name === 'Unavailable' || c.name === 'Unknown') {
-        data.climate = {
-            name: "Unavailable",
-            description: "Climate data is unavailable for this location.",
-            koppenCode: ""
-        };
+        const lat = data.coordinates?.lat;
+        const lng = data.coordinates?.lng;
+        if (lat !== undefined && lng !== undefined && !isNaN(Number(lat)) && !isNaN(Number(lng))) {
+          const est = getEstimatedClimate(Number(lat), Number(lng), data.state || data.region, data.country, data.entityType || data.type);
+          data.climate = {
+            name: est.climateName.toLowerCase().includes('climate') ? est.climateName : `${est.climateName} Climate`,
+            description: getClimateDescription(est.koppenCode, est.climateName),
+            koppenCode: est.koppenCode
+          };
+        } else {
+          data.climate = {
+              name: "Unavailable",
+              description: "Climate data is unavailable for this location.",
+              koppenCode: ""
+          };
+        }
       } else if (isHiddenEntityType) {
          // Historically, we hid climate for events. Let's keep it if AI found it useful, but if it says "Varies" clear it
          if (c.name.toLowerCase().includes('varies') || c.name.toLowerCase().includes('n/a')) {
@@ -911,12 +1004,42 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
          }
       }
     } else {
-      data.climate = {
-            name: "Unavailable",
-            description: "Climate data is unavailable for this location.",
-            koppenCode: ""
+      const lat = data.coordinates?.lat;
+      const lng = data.coordinates?.lng;
+      if (lat !== undefined && lng !== undefined && !isNaN(Number(lat)) && !isNaN(Number(lng))) {
+        const est = getEstimatedClimate(Number(lat), Number(lng), data.state || data.region, data.country, data.entityType || data.type);
+        data.climate = {
+          name: est.climateName.toLowerCase().includes('climate') ? est.climateName : `${est.climateName} Climate`,
+          description: getClimateDescription(est.koppenCode, est.climateName),
+          koppenCode: est.koppenCode
         };
+      } else {
+        data.climate = {
+              name: "Unavailable",
+              description: "Climate data is unavailable for this location.",
+              koppenCode: ""
+          };
+      }
     }
+
+    // Validate climate classification against entity's actual coordinates & region
+    if (data.climate && typeof data.climate === 'object' && data.climate.name && data.climate.name !== 'Unavailable') {
+      const lat = data.coordinates?.lat;
+      const lng = data.coordinates?.lng;
+      if (lat !== undefined && lng !== undefined && !isNaN(Number(lat)) && !isNaN(Number(lng))) {
+        const isValid = isClimateGeographicallyValid(data.climate.koppenCode, Number(lat), Number(lng), data.state || data.region, data.country);
+        if (!isValid) {
+          console.warn(`[Climate Validation] Discarded geographically incorrect climate "${data.climate.name}" (${data.climate.koppenCode}) for location ${lat}, ${lng} (${data.state || data.region}, ${data.country}). Correcting to regional baseline.`);
+          const est = getEstimatedClimate(Number(lat), Number(lng), data.state || data.region, data.country, data.entityType || data.type);
+          data.climate = {
+            name: est.climateName.toLowerCase().includes('climate') ? est.climateName : `${est.climateName} Climate`,
+            description: getClimateDescription(est.koppenCode, est.climateName),
+            koppenCode: est.koppenCode
+          };
+        }
+      }
+    }
+
     console.log(`[CLIMATE VALIDATION] after sanitize: ${JSON.stringify(data.climate)}`);
   }
   
@@ -964,9 +1087,15 @@ export const getInfoFromFeature = async (marker: MapMarker): Promise<LocationInf
 
   const promise = (async () => {
     try {
-    const revGeo = await reverseGeocode(lat, lng);
-    const country = revGeo?.country || "Unknown Country";
-    const region = revGeo?.state || revGeo?.region || "Unknown Region";
+    const country = marker.country || "Unknown Country";
+    const region = marker.state || marker.region || "Unknown Region";
+    const city = marker.city || marker.county || "Unknown City";
+    const coordSource = marker.coordinateSource || "Nominatim";
+    const identStatus = marker.identityStatus || "verified";
+    const osmId = marker.osmId ? `OSM ID: ${marker.osmId}` : null;
+    const osmType = marker.osmType ? `OSM Type: ${marker.osmType}` : null;
+    const wikidataId = marker.wikidataId ? `Wikidata ID: ${marker.wikidataId}` : null;
+    const wikipedia = marker.wikipedia ? `Wikipedia: ${marker.wikipedia}` : null;
     
     const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
     
@@ -979,14 +1108,27 @@ export const getInfoFromFeature = async (marker: MapMarker): Promise<LocationInf
     const discoveryPrompt = getDiscoveryPrompt(discoveryBrief.type, discoveryBrief.entity, discoveryBrief.signals);
     
     const mainPrompt = `
-      AUTHORITATIVE LOCATION OVERRIDE:
-      The user clicked on coordinates: ${lat.toFixed(4)}, ${lng.toFixed(4)}
+      AUTHORITATIVE CANONICAL GEOGRAPHIC IDENTITY:
+      Canonical entity: ${marker.name}
+      Entity type: ${marker.type || "place"}
       Country: ${country}
       Region: ${region}
+      City/area: ${city}
+      Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}
+      Coordinate source: ${coordSource}
+      Identity status: ${identStatus}
+      ${osmId ? osmId : ''}
+      ${osmType ? osmType : ''}
+      ${wikidataId ? wikidataId : ''}
+      ${wikipedia ? wikipedia : ''}
+      ${marker.population?.value ? `Population: ${marker.population.value}` : ''}
       
-      You are enriching an existing verified geographic entity. Do not replace it. Do not describe another place.
+      CRITICAL INSTRUCTIONS:
+      You are enriching the EXACT verified geographic entity specified above.
+      You must describe THIS ${marker.name} in ${country} (${region}) and must NOT substitute another entity with the same or similar name.
+      The coordinates, country, region, city, and identity are authoritative.
       
-      Return a JSON object conforming to the schema.
+      Return a JSON object conforming to the schema with substantive, educational information (do NOT output generic placeholder text like "Information on ${marker.name}.").
       CRITICAL INSTRUCTION: You MUST keep semantic boundaries strict. Do not duplicate information across fields.
       Return ONLY a valid JSON object. Do not output markdown code blocks (\`\`\`json), explanations, or any other text. Output strict raw JSON.
     `;
@@ -1021,15 +1163,16 @@ export const getInfoFromFeature = async (marker: MapMarker): Promise<LocationInf
     if (data) {
         const beforeKeys = Object.keys(data);
         
-        // Grounding validation
+        // Grounding & placeholder validation
         if (data.description) {
             const entityNameStr = discoveryBrief.entity.toLowerCase();
             const entityNameParts = entityNameStr.split(/[,\s-]/).filter(p => p.length > 3);
             const descLower = data.description.toLowerCase();
             const isGrounded = descLower.includes(entityNameStr) || entityNameParts.some(p => descLower.includes(p));
+            const isPlaceholder = isGenericPlaceholderDescription(data.description, discoveryBrief.entity);
             
-            if (!isGrounded) {
-                console.warn(`[Enrichment] GROUNDING_FAILED: Description does not mention entity "${discoveryBrief.entity}"`);
+            if (!isGrounded || isPlaceholder) {
+                console.warn(`[Enrichment] REJECTED_DESCRIPTION: isGrounded=${isGrounded}, isPlaceholder=${isPlaceholder} for "${discoveryBrief.entity}"`);
                 data = null;
             }
         }
@@ -1055,7 +1198,8 @@ export const getInfoFromFeature = async (marker: MapMarker): Promise<LocationInf
             if (score < 4) {
                console.warn(`[Enrichment] Quality Score Failed (${score}/4). Reasons: ${reasons.join(", ")}. Retrying...`);
                EnrichmentMetrics.retry++;
-               const qualityRetryPrompt = mainPrompt + `\n\nCRITICAL QUALITY FEEDBACK:\nYour previous response failed quality scoring for a documentary Discovery Interface. Reasons:\n- ${reasons.join("\n- ")}\nImprove the response to be more educational, avoid geographic filler, and focus on unique documentary facts.`;
+               const initialValidData = { ...data };
+               const qualityRetryPrompt = mainPrompt + `\n\nCRITICAL QUALITY FEEDBACK:\nYour previous response failed quality scoring for a documentary Discovery Interface. Reasons:\n- ${reasons.join("\n- ")}\nImprove the response to be more educational and focus on unique documentary facts.`;
                const retryRequest = generateContentWithRetry({
                  model: modelName,
                  contents: qualityRetryPrompt,
@@ -1078,8 +1222,8 @@ export const getInfoFromFeature = async (marker: MapMarker): Promise<LocationInf
                        const postRetryScore = evaluateDiscoveryScore(retryData).score;
                        console.log(`[Enrichment] Retry Score: ${postRetryScore}/4 vs Initial Score: ${score}/4`);
                        
-                       // Field-by-field richest merge
-                       data = mergeRichestFields(data, retryData);
+                       // Field-by-field richest merge, ensuring initial rich description is never destroyed
+                       data = mergeRichestFields(initialValidData, retryData);
                        
                        if (postRetryScore >= 4) {
                            EnrichmentMetrics.retry_success++;
@@ -1088,10 +1232,13 @@ export const getInfoFromFeature = async (marker: MapMarker): Promise<LocationInf
                            console.warn(`[Enrichment] Quality Score Failed again after retry (${postRetryScore}/4). Merged richest fields anyway.`);
                            EnrichmentMetrics.accepted++;
                        }
+                   } else {
+                       data = initialValidData;
                    }
                } else {
                    // Retry failed to parse, keep initial data
                    console.warn(`[Enrichment] Retry failed to parse, keeping initial data.`);
+                   data = initialValidData;
                }
             } else {
                EnrichmentMetrics.accepted++;
@@ -1123,16 +1270,10 @@ export const getInfoFromFeature = async (marker: MapMarker): Promise<LocationInf
             data.description = data.overview;
         }
         
-        // Final Quality Gate
-        const finalDescLower = (data.description || "").toLowerCase();
-        const fillerPhrases = ["is a location", "located in", "situated in", "regional feature", "surrounding communities", "part of the region"];
-        for (const phrase of fillerPhrases) {
-            if (finalDescLower.includes(phrase)) {
-                console.warn(`[Enrichment] HARD STOP: Final LLM payload contains rejected filler ("${phrase}"). Stripping degraded data.`);
-                data.description = "Documentary enrichment unavailable.";
-                data.notable = [];
-                break;
-            }
+        // Final Quality Validation: only replace if genuinely empty or an explicit generic placeholder
+        if (!data.description || isGenericPlaceholderDescription(data.description, name)) {
+            console.warn(`[Enrichment] Placeholder description detected for ${name}.`);
+            data.description = "Documentary enrichment unavailable.";
         }
     }
     
@@ -1194,7 +1335,7 @@ export function evaluateDiscoveryScore(data: any): { score: number, reasons: str
     const notableStr = Array.isArray(data.notable) ? data.notable.join(" ").toLowerCase() : (data.notable?.summary || "").toLowerCase();
 
     // 1. Identity Present (+1)
-    if (descLower.length > 50 && !descLower.includes("is a location in") && !descLower.includes("situated in")) {
+    if (descLower.length > 30 && !isGenericPlaceholderDescription(data.description, data.name)) {
         score += 1;
         reasons.push("Identity clearly defined.");
     }
@@ -1218,25 +1359,25 @@ export function evaluateDiscoveryScore(data: any): { score: number, reasons: str
     }
 
     // 5. Scientific/Natural Signal (+1)
-    if (descLower.includes("ecosystem") || descLower.includes("geolog") || descLower.includes("species") || notableStr.includes("science") || notableStr.includes("discover")) {
+    if (descLower.includes("ecosystem") || descLower.includes("geolog") || descLower.includes("species") || descLower.includes("wildlife") || descLower.includes("prairie") || descLower.includes("grassland") || descLower.includes("forest") || descLower.includes("mountain") || descLower.includes("water") || notableStr.includes("science") || notableStr.includes("discover") || notableStr.includes("wildlife")) {
         score += 1;
         reasons.push("Scientific/Natural signals present.");
     }
 
-    // Geography Filler Penalty (-2)
-    const fillerPhrases = ["is a location", "located in", "situated in", "serves surrounding communities", "regional feature", "area known as", "part of the region", "geographic significance", "located within the interior", "regional location"];
+    // Vacuous Placeholder Penalty (-2)
+    const vacuousPhrases = ["no specific information available", "no information available", "generic placeholder for this entity", "specific geographic description unavailable"];
     let penaltyApplied = false;
-    for (const phrase of fillerPhrases) {
+    for (const phrase of vacuousPhrases) {
         if (descLower.includes(phrase) || notableStr.includes(phrase)) {
             score -= 2;
             penaltyApplied = true;
-            reasons.push(`Penalty: Geographic filler phrase detected ("${phrase}").`);
+            reasons.push(`Penalty: Vacuous placeholder phrase detected ("${phrase}").`);
             break;
         }
     }
     
-    // Fallback point if they wrote good descriptions but missed a specific keyword
-    if (score < 4 && !penaltyApplied && descLower.length > 200 && notableStr.length > 100) {
+    // Substantial description boost (+1)
+    if (score < 4 && !penaltyApplied && descLower.length > 80) {
         score += 1;
         reasons.push("Content is substantial; +1 baseline boost.");
     }
@@ -1272,229 +1413,7 @@ export function getDeterministicImageSearchTerm(name: string, type: string, meta
     return name;
 }
 
-export const getInfoFromCoordinates = async (lat: number, lng: number, waypoint?: Waypoint): Promise<LocationInfo | null> => {
-  try {
-    const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
-    
-    const discoveryBrief = {
-      entity: waypoint?.name || "Selected Location",
-      type: waypoint?.type || waypoint?.entityType || "place",
-      signals: waypoint?.discoverySignals || []
-    };
-    console.log("[DISCOVERY BRIEF SENT TO LLM]", JSON.stringify(discoveryBrief, null, 2));
-    const discoveryPrompt = getDiscoveryPrompt(discoveryBrief.type, discoveryBrief.entity, discoveryBrief.signals);
-    
-    const mainPrompt = `
-      AUTHORITATIVE GEOGRAPHIC CONTEXT:
-      Coordinates: ${lat.toFixed(4)}, ${lng.toFixed(4)}
-      ${waypoint?.country ? `Country: ${waypoint.country}` : ''}
-      ${waypoint?.state ? `State/Region: ${waypoint.state}` : ''}
-      
-      You are enriching an existing verified geographic entity. Do not replace it. Do not describe another place.
-      
-      Return a JSON object conforming to the schema.
-      CRITICAL INSTRUCTION: You MUST keep semantic boundaries strict. Do not duplicate information across fields.
-      Return ONLY a valid JSON object. Do not output markdown code blocks (\`\`\`json), explanations, or any other text. Output strict raw JSON.
-    `;
 
-    const mainRequest = generateContentWithRetry({
-      model: modelName,
-      systemInstruction: discoveryPrompt,
-      contents: mainPrompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: mainInfoSchemaConfig,
-        maxOutputTokens: 4000,
-        temperature: 0.2
-      }
-    });
-
-    let mainResponse = await mainRequest;
-    
-    let parsed = parseAndExtract(mainResponse.text);
-    
-    logEnrichmentJsonPipeline(mainResponse.text, parsed, false);
-    
-    // 1-Time Strict Retry for Formatting Failures
-    if (!parsed.success && ((parsed as any).reason === "NO_JSON_FOUND" || (parsed as any).reason === "INVALID_JSON" || (parsed as any).reason === "UNBALANCED_DELIMITERS")) {
-       EnrichmentMetrics.retry++;
-       console.warn(`[RECOVERY] Parse failed (${(parsed as any).reason}): ${(parsed as any).error}. Triggering 1-time strict retry.`);
-       const retryPrompt = mainPrompt + "\n\nCRITICAL INSTRUCTION: Return ONLY a single valid JSON object. Do not include markdown, explanations, code fences, comments, or any text before or after the JSON.";
-       const retryRequest = generateContentWithRetry({
-         model: modelName,
-         contents: retryPrompt,
-         config: {
-           responseMimeType: "application/json",
-           responseSchema: mainInfoSchemaConfig,
-           maxOutputTokens: 4000,
-           temperature: 0.2
-         }
-       });
-       mainResponse = await retryRequest;
-       parsed = parseAndExtract(mainResponse.text);
-       logEnrichmentJsonPipeline(mainResponse.text, parsed, true);
-       
-       if (parsed.success) {
-           EnrichmentMetrics.retry_success++;
-       }
-    }
-
-    let data: any = parsed.success ? parsed.value : null;
-
-    if (Array.isArray(data)) {
-        console.warn("[ENRICHMENT] LLM returned array, unwrapping first object");
-        data = data.length > 0 ? data[0] : null;
-    }
-    if (data && typeof data !== "object") {
-        data = null;
-    }
-
-    if (data) {
-        const beforeKeys = Object.keys(data);
-        
-        // Grounding validation
-        if (data.description) {
-            const entityNameStr = discoveryBrief.entity.toLowerCase();
-            const entityNameParts = entityNameStr.split(/[,\s-]/).filter(p => p.length > 3);
-            const descLower = data.description.toLowerCase();
-            const isGrounded = descLower.includes(entityNameStr) || entityNameParts.some(p => descLower.includes(p));
-            
-            if (!isGrounded) {
-                console.warn(`[Enrichment] GROUNDING_FAILED: Description does not mention entity "${discoveryBrief.entity}"`);
-                data = null;
-            }
-        }
-
-        if (data && !data.description) {
-            EnrichmentMetrics.schema_failure++;
-            console.log("[Enrichment] SCHEMA_INVALID", {
-                receivedKeys: Object.keys(data),
-                expectedKeys: ["description"],
-                missingFields: ["description"]
-            });
-            data = null;
-        } else if (data) {
-            if (!data.notable || !Array.isArray(data.notable)) {
-                data.notable = [];
-            }
-            console.log("[ENRICHMENT NORMALIZATION]", {
-                before: beforeKeys,
-                after: Object.keys(data)
-            });
-
-            const { score, reasons } = evaluateDiscoveryScore(data);
-            if (score < 4) {
-               console.warn(`[Enrichment] Quality Score Failed (${score}/4). Reasons: ${reasons.join(", ")}. Retrying...`);
-               EnrichmentMetrics.retry++;
-               const qualityRetryPrompt = mainPrompt + `\n\nCRITICAL QUALITY FEEDBACK:\nYour previous response failed quality scoring for a documentary Discovery Interface. Reasons:\n- ${reasons.join("\n- ")}\nImprove the response to be more educational, avoid geographic filler, and focus on unique documentary facts.`;
-               const retryRequest = generateContentWithRetry({
-                 model: modelName,
-                 contents: qualityRetryPrompt,
-                 config: {
-                   responseMimeType: "application/json",
-                   responseSchema: mainInfoSchemaConfig,
-                   maxOutputTokens: 4000,
-                   temperature: 0.3 // slightly higher temp for retry variation
-                 }
-               });
-               mainResponse = await retryRequest;
-               parsed = parseAndExtract(mainResponse.text);
-               logEnrichmentJsonPipeline(mainResponse.text, parsed, true);
-               
-               if (parsed.success) {
-                   let retryData = parsed.value;
-                   if (Array.isArray(retryData)) retryData = retryData.length > 0 ? retryData[0] : null;
-                   
-                   if (retryData) {
-                       const postRetryScore = evaluateDiscoveryScore(retryData).score;
-                       console.log(`[Enrichment] Retry Score: ${postRetryScore}/4 vs Initial Score: ${score}/4`);
-                       
-                       data = mergeRichestFields(data, retryData);
-                       
-                       if (postRetryScore >= 4) {
-                           EnrichmentMetrics.retry_success++;
-                           EnrichmentMetrics.accepted++;
-                       } else {
-                           console.warn(`[Enrichment] Quality Score Failed again after retry (${postRetryScore}/4). Merged richest fields anyway.`);
-                           EnrichmentMetrics.accepted++;
-                       }
-                   }
-               } else {
-                   console.warn(`[Enrichment] Retry failed to parse, keeping initial data.`);
-               }
-            } else {
-               EnrichmentMetrics.accepted++;
-            }
-        }
-        if (data) {
-            data.imageSearchTerm = getDeterministicImageSearchTerm(data.name, data.type, data.metadataMode, waypoint?.discoverySignals || []);
-            
-            // Final Quality Gate
-            const finalDescLower = (data.description || "").toLowerCase();
-            const fillerPhrases = ["is a location", "located in", "situated in", "regional feature", "surrounding communities", "part of the region"];
-            for (const phrase of fillerPhrases) {
-                if (finalDescLower.includes(phrase)) {
-                    console.warn(`[Enrichment] HARD STOP: Final LLM payload contains rejected filler ("${phrase}"). Stripping degraded data.`);
-                    data.description = "Documentary enrichment unavailable.";
-                    data.notable = [];
-                    break;
-                }
-            }
-        }
-    }
-
-    if (!data) {
-        if (!parsed.success) {
-            EnrichmentMetrics.rejected++;
-            console.warn(`[Enrichment] STRICT RETRY FAILED (${(parsed as any).reason}): ${(parsed as any).error}`);
-        }
-        data = {
-            name: "", // Prevent "Unknown Location" from overriding waypoint name
-            type: LocationType.POI,
-            description: "Documentary enrichment unavailable.",
-            coordinates: { lat, lng },
-            funFacts: [],
-            notable: []
-        };
-    }
-
-    if (data.coordinates) {
-        data.coordinates = normalizeCoordinates(data.coordinates);
-    }
-
-    if (!data.coordinates || typeof data.coordinates.lat !== 'number' || isNaN(data.coordinates.lat)) {
-        data.coordinates = { lat, lng };
-    }
-    
-    if (!data.description) data.description = "";
-    if (!data.funFacts) data.funFacts = [];
-    if (!data.notable) data.notable = [];
-    if (!data.type) data.type = LocationType.POI;
-    if (waypoint) {
-        data.waypoint = waypoint;
-    }
-    
-    return enrichLocationInfo(data as LocationInfo);
-
-  } catch (error: any) {
-    const isQuota = error?.message?.includes('429') || error?.message?.includes('Quota') || (error?.error && error.error.code === 429);
-
-    const fallbackName = isQuota ? "System Busy (Quota)" : (waypoint?.name || "Connection Error");
-
-    return sanitizeLocationInfo({
-        name: fallbackName,
-        type: LocationType.POI,
-        entityType: waypoint?.type || "point_of_interest",
-        description: isQuota 
-            ? "The knowledge engine is currently experiencing high request volume. Please wait a few moments and try again." 
-            : "Documentary enrichment unavailable.",
-        climate: null,
-        coordinates: { lat, lng },
-        funFacts: [],
-        notable: []
-    } as unknown as LocationInfo);
-  }
-};
 
 // Schema for nearby places geographic anchor
 const nearbyPlacesSchemaConfig = {
@@ -1577,14 +1496,9 @@ import { overpassProvider } from './geographic/providers/OverpassProvider';
 import { wikipediaProvider } from './geographic/providers/WikipediaProvider';
 import { nominatimProvider } from './geographic/providers/NominatimProvider';
 
-import { classifyEntity } from './geographic/classification';
+import { classifyEntity, isLowSignificancePoi } from './geographic/classification';
 
 export const generateFallbackCandidates = async (lat: number, lng: number, context: any, environment?: string): Promise<Candidate[]> => {
-    let specificRequirements = "";
-    if (environment === 'urban' || environment === 'rural') {
-        specificRequirements = "You MUST include at least 3 nearby settlements (cities, towns, or villages), 2 geographic features, and 1 landmark. Do not return only administrative regions or natural features without settlements.";
-    }
-
     const prompt = `Return real nearby geographic entities around this exact coordinate (${lat}, ${lng}). Do not move the search to another country or famous locations.
 
 Context:
@@ -1594,7 +1508,7 @@ County: ${context.county || 'Unknown'}
 Locality: ${context.city || context.town || context.village || 'Unknown'}
 Environment: ${environment || 'wilderness'}
 
-${specificRequirements}
+Identify any real, prominent nearby geographic entities (such as a nearby town or settlement, prominent mountain, lake, river, or national park). Do not manufacture places or include obscure POIs simply to fill slots. If there is only one meaningful place, return only that place. If there are none, return an empty array [].
 
 Provide a JSON array of significant local places, natural features, landmarks, or settlements. Output ONLY valid JSON:
 [
@@ -1602,7 +1516,7 @@ Provide a JSON array of significant local places, natural features, landmarks, o
     "name": "Name of the place",
     "lat": 12.34,
     "lng": 56.78,
-    "type": "city | natural | historic | tourism | administrative | mountain | park"
+    "type": "city | town | village | natural | landmark | mountain | lake | river | national_park"
   }
 ]`;
 
@@ -1628,15 +1542,15 @@ Provide a JSON array of significant local places, natural features, landmarks, o
             identifiers: {},
             populationClass: 'small',
             discoverySignals: ['Found via Gemini Fallback']
-} as Candidate));
+        } as Candidate));
     } catch (e) {
         console.warn("[Gemini Fallback] Failed to generate fallback candidates:", e);
         return [];
     }
 };
 
-export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: number = 25, isFallback: boolean = false): Promise<DiscoveryResult> => {
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: number = 50): Promise<{ places: MapMarker[]; status: "SUCCESS" | "NO_RESULTS" | "PROVIDER_FAILURE"; diagnostics?: any }> => {
+  if (typeof lat !== 'number' || isNaN(lat) || typeof lng !== 'number' || isNaN(lng)) {
     return {
       places: [],
       status: "NO_RESULTS",
@@ -1650,8 +1564,46 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
     let candidatesReceived = 0;
     let rejectedByDistance = 0;
     
-    // 1. Resolve Context for RegionalSearchProvider
+    // 1. Resolve Context for the clicked coordinate
     const geoContext: Partial<ReverseGeocodeContext> = await reverseGeocode(lat, lng).catch(() => ({})) || {};
+
+    // STAGE 1: Primary Geographic Entity Resolution
+    const primaryEntity = await resolvePrimaryGeographicEntity(lat, lng, geoContext as any);
+
+    if (primaryEntity) {
+        console.log(`[Discovery] ${lat.toFixed(2)}, ${lng.toFixed(2)} → 1 candidate`);
+        console.log(`[Discovery] Primary: ${primaryEntity.name}`);
+
+        const primaryMarker: MapMarker = {
+            id: `primary-${primaryEntity.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+            name: primaryEntity.name,
+            lat: primaryEntity.lat,
+            lng: primaryEntity.lng,
+            type: primaryEntity.type,
+            populationClass: primaryEntity.populationClass || 'large',
+            provenance: primaryEntity.source,
+            discoverySignals: [primaryEntity.reason]
+        };
+
+        return {
+            places: [primaryMarker],
+            status: "SUCCESS",
+            diagnostics: {
+                discoveryMode: 'PRIMARY_ENTITY',
+                resolvedEntity: primaryEntity.name,
+                entityType: primaryEntity.type,
+                confidence: primaryEntity.confidence,
+                resultCount: 1,
+                providersAttempted: 1,
+                providerFailures: 0
+            }
+        };
+    }
+
+    // STAGE 2: Nearby Discovery Fallback
+    console.log(`[DISCOVERY MODE]\n` +
+      `mode: FALLBACK_NEARBY\n` +
+      `reason primary entity resolution failed: No meaningful primary entity directly at clicked coordinate (rural/oceanic area)\n`);
 
     // Detect Environment
     let environment: 'urban' | 'rural' | 'wilderness' | 'ocean' = 'wilderness';
@@ -1665,14 +1617,18 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
         environment = 'wilderness';
     }
 
-    // 2. Collect Candidates & Anchor
+    // Collect Candidates & Anchor
     const rawCandidates: Candidate[] = [];
     const context = { lat, lng, radiusKm: initialRadius, ...geoContext };
 
-    // Inject Anchor Provider Candidate
-    if (geoContext.feature || geoContext.displayName) {
-        const anchorName = geoContext.feature || (geoContext.displayName ? geoContext.displayName.split(',')[0] : 'Unknown Location');
-        if (anchorName && anchorName !== 'Unknown Location') {
+    // Inject Anchor Provider Candidate (only if valid specific feature, not an administrative container)
+    if (geoContext.feature) {
+        const anchorName = geoContext.feature;
+        const isCountyOrAdmin = anchorName.toLowerCase().includes('county') || 
+                               anchorName.toLowerCase().includes('district') || 
+                               (geoContext.county && anchorName.toLowerCase() === geoContext.county.toLowerCase()) ||
+                               (geoContext.state && anchorName.toLowerCase() === geoContext.state.toLowerCase());
+        if (anchorName && !isCountyOrAdmin && !isLowSignificancePoi(anchorName)) {
             rawCandidates.push({
                 id: 'anchor-feature',
                 name: anchorName,
@@ -1694,21 +1650,41 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
         }
     }
     
+    const providersAttemptedList: string[] = [];
+    const providerFailuresList: string[] = [];
+    const candidateSourcesUsed = new Set<string>();
+
+    const providerStatusList: string[] = [];
+
     const results = await Promise.allSettled(
         providerRegistry.map(async (provider) => {
             providersAttempted++;
+            providersAttemptedList.push(provider.name);
+            const data = await provider.searchNearby(context);
             return {
+                provider,
                 name: provider.name,
-                data: await provider.searchNearby(context)
+                data
             };
         })
     );
 
     for (const result of results) {
         if (result.status === 'fulfilled') {
-            for (const genericItem of result.value.data) {
+            const { provider, name, data } = result.value;
+            const status = provider.lastStatus || (data.length > 0 ? 'SUCCESS_WITH_RESULTS' : 'SUCCESS_EMPTY');
+            const msg = provider.lastStatusMessage ? ` (${provider.lastStatusMessage})` : '';
+            providerStatusList.push(`${name}: ${status}${msg}`);
+
+            if (status === 'RATE_LIMITED' || status === 'FAILED' || status === 'TIMEOUT') {
+                providerFailures++;
+                providerFailuresList.push(`${name}: ${provider.lastStatusMessage || status}`);
+            }
+
+            for (const genericItem of data) {
                 const item = genericItem as any;
                 candidatesReceived++;
+                candidateSourcesUsed.add(name);
                 
                 // 3. Normalize
                 const itemLat = item.lat || item.coordinates?.lat || 0;
@@ -1730,8 +1706,8 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
                     name: item.name || '',
                     type: (item.type || 'poi').toLowerCase(),
                     coordinates: { lat: itemLat, lng: itemLng },
-                    providers: [result.value.name],
-                    rawProviders: { [result.value.name]: item },
+                    providers: [name],
+                    rawProviders: { [name]: item },
                     pipelineStatus: "collected",
                     discoverySignals: item.discoverySignals || [],
                     populationClass: item.populationClass || 'small',
@@ -1745,9 +1721,16 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
             }
         } else {
             providerFailures++;
-            console.warn(`Provider failed:`, result.reason);
+            const failedProviderName = (result.reason as any)?.providerName || 'Unknown Provider';
+            providerFailuresList.push(`${failedProviderName}: ${result.reason?.message || result.reason}`);
+            providerStatusList.push(`${failedProviderName}: FAILED (${result.reason?.message || result.reason})`);
         }
     }
+
+    console.log(`[DISCOVERY PROVIDER STATUS]\n` +
+      providerStatusList.map(s => `  ${s}`).join('\n') + '\n' +
+      `candidate sources used: ${Array.from(candidateSourcesUsed).join(', ') || 'None'}\n` +
+      `fallback stage: ${providerFailures > 0 ? 'REGIONAL_MULTI_SOURCE_FALLBACK' : 'PRIMARY_PROVIDER_DISCOVERY'}\n`);
 
     // 4. Merge Evidence Into Entities
     const mergeCandidates = (candidates: Candidate[], existingMerged: Candidate[] = []) => {
@@ -1771,7 +1754,6 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
                     }
                     existing.pipelineStatus = "merged";
                     
-                    // If one is anchor, preserve anchor status
                     if (candidate.isAnchor) existing.isAnchor = true;
                     
                     merged = true;
@@ -1783,13 +1765,26 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
                 candidate.entityClass = classifyEntity(candidate);
                 
                 // Exclude administrative regions from discovery markers
-                if (geoContext.county && candidate.name.toLowerCase() === geoContext.county.toLowerCase()) {
+                if (geoContext.country && candidate.name.toLowerCase() === geoContext.country.toLowerCase()) {
                     candidate.entityClass = 'administrative_region';
+                    candidate.rankingClass = 'ADMINISTRATIVE_REGION';
                     candidate.type = 'administrative';
+                    candidate.normalizedEntityType = 'administrative_region';
+                    candidate.eligibleForDefaultDiscovery = false;
                 }
                 if (geoContext.state && candidate.name.toLowerCase() === geoContext.state.toLowerCase()) {
                     candidate.entityClass = 'administrative_region';
+                    candidate.rankingClass = 'ADMINISTRATIVE_REGION';
                     candidate.type = 'administrative';
+                    candidate.normalizedEntityType = 'administrative_region';
+                    candidate.eligibleForDefaultDiscovery = false;
+                }
+                if (geoContext.county && candidate.name.toLowerCase() === geoContext.county.toLowerCase()) {
+                    candidate.entityClass = 'administrative_region';
+                    candidate.rankingClass = 'ADMINISTRATIVE_REGION';
+                    candidate.type = 'administrative';
+                    candidate.normalizedEntityType = 'administrative_region';
+                    candidate.eligibleForDefaultDiscovery = false;
                 }
                 
                 result.push(candidate);
@@ -1800,114 +1795,87 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
 
     let mergedCandidates = mergeCandidates(rawCandidates);
 
-    // 5. Environment-Specific Quality Gate (Pre-Ranking)
-    const evaluateEnvironmentGate = (candidates: Candidate[], env: string) => {
-        const settlements = candidates.filter(c => c.entityClass === 'settlement').length;
-        const geoFeatures = candidates.filter(c => c.entityClass === 'geographic_feature' || c.entityClass === 'major_landmark').length;
-        const anchors = candidates.filter(c => c.isAnchor).length;
-        const total = candidates.length;
-
-        if (env === 'urban') return settlements >= 3;
-        if (env === 'rural') return settlements >= 1 || geoFeatures >= 2;
-        if (env === 'wilderness') return (anchors >= 1 && total >= 3) || geoFeatures >= 2;
-        if (env === 'ocean') return total >= 1;
-        return false;
-    };
-
-    let fallbackUsed = false;
-    let fallbackResultCount = 0;
-
-    const meetsMinimum = evaluateEnvironmentGate(mergedCandidates, environment);
-
-    if (!meetsMinimum) {
-        console.warn(`[Quality Gate] Pool rejected for environment: ${environment}. Engaging fallback.`);
-        fallbackUsed = true;
-        const fallbackRaw = await generateFallbackCandidates(lat, lng, geoContext, environment);
-        
-        const fallbackSettlements = fallbackRaw.filter(c => ['city', 'town', 'village'].includes(c.type));
-        if ((environment === 'urban' || environment === 'rural') && fallbackSettlements.length === 0) {
-            console.warn(`[Gemini Fallback] Rejected: Failed to generate settlements for ${environment} environment.`);
-        } else {
-            fallbackRaw.forEach(c => fallbackResultCount++);
-            
-            // Merge fallback candidates into the pool
-            mergedCandidates = mergeCandidates(fallbackRaw, mergedCandidates);
-        }
-        
-        console.log(`[DISCOVERY FALLBACK TRACE]\n{\n coordinate: [${lat}, ${lng}],\n environment: ${environment},\n fallbackUsed: ${fallbackUsed},\n fallbackResultCount: ${fallbackResultCount}\n}`);
-    }
-
-    // 6. Rank and Select
+    // 5. Score and Gate Candidates
     const balancedCandidates = applyCategoryBalance(mergedCandidates);
     await Promise.all(balancedCandidates.map(c => computeImportanceScore(c, lat, lng)));
+
+    const popPlacesCount = balancedCandidates.filter(c => (c.rankingClass === 'POPULATED_PLACE' || c.entityClass === 'settlement') && c.eligibleForDefaultDiscovery !== false).length;
+    const geoFeaturesCount = balancedCandidates.filter(c => (c.rankingClass === 'GEOGRAPHIC_FEATURE' || c.entityClass === 'geographic_feature') && c.eligibleForDefaultDiscovery !== false).length;
+    const adminRegionsCount = balancedCandidates.filter(c => c.rankingClass === 'ADMINISTRATIVE_REGION' || c.entityClass === 'administrative_region' || c.type === 'administrative').length;
+
+    console.log(`[Candidate Normalization & Classification Diagnostics]\n` +
+      (balancedCandidates.length > 0 ? balancedCandidates.map(c => 
+        `Candidate: ${c.name}\n` +
+        `  Provider type: ${c.originalProviderType || c.type}\n` +
+        `  Normalized type: ${c.normalizedEntityType || c.type}\n` +
+        `  Classification: ${c.rankingClass || 'OTHER'}\n` +
+        (c.displayName && c.displayName !== c.name ? `  Display name: ${c.displayName}\n` : '') +
+        `  Reason: ${c.classificationReason || c.classificationEvidence || (c.rankingClass === 'POPULATED_PLACE' ? 'Verified populated place' : (c.rankingClass === 'REJECTED' ? 'Non-geographic event/topic' : 'Geographic feature / administrative area'))}`
+      ).join('\n') : '  None'));
     
-    // Apply standard scoring threshold gate
+    // Apply standard scoring threshold gate (strictly enforces eligibleForDefaultDiscovery)
     const gatedCandidates = applyQualityGate(balancedCandidates);
 
+    console.log(`[Pre-Ranking Candidates]\n` +
+      (gatedCandidates.length > 0 ? gatedCandidates.map((c, i) => `  ${i + 1}. ${c.displayName || c.name} | ${c.normalizedEntityType || c.type} | ${(c.distanceKm ?? 0).toFixed(1)} km | score ${c.importanceScore ?? 0} | tier ${c.tier ?? 3}`).join('\n') : '  None'));
+
     gatedCandidates.sort((a, b) => {
-        // Anchor always wins
-        if (a.isAnchor && !b.isAnchor) return -1;
-        if (b.isAnchor && !a.isAnchor) return 1;
-
-        const tierA = a.tier || 4;
-        const tierB = b.tier || 4;
+        const tierA = a.tier || 3;
+        const tierB = b.tier || 3;
         
-        const distA = Math.sqrt(Math.pow(a.coordinates.lat - lat, 2) + Math.pow(a.coordinates.lng - lng, 2)) * 111;
-        const distB = Math.sqrt(Math.pow(b.coordinates.lat - lat, 2) + Math.pow(b.coordinates.lng - lng, 2)) * 111;
-
+        // Priority by hierarchy tier (Tier 1 > Tier 2 > Tier 3 > Tier 4 > Tier 5)
         if (tierA !== tierB) {
-            if (tierA === 2 && tierB === 1 && distB > 10 && distA < distB) return -1;
-            if (tierB === 2 && tierA === 1 && distA > 10 && distB < distA) return 1;
             return tierA - tierB;
         }
 
-        if (a.importanceScore !== b.importanceScore) return b.importanceScore! - a.importanceScore!;
-        if (a.confidenceScore !== b.confidenceScore) return b.confidenceScore! - a.confidenceScore!;
-        if (a.providers.length !== b.providers.length) return b.providers.length - a.providers.length;
-        
+        // Higher importance score wins within same tier
+        if ((a.importanceScore || 0) !== (b.importanceScore || 0)) {
+            return (b.importanceScore || 0) - (a.importanceScore || 0);
+        }
+
+        if ((a.confidenceScore || 0) !== (b.confidenceScore || 0)) {
+            return (b.confidenceScore || 0) - (a.confidenceScore || 0);
+        }
+
+        const distA = a.distanceKm ?? Math.sqrt(Math.pow(a.coordinates.lat - lat, 2) + Math.pow(a.coordinates.lng - lng, 2)) * 111;
+        const distB = b.distanceKm ?? Math.sqrt(Math.pow(b.coordinates.lat - lat, 2) + Math.pow(b.coordinates.lng - lng, 2)) * 111;
         return distA - distB;
     });
 
-    const selectedCandidates = applySelection(gatedCandidates, 15);
-    
-    // Ensure anchor is present in selection if it survived to gated
-    const anchor = gatedCandidates.find(c => c.isAnchor);
-    if (anchor && !selectedCandidates.find(c => c.id === anchor.id)) {
-        selectedCandidates.unshift(anchor);
-        if (selectedCandidates.length > 15) selectedCandidates.pop();
+    const selectedCandidates = applySelection(gatedCandidates, 6);
+
+    const finalMarkers: MapMarker[] = selectedCandidates.map(c => ({
+        id: c.id,
+        name: c.displayName || c.name,
+        displayName: c.displayName || c.name,
+        lat: c.coordinates.lat,
+        lng: c.coordinates.lng,
+        type: c.normalizedEntityType || c.type,
+        populationClass: c.populationClass || 'small',
+        provenance: c.providers.join(', '),
+        discoverySignals: c.discoverySignals,
+        identifiers: c.identifiers
+    }));
+
+    console.log(`[Candidate Ranking]\n` +
+      `populated places available: ${popPlacesCount}\n` +
+      `geographic features available: ${geoFeaturesCount}\n` +
+      `administrative regions: ${adminRegionsCount}\n\n` +
+      `Final results:\n` +
+      (finalMarkers.length > 0 ? finalMarkers.map((m, i) => `  ${i + 1}. ${m.name} | ${m.type}`).join('\n') : '  None'));
+
+    if (selectedCandidates.length > 0) {
+        console.log(`[Discovery primary]\n  ${selectedCandidates[0].name}`);
+    } else {
+        console.log(`[Discovery] ${lat.toFixed(2)}, ${lng.toFixed(2)} → 0 candidates`);
     }
-
-    const rejectedByClassification = rawCandidates.length - mergedCandidates.length;
-
-    console.log(`[DISCOVERY COVERAGE TRACE]\n` +
-      `{\n` +
-      `  "coordinate": [${lat}, ${lng}],\n` +
-      `  "environment": "${environment}",\n` +
-      `  "candidatesReceived": ${candidatesReceived},\n` +
-      `  "rejectedByDistance": ${rejectedByDistance},\n` +
-      `  "localSettlementCount": ${mergedCandidates.filter(c => c.entityClass === 'settlement' && c.distanceBand === 'local').length},\n` +
-      `  "regionalSettlementCount": ${mergedCandidates.filter(c => c.entityClass === 'settlement' && c.distanceBand === 'regional').length},\n` +
-      `  "extendedSettlementCount": ${mergedCandidates.filter(c => c.entityClass === 'settlement' && c.distanceBand === 'extended').length},\n` +
-      `  "finalCandidateCount": ${selectedCandidates.length}\n` +
-      `}\n`);
-
-    console.log(`[DISCOVERY HIERARCHY]\n` +
-      `Tier 1: ${gatedCandidates.filter(c => c.tier === 1).map(c => c.name).join(', ')}\n` +
-      `Tier 2: ${gatedCandidates.filter(c => c.tier === 2).map(c => c.name).join(', ')}\n` +
-      `Tier 3: ${gatedCandidates.filter(c => c.tier === 3).map(c => c.name).join(', ')}\n` +
-      `Tier 4: ${gatedCandidates.filter(c => c.tier === 4).map(c => c.name).join(', ')}\n` +
-      `Tier 5: ${gatedCandidates.filter(c => c.tier === 5).map(c => c.name).join(', ')}`);
-
-    console.log(`\n[DISCOVERY RANKING]\n`);
-    selectedCandidates.forEach((c, idx) => {
-        console.log(`Rank: ${idx + 1}\nName: ${c.name}\nEntity type: ${(c as any).geographicCategory || c.type}\nHierarchy tier: ${c.tier || 5}\nDistance: ${Math.round(Math.sqrt(Math.pow(c.coordinates.lat - lat, 2) + Math.pow(c.coordinates.lng - lng, 2)) * 111)}km\nScore: ${c.importanceScore}\nWinner Reason: ${idx === 0 ? 'Highest geographic tier and score' : 'Ranked below winner'}\n---`);
-    });
 
     if (selectedCandidates.length === 0) {
         return {
             places: [],
             status: "NO_RESULTS",
             diagnostics: { 
+                discoveryMode: 'REGIONAL_DISCOVERY',
                 providersAttempted, 
                 providerFailures, 
                 resultCount: 0,
@@ -1918,30 +1886,17 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
         };
     }
 
-    const finalMarkers: MapMarker[] = selectedCandidates.map(c => ({
-        id: c.id,
-        name: c.name,
-        lat: c.coordinates.lat,
-        lng: c.coordinates.lng,
-        type: c.type,
-        populationClass: c.populationClass || 'small',
-        provenance: c.providers.join(', '),
-        discoverySignals: c.discoverySignals
-    }));
-
     return {
         places: finalMarkers,
         status: "SUCCESS",
-        diagnostics: { 
-            providersAttempted, 
-            providerFailures, 
+        diagnostics: {
+            discoveryMode: 'REGIONAL_DISCOVERY',
             resultCount: finalMarkers.length,
-            candidatesReceived,
-            rejectedByDistance,
+            providersAttempted,
+            providerFailures,
             environment
         }
     };
-
   } catch (error: any) {
     console.error("Error fetching nearby places:", error);
     return {
@@ -2397,39 +2352,74 @@ export const recoverCoordinatesFromAi = async (rawQuery: string, intent: string,
   }
 };;
 
-export const recoverLocationMetadata = async (entityName: string, coordinates: GeoCoordinates): Promise<Partial<EnrichmentResult> | null> => {
+export const recoverLocationMetadata = async (
+  entityName: string, 
+  coordinates: GeoCoordinates,
+  canonicalIdentity?: Partial<CanonicalGeographicEntity> & { country?: string; state?: string; city?: string; region?: string; county?: string }
+): Promise<Partial<EnrichmentResult> | null> => {
   try {
     const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
     
+    const entityTitle = canonicalIdentity?.canonicalName || entityName;
+    const adminArea = canonicalIdentity?.city || canonicalIdentity?.county || canonicalIdentity?.state || canonicalIdentity?.region || "Unknown area";
+    const countryName = canonicalIdentity?.country || "Unknown country";
+    const entityTypeStr = canonicalIdentity?.entityType || "natural_feature";
+
+    const contextDetails = [
+      `Entity: ${entityTitle}`,
+      `Canonical coordinates: ${coordinates.lat}, ${coordinates.lng}`,
+      `Country: ${countryName}`,
+      `Administrative area: ${adminArea}`,
+      `Entity type: ${entityTypeStr}`,
+      canonicalIdentity?.osmId ? `OSM ID: ${canonicalIdentity.osmId}` : null,
+      canonicalIdentity?.osmType ? `OSM Type: ${canonicalIdentity.osmType}` : null,
+      canonicalIdentity?.wikidataId ? `Wikidata ID: ${canonicalIdentity.wikidataId}` : null,
+      canonicalIdentity?.wikipedia ? `Wikipedia: ${canonicalIdentity.wikipedia}` : null
+    ].filter(Boolean).join('\n');
+
     const basePrompt = `
-      Provide encyclopedic information for the location named "${entityName}" located precisely at coordinates: ${coordinates.lat}, ${coordinates.lng}.
+      Canonical geographic identity:
+${contextDetails}
+
+      CRITICAL INSTRUCTIONS:
+      1. You MUST describe THIS entity at THESE canonical coordinates (${coordinates.lat}, ${coordinates.lng}).
+      2. Do not substitute another place with the same or similar name.
+      3. The coordinates, country, administrative area, and entity type are authoritative.
+      4. LANGUAGE REQUIREMENT: All text fields ("description", "climate", "contextNotes", "notable") MUST be written strictly in ENGLISH. Never return French, Spanish, German, Italian, or other non-English text.
+      
       Current Date: ${currentDate}
       
-      Return a JSON object with:
-      - name: The feature's proper name only. Do NOT append State, Province, Country, or administrative hierarchy.
-      - locationString: The geographic hierarchy separated from the title (e.g. "Florida, United States").
-      - description: Write 2-4 concise paragraphs explaining what this place is, why it exists, why it is significant, and why someone should care. The first sentence must immediately identify what makes the place distinctive. Use Markdown headings. Forbidden phrases: "is a location in", "is situated in", "serves surrounding communities". Do not output a single generic paragraph.
-      - population: Object containing 'current' and 'historical' population estimates. For historical events, always distinguish historical population from modern population.
-      - climate: Object containing 'name' (e.g. "Oceanic climate"), 'description' (plain language summary), and 'koppenCode' (treat scientific classifications as supporting metadata, not primary).
-      - contextNotes: Array of 3 string facts that provide meaningful historical or geographic context. Do not output generic trivia.
-      - notable: Generate 3-6 highly specific facts. Prioritize History, Science, Culture, People, Economy, Records. Do not repeat information from the overview. Do not describe where the place is unless relevant.
-      - imageCaption: A concise caption (10-25 words) for an iconic photograph of this feature. Do not merely restate the title.
-      - imageSearchTerm: A highly specific Wikipedia search term to fetch the best iconic image of this feature.
-      
-      Output strictly valid JSON matching this structure.
+      Require the response to be a SINGLE JSON object with exactly these top-level fields:
+      {
+        "name": "${entityTitle}",
+        "locationString": "${adminArea}, ${countryName}",
+        "description": "2-4 substantive educational paragraphs in English explaining what this place is, why it exists, why it is significant, and why someone should care. Write informative narrative without generic template phrases.",
+        "population": null,
+        "climate": {
+          "name": "string (e.g. Subpolar oceanic climate, Oceanic climate, Alpine climate, Humid subtropical climate, etc.)",
+          "description": "string (plain language climate summary in English)",
+          "koppenCode": "string (e.g. Cfa, Cfb, ET)"
+        },
+        "contextNotes": ["substantive fact 1 in English", "substantive fact 2 in English", "substantive fact 3 in English"],
+        "notable": ["notable point 1 in English", "notable point 2 in English", "notable point 3 in English"]
+      }
+
+      Do NOT allow Markdown headings, nested explanatory sections, prose before/after JSON, or multiple JSON objects.
+      Output ONLY a single valid JSON object.
     `;
 
     const retryPrompt = `
-      Provide encyclopedic information for the location named "${entityName}" located precisely at coordinates: ${coordinates.lat}, ${coordinates.lng}.
-      Current Date: ${currentDate}
-      
+      Canonical geographic identity:
+${contextDetails}
+
       CRITICAL RULES:
-      1. You MUST output ONLY valid JSON.
-      2. Do NOT use markdown fences (\`\`\`).
-      3. Do NOT output partial JSON.
-      4. You MUST include ALL of the following top-level keys: "description", "population", "climate", "contextNotes", "notable".
-      5. If you cannot provide all fields, return empty strings and empty arrays, but always return a complete JSON object.
-      6. Do NOT return "name", "type", or "entityType" fields.
+      1. You MUST output ONLY a single valid JSON object.
+      2. Describe ONLY ${entityTitle} in ${countryName} at coordinates ${coordinates.lat}, ${coordinates.lng}.
+      3. ALL text must be strictly in ENGLISH. Do NOT use French, Spanish, German, Italian, etc.
+      4. Do NOT use markdown fences (\`\`\`).
+      5. Do NOT output partial JSON or nested climate objects as root.
+      6. You MUST include ALL of the following top-level keys: "description", "population", "climate", "contextNotes", "notable".
+      7. "description" must be substantive paragraphs in English about the entity, not just climate notes.
     `;
 
     const fetchAndParse = async (isRetry: boolean) => {
@@ -2451,8 +2441,26 @@ export const recoverLocationMetadata = async (entityName: string, coordinates: G
          data = data[0];
       }
       
-      if (data && !data.description && Object.keys(data).length === 1 && typeof data[Object.keys(data)[0]] === 'object') {
-          data = data[Object.keys(data)[0]];
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+          const keys = Object.keys(data);
+          // Unwrap container if needed
+          if (keys.length === 1 && typeof data[keys[0]] === 'object' && data[keys[0]] !== null && !Array.isArray(data[keys[0]])) {
+              data = data[keys[0]];
+          }
+          
+          // Never accept isolated sub-objects (e.g., climate sub-object extracted as root)
+          if (data.koppenCode && !data.climate) {
+              console.warn(`[RECOVERY PARSER] Rejected isolated sub-object containing koppenCode:`, data);
+              data = null;
+          }
+          if (data && isGenericPlaceholderDescription(data.description, entityTitle)) {
+              console.warn(`[RECOVERY PARSER] Description failed placeholder validation:`, data.description);
+              data = null;
+          }
+          if (data && data.description && !isEnglishText(data.description)) {
+              console.warn(`[RECOVERY PARSER] Description failed English language validation:`, data.description);
+              data = null;
+          }
       }
       return { rawText, extractedJson: parsed.success ? JSON.stringify(parsed.value, null, 2) : 'Extraction Failed', parseResult: parsed.success ? 'Pass' : 'Fail', data };
     };
@@ -2463,7 +2471,9 @@ export const recoverLocationMetadata = async (entityName: string, coordinates: G
         let missing: string[] = [];
         if (!data) return ['all'];
         
-        const isBlank = (val: any) => !val || typeof val !== 'string' || val.trim().length === 0 || val.includes('placeholder') || val.includes('unavailable');
+        if (!data.description || typeof data.description !== 'string' || isGenericPlaceholderDescription(data.description, entityTitle) || !isEnglishText(data.description)) {
+            missing.push('description');
+        }
         
         return missing;
     };
@@ -2485,6 +2495,24 @@ export const recoverLocationMetadata = async (entityName: string, coordinates: G
     console.log(`Retry Attempted:\n${retryAttempted}`);
     
     const data = attempt.data;
+
+    // Guardrail against narrative mismatch
+    if (data && data.description && canonicalIdentity?.country) {
+      const canonicalCountry = canonicalIdentity.country.toLowerCase().trim();
+      const descLower = (data.description || '').toLowerCase();
+      if ((canonicalCountry === 'united states' || canonicalCountry === 'usa') && 
+          (descLower.includes('iceland') || descLower.includes('reykjanes') || descLower.includes('grindavík')) &&
+          !descLower.includes('united states') && !descLower.includes('nevada')) {
+        console.warn(`[ENRICHMENT GUARDRAIL REJECTION] Narrative described Iceland for canonical US/Nevada entity. Rejecting contradictory narrative.`);
+        data.description = "";
+      } else if (canonicalCountry === 'iceland' && 
+                 (descLower.includes('nevada') || descLower.includes('las vegas')) &&
+                 !descLower.includes('iceland')) {
+        console.warn(`[ENRICHMENT GUARDRAIL REJECTION] Narrative described Nevada for canonical Iceland entity. Rejecting contradictory narrative.`);
+        data.description = "";
+      }
+    }
+
     const timestamp = Date.now();
     const provenance = { provider: "Gemini", timestamp, cache: false };
     const metadata: Partial<EnrichmentResult> = {};
@@ -2500,7 +2528,7 @@ export const recoverLocationMetadata = async (entityName: string, coordinates: G
         return false;
     };
 
-    if (data.description && !isBlank(data.description)) {
+    if (data && data.description && !isBlank(data.description) && isEnglishText(typeof data.description === 'string' ? data.description : data.description.text)) {
        metadata.description = typeof data.description === 'string' 
            ? { text: data.description, provenance } 
            : { ...data.description, provenance };
@@ -2509,54 +2537,41 @@ export const recoverLocationMetadata = async (entityName: string, coordinates: G
        rejectedFields.push('description');
     }
     
-    const isBlankPop = (p: any) => {
-        if (!p) return true;
-        if (typeof p === 'number') return false;
-        if (typeof p === 'string') return isBlank(p);
-        if (typeof p === 'object' && !Array.isArray(p) && Object.keys(p).length === 0) return true;
-        return isBlank(p.formattedValue);
-    };
-    
-    if (data.population && !isBlank(data.population) && !(isBlankPop(data.population.current) && isBlankPop(data.population.historical) && isBlankPop(data.population))) {
-       if (typeof data.population === 'string' || typeof data.population === 'number') {
-           metadata.population = { value: data.population, provenance };
-       } else {
-           metadata.population = {
-              value: data.population.current || data.population.historical,
-              formattedValue: data.population.current?.formattedValue || data.population.historical?.formattedValue || "",
-              timeframe: data.population.current?.timeframe || data.population.historical?.timeframe || "historical",
-              description: data.population.current?.description || data.population.historical?.description || "",
-              sourceType: "estimated",
-              current: data.population.current ? {
-                 value: data.population.current.value || 0,
-                 formattedValue: data.population.current.formattedValue || "",
-                 timeframe: "current",
-                 description: data.population.current.description || ""
-              } : undefined,
-              historical: {
-                 value: data.population.historical?.value || 0,
-                 formattedValue: data.population.historical?.formattedValue || "",
-                 timeframe: data.population.historical?.timeframe || "historical",
-                 description: data.population.historical?.description || ""
-              }
-           };
-       }
+    const rawEType = (canonicalIdentity?.entityType || '').toLowerCase();
+    const isSettlement = ['city', 'town', 'village', 'municipality', 'settlement', 'country', 'state'].includes(rawEType);
+
+    if (data && data.population && typeof data.population === 'number' && data.population > 0 && isSettlement) {
+       metadata.population = { value: data.population, source: "ai", status: "available" };
        validFields.push('population');
     } else {
        rejectedFields.push('population');
     }
     
-    if (data.climate && !isBlank(data.climate)) {
+    if (data && data.climate && !isBlank(data.climate)) {
+       let cName = "";
+       let cDesc = "";
+       let kCode = "";
        if (typeof data.climate === 'string') {
-           metadata.climate = { description: data.climate, provenance };
-       } else {
-           metadata.climate = {
-              value: data.climate.name || data.climate.koppenCode,
-              description: data.climate.description,
-              provenance
-           };
+           cName = data.climate;
+           cDesc = data.climate;
+       } else if (typeof data.climate === 'object') {
+           cName = data.climate.name || data.climate.value || data.climate.koppenCode || "";
+           cDesc = data.climate.description || "";
+           kCode = data.climate.koppenCode || "";
        }
-       validFields.push('climate');
+
+       if (cName && !isPlaceholderString(cName)) {
+           metadata.climate = {
+               value: cName,
+               name: cName,
+               description: isPlaceholderString(cDesc) ? "" : cDesc,
+               koppenCode: kCode,
+               provenance
+           };
+           validFields.push('climate');
+       } else {
+           rejectedFields.push('climate');
+       }
     } else {
        rejectedFields.push('climate');
     }

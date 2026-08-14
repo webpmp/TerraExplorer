@@ -3,14 +3,11 @@ import { DiscoveryProvider, DiscoveryContext } from './DiscoveryProvider';
 
 export class NominatimProvider implements DiscoveryProvider {
   name = "Nominatim";
+  lastStatus?: 'SUCCESS_WITH_RESULTS' | 'SUCCESS_EMPTY' | 'RATE_LIMITED' | 'TIMEOUT' | 'FAILED';
+  lastStatusMessage?: string;
 
   async searchNearby(context: DiscoveryContext): Promise<MapMarker[]> {
     const { lat, lng, radiusKm } = context;
-    // Nominatim doesn't have a good pure radius search without building a complex bounding box
-    // and using special endpoints. But we can use the reverse endpoint and then search around it,
-    // or use the standard search with viewbox.
-    // However, for POI discovery, Nominatim is quite limited. 
-    // We'll use a bounding box search.
     const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=jsonv2&zoom=18`;
 
     const startTime = Date.now();
@@ -19,21 +16,31 @@ export class NominatimProvider implements DiscoveryProvider {
 
     try {
       const response = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'TerraExplorer/1.0' } });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) {
+        this.lastStatus = response.status === 429 ? 'RATE_LIMITED' : 'FAILED';
+        this.lastStatusMessage = `HTTP ${response.status}`;
+        return [];
+      }
       const data = await response.json();
-      
-      const elapsed = Date.now() - startTime;
-      console.log(`[NOMINATIM TRACE] {\n  endpoint: "reverse",\n  elapsedMs: ${elapsed},\n  resultCount: ${data.name ? 1 : 0},\n  status: "SUCCESS"\n}`);
 
       if (!data || !data.name) {
+        this.lastStatus = 'SUCCESS_EMPTY';
         return [];
       }
 
-      // Check if it's a valid POI vs an address/administrative area. 
-      // Nominatim provides `category` and `type`.
-      const rejectedTypes = ["country", "state", "province", "county", "municipality", "administrative", "road", "house"];
+      // Check if it's a valid POI vs an address/administrative area/hamlet. 
+      const rejectedTypes = [
+        "country", "state", "province", "county", "administrative", 
+        "road", "house", "hamlet", "isolated_dwelling", "locality", "farm", "postcode",
+        "suburb", "neighbourhood", "building", "residential"
+      ];
       if (rejectedTypes.includes(data.category) || rejectedTypes.includes(data.type)) {
-          // It is not a POI.
+          this.lastStatus = 'SUCCESS_EMPTY';
+          return [];
+      }
+
+      if (data.name && (data.name.toLowerCase().includes('farm-to-market') || data.name.toLowerCase().includes('county road') || data.name.match(/\b(fm|cr)\s*\d+\b/i))) {
+          this.lastStatus = 'SUCCESS_EMPTY';
           return [];
       }
 
@@ -49,11 +56,12 @@ export class NominatimProvider implements DiscoveryProvider {
         discoverySignals: ["nominatim POI"]
       };
 
+      this.lastStatus = 'SUCCESS_WITH_RESULTS';
       return [marker];
     } catch (error: any) {
-      const elapsed = Date.now() - startTime;
-      console.warn(`[NOMINATIM TRACE] {\n  endpoint: "reverse",\n  elapsedMs: ${elapsed},\n  error: "${error.message}",\n  status: "FAILURE"\n}`);
-      throw error;
+      this.lastStatus = 'FAILED';
+      this.lastStatusMessage = error?.message || 'Request failed';
+      return [];
     } finally {
       clearTimeout(timeoutId);
     }

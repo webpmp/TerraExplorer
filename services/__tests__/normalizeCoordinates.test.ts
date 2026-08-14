@@ -1,41 +1,40 @@
+import { describe, test, expect } from 'vitest';
 import { normalizeCoordinates } from '../geminiService';
 
-console.log('=== Testing normalizeCoordinates ===');
+describe('normalizeCoordinates', () => {
+  const expected = { lat: 39.9042, lng: 32.8736 };
 
-let passed = 0;
-let failed = 0;
+  test('Format A: { lat, lng }', () => {
+    expect(normalizeCoordinates({ lat: 39.9042, lng: 32.8736 })).toEqual(expected);
+  });
 
-function runTest(name: string, input: any, expected: any) {
-  const result = normalizeCoordinates(input);
-  const resultStr = JSON.stringify(result);
-  const expectedStr = JSON.stringify(expected);
-  if (resultStr === expectedStr) {
-    console.log(`✅ ${name}`);
-    passed++;
-  } else {
-    console.error(`❌ ${name}`);
-    console.error(`   Expected: ${expectedStr}`);
-    console.error(`   Got:      ${resultStr}`);
-    failed++;
-  }
-}
+  test('Format B: { latitude, longitude }', () => {
+    expect(normalizeCoordinates({ latitude: 39.9042, longitude: 32.8736 })).toEqual(expected);
+  });
 
-const expected = { lat: 39.9042, lng: 32.8736 };
+  test('Format C: [lat, lng]', () => {
+    expect(normalizeCoordinates([39.9042, 32.8736])).toEqual(expected);
+  });
 
-runTest('Format A: { lat, lng }', { lat: 39.9042, lng: 32.8736 }, expected);
-runTest('Format B: { latitude, longitude }', { latitude: 39.9042, longitude: 32.8736 }, expected);
-runTest('Format C: [lat, lng]', [39.9042, 32.8736], expected);
-runTest('Format D: { coordinates: [lat, lng] }', { coordinates: [39.9042, 32.8736] }, expected);
-runTest('Format D nested: { coordinates: { latitude, longitude } }', { coordinates: { latitude: 39.9042, longitude: 32.8736 } }, expected);
-runTest('Invalid: null', null, undefined);
-runTest('Invalid: {}', {}, undefined);
-runTest('Invalid: { lat: string }', { lat: '39' }, undefined);
-runTest('Invalid: 0,0', { lat: 0, lng: 0 }, undefined);
+  test('Format D: { coordinates: [lat, lng] }', () => {
+    expect(normalizeCoordinates({ coordinates: [39.9042, 32.8736] })).toEqual(expected);
+  });
 
-// Regression Tests
-runTest('Grand Canyon swapped (-112, 36) -> (36, -112)', { lat: -112.064857, lng: 36.094481 }, { lat: 36.094481, lng: -112.064857 });
-runTest('Dead Sea valid (31, 35) -> unchanged', { lat: 31.5590, lng: 35.4732 }, { lat: 31.5590, lng: 35.4732 });
-runTest('Paris valid (48, 2) -> unchanged', { lat: 48.8566, lng: 2.3522 }, { lat: 48.8566, lng: 2.3522 });
-runTest('Invalid: latitude too high after swap', { lat: 100, lng: 100 }, undefined);
+  test('Format D nested: { coordinates: { latitude, longitude } }', () => {
+    expect(normalizeCoordinates({ coordinates: { latitude: 39.9042, longitude: 32.8736 } })).toEqual(expected);
+  });
 
-console.log(`\nTests passed: ${passed}, failed: ${failed}`);
+  test('Invalid inputs', () => {
+    expect(normalizeCoordinates(null)).toBeUndefined();
+    expect(normalizeCoordinates({})).toBeUndefined();
+    expect(normalizeCoordinates({ lat: '39' } as any)).toBeUndefined();
+    expect(normalizeCoordinates({ lat: 0, lng: 0 })).toBeUndefined();
+    expect(normalizeCoordinates({ lat: 100, lng: 100 })).toBeUndefined();
+  });
+
+  test('Coordinate swapping regressions', () => {
+    expect(normalizeCoordinates({ lat: -112.064857, lng: 36.094481 })).toEqual({ lat: 36.094481, lng: -112.064857 });
+    expect(normalizeCoordinates({ lat: 31.5590, lng: 35.4732 })).toEqual({ lat: 31.5590, lng: 35.4732 });
+    expect(normalizeCoordinates({ lat: 48.8566, lng: 2.3522 })).toEqual({ lat: 48.8566, lng: 2.3522 });
+  });
+});

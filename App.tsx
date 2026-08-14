@@ -7,15 +7,14 @@ import { ChevronDown, Loader2 } from 'lucide-react';
 
 import Earth from './components/Earth';
 import InfoPanel from './components/InfoPanel';
-import MapLabel from './components/MapLabel';
 import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import SettingsPanel from './components/SettingsPanel';
 import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint, GeoCoordinates, UserSettings, AIProvider, NewsProvider } from './types';
-import { getInfoFromCoordinates, getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, EnrichmentMetrics, cancelFeatureInfoRequests } from './services/geminiService';
+import { getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, EnrichmentMetrics, cancelFeatureInfoRequests } from './services/geminiService';
 import { getEstimatedClimate } from './services/geographic/climateEstimator';
-import { enrichLocationInfo, mergeRichestFields } from './services/locationService';
-import { generateStory, playAudioContext } from './services/ttsService';
+import { enrichLocationInfo, mergeLocationInfo } from './services/locationService';
+import { resolveGeographicMetadata } from './services/geographic/geographicResolver';
 import { logWaypointSnapshot } from './utils/pipelineDebug';
 import { fetchLiveNews } from './services/newsService';
 import { runSearchPipeline } from './services/pipeline';
@@ -335,6 +334,8 @@ const App: React.FC = () => {
     cameraStateRef.current.routeSuggestedDistance = dist;
   }, []);
 
+  const programmaticTransitionUntilRef = useRef<number>(0);
+
   const reconcileCameraState = useCallback(() => {
      if (!cameraControlsRef.current) return;
      
@@ -344,6 +345,8 @@ const App: React.FC = () => {
         cancelAnimationFrame(zoomAnimRef.current);
         zoomAnimRef.current = null;
      }
+
+     programmaticTransitionUntilRef.current = Date.now() + 1500;
 
      const cameraState = cameraStateRef.current;
 
@@ -850,22 +853,47 @@ const App: React.FC = () => {
         });
      }
 
-     // 1. Log Waypoint Selection
-     console.log(`=== WAYPOINT SELECTION ===`);
-     console.log(`Index: ${routeWaypoints?.findIndex(w => w.id === wp.id) ?? -1}`);
-     console.log(`Raw waypoint: ${JSON.stringify(wp, null, 2)}`);
-
-     // 1. Initial Data Setup (Render immediately)
-     let data: any = { 
+     const enrichmentRequestId = ++activeMarkerRequestRef.current;
+     
+     console.log(`ENTITY_RESOLUTION_STARTED [req: ${enrichmentRequestId}] for ${wp.name}`);
+     
+     const anchor: MapMarker = {
+         id: wp.id,
          name: wp.name,
-         coordinates: { lat: wp.lat, lng: wp.lng },
-         waypoint: wp,
+         lat: wp.lat,
+         lng: wp.lng,
+         type: wp.entityType || (wp as any).type || 'historical_waypoint',
+         populationClass: 'small'
+     };
+     
+     const geoMarker = await resolveGeographicMetadata(anchor);
+     
+     console.log(`ENTITY_RESOLUTION_COMPLETE [req: ${enrichmentRequestId}] for ${wp.name}`);
+
+     let data: any = { 
+         id: geoMarker.id,
+         name: wp.name, // Protected
+         coordinates: { lat: wp.lat, lng: wp.lng }, // Protected
+         waypoint: wp, // Protected
+         country: geoMarker.country,
+         state: geoMarker.state,
+         city: geoMarker.city,
+         population: geoMarker.population,
+         osmId: geoMarker.osmId,
+         osmType: geoMarker.osmType,
+         wikidataId: geoMarker.wikidataId,
+         wikipedia: geoMarker.wikipedia,
          description: wp.description,
          significance: wp.significance,
          highlights: wp.highlights,
          historicalPeriod: wp.historicalPeriod,
          entities: wp.entities,
-         entityType: "historical_waypoint"
+         entityType: wp.entityType || geoMarker.type || "historical_waypoint",
+         climate: getEstimatedClimate(wp.lat, wp.lng, wp.historicalRegion || wp.modernLocation || geoMarker.state || geoMarker.region || "", geoMarker.country || "", wp.entityType || geoMarker.type),
+         contextNotes: [],
+         news: [],
+         relatedEntities: [],
+         sectionState: { description: "loading", news: "loading" }
      };
 
      // Inject the route context so it's always available as historical context
@@ -877,111 +905,99 @@ const App: React.FC = () => {
          };
      }
 
-     // Add default note for specific Genghis Khan waypoint
      if (wp.id === 'wp-genghis-1') {
          data.defaultNote = "Waypoints from https://www.worldhistory.org/image/11221/map-of-the-campaigns-of-genghis-khan/";
      }
 
-     console.log(`=== WAYPOINT PAYLOAD BEFORE INFOPANEL ===`);
-     console.log(JSON.stringify(data, null, 2));
-     console.log(`=========================================`);
-
      setLocationInfo(data);
-     setIsLoading(false);
+     // InfoPanel mounting state ready
+     setIsLoading(true);
 
-     // 2. Background Geographic Enrichment
      const schema = ENTITY_SCHEMAS[data.entityType || 'city'] || ENTITY_SCHEMAS['city'];
      const fetchGeographicMetadata = schema.capabilities.supportsPopulation || schema.capabilities.supportsClimate;
      const overwriteNarrative = schema.enrichment.overwriteNarrative;
-     
-     console.log(`=== WAYPOINT ENRICHMENT DECISION ===`);
-     console.log(`Waypoint: ${wp.name}`);
-     console.log(`Entity Type: ${data.entityType || 'city'}`);
-     console.log(`Fetch Metadata: ${fetchGeographicMetadata}`);
-     console.log(`Overwrite Narrative: ${overwriteNarrative}`);
-     console.log(`===============================`);
 
      if (fetchGeographicMetadata) {
-         // Fetch non-blocking
-         getInfoFromCoordinates(wp.lat, wp.lng, wp).then(enrichedData => {
-             if (enrichedData) {
-                 const aiMetadataUseful = Boolean(
-                     enrichedData.population || 
-                     enrichedData.climate || 
-                     enrichedData.contextNotes?.length || 
-                     enrichedData.relatedEntities?.length ||
-                     (enrichedData.description && enrichedData.description !== "Information unavailable." && enrichedData.description !== "Detailed description unavailable.")
-                 );
-
-                 if (!aiMetadataUseful) {
-                     console.log(`\n===== ENRICHMENT STATUS =====\nSTATUS: FAILED\nSOURCE: NONE\nFALLBACK: ROUTE_DATA_ONLY\n=============================`);
-                     
-                     // If news still succeeded, we might want to merge it, but AI metadata failed
-                     if (!enrichedData.news?.length) {
-                         return;
-                     }
+         // Stage 3: Description & Notable
+         (async () => {
+             try {
+                 const enrichedData = await getInfoFromFeature(geoMarker);
+                 if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
+                 
+                 if (enrichedData) {
+                     setLocationInfo((prev: any) => {
+                         if (!prev || prev.waypoint?.id !== wp.id) return prev;
+                         const desc = overwriteNarrative ? (enrichedData.description || wp.description || wp.significance || wp.context) : (wp.description || wp.significance || wp.context || enrichedData.description);
+                         let nextState = mergeLocationInfo(prev, {
+                             description: desc,
+                             notable: enrichedData.notable,
+                             contextNotes: enrichedData.contextNotes,
+                             relatedEntities: enrichedData.relatedEntities,
+                             imageSearchTerm: enrichedData.imageSearchTerm,
+                             sectionState: { ...prev.sectionState, description: "complete" }
+                         });
+                         const mode = enrichedData.metadataMode || 'modern_place';
+                         if (mode === 'historical_site') {
+                             delete nextState.population;
+                             delete nextState.climate;
+                         } else if (mode === 'natural_feature') {
+                             delete nextState.population;
+                         }
+                         return nextState;
+                     });
                  } else {
-                     console.log(`\n===== ENRICHMENT STATUS =====\nSTATUS: SUCCESS\nSOURCE: AI_METADATA\n=============================`);
+                     setLocationInfo((prev: any) => {
+                         if (!prev || prev.waypoint?.id !== wp.id) return prev;
+                         return { ...prev, sectionState: { ...prev.sectionState, description: "error" } };
+                     });
                  }
-                 setLocationInfo(prev => {
-                     // Make sure we are still looking at the same waypoint!
-                     if (!prev || prev.waypoint?.id !== wp.id) return prev;
-                     
-                     const desc = overwriteNarrative ? (enrichedData.description || wp.description || wp.significance || wp.context) : (wp.description || wp.significance || wp.context || enrichedData.description);
-
-                     console.log(`=== WAYPOINT ENRICHMENT MERGE ===`);
-                     console.log(`Protected Fields:`);
-                     console.log(`name: ${wp.name}`);
-                     console.log(`coordinates: lat ${wp.lat}, lng ${wp.lng}`);
-                     console.log(`description: ${desc}`);
-                     console.log(`Metadata Mode: ${enrichedData.metadataMode || 'modern_place'}`);
-
-                     console.log("[FINAL DISCOVERY PAYLOAD]", JSON.stringify({
-                         name: wp.name,
-                         description: desc,
-                         notable: enrichedData.notable,
-                         entityType: enrichedData.entityType,
-                         provenance: enrichedData.provenance,
-                         discoverySignals: enrichedData.discoverySignals || wp.discoverySignals
-                     }, null, 2));
-
-                     let nextState = {
-                         ...prev,
-                         ...enrichedData, // Enrichment fills in the blanks
-                         news: (enrichedData.news && enrichedData.news.length > 0) ? enrichedData.news : (prev.news || []),
-                         name: wp.name, // Protected
-                         coordinates: { lat: wp.lat, lng: wp.lng }, // Protected
-                         description: desc, // Protected
-                         waypoint: wp // Protected
-                     };
-                     
-                     // 4. Handle metadataMode specific logic
-                     const mode = enrichedData.metadataMode || 'modern_place';
-                     if (mode === 'historical_site') {
-                         console.log(`Deprioritizing modern geographic data for historical_site.`);
-                         delete nextState.population;
-                         delete nextState.climate;
-                         nextState.news = []; 
-                     } else if (mode === 'natural_feature') {
-                         console.log(`Deprioritizing city demographics for natural_feature.`);
-                         delete nextState.population;
-                     } else {
-                         console.log(`Allowing normal geographic enrichment for modern_place.`);
-                     }
-                     
-                     console.log(`===============================`);
-                     
-                     return nextState;
-                 });
-             } else {
-                 console.log(`Enrichment Result: FAILED OR EMPTY for ${wp.name}`);
+             } catch (err) {
+                 if (enrichmentRequestId === activeMarkerRequestRef.current) {
+                     setLocationInfo((prev: any) => prev ? { ...prev, sectionState: { ...prev.sectionState, description: "error" } } : prev);
+                 }
+             } finally {
+                 if (enrichmentRequestId === activeMarkerRequestRef.current) {
+                     setIsLoading(false);
+                 }
              }
-         }).catch(err => console.error(`Background enrichment failed for ${wp.name}:`, err));
+         })();
+
+         // Stage 4: News
+         (async () => {
+             try {
+                 await new Promise(resolve => setTimeout(resolve, 100));
+                 if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
+                 setIsNewsFetching(true);
+                 
+                 const dataWithNews = await enrichLocationInfo(data);
+                 if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
+                 
+                 if (dataWithNews && dataWithNews.news) {
+                     setLocationInfo((prev: any) => {
+                         if (!prev || prev.waypoint?.id !== wp.id) return prev;
+                         return mergeLocationInfo(prev, {
+                             news: dataWithNews.news,
+                             newsError: dataWithNews.newsError,
+                             sectionState: { ...prev.sectionState, news: "complete" }
+                         });
+                     });
+                 } else {
+                     setLocationInfo((prev: any) => prev ? { ...prev, sectionState: { ...prev.sectionState, news: "error" } } : prev);
+                 }
+             } catch (err) {
+                 if (enrichmentRequestId === activeMarkerRequestRef.current) {
+                     setLocationInfo((prev: any) => prev ? { ...prev, sectionState: { ...prev.sectionState, news: "error" } } : prev);
+                 }
+             } finally {
+                 if (enrichmentRequestId === activeMarkerRequestRef.current) {
+                     setIsNewsFetching(false);
+                 }
+             }
+         })();
+     } else {
+         setIsLoading(false);
      }
-
-
   }, [isZoomLocked, lockedZoomDistance, reconcileCameraState]);
-  
   const selectEntity = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint) => {
     const targetKey = marker.id || marker.name;
     const now = Date.now();
@@ -999,10 +1015,8 @@ const App: React.FC = () => {
         setSelectedMarkerId(marker.id);
         setIsFocused(true);
         
-        // Check if this is a Route Favorite
         const fav = marker as FavoriteLocation;
         if (fav.type === 'route' && fav.waypoints) {
-            // Load the saved route
             setRouteWaypoints(fav.waypoints);
             setActiveRouteId(fav.id);
             cameraStateRef.current.activeRoute = fav.id;
@@ -1014,7 +1028,6 @@ const App: React.FC = () => {
         }
 
         const isRoutePoint = 'context' in marker || 'routeTitle' in marker;
-
         if (isRoutePoint) {
             const wp = marker as Waypoint;
             const idx = routeWaypoints.findIndex(w => w.id === wp.id);
@@ -1033,20 +1046,36 @@ const App: React.FC = () => {
         }
         
         const enrichmentRequestId = ++activeMarkerRequestRef.current;
-
-        const identity = {
-            id: marker.id,
-            name: marker.name,
-            entityType: marker.type || "generic",
-            type: marker.type,
-            coordinates: { lat: marker.lat, lng: marker.lng }
+        console.log(`[Entity] Resolving ${marker.name}`);
+        
+        const anchor: MapMarker = {
+             id: marker.id,
+             name: marker.name,
+             lat: marker.lat,
+             lng: marker.lng,
+             type: ('type' in marker && marker.type ? marker.type : 'generic'),
+             populationClass: 'small'
         };
+        
+        const geoMarker = await resolveGeographicMetadata(anchor);
+        console.log(`[Entity] ${marker.name} resolved`);
 
         const basePayload = {
-            ...identity,
+            id: geoMarker.id || marker.id,
+            name: geoMarker.name,
+            entityType: geoMarker.type || "generic",
+            type: geoMarker.type,
+            coordinates: { lat: geoMarker.lat, lng: geoMarker.lng },
+            country: geoMarker.country,
+            state: geoMarker.state,
+            city: geoMarker.city,
+            population: geoMarker.population,
+            osmId: geoMarker.osmId,
+            osmType: geoMarker.osmType,
+            wikidataId: geoMarker.wikidataId,
+            wikipedia: geoMarker.wikipedia,
             description: "",
-            population: null,
-            climate: getEstimatedClimate(marker.lat, marker.lng, "", ""),
+            climate: getEstimatedClimate(geoMarker.lat, geoMarker.lng, geoMarker.state || geoMarker.region || "", geoMarker.country || "", geoMarker.type),
             contextNotes: [],
             news: [],
             relatedEntities: [],
@@ -1059,40 +1088,22 @@ const App: React.FC = () => {
 
         if (cameraControlsRef.current) {
             const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.5;
-            
             cameraStateRef.current.routeSuggestedDistance = targetDist;
             cameraStateRef.current.targetRotation = { lat: marker.lat, lng: marker.lng };
-            
-            requestAnimationFrame(() => {
-               reconcileCameraState();
-            });
+            requestAnimationFrame(() => reconcileCameraState());
         }
-
-        // Asynchronous enrichment logic without awaiting it to block UI flow
-        // Protected fields that must never be overwritten with undefined
-        const IMMUTABLE_ENRICHMENT_FIELDS = ["name", "entityType", "coordinates", "climate"];
-        const mergeProtected = (prev: any, next: any) => {
-            const merged = { ...prev, ...next };
-            for (const field of IMMUTABLE_ENRICHMENT_FIELDS) {
-                if (prev[field] !== undefined) {
-                    merged[field] = prev[field] ?? next[field];
-                }
-            }
-            return merged;
-        };
 
         // Stage 3: Description & Notable
         (async () => {
             try {
-                const data = await getInfoFromFeature(marker);
-                
+                const data = await getInfoFromFeature(geoMarker);
                 if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
                 
                 if (data) {
-                    console.log(`[ENRICHMENT FLOW TRACE]\n{\n stage: "Before App.tsx state update",\n description: "${(data.description || "").substring(0,20)}",\n notable: ${data.notable?.length || 0},\n contextNotes: ${data.contextNotes?.length || 0}\n}`);
+                    console.log(`[Enrichment] ${geoMarker.name} complete`);
                     setLocationInfo((prev: any) => {
                         if (!prev) return data;
-                        return mergeProtected(prev, {
+                        return mergeLocationInfo(prev, {
                             description: data.description || prev.description,
                             notable: data.notable || prev.notable,
                             contextNotes: data.contextNotes || prev.contextNotes,
@@ -1102,26 +1113,11 @@ const App: React.FC = () => {
                         });
                     });
                 } else {
-                    setLocationInfo((prev: any) => {
-                        if (!prev) return prev;
-                        return {
-                            ...prev,
-                            description: "Additional information unavailable.",
-                            sectionState: { ...prev.sectionState, description: "error" }
-                        };
-                    });
+                    setLocationInfo((prev: any) => prev ? { ...prev, sectionState: { ...prev.sectionState, description: "error" } } : prev);
                 }
             } catch (err) {
-                console.error(`Background enrichment failed for ${marker.name}:`, err);
                 if (enrichmentRequestId === activeMarkerRequestRef.current) {
-                    setLocationInfo((prev: any) => {
-                        if (!prev) return prev;
-                        return {
-                            ...prev,
-                            description: "Additional information unavailable.",
-                            sectionState: { ...prev.sectionState, description: "error" }
-                        };
-                    });
+                    setLocationInfo((prev: any) => prev ? { ...prev, sectionState: { ...prev.sectionState, description: "error" } } : prev);
                 }
             } finally {
                 if (enrichmentRequestId === activeMarkerRequestRef.current) {
@@ -1133,43 +1129,28 @@ const App: React.FC = () => {
         // Stage 4: News
         (async () => {
             try {
-                // Wait for a short delay so news doesn't block the UI thread during the description fetch
                 await new Promise(resolve => setTimeout(resolve, 100));
-                
                 if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
                 setIsNewsFetching(true);
                 
                 const dataWithNews = await enrichLocationInfo(basePayload);
-                
                 if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
                 
                 if (dataWithNews && dataWithNews.news) {
                     setLocationInfo((prev: any) => {
                         if (!prev) return prev;
-                        return mergeProtected(prev, {
+                        return mergeLocationInfo(prev, {
                             news: dataWithNews.news,
                             newsError: dataWithNews.newsError,
                             sectionState: { ...prev.sectionState, news: "complete" }
                         });
                     });
                 } else {
-                    setLocationInfo((prev: any) => {
-                        if (!prev) return prev;
-                        return {
-                            ...prev,
-                            sectionState: { ...prev.sectionState, news: "error" }
-                        };
-                    });
+                    setLocationInfo((prev: any) => prev ? { ...prev, sectionState: { ...prev.sectionState, news: "error" } } : prev);
                 }
             } catch (err) {
                  if (enrichmentRequestId === activeMarkerRequestRef.current) {
-                    setLocationInfo((prev: any) => {
-                        if (!prev) return prev;
-                        return {
-                            ...prev,
-                            sectionState: { ...prev.sectionState, news: "error" }
-                        };
-                    });
+                    setLocationInfo((prev: any) => prev ? { ...prev, sectionState: { ...prev.sectionState, news: "error" } } : prev);
                 }
             } finally {
                 if (enrichmentRequestId === activeMarkerRequestRef.current) {
@@ -1181,7 +1162,6 @@ const App: React.FC = () => {
         processingMarkerRef.current = null;
     }
   }, [isZoomLocked, lockedZoomDistance, reconcileCameraState, loadWaypointData, activeRouteId, routeWaypoints]);
-
   const handleMarkerClick = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint, point?: THREE.Vector3) => {
       selectEntity(marker);
   }, [selectEntity]);
@@ -1323,6 +1303,12 @@ const App: React.FC = () => {
    }, [failScan]);
 
   const handleGlobeClick = useCallback(async (lat: number, lng: number, point: THREE.Vector3) => {
+     // Guard against programmatic transitions and ongoing camera animations
+     if (Date.now() < programmaticTransitionUntilRef.current || targetCameraPosRef.current !== null) {
+        console.log("[handleGlobeClick] Blocked click during programmatic globe positioning/animation");
+        return;
+     }
+
      // Check if the clicked location is close to an existing waypoint
      const isClose = (lat1: number, lng1: number, lat2: number, lng2: number) => {
        const R = 6371; // km
@@ -1503,6 +1489,15 @@ const App: React.FC = () => {
         lng: lng,
         populationClass: 'large'
       };
+
+      // Invalidate any in-flight background scans and suppress scan state
+      activeScanIdRef.current += 1;
+      setScanningArea(null);
+      setIsScanningArea(false);
+      setScanStatus(null);
+      scanFullyProcessedRef.current = true;
+      programmaticTransitionUntilRef.current = Date.now() + 1500;
+
       setMarkers([searchMarker]);
       setSelectedMarkerId(searchMarker.id);
       setLocationInfo((pipelineResult as any).finalData!);

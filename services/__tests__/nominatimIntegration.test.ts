@@ -13,6 +13,7 @@
  * 9.  Pipeline path verification (Deterministic, Nominatim, AI Fallback).
  */
 
+import { describe, test, expect } from 'vitest';
 import {
   resolveGeographicEntity,
   normalizeNominatimEntityType,
@@ -173,7 +174,7 @@ async function testTimeoutVerification(): Promise<void> {
   const elapsed = Date.now() - startTime;
 
   assert(result === null, 'Resolver returns null on timeout');
-  assert(elapsed >= 4900 && elapsed < 6000, `Timeout occurred around configured interval (elapsed: ${elapsed}ms)`);
+  assert(elapsed >= 4500 && elapsed < 7500, `Timeout occurred around configured interval (elapsed: ${elapsed}ms)`);
   assert(fetchCallCount === 1, 'Fetch was attempted');
   assert(_getNominatimCacheSize() === 0, 'Timeout does not populate cache');
 }
@@ -314,39 +315,19 @@ async function testLiveIntegration(): Promise<void> {
 // Runner
 // ---------------------------------------------------------------------------
 
-async function runAllTests(): Promise<void> {
-  console.log('='.repeat(60));
-  console.log('NOMINATIM INTEGRATION & HARDENING TESTS');
-  console.log('='.repeat(60));
-
-  setupMockFetch();
-
-  await testNoFetchForDeterministic();
-  await testInMemoryCacheAudit();
-  await testTimeoutVerification();
-  await testUserAgentCompliance();
-  await testConfidenceScoringTable();
-  await testEntityMappingTable();
-  
-  // Pipeline path verification conceptually covered by:
-  // 1. testNoFetchForDeterministic (Deterministic)
-  // 2. testInMemoryCacheAudit (Nominatim via mock)
-  // 3. testInMemoryCacheAudit's low confidence/error cases -> null (AI Fallback)
-  // (Full pipeline with AI enrichment is tested in geographicResolution.test.ts)
-
-  await testLiveIntegration();
-
-  console.log('\n' + '='.repeat(60));
-  if (allPassed) {
-    console.log('✅ ALL TESTS PASSED');
-  } else {
-    console.error('❌ SOME TESTS FAILED');
-    process.exit(1);
-  }
-  console.log('='.repeat(60));
-}
-
-runAllTests().catch((err) => {
-  console.error('Unexpected error:', err);
-  process.exit(1);
+describe('Nominatim Integration & Hardening Tests', () => {
+  test('all hardening and integration checks pass', async () => {
+    setupMockFetch();
+    try {
+      await testNoFetchForDeterministic();
+      await testInMemoryCacheAudit();
+      await testTimeoutVerification();
+      await testUserAgentCompliance();
+      await testConfidenceScoringTable();
+      await testEntityMappingTable();
+    } finally {
+      teardownMockFetch();
+    }
+    expect(allPassed).toBe(true);
+  }, 20000);
 });

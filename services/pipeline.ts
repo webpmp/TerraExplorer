@@ -1,12 +1,15 @@
-import { LocationInfo, QueryIntent, isValidCoordinates, Waypoint } from '../types';
+import { LocationInfo, QueryIntent, isValidCoordinates, Waypoint, CoordinateSource, GeographicIdentityStatus } from '../types';
 import { ResolvedEntity, EnrichmentResult } from '../domain';
 import { routeIntentAndExtractEntity, resolveLocationQuery, sanitizeLocationInfo, recoverCoordinatesFromAi, recoverLocationMetadata, getUserSettings, generateRoute, normalizeCoordinates } from './geminiService';
 import { enrichLocationInfo } from './locationService';
 import { createIdentity, createResolvedSubject, createResolvedEntity } from './entityFactory';
-import { validateResolvedEntity } from './entityValidation';
+import { validateResolvedEntity, isGenericPlaceholderDescription } from './entityValidation';
 import { mergeCoordinates } from './coordinateAuthority';
 import { CanonicalGeographicEntity } from '../domain';
 import { classifyGeographicEntity } from './classifierService';
+import { getEstimatedClimate, getClimateDescription } from './geographic/climateEstimator';
+import { reverseGeocode } from './geographic/geographicResolver';
+import { isPlaceholderString } from '../components/InfoPanel';
 
 // --- PIPELINE TYPES ---
 
@@ -131,7 +134,7 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
     );
     
     let recoveredValid = false;
-    let source = "ai_recovery";
+    let source: CoordinateSource = "ai_recovery";
     if (recoveryCoords && isValidCoordinates(recoveryCoords)) {
       const incoming = {
          lat: recoveryCoords.lat,
@@ -142,10 +145,12 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
       const existing = resolvedData.coordinates ? {
          lat: resolvedData.coordinates.lat,
          lng: resolvedData.coordinates.lng,
-         source: (resolvedData as any).coordinateSource || 'deterministic'
+         source: (resolvedData as any).coordinateSource || (resolvedData.coordinates as any).source || 'ai_recovery'
       } as any : null;
       
       resolvedData.coordinates = mergeCoordinates(existing, incoming);
+      (resolvedData as any).coordinateSource = incoming.source;
+      (resolvedData as any).identityStatus = (resolvedData as any).identityStatus || "unverified";
       error = undefined;
       recoveryUsed = true;
       recoveredValid = true;
@@ -156,6 +161,9 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   }
 
   // Normalize whatever coordinates we have at this point
+  let finalSource: CoordinateSource = 'deterministic';
+  let finalStatus: GeographicIdentityStatus = 'verified';
+
   if (resolvedData && resolvedData.coordinates) {
      const inputCoords = JSON.stringify(resolvedData.coordinates);
      const normalized = normalizeCoordinates(resolvedData.coordinates) || normalizeCoordinates(resolvedData);
@@ -168,9 +176,15 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
      const finalValid = isValidCoordinates(resolvedData.coordinates);
      coordinatesValid = finalValid;
      
-     const source = (resolvedData.coordinates as any)?.source || (recoveryUsed ? 'ai_recovery' : 'deterministic');
+     finalSource = (resolvedData.coordinates as any)?.source || (resolvedData as any)?.coordinateSource || (recoveryUsed ? 'ai_recovery' : ((rawResolverResult as any)?.aiUsed ? 'ai_recovery' : 'deterministic'));
+     finalStatus = (resolvedData as any)?.identityStatus || (finalSource === 'ai_recovery' ? 'unverified' : 'verified');
+
+     resolvedData.coordinates.source = finalSource;
+     (resolvedData as any).coordinateSource = finalSource;
+     (resolvedData as any).identityStatus = finalStatus;
      
-     console.log(`[FINAL COORDINATE VALIDATION]\nCoordinates: ${JSON.stringify(resolvedData.coordinates)}\nSource: ${source}\nValid: ${finalValid}`);
+     console.log(`[FINAL COORDINATE VALIDATION]\nCoordinates: ${JSON.stringify(resolvedData.coordinates)}\nSource: ${finalSource}\nValid: ${finalValid}`);
+     console.log(`COORDINATE_FINAL\nname: ${resolvedData.name || entityResult.entity}\nlat: ${resolvedData.coordinates.lat}\nlng: ${resolvedData.coordinates.lng}\nsource: ${finalSource}\nstatus: ${finalStatus}\nprovider: ${finalSource === 'geocoder' ? 'Nominatim' : (finalSource === 'deterministic' ? 'DeterministicDB' : 'ai_recovery')}`);
   }
 
   // 1. CANONICAL ENTITY LOCK
@@ -181,13 +195,28 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
 
   if (coordinatesValid && resolvedData && resolvedData.coordinates) {
       const canonicalName = resolvedData.name || entityResult.entity;
+
+      // Populate administrative context if missing from deterministic coordinates
+      if (!resolvedData.country || !resolvedData.state) {
+          try {
+              const rev = await reverseGeocode(resolvedData.coordinates.lat, resolvedData.coordinates.lng);
+              if (rev) {
+                  resolvedData.country = resolvedData.country || rev.country;
+                  resolvedData.state = resolvedData.state || rev.state;
+                  resolvedData.city = resolvedData.city || rev.city;
+                  resolvedData.county = resolvedData.county || rev.county;
+              }
+          } catch {
+              // Best effort
+          }
+      }
       
       const providerSignals = (resolvedData as any).discoverySignals || [];
-      const adminContext = {
-          country: (resolvedData as any).country,
-          state: (resolvedData as any).state,
-          county: (resolvedData as any).county
-      };
+      const adminContext = [
+          (resolvedData as any).country,
+          (resolvedData as any).state,
+          (resolvedData as any).county
+      ].filter(Boolean);
 
       entityType = await classifyGeographicEntity(
           canonicalName,
@@ -199,12 +228,22 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
       canonicalEntity = {
           canonicalName,
           entityType,
-          coordinates: resolvedData.coordinates,
+          coordinates: {
+              lat: resolvedData.coordinates.lat,
+              lng: resolvedData.coordinates.lng,
+              source: finalSource
+          },
+          coordinateSource: finalSource,
+          identityStatus: finalStatus,
           providerSignals,
-          adminContext
+          adminContext,
+          osmId: (resolvedData as any).osmId,
+          osmType: (resolvedData as any).osmType,
+          wikidataId: (resolvedData as any).wikidataId,
+          wikipedia: (resolvedData as any).wikipedia
       };
 
-      console.log(`[CANONICAL ENTITY]\nRequested entity: ${entityResult.intentResult.normalized.request.rawQuery}\nResolved name: ${canonicalEntity.canonicalName}\nCanonical name: ${canonicalEntity.canonicalName}\nEntity type: ${canonicalEntity.entityType}\nCoordinates: ${canonicalEntity.coordinates.lat}, ${canonicalEntity.coordinates.lng}\nCoordinate source: ${(canonicalEntity.coordinates as any).source || 'deterministic'}\nProvider classifications: ${providerSignals.join(',') || 'none'}\nFinal classification: ${canonicalEntity.entityType}\nClassification confidence: 1.0\nAdministrative context: ${JSON.stringify(adminContext)}`);
+      console.log(`[CANONICAL ENTITY]\nRequested entity: ${entityResult.intentResult.normalized.request.rawQuery}\nResolved name: ${canonicalEntity.canonicalName}\nCanonical name: ${canonicalEntity.canonicalName}\nEntity type: ${canonicalEntity.entityType}\nCoordinates: ${canonicalEntity.coordinates.lat}, ${canonicalEntity.coordinates.lng}\nCoordinate source: ${canonicalEntity.coordinateSource || canonicalEntity.coordinates.source}\nIdentity status: ${canonicalEntity.identityStatus}\nProvider classifications: ${providerSignals.join(',') || 'none'}\nFinal classification: ${canonicalEntity.entityType}\nClassification confidence: 1.0\nAdministrative context: ${JSON.stringify(adminContext)}`);
 
       identity = createIdentity(
           entityResult.intentResult.normalized.request.rawQuery,
@@ -216,9 +255,18 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   }
 
   // 3. METADATA RECOVERY (Short-circuit if description exists)
-  if (coordinatesValid && canonicalEntity && !resolvedData?.description) {
+  const isPlaceholder = isGenericPlaceholderDescription(resolvedData?.description, canonicalEntity?.canonicalName);
+  // 3. METADATA RECOVERY (Short-circuit only if substantive description exists)
+  if (coordinatesValid && canonicalEntity && (!resolvedData?.description || isPlaceholder)) {
       try {
-        const metadataRecovery = await recoverLocationMetadata(canonicalEntity.canonicalName, canonicalEntity.coordinates);
+        const metadataRecovery = await recoverLocationMetadata(canonicalEntity.canonicalName, canonicalEntity.coordinates, {
+          ...canonicalEntity,
+          country: (resolvedData as any).country,
+          state: (resolvedData as any).state,
+          city: (resolvedData as any).city,
+          county: (resolvedData as any).county,
+          region: (resolvedData as any).region
+        });
         if (metadataRecovery) {
            console.log(`=== RECOVERY ENRICHMENT TRACE ===`);
            console.log(`Metadata Present: true`);
@@ -238,22 +286,34 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
         console.error("Failed to generate metadata for recovered coordinates:", err);
       }
   } else {
-      console.log(`Metadata Recovery Attempted: No (Description exists)`);
+      console.log(`Metadata Recovery Attempted: No (Substantive description exists)`);
   }
 
   // Construct the ResolvedEntity Domain Object
   let entity: ResolvedEntity | undefined = undefined;
   
   if (resolvedData && resolvedData.coordinates && identity && canonicalEntity) {
+     const providerName = finalSource === 'geocoder' 
+       ? "Nominatim" 
+       : (finalSource === 'deterministic' ? "DeterministicDB" : "ai_recovery");
+
      const primaryLocation = {
          label: canonicalEntity.canonicalName,
          featureType: canonicalEntity.entityType,
          location: {
              coordinates: canonicalEntity.coordinates,
+             address: {
+                 country: (resolvedData as any).country,
+                 state: (resolvedData as any).state,
+                 city: (resolvedData as any).city,
+                 full: (resolvedData as any).locationString
+             },
              boundingBox: resolvedData.boundary as any
          },
+         coordinateSource: finalSource,
+         identityStatus: finalStatus,
          provenance: {
-             provider: recoveryUsed ? "Gemini Recovery" : "Gemini Resolution",
+             provider: providerName,
              timestamp: Date.now(),
              cache: false
          },
@@ -262,7 +322,7 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
      
      const subject = createResolvedSubject(
          identity,
-         primaryLocation
+         primaryLocation as any
      );
      
      const recoveredMetadata = (resolvedData as any)._recoveredMetadata as Partial<EnrichmentResult> | undefined;
@@ -277,6 +337,44 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
          contextNotes: (resolvedData as any).contextNotes || [],
          ...recoveredMetadata
      };
+
+     if (isPlaceholder && recoveredMetadata?.description) {
+         finalMetadata.description = recoveredMetadata.description;
+     }
+
+     // Remove population for non-settlements
+     const eTypeLower = (canonicalEntity.entityType || '').toLowerCase();
+     const isSettlement = ['city', 'town', 'village', 'municipality', 'settlement', 'country', 'state'].includes(eTypeLower);
+     if (!isSettlement || (finalMetadata.population && typeof finalMetadata.population.value === 'number' && finalMetadata.population.value <= 0)) {
+         finalMetadata.population = undefined;
+     }
+
+     const hasClimate = finalMetadata.climate && (
+         (typeof finalMetadata.climate === 'string' && !isPlaceholderString(finalMetadata.climate)) ||
+         (typeof finalMetadata.climate === 'object' && (
+             (finalMetadata.climate.name && !isPlaceholderString(finalMetadata.climate.name)) ||
+             (finalMetadata.climate.value && !isPlaceholderString(finalMetadata.climate.value))
+         ))
+     );
+
+     if (!hasClimate) {
+         const lat = canonicalEntity.coordinates.lat;
+         const lng = canonicalEntity.coordinates.lng;
+         const reg = (resolvedData as any).state || (resolvedData as any).region || "";
+         const ctry = (resolvedData as any).country || "";
+         const eType = canonicalEntity.entityType;
+         const est = getEstimatedClimate(lat, lng, reg, ctry, eType);
+         const desc = getClimateDescription(est.koppenCode, est.climateName);
+         if (est && !isPlaceholderString(est.climateName)) {
+             finalMetadata.climate = {
+                 name: est.climateName,
+                 description: desc,
+                 koppenCode: est.koppenCode
+             };
+         } else {
+             finalMetadata.climate = undefined;
+         }
+     }
      
      entity = createResolvedEntity(
          subject,
@@ -334,10 +432,10 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
   const entityType = locationResult.entity?.subject?.identity?.entityType;
   
   const isRouteFallback = 
-    entityType === 'historical_trade_route' ||
-    entityType === 'historical_network' ||
-    entityType === 'empire' ||
-    entityType === 'civilization' ||
+    (entityType as any) === 'historical_trade_route' ||
+    (entityType as any) === 'historical_network' ||
+    (entityType as any) === 'empire' ||
+    (entityType as any) === 'civilization' ||
     entityType === 'route';
     
   if (isRouteFallback) {

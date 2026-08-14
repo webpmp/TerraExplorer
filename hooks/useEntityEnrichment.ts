@@ -38,7 +38,7 @@ export function useEntityEnrichment(
 
         // Fetch Metadata
         console.log(`[INFO PANEL PERF] metadataStarted at ${Date.now()}`);
-        getInfoFromFeature(marker.name, marker.lat, marker.lng).then(data => {
+        getInfoFromFeature(marker).then(data => {
             console.log(`[INFO PANEL PERF] metadataCompleted at ${Date.now()}`);
             if (id !== requestId.current) {
                 console.log(`[INFO PANEL PERF] enrichmentCancelled (metadata) for ${marker.name}`);

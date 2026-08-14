@@ -2,18 +2,24 @@ export const selectionConfig = {
     maxPerCategory: {
         city: 4,
         town: 4,
+        village: 4,
+        hamlet: 2,
+        municipality: 4,
         national_park: 2,
         state_park: 2,
+        mountain: 2,
+        water_body: 2,
         museum: 2,
         landmark: 3,
         geology: 2
     } as Record<string, number>,
 
     maxPerClass: {
-        settlement: 3,
-        major_landmark: 1,
-        geographic_feature: 2,
-        minor_poi: 2,
+        settlement: 4,
+        POPULATED_PLACE: 4,
+        major_landmark: 3,
+        geographic_feature: 3,
+        minor_poi: 0,
         generic: 2
     } as Record<string, number>,
 

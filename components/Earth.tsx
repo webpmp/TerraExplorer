@@ -1,5 +1,5 @@
 
-import React, { useRef, useImperativeHandle, forwardRef, useMemo, useEffect, useState, Suspense } from 'react';
+import React, { useRef, useImperativeHandle, forwardRef, useMemo, useEffect, useState, useCallback, Suspense } from 'react';
 import { useFrame, useLoader, useThree } from '@react-three/fiber';
 import { TextureLoader } from 'three';
 import { Decal, useTexture, Line, Text, Billboard, Instances, Instance, Html } from '@react-three/drei';
@@ -321,7 +321,8 @@ const HoverOverlay: React.FC<{
   skin: SkinType;
   onMarkerClick: (marker: any, point: THREE.Vector3) => void;
   outlineColor: string;
-}> = ({ isInteracting, groupRef, skin, onMarkerClick, outlineColor }) => {
+  selectedMarkerId?: string | null;
+}> = ({ isInteracting, groupRef, skin, onMarkerClick, outlineColor, selectedMarkerId }) => {
   const isParchment = skin === 'parchment';
   const isModern = skin === 'modern' || isParchment;
   const isAmber = skin === 'retro-amber';
@@ -340,6 +341,41 @@ const HoverOverlay: React.FC<{
   const length = Math.sqrt(labelX * labelX + labelY * labelY);
   const nDirX = labelX / length;
   const nDirY = labelY / length;
+
+  const cachedSelectedPinRef = useRef<{ pin: any; object: THREE.Object3D; id: string } | null>(null);
+
+  // Clear cache if selectedMarkerId is removed
+  useEffect(() => {
+    if (!selectedMarkerId) {
+      cachedSelectedPinRef.current = null;
+    }
+  }, [selectedMarkerId]);
+
+  const findSelectedPinObject = useCallback(() => {
+    if (!selectedMarkerId || !groupRef.current) {
+      cachedSelectedPinRef.current = null;
+      return null;
+    }
+
+    if (cachedSelectedPinRef.current && cachedSelectedPinRef.current.id === selectedMarkerId && cachedSelectedPinRef.current.object.parent) {
+      return cachedSelectedPinRef.current;
+    }
+
+    let match: { pin: any; object: THREE.Object3D; id: string } | null = null;
+    groupRef.current.traverse((obj) => {
+      if (!match && obj.userData?.isPin) {
+        const markerData = obj.userData.markerData;
+        if (markerData && (markerData.id === selectedMarkerId || String(markerData.id) === String(selectedMarkerId))) {
+          match = { pin: markerData, object: obj, id: selectedMarkerId };
+        }
+      }
+    });
+
+    if (match) {
+      cachedSelectedPinRef.current = match;
+    }
+    return match || cachedSelectedPinRef.current;
+  }, [selectedMarkerId, groupRef]);
 
   useEffect(() => {
     const raycaster = new THREE.Raycaster();
@@ -417,15 +453,26 @@ const HoverOverlay: React.FC<{
   }, [isInteracting, camera, size, gl, hoveredPin, groupRef]);
 
   useFrame(() => {
-    if (!hoveredPin || !hoveredObject || !containerGroupRef.current) return;
+    let currentActivePin = hoveredPin;
+    let currentActiveObject = hoveredObject;
+
+    if (!currentActivePin && selectedMarkerId) {
+      const match = findSelectedPinObject();
+      if (match) {
+        currentActivePin = match.pin;
+        currentActiveObject = match.object;
+      }
+    }
+
+    if (!currentActivePin || !currentActiveObject || !containerGroupRef.current) return;
 
     // 1. Refresh world position every frame
     const wp = new THREE.Vector3();
-    hoveredObject.getWorldPosition(wp);
+    currentActiveObject.getWorldPosition(wp);
     containerGroupRef.current.position.copy(wp);
 
     // 2. Compute dynamic pin radius in screen pixels
-    const markerVisualSize = (hoveredObject.userData.visualSize || 0.01) * 1.2;
+    const markerVisualSize = (currentActiveObject.userData.visualSize || 0.01) * 1.2;
     
     // Project center
     const centerScreen = wp.clone().project(camera);
@@ -458,10 +505,21 @@ const HoverOverlay: React.FC<{
     }
   });
 
-  if (!hoveredPin) return null;
+  let activePin = hoveredPin;
+  let activeObject = hoveredObject;
 
-  const isWaypoint = hoveredObject?.userData?.isWaypoint;
-  const waypointIndex = hoveredObject?.userData?.waypointIndex;
+  if (!activePin && selectedMarkerId) {
+    const match = findSelectedPinObject();
+    if (match) {
+      activePin = match.pin;
+      activeObject = match.object;
+    }
+  }
+
+  if (!activePin || !activeObject) return null;
+
+  const isWaypoint = activeObject?.userData?.isWaypoint;
+  const waypointIndex = activeObject?.userData?.waypointIndex;
 
   return (
     <group ref={containerGroupRef}>
@@ -471,7 +529,7 @@ const HoverOverlay: React.FC<{
           onClick={(e) => {
               e.stopPropagation();
               if (containerGroupRef.current) {
-                  onMarkerClick(hoveredPin, containerGroupRef.current.position.clone());
+                  onMarkerClick(activePin, containerGroupRef.current.position.clone());
               }
           }}
         >
@@ -497,8 +555,8 @@ const HoverOverlay: React.FC<{
                   : 'bg-black text-green-300 border-green-400 font-mono hover:bg-green-900/40'}`}
           >
             {isWaypoint && waypointIndex !== undefined 
-              ? `${waypointIndex + 1}. ${hoveredPin.name || 'Unknown Location'}` 
-              : (hoveredPin.name || 'Unknown Location')}
+              ? `${waypointIndex + 1}. ${(activePin as any).displayName || activePin.name || 'Unknown Location'}` 
+              : ((activePin as any).displayName || activePin.name || 'Unknown Location')}
           </div>
         </div>
       </Html>
@@ -846,54 +904,55 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     const scanMarkers = processedMarkers.filter(m => m.type === 'marker');
     if (scanMarkers.length > 0 && groupRef.current) {
        const parent = groupRef.current;
-       // Project all scan result markers to screen coordinates
+       const widthHalf = state.size.width * 0.5;
+       const heightHalf = state.size.height * 0.5;
+
+       // Project scan result markers to screen coordinates
        const screenCoords = scanMarkers.map(m => {
           const worldPos = new THREE.Vector3().copy(m.position).applyMatrix4(parent.matrixWorld);
           const tempV = worldPos.clone().project(state.camera);
           return {
              id: m.id,
-             position: m.position,
              worldPos: worldPos,
-             tempV: tempV,
-             x: (tempV.x * 0.5 + 0.5) * state.size.width,
-             y: (tempV.y * 0.5 + 0.5) * state.size.height
+             tempZ: tempV.z,
+             x: (tempV.x + 1.0) * widthHalf,
+             y: (tempV.y + 1.0) * heightHalf
           };
        });
 
-       // Reset/initialize screen space offsets
-       const screenOffsets = scanMarkers.map(() => ({ x: 0, y: 0 }));
+       const screenOffsetsX = new Float32Array(scanMarkers.length);
+       const screenOffsetsY = new Float32Array(scanMarkers.length);
 
        // Calculate zoom Level and dynamic minPixelDistance
        const distance = state.camera.position.length();
        const zoomLevel = THREE.MathUtils.clamp((8.0 - distance) / (8.0 - 1.2), 0, 1);
        
-       // Zoom-aware spacing threshold formula: minPixelDistance = baseDistance * (1 + zoomLevel * factor)
        const baseDistance = 14; // base distance in pixels
        const factor = 2; // separation factor per zoom level
        const minPixelDistance = baseDistance * (1 + zoomLevel * factor);
 
-       // 3 iterations of relaxation passes to resolve overlaps dynamically
-       for (let pass = 0; pass < 3; pass++) {
+       // 2 iterations of relaxation passes to resolve overlaps dynamically
+       for (let pass = 0; pass < 2; pass++) {
           for (let i = 0; i < scanMarkers.length; i++) {
              for (let j = i + 1; j < scanMarkers.length; j++) {
-                const posI = { x: screenCoords[i].x + screenOffsets[i].x, y: screenCoords[i].y + screenOffsets[i].y };
-                const posJ = { x: screenCoords[j].x + screenOffsets[j].x, y: screenCoords[j].y + screenOffsets[j].y };
+                const posIX = screenCoords[i].x + screenOffsetsX[i];
+                const posIY = screenCoords[i].y + screenOffsetsY[i];
+                const posJX = screenCoords[j].x + screenOffsetsX[j];
+                const posJY = screenCoords[j].y + screenOffsetsY[j];
                 
-                const dx = posJ.x - posI.x;
-                const dy = posJ.y - posI.y;
+                const dx = posJX - posIX;
+                const dy = posJY - posIY;
                 const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
                 
                 if (dist < minPixelDistance) {
-                   const overlap = minPixelDistance - dist;
-                   const rx = dx / dist;
-                   const ry = dy / dist;
+                   const force = (minPixelDistance - dist) * 0.5;
+                   const rx = (dx / dist) * force;
+                   const ry = (dy / dist) * force;
                    
-                   // Push them apart equally (0.5 each)
-                   const force = overlap * 0.5;
-                   screenOffsets[i].x -= rx * force;
-                   screenOffsets[i].y -= ry * force;
-                   screenOffsets[j].x += rx * force;
-                   screenOffsets[j].y += ry * force;
+                   screenOffsetsX[i] -= rx;
+                   screenOffsetsY[i] -= ry;
+                   screenOffsetsX[j] += rx;
+                   screenOffsetsY[j] += ry;
                 }
              }
           }
@@ -901,8 +960,8 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
 
        // Convert screen space offsets to camera-aligned world space displacements
        scanMarkers.forEach((m, i) => {
-          const dx = screenOffsets[i].x;
-          const dy = screenOffsets[i].y;
+          const dx = screenOffsetsX[i];
+          const dy = screenOffsetsY[i];
           
           if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
              const resolvedX = screenCoords[i].x + dx;
@@ -911,19 +970,23 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
              const resolvedNDC = new THREE.Vector3(
                 (resolvedX / state.size.width) * 2 - 1,
                 (resolvedY / state.size.height) * 2 - 1,
-                screenCoords[i].tempV.z
+                screenCoords[i].tempZ
              );
 
              const resolvedWorldPos = resolvedNDC.unproject(state.camera);
-             const displacement = new THREE.Vector3().subVectors(resolvedWorldPos, screenCoords[i].worldPos);
-             
-             scanOffsetsRef.current[m.id] = displacement;
+             scanOffsetsRef.current[m.id] = new THREE.Vector3().subVectors(resolvedWorldPos, screenCoords[i].worldPos);
           } else {
-             scanOffsetsRef.current[m.id] = new THREE.Vector3(0, 0, 0);
+             if (scanOffsetsRef.current[m.id]) {
+                scanOffsetsRef.current[m.id].set(0, 0, 0);
+             } else {
+                scanOffsetsRef.current[m.id] = new THREE.Vector3(0, 0, 0);
+             }
           }
        });
     }
   });
+
+  const pointerDownInfoRef = useRef<{ time: number; x: number; y: number } | null>(null);
 
   const handleGlobeClick = (e: any) => {
     e.stopPropagation();
@@ -931,8 +994,16 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     // Ignore right click
     if (e.button === 2) return;
 
-    // Prevent click if user was dragging (delta is distance in pixels)
-    if (e.delta > 5) return;
+    // Verify this was a genuine intentional user pointer-down on the globe
+    const pDown = pointerDownInfoRef.current;
+    pointerDownInfoRef.current = null;
+    if (!pDown) return;
+
+    const clickDuration = Date.now() - pDown.time;
+    const moveDist = Math.hypot(e.clientX - pDown.x, e.clientY - pDown.y);
+
+    // Prevent click if user was dragging or held down for a long gesture (> 5px move or > 700ms)
+    if (e.delta > 5 || moveDist > 5 || clickDuration > 700) return;
 
     if (!innerMeshRef.current || !e.point) return;
 
@@ -942,23 +1013,10 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     // Normalize and convert using shared spherical inverse
     const { lat, lng } = vector3ToLatLng(localPoint);
 
-    console.log("===== GLOBE CLICK COORDINATE =====");
-    console.log("World point:");
-    console.log(`x: ${e.point.x}`);
-    console.log(`y: ${e.point.y}`);
-    console.log(`z: ${e.point.z}`);
-    console.log("\nLocal point:");
-    console.log(`x: ${localPoint.x}`);
-    console.log(`y: ${localPoint.y}`);
-    console.log(`z: ${localPoint.z}`);
-    console.log(`\nResolved lat: ${lat}`);
-    console.log(`lng: ${lng}`);
-    console.log("===============================");
+    // Validate coordinates are valid numbers and inside geographic bounds
+    if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
 
-    console.log("===== COORDINATE PIPELINE =====");
-    console.log(`Stage: Globe intersection`);
-    console.log(`coordinate: ${lat}, ${lng}`);
-    console.log("===============================");
+    console.log(`[Globe Click] Coordinate: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
 
     props.onLocationClick(lat, lng, e.point);
   };
@@ -997,6 +1055,11 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
         onPointerDown={(e) => {
           if (e.button === 2) return;
           props.setIsInteracting(true);
+          pointerDownInfoRef.current = {
+            time: Date.now(),
+            x: e.clientX,
+            y: e.clientY
+          };
         }}
         onPointerUp={(e) => {
           if (e.button === 2) return;
@@ -1005,6 +1068,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
         onPointerOut={(e) => {
           if (e.button === 2) return;
           props.setIsInteracting(false);
+          pointerDownInfoRef.current = null;
         }}
       >
         {isGreen ? (
@@ -1143,7 +1207,14 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     </group>
     
     {/* Hover Overlay outside the rotating group so it stays oriented to screen */}
-    <HoverOverlay isInteracting={props.isInteracting} groupRef={groupRef} skin={props.skin} onMarkerClick={props.onMarkerClick} outlineColor={outlineColor} />
+    <HoverOverlay 
+      isInteracting={props.isInteracting} 
+      groupRef={groupRef} 
+      skin={props.skin} 
+      onMarkerClick={props.onMarkerClick} 
+      outlineColor={outlineColor}
+      selectedMarkerId={selectedMarkerId}
+    />
     </>
   );
 });

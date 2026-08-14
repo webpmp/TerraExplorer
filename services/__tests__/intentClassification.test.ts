@@ -1,8 +1,7 @@
+import { describe, test, expect } from 'vitest';
 import { routeIntentAndExtractEntity } from '../geminiService';
 
-function testIntentClassification() {
-  console.log("Running Intent Classification Regression Tests...\n");
-
+describe('Intent Classification Regression Tests', () => {
   const testCases = [
     // Historical Event Queries
     { query: "Where did the eruption of Vesuvius take place?", expectedIntent: "HISTORICAL_EVENT", expectedEntity: "eruption of Vesuvius", expectedMode: "MULTI_LOCATION_EXPLORATION" },
@@ -16,15 +15,12 @@ function testIntentClassification() {
     { query: "Where is Mount Fuji?", expectedIntent: "NATURAL_LOCATION", expectedEntity: "Mount Fuji", expectedMode: undefined }
   ];
 
-  for (const tc of testCases) {
-    const res = routeIntentAndExtractEntity(tc.query);
-    console.log(`Query: "${tc.query}" -> Intent: ${res.intent}, Entity: "${res.entity}", Mode: ${res.resolutionMode}`);
-    console.assert(res.intent === tc.expectedIntent, `FAILED: ${tc.query} expected intent ${tc.expectedIntent}, got ${res.intent}`);
-    console.assert(res.entity.toLowerCase() === tc.expectedEntity.toLowerCase(), `FAILED: ${tc.query} expected entity ${tc.expectedEntity}, got ${res.entity}`);
-    console.assert(res.resolutionMode === tc.expectedMode, `FAILED: ${tc.query} expected mode ${tc.expectedMode}, got ${res.resolutionMode}`);
-  }
-
-  console.log("\nAll Intent Classification Regression Tests PASSED successfully!");
-}
-
-testIntentClassification();
+  testCases.forEach((tc) => {
+    test(`Query: "${tc.query}"`, () => {
+      const res = routeIntentAndExtractEntity(tc.query);
+      expect(res.intent).toBe(tc.expectedIntent);
+      expect(res.entity.toLowerCase()).toBe(tc.expectedEntity.toLowerCase());
+      expect(res.resolutionMode).toBe(tc.expectedMode);
+    });
+  });
+});

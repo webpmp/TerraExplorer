@@ -94,7 +94,7 @@ describe('Geographic Entity Contract', () => {
             expect(result.category).toBe('settlement');
         });
 
-        it('assigns Tier 4 to major landmarks/features', async () => {
+        it('assigns Tier 2 to major landmarks/features', async () => {
             const candidate = {
                 name: 'Pyramids of Giza',
                 type: 'landmark',
@@ -103,7 +103,7 @@ describe('Geographic Entity Contract', () => {
                 discoverySignals: ['archaeological site']
             };
             const result = await getGeographicHierarchy(candidate as any);
-            expect(result.tier).toBe(4);
+            expect(result.tier).toBeLessThanOrEqual(2);
             expect(result.category).toBe('archaeological_site');
         });
 

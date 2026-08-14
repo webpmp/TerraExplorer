@@ -86,7 +86,12 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
     }
   },
   landmark: {
-    capabilities: ModernPlace.capabilities!,
+    capabilities: {
+      supportsNews: true,
+      supportsPopulation: false,
+      supportsClimate: true,
+      supportsHistoricalNarrative: true
+    },
     enrichment: {
       overwriteNarrative: true,
       fetchNews: true

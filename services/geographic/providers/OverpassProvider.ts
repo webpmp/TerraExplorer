@@ -11,6 +11,8 @@ const CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 24 hours
 
 export class OverpassProvider implements DiscoveryProvider {
   name = "OpenStreetMap";
+  lastStatus?: 'SUCCESS_WITH_RESULTS' | 'SUCCESS_EMPTY' | 'RATE_LIMITED' | 'TIMEOUT' | 'FAILED';
+  lastStatusMessage?: string;
 
   private async fetchOverpass(query: string, timeoutMs: number): Promise<any> {
     const endpoints = [
@@ -37,12 +39,22 @@ export class OverpassProvider implements DiscoveryProvider {
         return { data, endpoint };
       }));
       
-      const elapsed = Date.now() - startTime;
-      console.log(`OVERPASS TRACE\n{\n endpoint: "${response.endpoint}",\n elapsedMs: ${elapsed},\n resultCount: ${response.data?.elements?.length || 0},\n status: "SUCCESS"\n}`);
       controller.abort(); // Abort remaining requests
+      this.lastStatus = response.data?.elements?.length > 0 ? 'SUCCESS_WITH_RESULTS' : 'SUCCESS_EMPTY';
+      this.lastStatusMessage = undefined;
       return response.data;
-    } catch (error) {
-      console.warn(`[Overpass] Request failed or timed out:`, error);
+    } catch (error: any) {
+      const errStr = String(error?.message || error || '');
+      if (errStr.includes('429')) {
+        this.lastStatus = 'RATE_LIMITED';
+        this.lastStatusMessage = 'HTTP 429 Too Many Requests';
+      } else if (errStr.includes('abort') || errStr.includes('timeout')) {
+        this.lastStatus = 'TIMEOUT';
+        this.lastStatusMessage = 'Request timed out';
+      } else {
+        this.lastStatus = 'FAILED';
+        this.lastStatusMessage = errStr || 'Endpoint request failed';
+      }
       return { elements: [] };
     } finally {
       clearTimeout(timeoutId);
@@ -57,6 +69,7 @@ export class OverpassProvider implements DiscoveryProvider {
 
     const cached = overpassCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      this.lastStatus = cached.result.length > 0 ? 'SUCCESS_WITH_RESULTS' : 'SUCCESS_EMPTY';
       return cached.result;
     }
 
@@ -66,7 +79,7 @@ export class OverpassProvider implements DiscoveryProvider {
     const query = `
       [out:json][timeout:10];
       (
-        nwr["place"~"city|town|village|capital"](around:${radiusMeters},${lat},${lng});
+        nwr["place"~"city|town|village|municipality|capital"](around:${radiusMeters},${lat},${lng});
         nwr["natural"~"peak|water|bay|beach|lake|river|volcano|desert|forest|glacier|waterfall|canyon"](around:${radiusMeters},${lat},${lng});
         nwr["leisure"~"nature_reserve|park"](around:${radiusMeters},${lat},${lng});
         nwr["historic"~"monument|archaeological_site|ruins|castle|memorial|shipwreck"](around:${radiusMeters},${lat},${lng});
@@ -99,6 +112,7 @@ export class OverpassProvider implements DiscoveryProvider {
 
         // Skip unnamed or overly generic names like "Bench"
         if (name.toLowerCase() === 'bench' || name.toLowerCase() === 'tree') continue;
+        if (element.tags?.place === 'hamlet' || element.tags?.place === 'isolated_dwelling') continue;
 
         const normalizedName = name.toLowerCase().replace(/[^a-z0-9]/g, '');
         if (seenNames.has(normalizedName)) continue;
@@ -190,9 +204,27 @@ export class OverpassProvider implements DiscoveryProvider {
 
         const mBaseId = name.replace(/\s+/g, '-').toLowerCase();
         
+        let populationInfo;
+        if (tags.population) {
+            const popVal = parseInt(tags.population, 10);
+            if (!isNaN(popVal)) {
+                populationInfo = {
+                    value: popVal,
+                    source: "OpenStreetMap",
+                    status: "available"
+                };
+            }
+        }
+        
         candidates.push({
           marker: {
               id: `nearby-${mBaseId}-${elLat.toFixed(4)}-${elLon.toFixed(4)}`,
+              osmId: element.id ? element.id.toString() : undefined,
+              osmType: element.type,
+              wikidataId: tags.wikidata,
+              wikipedia: tags.wikipedia,
+              population: populationInfo,
+              tags: tags,
               name,
               lat: elLat,
               lng: elLon,

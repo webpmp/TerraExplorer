@@ -1,4 +1,5 @@
 import { ResolvedEntity, PresentationModel, MetadataLoadState } from '../domain';
+import { formatUserFacingCategory } from '../utils/categoryFormatting';
 
 export const selectEntityTitle = (entity: ResolvedEntity): string => {
     return entity.subject.identity.canonicalName ?? entity.subject.primaryLocation.label;
@@ -11,7 +12,7 @@ export const selectEntitySubtitle = (entity: ResolvedEntity): string => {
         if (loc.address.city && loc.address.country) return `${loc.address.city}, ${loc.address.country}`;
         if (loc.address.country) return loc.address.country;
     }
-    return '';
+    return entity.subject.identity.entityType || '';
 };
 
 export const selectMetadataLoadState = (entity: ResolvedEntity): MetadataLoadState => {
@@ -35,7 +36,7 @@ export const selectPresentationModel = (entity: ResolvedEntity): PresentationMod
             overview: loadState.description || loadState.image,
             climate: loadState.climate,
             population: loadState.population,
-            notable: !!entity.metadata?.notable?.summary,
+            notable: !!(entity.metadata?.notable && entity.metadata.notable.length > 0),
             news: loadState.news
         },
         loadState

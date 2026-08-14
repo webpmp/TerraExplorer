@@ -1,14 +1,19 @@
 import 'react';
 
+export type CoordinateSource = "deterministic" | "geocoder" | "ai_recovery";
+export type GeographicIdentityStatus = "verified" | "unverified" | "ambiguous" | "failed";
+
 export interface GeoCoordinates {
   lat: number;
   lng: number;
+  source?: CoordinateSource;
+  confidence?: "high" | "medium" | "low";
 }
 
 export interface ResolvedCoordinates {
   lat: number;
   lng: number;
-  source: "deterministic" | "geocoder" | "ai_recovery";
+  source: CoordinateSource;
   confidence?: "high" | "medium" | "low";
 }
 
@@ -52,11 +57,9 @@ export interface NewsItem {
 }
 
 export interface PopulationInfo {
-  value?: number;
-  formattedValue: string;
-  timeframe: string;
-  description: string;
-  sourceType?: "census" | "estimate" | "historical_record" | "ai_inference";
+  value: number | null;
+  source: string | null;
+  status: "available" | "not_applicable" | "lookup_failed" | "pending";
 }
 
 export interface ClimateInfo {
@@ -102,10 +105,7 @@ export interface LocationInfo {
   type: LocationType;
   entityType?: string;
   description: string;
-  population?: {
-    current?: PopulationInfo;
-    historical?: PopulationInfo;
-  } | null;
+  population?: PopulationInfo | null;
   climate?: ClimateInfo | null;
   notable?: NotableItem[];
   contextNotes?: string[];
@@ -116,6 +116,17 @@ export interface LocationInfo {
   relatedEntities?: any[];
   metadataMode?: 'historical_site' | 'modern_place' | 'natural_feature';
   coordinates: GeoCoordinates;
+  coordinateSource?: CoordinateSource;
+  identityStatus?: GeographicIdentityStatus;
+  country?: string;
+  state?: string;
+  region?: string;
+  county?: string;
+  city?: string;
+  osmId?: string;
+  osmType?: string;
+  wikidataId?: string;
+  wikipedia?: string;
   boundary?: GeoCoordinates[];
   pipelineVersion?: number;
   status?: "loading" | "success" | "error";
@@ -140,12 +151,17 @@ export interface LocationInfo {
 export interface MapMarker {
   id: string;
   name: string;
+  displayName?: string;
   lat: number;
   lng: number;
   populationClass: 'large' | 'medium' | 'small'; // Affects dot size
   type?: string;
+  coordinateSource?: CoordinateSource;
+  identityStatus?: GeographicIdentityStatus;
   country?: string;
   state?: string;
+  region?: string;
+  county?: string;
   discoverySignals?: string[];
   city?: string;
   metadataMode?: string;
@@ -155,6 +171,10 @@ export interface MapMarker {
   isAnchor?: boolean;
   provenance?: string;
   wikidataId?: string;
+  osmId?: string;
+  osmType?: string;
+  wikipedia?: string;
+  tags?: any;
   populationStatus?: string;
   populationSource?: string;
 }
@@ -162,6 +182,7 @@ export interface MapMarker {
 export interface Candidate {
   id: string;
   name: string;
+  displayName?: string;
   coordinates: { lat: number; lng: number };
   type: string;
   isAnchor?: boolean;
@@ -177,6 +198,7 @@ export interface Candidate {
   
   tier?: number;
   entityClass?: string;
+  rankingClass?: 'POPULATED_PLACE' | 'GEOGRAPHIC_FEATURE' | 'ADMINISTRATIVE_REGION' | 'POI' | 'ATTRACTION_INFRASTRUCTURE' | 'OTHER' | 'REJECTED';
   distanceBand?: 'local' | 'regional' | 'extended';
   distanceKm?: number;
   settlementConfidence?: number;
@@ -192,6 +214,34 @@ export interface Candidate {
     osmId?: string;
     [key: string]: string | undefined;
   };
+  researchSignificance?: 'high' | 'medium' | 'low' | 'none';
+  recognizability?: 'high' | 'medium' | 'low' | 'none';
+  geographicSpecificity?: 'point' | 'local' | 'regional' | 'broad_area';
+  administrativeScale?: 'settlement' | 'feature' | 'landmark' | 'county' | 'district' | 'state' | 'country' | 'none';
+  insideEntity?: boolean;
+  eligibility?: 'eligible' | 'ineligible';
+  eligibilityReason?: string;
+  eligibleForDefaultDiscovery?: boolean;
+  exclusionReason?: string;
+  selectionReason?: string;
+  settlementTier?: 'A' | 'B' | 'C' | 'D' | 'E';
+  relevanceScore?: number;
+  relevanceThreshold?: number;
+  originalProviderType?: string;
+  normalizedEntityType?: string;
+  classificationConfidence?: string;
+  classificationEvidence?: string;
+  classificationReason?: string;
+  prominenceTier?: 'Tier A' | 'Tier B' | 'Tier C' | 'Tier D';
+  prominenceEvidence?: string;
+  isAdministrative?: boolean;
+  wikidataEvidence?: string;
+  directClickMatch?: boolean;
+  finalScore?: number;
+  wikipediaEvidence?: string;
+  geographicRelevance?: 'high' | 'medium' | 'low';
+  eligibilityScore?: number;
+  minimumRequiredScore?: number;
 }
 export interface SearchResult {
   locationInfo?: LocationInfo | Partial<LocationInfo>;
@@ -245,7 +295,7 @@ export interface Waypoint {
   modernLocation?: string;
   lat: number;
   lng: number;
-  context: string;
+  context?: string;
   entityType?: string;
   discoverySignals?: string[];
   role?: "primary" | "related" | "administrative" | "historical_context";

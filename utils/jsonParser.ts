@@ -235,6 +235,112 @@ function repairTruncatedJson(input: string): string {
   return repaired;
 }
 
+export function extractAllJsonCandidates(text: string): Array<{ extracted: string, startIndex: number, endIndex: number }> {
+    const sanitized = sanitize(text);
+    const candidates: Array<{ extracted: string, startIndex: number, endIndex: number }> = [];
+    
+    let i = 0;
+    while (i < sanitized.length) {
+        const nextBrace = sanitized.indexOf('{', i);
+        const nextBracket = sanitized.indexOf('[', i);
+        
+        let startIndex = -1;
+        if (nextBrace !== -1 && nextBracket !== -1) {
+            startIndex = Math.min(nextBrace, nextBracket);
+        } else if (nextBrace !== -1) {
+            startIndex = nextBrace;
+        } else if (nextBracket !== -1) {
+            startIndex = nextBracket;
+        } else {
+            break;
+        }
+        
+        const stack: string[] = [];
+        let insideString = false;
+        let escaped = false;
+        let endIndex = -1;
+        
+        for (let j = startIndex; j < sanitized.length; j++) {
+            const char = sanitized[j];
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (char === '\\') {
+                escaped = true;
+                continue;
+            }
+            if (char === '"') {
+                insideString = !insideString;
+                continue;
+            }
+            if (!insideString) {
+                if (char === '{' || char === '[') {
+                    stack.push(char);
+                } else if (char === '}' || char === ']') {
+                    const last = stack[stack.length - 1];
+                    if ((char === '}' && last === '{') || (char === ']' && last === '[')) {
+                        stack.pop();
+                        if (stack.length === 0) {
+                            endIndex = j;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (endIndex !== -1) {
+            const extracted = sanitized.substring(startIndex, endIndex + 1);
+            candidates.push({ extracted, startIndex, endIndex });
+            i = endIndex + 1;
+        } else {
+            const extracted = sanitized.substring(startIndex);
+            candidates.push({ extracted, startIndex, endIndex: sanitized.length - 1 });
+            break;
+        }
+    }
+    
+    return candidates;
+}
+
+export function scoreMetadataObject(val: any): number {
+    if (!val || typeof val !== 'object') {
+        return -100;
+    }
+    if (Array.isArray(val)) {
+        return val.length > 0 && typeof val[0] === 'object' ? 5 : 1;
+    }
+
+    let score = 0;
+    const keys = Object.keys(val);
+
+    // If wrapped in a container like { data: {...} } or { locationInfo: {...} }, evaluate inner
+    if (keys.length === 1 && typeof val[keys[0]] === 'object' && val[keys[0]] !== null && !Array.isArray(val[keys[0]])) {
+        return scoreMetadataObject(val[keys[0]]) + 1;
+    }
+
+    if (typeof val.description === 'string' && val.description.trim().length > 0) score += 6;
+    if (val.climate !== undefined && typeof val.climate === 'object' && val.climate !== null) score += 6;
+    if (Array.isArray(val.notable) || (val.notable && typeof val.notable === 'object')) score += 5;
+    if (Array.isArray(val.contextNotes) || typeof val.contextNotes === 'string') score += 5;
+    if (typeof val.name === 'string') score += 4;
+    if (typeof val.locationString === 'string') score += 4;
+    if (typeof val.population === 'number' || val.population === null) score += 2;
+    if (val.coordinates !== undefined) score += 3;
+
+    // Sub-object penalties:
+    // A standalone climate object has koppenCode or {name, description, koppenCode} without notable, contextNotes, or locationString
+    if (val.koppenCode !== undefined && !val.climate) {
+        score -= 25; // Clearly a sub-object
+    }
+    if (keys.length <= 3 && (keys.includes('koppenCode') || (keys.includes('description') && keys.includes('name') && keys.length === 2))) {
+        score -= 15;
+    }
+
+    return score;
+}
+
 export const parseAndExtract = (text: string): ParseResult => {
     if (!text) {
         ParserMetrics.no_json++;
@@ -242,6 +348,56 @@ export const parseAndExtract = (text: string): ParseResult => {
     }
 
     const sanitized = sanitize(text);
+    const candidates = extractAllJsonCandidates(sanitized);
+
+    if (candidates.length > 1) {
+        // Evaluate all candidates and pick the best top-level object
+        const parsedCandidates: Array<{ value: any, extracted: string, repairs: string[], score: number }> = [];
+
+        for (const cand of candidates) {
+            let extracted = cand.extracted;
+            try {
+                const value = JSON.parse(extracted);
+                const score = scoreMetadataObject(value);
+                parsedCandidates.push({ value, extracted, repairs: [], score });
+            } catch {
+                let textToRepair = repairTruncatedJson(extracted);
+                const { repaired, repairs: syntaxRepairs } = repairJson(textToRepair);
+                try {
+                    const value = JSON.parse(repaired);
+                    const score = scoreMetadataObject(value);
+                    parsedCandidates.push({ value, extracted: repaired, repairs: syntaxRepairs, score });
+                } catch {
+                    // ignore unparseable secondary candidates
+                }
+            }
+        }
+
+        if (parsedCandidates.length > 0) {
+            parsedCandidates.sort((a, b) => b.score - a.score);
+            const best = parsedCandidates[0];
+            let unwrappedValue = best.value;
+            // Unwrap single key container if applicable
+            if (unwrappedValue && typeof unwrappedValue === 'object' && !Array.isArray(unwrappedValue)) {
+                const k = Object.keys(unwrappedValue);
+                if (k.length === 1 && typeof unwrappedValue[k[0]] === 'object' && unwrappedValue[k[0]] !== null && !Array.isArray(unwrappedValue[k[0]])) {
+                    const innerScore = scoreMetadataObject(unwrappedValue[k[0]]);
+                    if (innerScore > 0) {
+                        unwrappedValue = unwrappedValue[k[0]];
+                    }
+                }
+            }
+
+            ParserMetrics.success++;
+            return {
+                success: true,
+                value: unwrappedValue,
+                extracted: best.extracted,
+                repairs: best.repairs
+            };
+        }
+    }
+
     let { extracted, reason, repairs: extractRepairs } = extract(sanitized);
     
     if (!extracted) {
@@ -260,13 +416,25 @@ export const parseAndExtract = (text: string): ParseResult => {
     }
     
     try {
-        const value = JSON.parse(extracted);
+        let value = JSON.parse(extracted);
         console.log(`[JSON Parser Trace] RAW JSON ↓ EXTRACT SUCCESS ↓ DIRECT PARSE SUCCESS`);
         if (extractRepairs.length > 0 || sanitized.length !== extracted.length || text.length !== sanitized.length) {
             ParserMetrics.recovered++;
         } else {
             ParserMetrics.success++;
         }
+
+        // Unwrap single key container if applicable
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+            const k = Object.keys(value);
+            if (k.length === 1 && typeof value[k[0]] === 'object' && value[k[0]] !== null && !Array.isArray(value[k[0]])) {
+                const innerScore = scoreMetadataObject(value[k[0]]);
+                if (innerScore > 0) {
+                    value = value[k[0]];
+                }
+            }
+        }
+
         return {
             success: true,
             value,
@@ -279,10 +447,22 @@ export const parseAndExtract = (text: string): ParseResult => {
         textToRepair = repairTruncatedJson(textToRepair);
         const { repaired, repairs: syntaxRepairs } = repairJson(textToRepair);
         try {
-            const value = JSON.parse(repaired);
+            let value = JSON.parse(repaired);
             ParserMetrics.recovered++;
             ParserMetrics.success++;
             console.log(`[JSON Parser Trace] RAW JSON ↓ EXTRACT SUCCESS ↓ PARSE FAILED ↓ REPAIR ATTEMPTED ↓ REPAIR SUCCESS ↓ PARSE SUCCESS`);
+
+            // Unwrap single key container if applicable
+            if (value && typeof value === 'object' && !Array.isArray(value)) {
+                const k = Object.keys(value);
+                if (k.length === 1 && typeof value[k[0]] === 'object' && value[k[0]] !== null && !Array.isArray(value[k[0]])) {
+                    const innerScore = scoreMetadataObject(value[k[0]]);
+                    if (innerScore > 0) {
+                        value = value[k[0]];
+                    }
+                }
+            }
+
             return {
                 success: true,
                 value,

@@ -1,4 +1,5 @@
-import { GeoCoordinates, NotableItem } from './types';
+import { GeoCoordinates, NotableItem, CoordinateSource, GeographicIdentityStatus } from './types';
+export type { CoordinateSource, GeographicIdentityStatus };
 
 // ==========================================
 // ARCHITECTURAL INVARIANTS
@@ -32,13 +33,17 @@ export type GeographicEntityType =
     | "mountain"
     | "island"
     | "national_park"
+    | "park"
     | "administrative_region"
     | "road"
+    | "trail"
     | "address"
     | "infrastructure"
     | "minor_poi"
     | "shipwreck_site"
-    | "historical_site";
+    | "historical_site"
+    | "city" | "town" | "village" | "hamlet" | "country" | "continent" | "ocean" | "sea" | "lake" | "river" | "volcano" | "desert" | "archipelago" | "building" | "monument" | "bridge" | "ship" | "shipwreck" | "route" | "natural_landmark"
+    | "discovery_site" | "festival_site" | "historical_event_site";
 
 export type NonGeographicEntityType = 
     | "historical_person" 
@@ -57,8 +62,14 @@ export interface CanonicalGeographicEntity {
   readonly canonicalName: string;
   readonly entityType: GeographicEntityType;
   readonly coordinates: GeoCoordinates;
+  readonly coordinateSource?: CoordinateSource;
+  readonly identityStatus?: GeographicIdentityStatus;
   readonly providerSignals?: string[];
   readonly adminContext?: string[];
+  readonly osmId?: string;
+  readonly osmType?: string;
+  readonly wikidataId?: string;
+  readonly wikipedia?: string;
 }
 
 export interface Provenance {
@@ -125,8 +136,8 @@ export type RelationshipKind = "same_city" | "same_region" | "same_country" | "h
 export interface RelatedEntity { name: string; entityType: EntityType; relationship: RelationshipKind; customRelationship?: string; provenance: Provenance; }
 export interface NewsArticle { title: string; url: string; source: string; publishedAt: string; snippet?: string; imageUrl?: string; provenance: Provenance; }
 export interface ImageInfo { imageUrl: string; imageType: string; verified: boolean; provenance: Provenance; }
-export interface PopulationInfo { value: number | null; status: 'available' | 'not_applicable' | 'lookup_failed' | 'pending'; provenance: Provenance; }
-export interface ClimateInfo { value: string; description: string; provenance: Provenance; }
+export interface PopulationInfo { value: number | null; source: string | null; status: 'available' | 'not_applicable' | 'lookup_failed' | 'pending'; }
+export interface ClimateInfo { value: string; description: string; name?: string; koppenCode?: string; provenance: Provenance; }
 
 export interface EnrichmentResult {
     description?: { text: string; provenance: Provenance };

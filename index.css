@@ -1,1 +1,11 @@
 /* TerraExplorer AI custom styles */
+.parchment-drop-cap::first-letter { 
+  font-family: "IM Fell Double Pica", serif;
+  float: left;
+  font-size: 3rem; /* text-5xl approximate */
+  line-height: 0.75;
+  padding-top: 0.25rem; /* pt-1 */
+  margin-right: 0.5rem; /* mr-2 */
+  font-weight: bold;
+  color: #8b5a2b;
+}

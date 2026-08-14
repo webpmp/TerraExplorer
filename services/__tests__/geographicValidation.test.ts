@@ -4,13 +4,17 @@ import * as geographicResolver from '../geographic/geographicResolver';
 import * as geminiService from '../geminiService';
 import { overpassProvider } from '../geographic/providers/OverpassProvider';
 
-vi.mock('../geographic/geographicResolver', () => ({
-  reverseGeocode: vi.fn(),
-}));
+vi.mock('../geographic/geographicResolver', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../geographic/geographicResolver')>();
+  return {
+    ...actual,
+    reverseGeocode: vi.fn(),
+  };
+});
 
 vi.mock('../geographic/providers/OverpassProvider', () => ({
   overpassProvider: {
-    getNearbyPlaces: vi.fn(),
+    searchNearby: vi.fn(),
     name: "OpenStreetMap"
   }
 }));
@@ -28,10 +32,7 @@ describe('Deterministic Geographic Validation in getNearbyPlaces', () => {
       type: 'region'
     });
 
-    vi.mocked(overpassProvider.getNearbyPlaces).mockResolvedValue({
-      status: "complete",
-      places: []
-    });
+    vi.mocked(overpassProvider.searchNearby).mockResolvedValue([]);
 
     await getNearbyPlaces(26.5, 56.2, 50);
     
@@ -46,13 +47,10 @@ describe('Deterministic Geographic Validation in getNearbyPlaces', () => {
       type: 'state'
     });
 
-    vi.mocked(overpassProvider.getNearbyPlaces).mockResolvedValue({
-      status: "complete",
-      places: [
-        { id: '1', name: 'Al Hamra', lat: 26.6, lng: 56.3, type: 'village', populationClass: 'small' },
-        { id: '2', name: 'Dibba Al-Fujairah', lat: 26.7, lng: 56.4, type: 'city', populationClass: 'large' }
-      ]
-    });
+    vi.mocked(overpassProvider.searchNearby).mockResolvedValue([
+      { id: '1', name: 'Al Hamra', lat: 26.6, lng: 56.3, type: 'village', populationClass: 'small' } as any,
+      { id: '2', name: 'Dibba Al-Fujairah', lat: 26.7, lng: 56.4, type: 'city', populationClass: 'large' } as any
+    ]);
 
     const result = await getNearbyPlaces(26.5, 56.2, 50);
     const places = result.places;
@@ -65,24 +63,19 @@ describe('Deterministic Geographic Validation in getNearbyPlaces', () => {
     vi.mocked(geographicResolver.reverseGeocode).mockResolvedValue({
       country: 'New Zealand',
       state: 'Otago',
-      city: 'Cromwell',
-      type: 'city'
+      type: 'region'
     });
 
-    vi.mocked(overpassProvider.getNearbyPlaces).mockResolvedValue({
-      status: "complete",
-      places: [
-        { id: '3', name: 'Bannockburn', lat: -45.08, lng: 169.17, type: 'village', populationClass: 'small' },
-        { id: '4', name: 'Lake Dunstan', lat: -44.9, lng: 169.2, type: 'lake', populationClass: 'small' }
-      ]
-    });
+    vi.mocked(overpassProvider.searchNearby).mockResolvedValue([
+      { id: '3', name: 'Bannockburn', lat: -45.08, lng: 169.17, type: 'village', populationClass: 'small' } as any,
+      { id: '4', name: 'Lake Dunstan', lat: -44.9, lng: 169.2, type: 'lake', populationClass: 'small' } as any
+    ]);
 
     const result = await getNearbyPlaces(-45.0, 169.2, 10);
     const places = result.places;
     
-    // Check that anchor is Cromwell
-    expect(places[0].name).toBe('Cromwell, Otago');
-    expect(places.some(p => p.name === 'Bannockburn')).toBe(true);
+    // Check that real OSM entities are returned, without synthesized anchors
+    expect(places[0].name).toBe('Bannockburn');
     expect(places.some(p => p.name === 'Lake Dunstan')).toBe(true);
     expect(geminiService.generateContentWithRetry).not.toHaveBeenCalled();
   });
@@ -90,12 +83,9 @@ describe('Deterministic Geographic Validation in getNearbyPlaces', () => {
   test('Remote Area without reverse geocoder falls back to nearest OSM entity', async () => {
     vi.mocked(geographicResolver.reverseGeocode).mockResolvedValue(null);
 
-    vi.mocked(overpassProvider.getNearbyPlaces).mockResolvedValue({
-      status: "complete",
-      places: [
-        { id: '5', name: 'Remote Village', lat: 10.05, lng: 20.05, type: 'village', populationClass: 'small' }
-      ]
-    });
+    vi.mocked(overpassProvider.searchNearby).mockResolvedValue([
+      { id: '5', name: 'Remote Village', lat: 10.05, lng: 20.05, type: 'village', populationClass: 'small' } as any
+    ]);
 
     // 10, 20 is the query
     const result = await getNearbyPlaces(10, 20, 10);
@@ -103,6 +93,6 @@ describe('Deterministic Geographic Validation in getNearbyPlaces', () => {
     
     // Falls back to nearest marker name
     expect(places[0].name).toBe('Remote Village');
-    expect(places[0].isAnchor).toBe(true);
+    expect(places[0].isAnchor).toBeUndefined();
   });
 });

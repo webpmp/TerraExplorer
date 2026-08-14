@@ -3,36 +3,82 @@ import { getUserSettings, sanitizeLocationInfo } from './geminiService';
 import { fetchLiveNews } from './newsService';
 import { logWaypointSnapshot } from '../utils/pipelineDebug';
 
-export const mergeRichestFields = (target: any, source: any): any => {
-    if (!source || typeof source !== 'object') return target;
-    if (!target || typeof target !== 'object') return { ...source };
+export const mergeLocationInfo = (prev: any, next: any): any => {
+    if (!next || typeof next !== 'object') return prev;
+    if (!prev || typeof prev !== 'object') return { ...next };
     
-    const merged = { ...target };
-    for (const key of Object.keys(source)) {
-        const sourceVal = source[key];
-        const targetVal = merged[key];
-        
-        if (typeof sourceVal === 'string' && typeof targetVal === 'string') {
-            if (sourceVal.trim().length > targetVal.trim().length) {
-                merged[key] = sourceVal;
-            }
-        } else if (Array.isArray(sourceVal) && Array.isArray(targetVal)) {
-            if (sourceVal.length > targetVal.length) {
-                merged[key] = sourceVal;
-            }
-        } else if (sourceVal && (!targetVal || (Array.isArray(targetVal) && targetVal.length === 0))) {
-            merged[key] = sourceVal;
-        } else if (sourceVal !== undefined && sourceVal !== null && sourceVal !== "") {
-            if (!(Array.isArray(sourceVal) && sourceVal.length === 0)) {
-                // If it's a completely new type or object and target is emptyish, or if we can't easily compare, prefer source only if it's non-empty
-                if (targetVal === undefined || targetVal === null || targetVal === "") {
-                    merged[key] = sourceVal;
-                }
+    const merged = { ...prev, ...next };
+    
+    // 1. Immutable Deterministic Fields
+    // These must never be overwritten by AI once set
+    const IMMUTABLE_FIELDS = ["name", "entityType", "type", "coordinates", "coordinateSource", "identityStatus", "country", "state", "city", "county", "region", "osmId", "osmType", "wikidataId", "wikipedia", "population"];
+    for (const field of IMMUTABLE_FIELDS) {
+        if (prev[field] !== undefined && prev[field] !== null) {
+            // Only overwrite if next has a valid value and prev is basically empty/placeholder, otherwise keep prev.
+            if (field === 'coordinates' && prev.coordinates && !isNaN(prev.coordinates.lat)) {
+                merged.coordinates = prev.coordinates;
+            } else if (field === 'population' && prev.population?.value !== undefined && prev.population?.value !== null) {
+                merged.population = prev.population;
+            } else {
+                merged[field] = prev[field];
             }
         }
     }
+    
+    // Strict Population Validation for incoming AI values
+    if (merged.population) {
+        const p = merged.population;
+        if (p === null || p === "" || typeof p !== 'object' || p.value === undefined || p.status === undefined) {
+            // Reject malformed incoming population, restore prev if it existed
+            if (prev.population && prev.population.value !== undefined && prev.population.value !== null) {
+                merged.population = prev.population;
+            } else {
+                delete merged.population;
+            }
+        }
+    }
+    
+    // 2. Non-Destructive Image Merge
+    // A valid image must never be overwritten by a missing/empty/placeholder image
+    const isInvalidImage = (img: any) => !img || img === "" || img === "placeholder.jpg" || img.includes("placeholder");
+    
+    if (prev.primaryImage && !isInvalidImage(prev.primaryImage)) {
+        if (isInvalidImage(next.primaryImage)) {
+            merged.primaryImage = prev.primaryImage;
+        } else {
+            // Both valid, prefer newer (or richer)
+            merged.primaryImage = next.primaryImage;
+        }
+    }
+    
+    if (prev.notable && Array.isArray(prev.notable) && next.notable && Array.isArray(next.notable)) {
+        // Merge notable arrays safely, preserving images where possible
+        // This is complex, so we'll just keep the one with images if the other doesn't have them
+        const prevHasImages = prev.notable.some((n: any) => n.image && !isInvalidImage(n.image));
+        const nextHasImages = next.notable.some((n: any) => n.image && !isInvalidImage(n.image));
+        
+        if (prevHasImages && !nextHasImages && prev.notable.length > 0) {
+            merged.notable = prev.notable;
+        }
+    }
+
+    // 3. String length and quality fallback for descriptions/context (like mergeRichestFields)
+    const TEXT_FIELDS = ["description", "overview", "climate"];
+    for (const field of TEXT_FIELDS) {
+        if (typeof prev[field] === 'string') {
+            if (typeof next[field] !== 'string' || next[field].trim().length === 0 || isInvalidImage(next[field])) {
+                merged[field] = prev[field];
+            } else if (prev[field].trim().length > next[field].trim().length && !isInvalidImage(prev[field])) {
+                merged[field] = prev[field];
+            }
+        }
+    }
+
     return merged;
 };
+
+// Alias for backwards compatibility where used
+export const mergeRichestFields = mergeLocationInfo;
 
 export const enrichLocationInfo = async (resolvedData: any): Promise<any> => {
     const settings = getUserSettings();

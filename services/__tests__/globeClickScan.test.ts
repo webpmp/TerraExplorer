@@ -1,11 +1,13 @@
+import { describe, test, expect } from 'vitest';
 import { reverseGeocode, resolveWithContext } from '../geographic/geographicResolver';
 import { calculateDistanceKm } from '../geographic/geographicDistance';
 import { getNearbyPlaces } from '../geminiService';
 import fs from 'fs';
 import path from 'path';
 
-async function runTests() {
-  let passed = true;
+describe('Globe Click Scan Efficiency & Rate Limiting Tests', () => {
+  test('efficiency and rate limiting tests', async () => {
+    let passed = true;
 
   console.log('--- Globe Click Scan Efficiency & Rate Limiting Tests ---');
 
@@ -291,13 +293,6 @@ async function runTests() {
     passed = false;
   }
 
-  if (!passed) {
-    console.error('\n❌ Some tests failed.');
-    process.exit(1);
-  } else {
-    console.log('\n✅ All Globe Click Scan Efficiency tests passed.');
-    process.exit(0);
-  }
-}
-
-runTests();
+    expect(passed).toBe(true);
+  });
+});
