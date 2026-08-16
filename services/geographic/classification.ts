@@ -108,7 +108,7 @@ export interface GeographicHierarchyResult {
     selectionReason?: string;
 }
 
-export const getGeographicHierarchy = async (candidate: Candidate): Promise<GeographicHierarchyResult> => {
+export const classifyEntityWithHierarchy = async (candidate: Candidate): Promise<GeographicHierarchyResult | GeographicEntityClass> => {
     const name = candidate.name || '';
     const rawType = (candidate.type || '').toLowerCase();
     const signals = candidate.discoverySignals || [];
@@ -275,13 +275,30 @@ export const getGeographicHierarchy = async (candidate: Candidate): Promise<Geog
     candidate.classificationConfidence = classResult.confidence;
     candidate.classificationEvidence = classResult.evidence;
 
+    // 1. AUTHORITATIVE SETTLEMENT PRECEDENCE:
+    // If the provider has already identified an entity as city, town, village, municipality, or capital,
+    // and that classification is supported by authoritative provider metadata, generic name/description heuristics
+    // must NOT override it (e.g. Siak Sri Indrapura, Pangkalan Bunut, Sorek, Ukui, Pangkalan Kerinci, Langgam).
+    const hasAuthoritativeSettlementTag = 
+        ['city', 'town', 'village', 'municipality', 'municipio', 'capital', 'settlement', 'populated place'].includes(type as string) ||
+        ['city', 'town', 'village', 'municipality', 'municipio', 'place', 'settlement'].includes(rawType) ||
+        (candidate.rawProviders?.Overpass?.tags?.place && ['city', 'town', 'village', 'municipality'].includes(candidate.rawProviders.Overpass.tags.place)) ||
+        (candidate.rawProviders?.Nominatim && (candidate.rawProviders.Nominatim.category === 'place' || ['city', 'town', 'village', 'municipality'].includes(candidate.rawProviders.Nominatim.type))) ||
+        (candidate.rawProviders?.DeterministicDB && candidate.rawProviders.DeterministicDB.entityType && ['city', 'town', 'village', 'municipality'].includes(candidate.rawProviders.DeterministicDB.entityType)) ||
+        signals.some(s => s === 'city' || s === 'town' || s === 'village' || s === 'municipality' || s === 'place=city' || s === 'place=town' || s === 'place=village' || s === 'place=municipality');
+
+    const isExplicitProtectedArea = name.match(/\b(special reserve|national reserve|nature reserve|wildlife reserve|game reserve|forest reserve|faunal reserve|biosphere reserve|ecological reserve|national park|state park|provincial park|tribal park|parque nacional|parc national|wildlife sanctuary|national monument|preserve|refuge|wilderness area|wilderness|national grassland|grassland|national forest|forest|creek|river|lake|mountain|mount|mt\.?|peak|volcano|canyon|valley|gorge|glacier|falls|waterfall)\b/i) !== null;
+
     // Check POI / Attraction / Infrastructure pattern
-    const isPoiType = ['attraction', 'hotel', 'resort', 'stadium', 'museum', 'station', 'road', 'infrastructure', 'minor_poi', 'airport'].includes(type) || 
-                      ['tourism', 'leisure', 'hotel', 'resort', 'stadium', 'museum', 'station', 'aeroway', 'highway'].includes(rawType) ||
-                      name.match(/\b(resort|hotel|motel|inn|lodge|stadium|arena|casino|airport|aeropuerto|station|estación|terminal|golf club|country club|theme park|amusement park)\b/i) !== null;
+    const isAirport = type === 'airport' || rawType === 'airport' || rawType === 'aeroway' || rawType === 'aerodrome' ||
+                      name.match(/\b(airport|aeropuerto|bandara|bandar udara|airfield|aerodrome|heliport)\b/i) !== null;
+
+    const isPoiType = isAirport || ['attraction', 'hotel', 'resort', 'stadium', 'museum', 'station', 'road', 'infrastructure', 'minor_poi'].includes(type) || 
+                      ['tourism', 'leisure', 'hotel', 'resort', 'stadium', 'museum', 'station', 'highway', 'infrastructure'].includes(rawType) ||
+                      name.match(/\b(resort|hotel|motel|inn|lodge|stadium|arena|casino|station|estación|terminal|railway station|train station|golf club|country club|theme park|amusement park)\b/i) !== null;
 
     // Check Geographic Feature pattern (Strictly prevents parks, reserves, mountains, water from becoming populated places)
-    const isGeographicFeature = ['national_park', 'mountain', 'water_body', 'historical_site', 'archaeological_site', 'natural_feature', 'island', 'volcano', 'lake', 'river', 'forest', 'nature_reserve', 'protected_area'].includes(type) ||
+    const isGeographicFeature = !isPoiType && (['national_park', 'mountain', 'water_body', 'historical_site', 'archaeological_site', 'natural_feature', 'island', 'volcano', 'lake', 'river', 'forest', 'nature_reserve', 'protected_area'].includes(type) ||
                                 ['natural', 'historic', 'lake', 'river', 'mountain', 'nature_reserve', 'national_park', 'protected_area', 'forest', 'water'].includes(rawType) ||
                                 name.match(/\b(special reserve|national reserve|nature reserve|wildlife reserve|game reserve|forest reserve|faunal reserve|reserve|reserva|réserve|biosphere reserve|ecological reserve)\b/i) !== null ||
                                 name.match(/\b(national park|state park|provincial park|tribal park|parque nacional|parc national|conservation area|protected area|wilderness area|wilderness)\b/i) !== null ||
@@ -290,14 +307,33 @@ export const getGeographicHierarchy = async (candidate: Candidate): Promise<Geog
                                 name.match(/\b(mountain range|mountain|mount|mt\.?|peak|pico|summit|volcano|volcán|cordillera|ridge|pass|canyon|cañón|gorge)\b/i) !== null ||
                                 name.match(/\b(lake|lago|lac|lagoon|laguna|reservoir|embalse|bay|baie|gulf|golfe|sound|strait|ocean|sea|mer)\b/i) !== null ||
                                 name.match(/\b(river|río|fleuve|creek|stream|brook|waterfall|cascada|falls|rapids)\b/i) !== null ||
-                                name.match(/\b(island|isla|îles?|isle|archipelago|atoll|reef|cay|key|shoal|glacier|icefield|dune|desert|desierto)\b/i) !== null;
+                                name.match(/\b(island|isla|îles?|isle|archipelago|atoll|reef|cay|key|shoal|glacier|icefield|dune|desert|desierto)\b/i) !== null);
 
-    // Preserving semantic populated-place types
-    if (isPoiType) {
-        candidate.normalizedEntityType = type === 'settlement' || type === 'city' || type === 'town' ? 'attraction' : type;
+    if (hasAuthoritativeSettlementTag && !isExplicitProtectedArea) {
+        let canonicalType = 'town';
+        if (rawType === 'city' || type === 'city' || sigStr.includes('city') || sigStr.includes('capital')) canonicalType = 'city';
+        else if (rawType === 'town' || type === 'town' || rawType === 'municipality' || (type as string) === 'municipality') canonicalType = 'town';
+        else if (rawType === 'village' || type === 'village') canonicalType = 'village';
+        else if (rawType === 'hamlet' || type === 'hamlet') canonicalType = 'hamlet';
+        else if (type === 'settlement') canonicalType = rawType || 'town';
+
+        candidate.normalizedEntityType = canonicalType;
+        candidate.type = canonicalType;
+        candidate.rankingClass = 'POPULATED_PLACE';
+        candidate.entityClass = 'settlement';
+        candidate.classificationReason = 'Verified populated place';
+    } else if (isPoiType) {
+        let canonicalPoiType = type;
+        if (isAirport) {
+            canonicalPoiType = 'airport';
+        } else if (canonicalPoiType === 'settlement' || canonicalPoiType === 'city' || canonicalPoiType === 'town' || canonicalPoiType === 'generic') {
+            canonicalPoiType = 'attraction';
+        }
+        candidate.normalizedEntityType = canonicalPoiType;
+        candidate.type = canonicalPoiType;
         candidate.rankingClass = 'POI';
         candidate.entityClass = 'major_landmark';
-        candidate.classificationReason = 'Infrastructure / attraction / point of interest';
+        candidate.classificationReason = isAirport ? 'Airport / transportation infrastructure' : 'Infrastructure / attraction / point of interest';
     } else if (isGeographicFeature) {
         let fType = type;
         if (fType === 'settlement' || fType === 'city' || fType === 'town' || (fType as string) === 'generic' || (fType as string) === 'poi') {
@@ -364,6 +400,66 @@ export const getGeographicHierarchy = async (candidate: Candidate): Promise<Geog
         };
     }
 
+    return (candidate.entityClass || 'generic') as GeographicEntityClass;
+};
+
+/**
+ * Classify entity into structured geographic hierarchy.
+ */
+export const getGeographicHierarchy = async (candidate: Candidate): Promise<GeographicHierarchy> => {
+    if (!candidate.rankingClass || !candidate.normalizedEntityType) {
+        const earlyHierarchy = await classifyEntityWithHierarchy(candidate);
+        if (earlyHierarchy && typeof earlyHierarchy === 'object' && 'tier' in earlyHierarchy) {
+            return earlyHierarchy as GeographicHierarchy;
+        }
+    }
+
+    const rawType = (candidate.originalProviderType || candidate.rawProviders?.Overpass?.tags?.place || candidate.type || '').toLowerCase();
+    const type = (candidate.normalizedEntityType || candidate.type || '').toLowerCase();
+    const name = candidate.name || '';
+    const signals = candidate.discoverySignals || [];
+    const sigStr = signals.join(' ').toLowerCase();
+
+    const assignAndReturn = (hierarchy: GeographicHierarchy): GeographicHierarchy => {
+        candidate.tier = hierarchy.tier;
+        candidate.prominenceTier = hierarchy.prominenceTier;
+        candidate.prominenceEvidence = hierarchy.prominenceEvidence;
+        candidate.settlementTier = hierarchy.settlementTier;
+        candidate.entityClass = hierarchy.category === 'administrative_region' ? 'administrative_region' : (candidate.entityClass || hierarchy.category);
+        (candidate as any).geographicCategory = hierarchy.category;
+        (candidate as any).geographicImportance = hierarchy.importance;
+        candidate.researchSignificance = hierarchy.researchSignificance;
+        candidate.recognizability = hierarchy.recognizability;
+        candidate.geographicSpecificity = hierarchy.geographicSpecificity;
+        candidate.administrativeScale = hierarchy.administrativeScale;
+        candidate.eligibleForDefaultDiscovery = hierarchy.eligibleForDefaultDiscovery;
+        candidate.exclusionReason = hierarchy.exclusionReason;
+        candidate.selectionReason = hierarchy.selectionReason;
+        candidate.eligibility = hierarchy.eligibility;
+        candidate.eligibilityReason = hierarchy.eligibilityReason;
+        return hierarchy;
+    };
+
+    // Category F: Administrative Regions / Context (Excluded from discovery markers)
+    if (candidate.rankingClass === 'ADMINISTRATIVE_REGION' || candidate.entityClass === 'administrative_region' || type === 'administrative') {
+        return assignAndReturn({
+            tier: 4,
+            category: 'administrative_region',
+            discoveryCategory: 'ADMINISTRATIVE_REGION',
+            importance: 'administrative container / context',
+            prominenceTier: 'Tier D',
+            prominenceEvidence: 'Administrative boundary or container without independent point prominence',
+            researchSignificance: 'low',
+            recognizability: 'low',
+            geographicSpecificity: 'polygon',
+            administrativeScale: 'administrative',
+            eligibleForDefaultDiscovery: false,
+            eligibility: 'ineligible',
+            eligibilityReason: 'Administrative region with insufficient independent significance',
+            exclusionReason: 'Administrative region with insufficient independent significance'
+        });
+    }
+
     const isMajorSettlement = candidate.rankingClass === 'POPULATED_PLACE' && (
         candidate.type === 'city' ||
         candidate.populationClass === 'large' ||
@@ -375,10 +471,13 @@ export const getGeographicHierarchy = async (candidate: Candidate): Promise<Geog
         sigStr.includes('major city')
     );
 
-    const isRegionalSettlement = candidate.rankingClass === 'POPULATED_PLACE' && (
+    const isRegionalSettlement = (candidate.rankingClass === 'POPULATED_PLACE' || candidate.entityClass === 'settlement') && (
+        candidate.type === 'city' ||
+        candidate.type === 'municipality' ||
         candidate.populationClass === 'medium' ||
-        (typeof candidate.population === 'number' && candidate.population >= 15000) ||
-        (candidate.population && typeof candidate.population === 'object' && candidate.population.value >= 15000) ||
+        (typeof candidate.population === 'number' && candidate.population >= 5000) ||
+        (candidate.population && typeof candidate.population === 'object' && candidate.population.value >= 5000) ||
+        rawType === 'city' ||
         rawType === 'municipality' ||
         rawType === 'municipio' ||
         sigStr.includes('state capital') ||
@@ -386,7 +485,7 @@ export const getGeographicHierarchy = async (candidate: Candidate): Promise<Geog
         sigStr.includes('regional center') ||
         sigStr.includes('county seat') ||
         sigStr.includes('municipality') ||
-        name.match(/^(victoria|olympia|bellingham|spokane|wenatchee|yakima|abilene|brownwood|cisco|eastland|kailua-kona|kailua|kahului|fredericksburg|marble falls|ocosingo|al hamra|dibba al-fujairah|bannockburn|oroville|washtucna|laingsburg|siak sri indrapura|celebration|kissimmee|poinciana|saint cloud)$/i) !== null
+        name.match(/^(victoria|olympia|bellingham|spokane|wenatchee|yakima|abilene|brownwood|cisco|eastland|kailua-kona|kailua|kahului|fredericksburg|marble falls|ocosingo|al hamra|dibba al-fujairah|bannockburn|oroville|washtucna|laingsburg|siak sri indrapura|pangkalan kerinci|pangkalan bunut|sorek|ukui|langgam|celebration|kissimmee|poinciana|saint cloud)$/i) !== null
     );
 
     // Category A: Major Settlement
@@ -407,6 +506,27 @@ export const getGeographicHierarchy = async (candidate: Candidate): Promise<Geog
             eligibility: 'eligible',
             eligibilityReason: 'Major recognized city with high research significance',
             selectionReason: 'Major recognized city with high research significance'
+        });
+    }
+
+    // Category B: Recognizable Regional Settlement
+    if (isRegionalSettlement) {
+        return assignAndReturn({
+            tier: 2,
+            category: 'settlement',
+            discoveryCategory: 'RECOGNIZABLE_SETTLEMENT',
+            settlementTier: 'B',
+            importance: 'regional settlement',
+            prominenceTier: 'Tier B',
+            prominenceEvidence: 'Regional city or documented settlement with municipal significance',
+            researchSignificance: 'high',
+            recognizability: 'high',
+            geographicSpecificity: 'point',
+            administrativeScale: 'settlement',
+            eligibleForDefaultDiscovery: true,
+            eligibility: 'eligible',
+            eligibilityReason: 'Recognizable regional settlement with municipal significance',
+            selectionReason: 'Recognizable regional settlement with municipal significance'
         });
     }
 
@@ -455,32 +575,35 @@ export const getGeographicHierarchy = async (candidate: Candidate): Promise<Geog
         });
     }
 
-    // Category B: Recognizable Regional Settlement
-    if (isRegionalSettlement) {
+    // Category POI: Recognized Major Landmark / Airport / Infrastructure
+    if (candidate.rankingClass === 'POI' || type === 'airport' || rawType === 'airport' || rawType === 'aeroway' || rawType === 'aerodrome') {
         return assignAndReturn({
             tier: 2,
-            category: 'settlement',
-            discoveryCategory: 'RECOGNIZABLE_SETTLEMENT',
-            settlementTier: 'B',
-            importance: 'regional settlement',
+            category: type || 'airport',
+            discoveryCategory: 'MAJOR_NATURAL_CULTURAL_FEATURE',
+            importance: 'major transportation infrastructure / landmark',
             prominenceTier: 'Tier B',
-            prominenceEvidence: 'Regional city or documented settlement with municipal significance',
-            researchSignificance: 'high',
+            prominenceEvidence: 'Recognized airport or transportation infrastructure',
+            researchSignificance: 'medium',
             recognizability: 'high',
             geographicSpecificity: 'point',
-            administrativeScale: 'settlement',
+            administrativeScale: 'landmark',
             eligibleForDefaultDiscovery: true,
             eligibility: 'eligible',
-            eligibilityReason: 'Recognizable regional settlement with municipal significance',
-            selectionReason: 'Recognizable regional settlement with municipal significance'
+            eligibilityReason: 'Recognized landmark or transportation facility',
+            selectionReason: 'Recognized landmark or transportation facility'
         });
     }
 
-    // Documented local town/village (Category B/C)
-    const isDocumentedSettlement = candidate.rankingClass === 'POPULATED_PLACE' || (
+    // Documented local town/village (Category B)
+    const isDocumentedSettlement = (
         (candidate.providers && candidate.providers.includes('Wikipedia')) ||
         Boolean(candidate.identifiers?.wikipediaId) ||
-        rawType === 'town' || rawType === 'city' || rawType === 'village' || rawType === 'municipality' || rawType === 'populated place'
+        candidate.populationClass === 'medium' ||
+        candidate.populationClass === 'large' ||
+        (typeof candidate.population === 'number' && candidate.population >= 5000) ||
+        (candidate.population && typeof candidate.population === 'object' && candidate.population.value >= 5000) ||
+        rawType === 'city' || rawType === 'municipality' || rawType === 'capital'
     );
 
     if (isDocumentedSettlement) {
@@ -488,9 +611,9 @@ export const getGeographicHierarchy = async (candidate: Candidate): Promise<Geog
             tier: 2,
             category: 'settlement',
             discoveryCategory: 'RECOGNIZABLE_SETTLEMENT',
-            settlementTier: 'C',
+            settlementTier: 'B',
             importance: 'meaningful regional town',
-            prominenceTier: 'Tier C',
+            prominenceTier: 'Tier B',
             prominenceEvidence: 'Settlement with documented municipal or local significance',
             researchSignificance: 'medium',
             recognizability: 'medium',
@@ -500,6 +623,27 @@ export const getGeographicHierarchy = async (candidate: Candidate): Promise<Geog
             eligibility: 'eligible',
             eligibilityReason: 'Documented town with municipal significance',
             selectionReason: 'Documented town with municipal significance'
+        });
+    }
+
+    // Small local town / village (Category C) -> eligible within local range (<= 20km)
+    if (candidate.rankingClass === 'POPULATED_PLACE' || candidate.entityClass === 'settlement' || rawType === 'town' || rawType === 'village' || type === 'town' || type === 'village') {
+        return assignAndReturn({
+            tier: 2,
+            category: 'settlement',
+            discoveryCategory: 'RECOGNIZABLE_SETTLEMENT',
+            settlementTier: 'C',
+            importance: 'small local town',
+            prominenceTier: 'Tier C',
+            prominenceEvidence: 'Small local settlement with local relevance',
+            researchSignificance: 'low',
+            recognizability: 'low',
+            geographicSpecificity: 'point',
+            administrativeScale: 'settlement',
+            eligibleForDefaultDiscovery: true,
+            eligibility: 'eligible',
+            eligibilityReason: 'Local town eligible within local range',
+            selectionReason: 'Local town eligible within local range'
         });
     }
 

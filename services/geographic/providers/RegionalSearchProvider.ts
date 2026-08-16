@@ -10,7 +10,10 @@ export class RegionalSearchProvider implements DiscoveryProvider {
 
   async searchNearby(context: DiscoveryContext): Promise<Candidate[]> {
     const candidates: Candidate[] = [];
-    const { country, state, county, municipality, city, town, village, lat, lng } = context;
+    const { country, state, county, municipality, city, town, village, lat, lng, radiusKm = 150, categoryFilter = 'all' } = context;
+
+    const searchSettlements = categoryFilter === 'settlements' || categoryFilter === 'all';
+    const searchFeatures = categoryFilter === 'features' || categoryFilter === 'all';
 
     const seenIds = new Set<string>();
 
@@ -47,12 +50,12 @@ export class RegionalSearchProvider implements DiscoveryProvider {
             if (state && cleanName.toLowerCase() === state.toLowerCase()) return false;
             if (county && cleanName.toLowerCase() === county.toLowerCase()) return false;
 
-            // Reject if distance to click is excessively far (> 200km)
+            // Reject if distance to click exceeds radiusKm
             const itemLat = parseFloat(item.lat);
             const itemLon = parseFloat(item.lon);
             if (isNaN(itemLat) || isNaN(itemLon)) return false;
             const dist = Math.sqrt(Math.pow((itemLat - lat) * 111, 2) + Math.pow((itemLon - lng) * 111, 2));
-            if (dist > 200) return false;
+            if (dist > radiusKm) return false;
 
             return true;
           })
@@ -83,48 +86,63 @@ export class RegionalSearchProvider implements DiscoveryProvider {
       }
     };
 
-    // 1. Spatial check against Deterministic Location DB within 200km
+    // 1. Spatial check against Deterministic Location DB within radiusKm
     for (const [key, entry] of Object.entries(DETERMINISTIC_LOCATION_DB)) {
       const dLat = Math.abs(entry.lat - lat);
       const dLng = Math.abs(entry.lng - lng);
       const distKm = Math.sqrt(Math.pow(dLat * 111, 2) + Math.pow(dLng * 111, 2));
-      if (distKm <= 200) {
-        const cleanName = entry.name.split(',')[0].trim();
-        addCandidates([{
-          id: `regional-db-${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
-          name: cleanName,
-          coordinates: { lat: entry.lat, lng: entry.lng },
-          type: entry.entityType || 'city',
-          entityClass: 'settlement',
-          providers: [this.name, "DeterministicDB"],
-          rawProviders: { DeterministicDB: entry },
-          pipelineStatus: "collected",
-          populationClass: entry.population && entry.population > 100000 ? 'large' : (entry.population && entry.population > 25000 ? 'medium' : 'small'),
-          discoverySignals: [`Canonical regional entity (${Math.round(distKm)}km away)`],
-          settlementConfidence: 90
-        }]);
+      if (distKm <= radiusKm) {
+        const isSettlement = ['city', 'town', 'village', 'municipality'].includes(entry.entityType || 'city');
+        if ((searchSettlements && isSettlement) || (searchFeatures && !isSettlement)) {
+          const cleanName = entry.name.split(',')[0].trim();
+          addCandidates([{
+            id: `regional-db-${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+            name: cleanName,
+            coordinates: { lat: entry.lat, lng: entry.lng },
+            type: entry.entityType || 'city',
+            entityClass: isSettlement ? 'settlement' : 'geographic_feature',
+            providers: [this.name, "DeterministicDB"],
+            rawProviders: { DeterministicDB: entry },
+            pipelineStatus: "collected",
+            populationClass: entry.population && entry.population > 100000 ? 'large' : (entry.population && entry.population > 25000 ? 'medium' : 'small'),
+            discoverySignals: [`Canonical regional entity (${Math.round(distKm)}km away)`],
+            settlementConfidence: 90
+          }]);
+        }
       }
     }
 
     // 2. Overpass Query (with graceful timeout handling)
+    const radiusMeters = Math.round(radiusKm * 1000);
+    let overpassSubQueries = '';
+    if (searchSettlements) {
+      overpassSubQueries += `
+        node["place"~"city|town|village|municipality"](around:${radiusMeters},${lat},${lng});
+        way["place"~"city|town|village|municipality"](around:${radiusMeters},${lat},${lng});
+        rel["place"~"city|town|village|municipality"](around:${radiusMeters},${lat},${lng});
+      `;
+    }
+    if (searchFeatures) {
+      overpassSubQueries += `
+        node["natural"~"strait|bay|water|sea|peak|volcano|desert|canyon|glacier"](around:${radiusMeters},${lat},${lng});
+        way["natural"~"strait|bay|water|sea|peak|volcano|desert|canyon|glacier"](around:${radiusMeters},${lat},${lng});
+        rel["natural"~"strait|bay|water|sea|peak|volcano|desert|canyon|glacier"](around:${radiusMeters},${lat},${lng});
+        node["waterway"~"river|canal"](around:${radiusMeters},${lat},${lng});
+        way["waterway"~"river|canal"](around:${radiusMeters},${lat},${lng});
+        rel["waterway"~"river|canal"](around:${radiusMeters},${lat},${lng});
+        node["leisure"="nature_reserve"](around:${radiusMeters},${lat},${lng});
+        way["leisure"="nature_reserve"](around:${radiusMeters},${lat},${lng});
+        rel["leisure"="nature_reserve"](around:${radiusMeters},${lat},${lng});
+        node["boundary"="national_park"](around:${radiusMeters},${lat},${lng});
+        way["boundary"="national_park"](around:${radiusMeters},${lat},${lng});
+        rel["boundary"="national_park"](around:${radiusMeters},${lat},${lng});
+      `;
+    }
+
     const overpassQuery = `
       [out:json][timeout:8];
       (
-        node["place"~"city|town|village|municipality"](around:150000,${lat},${lng});
-        way["place"~"city|town|village|municipality"](around:150000,${lat},${lng});
-        rel["place"~"city|town|village|municipality"](around:150000,${lat},${lng});
-        node["natural"~"strait|bay|water|sea|peak|volcano|desert|canyon|glacier"](around:150000,${lat},${lng});
-        way["natural"~"strait|bay|water|sea|peak|volcano|desert|canyon|glacier"](around:150000,${lat},${lng});
-        rel["natural"~"strait|bay|water|sea|peak|volcano|desert|canyon|glacier"](around:150000,${lat},${lng});
-        node["waterway"~"river|canal"](around:150000,${lat},${lng});
-        way["waterway"~"river|canal"](around:150000,${lat},${lng});
-        rel["waterway"~"river|canal"](around:150000,${lat},${lng});
-        node["leisure"="nature_reserve"](around:150000,${lat},${lng});
-        way["leisure"="nature_reserve"](around:150000,${lat},${lng});
-        rel["leisure"="nature_reserve"](around:150000,${lat},${lng});
-        node["boundary"="national_park"](around:150000,${lat},${lng});
-        way["boundary"="national_park"](around:150000,${lat},${lng});
-        rel["boundary"="national_park"](around:150000,${lat},${lng});
+        ${overpassSubQueries}
       );
       out center 35;
     `;
@@ -154,6 +172,10 @@ export class RegionalSearchProvider implements DiscoveryProvider {
               const eLat = e.lat ?? e.center?.lat;
               const eLng = e.lon ?? e.center?.lon;
               if (eLat === undefined || eLng === undefined) return null;
+              
+              const dist = Math.sqrt(Math.pow((eLat - lat) * 111, 2) + Math.pow((eLng - lng) * 111, 2));
+              if (dist > radiusKm) return null;
+
               let placeType = e.tags.place || (e.tags.boundary === 'national_park' ? 'national_park' : (e.tags.leisure === 'nature_reserve' ? 'natural' : (e.tags.natural ? e.tags.natural : 'settlement')));
               if (e.tags.natural === 'strait' || e.tags.natural === 'bay' || e.tags.natural === 'water' || e.tags.waterway) {
                 placeType = 'water_body';
@@ -180,130 +202,152 @@ export class RegionalSearchProvider implements DiscoveryProvider {
       // Overpass failure is captured gracefully in diagnostics
     }
 
-    // 3. Multi-Offset Wikipedia Geosearch (Covers ~100km radius around click)
-    const offsetD = 0.45; // ~50 km offset
-    const searchGrid = [
-      { lat, lng },
-      { lat: lat + offsetD, lng },
-      { lat: lat - offsetD, lng },
-      { lat, lng: lng + offsetD },
-      { lat, lng: lng - offsetD }
-    ];
+    // 3. Multi-Offset Wikipedia Geosearch (Covers radius around click)
+    if (searchFeatures) {
+      const offsetD = Math.min(radiusKm / 222, 0.45);
+      const searchGrid = [
+        { lat, lng },
+        { lat: lat + offsetD, lng },
+        { lat: lat - offsetD, lng },
+        { lat, lng: lng + offsetD },
+        { lat, lng: lng - offsetD }
+      ];
 
-    try {
-      const wikiPromises = searchGrid.map(async (pt) => {
-        const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${pt.lat}|${pt.lng}&gsradius=10000&gslimit=15&format=json&origin=*`;
-        try {
-          const res = await fetch(wikiUrl);
-          if (!res.ok) return [];
-          const data = await res.json();
-          if (!data?.query?.geosearch) return [];
-          return data.query.geosearch
-            .filter((item: any) => {
-              if (!item.title) return false;
-              if (item.title.match(/mine|quarry|claim|creek|road|bridge|school|station|parish/i)) return false;
-              // Reject non-geographic events, conflicts, insurgencies, topics, elections
-              if (item.title.match(/\b(insurgency|uprising|rebellion|revolution|war|battle|conflict|offensive|siege|campaign|massacre|crisis|protest|riot|incident|accord|treaty|election|referendum|coup|strike|bombing|assassination|movement|dynasty|regime)\b/i)) return false;
-              if (country && item.title.toLowerCase() === country.toLowerCase()) return false;
-              if (state && item.title.toLowerCase() === state.toLowerCase()) return false;
-              return true;
-            })
-            .map((item: any) => {
-              let wType = "landmark";
-              if (item.title.match(/\b(Strait|Sea|Gulf|Bay|Channel|Ocean|Sound|River|Lake|Reservoir)\b/i)) {
-                wType = "water_body";
-              } else if (item.title.match(/\b(National Park|State Park|National Monument|Park|Reserve)\b/i)) {
-                wType = item.title.includes('Park') ? 'national_park' : 'natural_feature';
-              } else if (item.title.match(/\b(Mountain|Mount|Peak|Volcano|Range|Desert|Canyon|Gorge|Island|Isle)\b/i)) {
-                wType = item.title.match(/\b(Island|Isle)\b/i) ? 'island' : (item.title.match(/\b(Mountain|Mount|Peak|Volcano)\b/i) ? 'mountain' : 'natural_feature');
-              } else if (item.title.match(/,\s*(Costa Rica|Nicaragua|Honduras|Texas|Washington|California|Australia|Queensland|Western Cape|Iran|Yemen|Oman|Madagascar|[A-Z]{2})$/i)) {
-                wType = "settlement";
-              }
-              return {
-                id: `regional-wiki-${item.pageid}`,
-                name: item.title,
-                coordinates: { lat: parseFloat(item.lat), lng: parseFloat(item.lon) },
-                type: wType,
-                providers: [this.name, "Wikipedia"],
-                rawProviders: { [this.name]: item },
-                pipelineStatus: "collected",
-                discoverySignals: ["Wikipedia regional multi-point geosearch"]
-              } as Candidate;
-            });
-        } catch (e) {
-          return [];
-        }
-      });
+      try {
+        const wikiPromises = searchGrid.map(async (pt) => {
+          const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${pt.lat}|${pt.lng}&gsradius=10000&gslimit=15&format=json&origin=*`;
+          try {
+            const res = await fetch(wikiUrl);
+            if (!res.ok) return [];
+            const data = await res.json();
+            if (!data?.query?.geosearch) return [];
+            return data.query.geosearch
+              .filter((item: any) => {
+                if (!item.title) return false;
+                if (item.title.match(/mine|quarry|claim|creek|road|bridge|school|station|parish/i)) return false;
+                // Reject non-geographic events, conflicts, insurgencies, topics, elections
+                if (item.title.match(/\b(insurgency|uprising|rebellion|revolution|war|battle|conflict|offensive|siege|campaign|massacre|crisis|protest|riot|incident|accord|treaty|election|referendum|coup|strike|bombing|assassination|movement|dynasty|regime)\b/i)) return false;
+                if (country && item.title.toLowerCase() === country.toLowerCase()) return false;
+                if (state && item.title.toLowerCase() === state.toLowerCase()) return false;
+                
+                const itemLat = parseFloat(item.lat);
+                const itemLon = parseFloat(item.lon);
+                if (isNaN(itemLat) || isNaN(itemLon)) return false;
+                const dist = Math.sqrt(Math.pow((itemLat - lat) * 111, 2) + Math.pow((itemLon - lng) * 111, 2));
+                if (dist > radiusKm) return false;
 
-      const wikiResults = await Promise.all(wikiPromises);
-      wikiResults.forEach(addCandidates);
-    } catch (e) {
-      // Handled gracefully
+                return true;
+              })
+              .map((item: any) => {
+                let wType = "landmark";
+                if (item.title.match(/\b(Strait|Sea|Gulf|Bay|Channel|Ocean|Sound|River|Lake|Reservoir)\b/i)) {
+                  wType = "water_body";
+                } else if (item.title.match(/\b(National Park|State Park|National Monument|Park|Reserve)\b/i)) {
+                  wType = item.title.includes('Park') ? 'national_park' : 'natural_feature';
+                } else if (item.title.match(/\b(Mountain|Mount|Peak|Volcano|Range|Desert|Canyon|Gorge|Island|Isle)\b/i)) {
+                  wType = item.title.match(/\b(Island|Isle)\b/i) ? 'island' : (item.title.match(/\b(Mountain|Mount|Peak|Volcano)\b/i) ? 'mountain' : 'natural_feature');
+                } else if (item.title.match(/,\s*(Costa Rica|Nicaragua|Honduras|Texas|Washington|California|Australia|Queensland|Western Cape|Iran|Yemen|Oman|Madagascar|[A-Z]{2})$/i)) {
+                  wType = "settlement";
+                }
+                return {
+                  id: `regional-wiki-${item.pageid}`,
+                  name: item.title,
+                  coordinates: { lat: parseFloat(item.lat), lng: parseFloat(item.lon) },
+                  type: wType,
+                  providers: [this.name, "Wikipedia"],
+                  rawProviders: { [this.name]: item },
+                  pipelineStatus: "collected",
+                  discoverySignals: ["Wikipedia regional multi-point geosearch"]
+                } as Candidate;
+              });
+          } catch (e) {
+            return [];
+          }
+        });
+
+        const wikiResults = await Promise.all(wikiPromises);
+        wikiResults.forEach(addCandidates);
+      } catch (e) {
+        // Handled gracefully
+      }
     }
 
     // 4. Structured Regional Settlement Searches
-    const settlementQueries = [
-      village ? { q: `${village}, ${state || country}`, type: 'village' } : null,
-      town ? { q: `${town}, ${state || country}`, type: 'town' } : null,
-      city ? { q: `${city}, ${state || country}`, type: 'city' } : null,
-      municipality ? { q: `${municipality}, ${state || country}`, type: 'municipality' } : null,
-      county ? { q: `${county} seat, ${state || country}`, type: 'city' } : null,
-      county ? { q: `cities in ${county}, ${state || country}`, type: 'city' } : null,
-      county ? { q: `towns in ${county}, ${state || country}`, type: 'town' } : null,
-      state ? { q: `cities in ${state}, ${country || ''}`, type: 'city' } : null,
-    ].filter(Boolean) as Array<{ q: string; type: string }>;
+    if (searchSettlements) {
+      const settlementQueries = [
+        village ? { q: `${village}, ${state || country}`, type: 'village' } : null,
+        town ? { q: `${town}, ${state || country}`, type: 'town' } : null,
+        city ? { q: `${city}, ${state || country}`, type: 'city' } : null,
+        municipality ? { q: `${municipality}, ${state || country}`, type: 'municipality' } : null,
+        county ? { q: `${county} seat, ${state || country}`, type: 'city' } : null,
+        county ? { q: `cities in ${county}, ${state || country}`, type: 'city' } : null,
+        county ? { q: `towns in ${county}, ${state || country}`, type: 'town' } : null,
+        state ? { q: `cities in ${state}, ${country || ''}`, type: 'city' } : null,
+      ].filter(Boolean) as Array<{ q: string; type: string }>;
 
-    try {
-      const nomResults = await Promise.all(
-        settlementQueries.slice(0, 6).map(item => fetchNominatim(item.q, item.type, { 
-          discoverySignals: [`Regional settlement search for ${item.q}`],
-          entityClass: 'settlement'
-        }))
-      );
-      nomResults.forEach(addCandidates);
-    } catch (e) {
-      // Handled gracefully
+      try {
+        const nomResults = await Promise.all(
+          settlementQueries.slice(0, 6).map(item => fetchNominatim(item.q, item.type, { 
+            discoverySignals: [`Regional settlement search for ${item.q}`],
+            entityClass: 'settlement'
+          }))
+        );
+        nomResults.forEach(addCandidates);
+      } catch (e) {
+        // Handled gracefully
+      }
     }
 
-    // 5. Bounded Box City/Town Search in Nominatim (~100km box)
-    try {
-      const bboxUrl = `https://nominatim.openstreetmap.org/search?q=city+OR+town&format=jsonv2&viewbox=${(lng - 1.0).toFixed(4)},${(lat + 1.0).toFixed(4)},${(lng + 1.0).toFixed(4)},${(lat - 1.0).toFixed(4)}&bounded=1&limit=10&extratags=1`;
-      const bboxRes = await fetch(bboxUrl, { headers: { 'User-Agent': 'TerraExplorer/1.0' } });
-      if (bboxRes.ok) {
-        const bboxData = await bboxRes.json();
-        const bboxCandidates = (bboxData || [])
-          .filter((item: any) => {
-            const t = (item.type || item.category || '').toLowerCase();
-            const cleanName = (item.name || item.display_name.split(',')[0]).trim();
-            if (country && cleanName.toLowerCase() === country.toLowerCase()) return false;
-            if (state && cleanName.toLowerCase() === state.toLowerCase()) return false;
-            if (county && cleanName.toLowerCase() === county.toLowerCase()) return false;
-            return ['city', 'town', 'village', 'municipality'].includes(t) || item.category === 'place';
-          })
-          .map((item: any) => {
-            const cleanName = (item.name || item.display_name.split(',')[0]).trim();
-            return {
-              id: `regional-nom-bbox-${item.place_id || item.osm_id}`,
-              name: cleanName,
-              coordinates: { lat: parseFloat(item.lat), lng: parseFloat(item.lon) },
-              type: item.type || 'city',
-              entityClass: 'settlement',
-              providers: [this.name, "Nominatim"],
-              rawProviders: { [this.name]: item },
-              pipelineStatus: "collected",
-              identifiers: { osmId: item.osm_id ? item.osm_id.toString() : undefined },
-              settlementConfidence: 80,
-              discoverySignals: ["Bounded spatial city search in Nominatim"]
-            } as Candidate;
-          });
-        addCandidates(bboxCandidates);
+    // 5. Bounded Box City/Town Search in Nominatim
+    if (searchSettlements) {
+      try {
+        const degLat = radiusKm / 111;
+        const degLng = radiusKm / (111 * Math.max(0.1, Math.cos((lat * Math.PI) / 180)));
+        const bboxUrl = `https://nominatim.openstreetmap.org/search?q=city+OR+town&format=jsonv2&viewbox=${(lng - degLng).toFixed(4)},${(lat + degLat).toFixed(4)},${(lng + degLng).toFixed(4)},${(lat - degLat).toFixed(4)}&bounded=1&limit=10&extratags=1`;
+        const bboxRes = await fetch(bboxUrl, { headers: { 'User-Agent': 'TerraExplorer/1.0' } });
+        if (bboxRes.ok) {
+          const bboxData = await bboxRes.json();
+          const bboxCandidates = (bboxData || [])
+            .filter((item: any) => {
+              const t = (item.type || item.category || '').toLowerCase();
+              const cleanName = (item.name || item.display_name.split(',')[0]).trim();
+              if (country && cleanName.toLowerCase() === country.toLowerCase()) return false;
+              if (state && cleanName.toLowerCase() === state.toLowerCase()) return false;
+              if (county && cleanName.toLowerCase() === county.toLowerCase()) return false;
+
+              const itemLat = parseFloat(item.lat);
+              const itemLon = parseFloat(item.lon);
+              if (isNaN(itemLat) || isNaN(itemLon)) return false;
+              const dist = Math.sqrt(Math.pow((itemLat - lat) * 111, 2) + Math.pow((itemLon - lng) * 111, 2));
+              if (dist > radiusKm) return false;
+
+              return ['city', 'town', 'village', 'municipality'].includes(t) || item.category === 'place';
+            })
+            .map((item: any) => {
+              const cleanName = (item.name || item.display_name.split(',')[0]).trim();
+              return {
+                id: `regional-nom-bbox-${item.place_id || item.osm_id}`,
+                name: cleanName,
+                coordinates: { lat: parseFloat(item.lat), lng: parseFloat(item.lon) },
+                type: item.type || 'city',
+                entityClass: 'settlement',
+                providers: [this.name, "Nominatim"],
+                rawProviders: { [this.name]: item },
+                pipelineStatus: "collected",
+                identifiers: { osmId: item.osm_id ? item.osm_id.toString() : undefined },
+                settlementConfidence: 80,
+                discoverySignals: ["Bounded spatial city search in Nominatim"]
+              } as Candidate;
+            });
+          addCandidates(bboxCandidates);
+        }
+      } catch (e) {
+        // Handled gracefully
       }
-    } catch (e) {
-      // Handled gracefully
     }
 
     // 6. Wikipedia City / Settlement Article Search
-    if (state || county || country) {
+    if (searchSettlements && (state || county || country)) {
       const citySearchTopic = county ? `List of cities in ${county} ${state || country}` : `List of cities in ${state || country}`;
       try {
         const citySearchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(citySearchTopic)}&srlimit=8&format=json&origin=*`;
@@ -323,7 +367,7 @@ export class RegionalSearchProvider implements DiscoveryProvider {
                   const pLat = page.coordinates[0].lat;
                   const pLng = page.coordinates[0].lon;
                   const dist = Math.sqrt(Math.pow(pLat - lat, 2) + Math.pow(pLng - lng, 2)) * 111;
-                  if (dist <= 150 && !page.title.toLowerCase().includes('list of') && !page.title.toLowerCase().includes('county')) {
+                  if (dist <= radiusKm && !page.title.toLowerCase().includes('list of') && !page.title.toLowerCase().includes('county')) {
                     const cleanName = page.title.split(',')[0].trim();
                     addCandidates([{
                       id: `regional-wikicity-${page.pageid}`,
@@ -348,7 +392,7 @@ export class RegionalSearchProvider implements DiscoveryProvider {
     }
 
     // 7. Wikipedia Text Search for Regional Landmarks & Parks with Coordinates
-    if (country || state) {
+    if (searchFeatures && (country || state)) {
       const queryTopic = state ? `${state} National Park` : `${country} National Park`;
       try {
         const textSearchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(queryTopic)}&srlimit=5&format=json&origin=*`;
@@ -368,12 +412,18 @@ export class RegionalSearchProvider implements DiscoveryProvider {
                   const pLat = page.coordinates[0].lat;
                   const pLng = page.coordinates[0].lon;
                   const dist = Math.sqrt(Math.pow(pLat - lat, 2) + Math.pow(pLng - lng, 2)) * 111;
-                  if (dist <= 200) {
+                  if (dist <= radiusKm) {
+                    let featureType = 'natural_feature';
+                    if (page.title.match(/\b(airport|aeropuerto|bandara)\b/i)) {
+                      featureType = 'airport';
+                    } else if (page.title.match(/\b(National Park|State Park|Parque Nacional)\b/i)) {
+                      featureType = 'national_park';
+                    }
                     addCandidates([{
                       id: `regional-wikitext-${page.pageid}`,
                       name: page.title,
                       coordinates: { lat: pLat, lng: pLng },
-                      type: page.title.includes('Park') ? 'national_park' : 'natural_feature',
+                      type: featureType,
                       providers: [this.name, "Wikipedia"],
                       rawProviders: { [this.name]: page },
                       pipelineStatus: "collected",
@@ -391,7 +441,7 @@ export class RegionalSearchProvider implements DiscoveryProvider {
     }
 
     const cityCandidates = candidates.filter(c => c.entityClass === 'settlement' || ['city', 'town', 'village', 'municipality'].includes(c.type));
-    console.log(`[City Discovery]\nlocation: ${lat.toFixed(4)}, ${lng.toFixed(4)}\nradius: 150 km\ncandidates found: ${cityCandidates.length}` +
+    console.log(`[City Discovery - RegionalSearchProvider]\nlocation: ${lat.toFixed(4)}, ${lng.toFixed(4)}\nradius: ${radiusKm} km\ncandidates found: ${cityCandidates.length}` +
       (cityCandidates.length > 0 ? '\n' + cityCandidates.map(c => `  - ${c.name} | ${c.type} | ${(c.distanceKm ?? Math.sqrt(Math.pow((c.coordinates.lat - lat)*111, 2) + Math.pow((c.coordinates.lng - lng)*111, 2))).toFixed(1)} km | ${c.providers.join(', ')}`).join('\n') : ''));
 
     this.lastStatus = candidates.length > 0 ? 'SUCCESS_WITH_RESULTS' : 'SUCCESS_EMPTY';
@@ -400,4 +450,5 @@ export class RegionalSearchProvider implements DiscoveryProvider {
 }
 
 export const regionalSearchProvider = new RegionalSearchProvider();
+
 

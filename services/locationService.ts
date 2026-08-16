@@ -2,6 +2,8 @@ import { LocationInfo } from '../types';
 import { getUserSettings, sanitizeLocationInfo } from './geminiService';
 import { fetchLiveNews } from './newsService';
 import { logWaypointSnapshot } from '../utils/pipelineDebug';
+import { isClimateConflicting } from './geographic/climateEstimator';
+import { isPlaceholderString } from '../components/InfoPanel';
 
 export const mergeLocationInfo = (prev: any, next: any): any => {
     if (!next || typeof next !== 'object') return prev;
@@ -37,6 +39,32 @@ export const mergeLocationInfo = (prev: any, next: any): any => {
             }
         }
     }
+
+    // Strict Climate Protection: deterministic / established climate in prev cannot be overwritten by conflicting next climate
+    const prevClimateName = prev.climate?.name || prev.climate?.value || (typeof prev.climate === 'string' ? prev.climate : '');
+    if (prev.climate && !isPlaceholderString(prevClimateName)) {
+        if (next.climate) {
+            const conflict = isClimateConflicting(
+                next.climate,
+                prev.climate,
+                prev.coordinates?.lat,
+                prev.coordinates?.lng,
+                prev.state || prev.region,
+                prev.country,
+                prev.entityType || prev.type
+            );
+            if (conflict.isConflict) {
+                console.warn(`[CLIMATE CONTRADICTION REJECTION] mergeLocationInfo rejected incoming climate "${next.climate?.name || next.climate}" (${conflict.reason}). Preserving authoritative climate.`);
+                merged.climate = prev.climate;
+            } else if (typeof next.climate === 'object' && next.climate.name && !isPlaceholderString(next.climate.name)) {
+                merged.climate = next.climate;
+            } else {
+                merged.climate = prev.climate;
+            }
+        } else {
+            merged.climate = prev.climate;
+        }
+    }
     
     // 2. Non-Destructive Image Merge
     // A valid image must never be overwritten by a missing/empty/placeholder image
@@ -63,7 +91,7 @@ export const mergeLocationInfo = (prev: any, next: any): any => {
     }
 
     // 3. String length and quality fallback for descriptions/context (like mergeRichestFields)
-    const TEXT_FIELDS = ["description", "overview", "climate"];
+    const TEXT_FIELDS = ["description", "overview"];
     for (const field of TEXT_FIELDS) {
         if (typeof prev[field] === 'string') {
             if (typeof next[field] !== 'string' || next[field].trim().length === 0 || isInvalidImage(next[field])) {

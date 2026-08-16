@@ -658,6 +658,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       panelBg: "bg-transparent",
       header: "bg-gradient-to-r from-blue-900 to-cyan-900",
       headerTitle: "brand-font text-white",
+      locationTitle: "brand-font text-white",
       tag: "text-cyan-300 border-cyan-400/50 bg-cyan-900/60 rounded-full",
       subtext: "text-cyan-200 opacity-90",
       bodyText: "text-gray-100",
@@ -679,6 +680,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       panelBg: "bg-transparent",
       header: "bg-green-900/30",
       headerTitle: "text-green-300 uppercase",
+      locationTitle: "text-green-300 uppercase",
       tag: "text-black bg-green-400 border-green-400 rounded-none font-bold",
       subtext: "text-green-300",
       bodyText: "text-green-200",
@@ -700,6 +702,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       panelBg: "bg-transparent",
       header: "bg-amber-900/30",
       headerTitle: "text-amber-300 uppercase",
+      locationTitle: "text-amber-300 uppercase",
       tag: "text-black bg-amber-400 border-amber-400 rounded-none font-bold",
       subtext: "text-amber-300",
       bodyText: "text-amber-200",
@@ -721,6 +724,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       panelBg: "bg-transparent",
       header: "bg-[#e8d5b5]/30",
       headerTitle: "text-[#8b5a2b] font-bold uppercase tracking-wider brand-font",
+      locationTitle: "text-[#8b5a2b] font-bold font-garamond tracking-wide",
       tag: "text-[#3e2723] bg-[#d2b48c] border border-[#8b5a2b] rounded-sm font-bold shadow-sm",
       subtext: "text-[#8b5a2b]",
       bodyText: "text-[#5c3a21]",
@@ -1098,7 +1102,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
              <div className="space-y-1 pt-1">
                  <SectionHeader 
                      title="Population" 
-                     icon={<Users size={16} />} 
                      theme={theme} 
                      isRetro={isRetro} 
                      isParchment={isParchment} 
@@ -1354,8 +1357,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             {/* 3. Location title */}
             <div className="flex flex-col gap-2 items-center text-center">
               <div className="flex flex-col items-center justify-center gap-1">
-                 <h2 className={`${titleSize} font-bold text-center ${theme.headerTitle}`}>
-                   {routeNav ? `${routeNav.current}. ` : ''}{(info as any).displayName || info.name}
+                 <h2 className={`${titleSize} font-bold text-center ${theme.locationTitle || theme.headerTitle}`}>
+                   {(info as any).displayName || info.name}
                  </h2>
                  <span className={`${smallTextSize} uppercase px-2 py-0.5 ${theme.tag}`}>
                    {formatUserFacingCategory(info.entityType, info.name, info.type).toUpperCase()}

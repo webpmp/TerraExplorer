@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { reverseGeocode, ReverseGeocodeContext, resolveGeographicMetadata, resolveGeographicEntity, GeographicSource, resolvePrimaryGeographicEntity } from "./geographic/geographicResolver";
-import { getEstimatedClimate, getClimateDescription, isClimateGeographicallyValid } from './geographic/climateEstimator';
+import { getEstimatedClimate, getClimateDescription, isClimateGeographicallyValid, isClimateConflicting } from './geographic/climateEstimator';
 import { providerRegistry } from './geographic/providers/providerRegistry';
 import { applySelection } from './geographic/selection';
 import { applyQualityGate } from './geographic/qualityGate';
@@ -1617,134 +1617,30 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
         environment = 'wilderness';
     }
 
-    // Collect Candidates & Anchor
-    const rawCandidates: Candidate[] = [];
-    const context = { lat, lng, radiusKm: initialRadius, ...geoContext };
-
-    // Inject Anchor Provider Candidate (only if valid specific feature, not an administrative container)
-    if (geoContext.feature) {
-        const anchorName = geoContext.feature;
-        const isCountyOrAdmin = anchorName.toLowerCase().includes('county') || 
-                               anchorName.toLowerCase().includes('district') || 
-                               (geoContext.county && anchorName.toLowerCase() === geoContext.county.toLowerCase()) ||
-                               (geoContext.state && anchorName.toLowerCase() === geoContext.state.toLowerCase());
-        if (anchorName && !isCountyOrAdmin && !isLowSignificancePoi(anchorName)) {
-            rawCandidates.push({
-                id: 'anchor-feature',
-                name: anchorName,
-                type: 'natural_feature',
-                coordinates: { lat, lng },
-                providers: ['AnchorProvider'],
-                rawProviders: { AnchorProvider: geoContext },
-                pipelineStatus: "collected",
-                discoverySignals: ['Selected via click (Anchor)'],
-                populationClass: 'small',
-                identifiers: {},
-                distanceBand: 'local',
-                distanceKm: 0,
-                settlementConfidence: 0,
-                importanceScore: 100,
-                confidenceScore: 100,
-                isAnchor: true
-            } as any);
-        }
-    }
-    
     const providersAttemptedList: string[] = [];
     const providerFailuresList: string[] = [];
     const candidateSourcesUsed = new Set<string>();
-
     const providerStatusList: string[] = [];
 
-    const results = await Promise.allSettled(
-        providerRegistry.map(async (provider) => {
-            providersAttempted++;
-            providersAttemptedList.push(provider.name);
-            const data = await provider.searchNearby(context);
-            return {
-                provider,
-                name: provider.name,
-                data
-            };
-        })
-    );
-
-    for (const result of results) {
-        if (result.status === 'fulfilled') {
-            const { provider, name, data } = result.value;
-            const status = provider.lastStatus || (data.length > 0 ? 'SUCCESS_WITH_RESULTS' : 'SUCCESS_EMPTY');
-            const msg = provider.lastStatusMessage ? ` (${provider.lastStatusMessage})` : '';
-            providerStatusList.push(`${name}: ${status}${msg}`);
-
-            if (status === 'RATE_LIMITED' || status === 'FAILED' || status === 'TIMEOUT') {
-                providerFailures++;
-                providerFailuresList.push(`${name}: ${provider.lastStatusMessage || status}`);
-            }
-
-            for (const genericItem of data) {
-                const item = genericItem as any;
-                candidatesReceived++;
-                candidateSourcesUsed.add(name);
-                
-                // 3. Normalize
-                const itemLat = item.lat || item.coordinates?.lat || 0;
-                const itemLng = item.lng || item.coordinates?.lng || 0;
-                const distKm = Math.sqrt(Math.pow(itemLat - lat, 2) + Math.pow(itemLng - lng, 2)) * 111;
-                
-                let distanceBand: 'local' | 'regional' | 'extended' | 'invalid' = 'invalid';
-                if (distKm <= 25) distanceBand = 'local';
-                else if (distKm <= 100) distanceBand = 'regional';
-                else if (distKm <= 250) distanceBand = 'extended';
-
-                if (distanceBand === 'invalid') {
-                    rejectedByDistance++;
-                    continue;
-                }
-
-                const candidate: Candidate = {
-                    id: item.id,
-                    name: item.name || '',
-                    type: (item.type || 'poi').toLowerCase(),
-                    coordinates: { lat: itemLat, lng: itemLng },
-                    providers: [name],
-                    rawProviders: { [name]: item },
-                    pipelineStatus: "collected",
-                    discoverySignals: item.discoverySignals || [],
-                    populationClass: item.populationClass || 'small',
-                    identifiers: item.identifiers || {},
-                    distanceBand: distanceBand,
-                    distanceKm: distKm,
-                    settlementConfidence: item.settlementConfidence
-                };
-                if (!candidate.name) continue;
-                rawCandidates.push(candidate);
-            }
-        } else {
-            providerFailures++;
-            const failedProviderName = (result.reason as any)?.providerName || 'Unknown Provider';
-            providerFailuresList.push(`${failedProviderName}: ${result.reason?.message || result.reason}`);
-            providerStatusList.push(`${failedProviderName}: FAILED (${result.reason?.message || result.reason})`);
-        }
-    }
-
-    console.log(`[DISCOVERY PROVIDER STATUS]\n` +
-      providerStatusList.map(s => `  ${s}`).join('\n') + '\n' +
-      `candidate sources used: ${Array.from(candidateSourcesUsed).join(', ') || 'None'}\n` +
-      `fallback stage: ${providerFailures > 0 ? 'REGIONAL_MULTI_SOURCE_FALLBACK' : 'PRIMARY_PROVIDER_DISCOVERY'}\n`);
-
-    // 4. Merge Evidence Into Entities
-    const mergeCandidates = (candidates: Candidate[], existingMerged: Candidate[] = []) => {
+    // Helper to merge candidate evidence, deduplicate, and classify
+    const mergeCandidateList = (candidates: Candidate[], existingMerged: Candidate[] = []): Candidate[] => {
         const result = [...existingMerged];
         for (const candidate of candidates) {
             let merged = false;
             const normalizedName = candidate.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const candidateId = candidate.identifiers?.osmId || candidate.identifiers?.wikidataId || candidate.id;
 
             for (const existing of result) {
                 const existingNormalized = existing.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+                const existingId = existing.identifiers?.osmId || existing.identifiers?.wikidataId || existing.id;
                 const dist = Math.sqrt(Math.pow(candidate.coordinates.lat - existing.coordinates.lat, 2) + Math.pow(candidate.coordinates.lng - existing.coordinates.lng, 2)) * 111;
                 
-                // Name match or proximity match
-                if (normalizedName === existingNormalized || dist < 0.5) {
+                // Match by stable identity, exact normalized name (within 50km or for geographic features/national parks), or spatial proximity (< 0.5 km)
+                const idMatch = Boolean(candidateId && existingId && candidateId === existingId);
+                const nameMatch = normalizedName.length > 2 && normalizedName === existingNormalized && (dist < 50 || candidate.entityClass === 'geographic_feature' || existing.entityClass === 'geographic_feature');
+                const proximityMatch = dist < 0.5;
+
+                if (idMatch || nameMatch || proximityMatch) {
                     if (!existing.providers.includes(candidate.providers[0])) {
                         existing.providers.push(candidate.providers[0]);
                     }
@@ -1753,9 +1649,10 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
                         existing.discoverySignals = [...(existing.discoverySignals || []), ...candidate.discoverySignals];
                     }
                     existing.pipelineStatus = "merged";
-                    
                     if (candidate.isAnchor) existing.isAnchor = true;
-                    
+                    if (candidate.distanceKm !== undefined && (existing.distanceKm === undefined || candidate.distanceKm < existing.distanceKm)) {
+                        existing.distanceKm = candidate.distanceKm;
+                    }
                     merged = true;
                     break;
                 }
@@ -1793,7 +1690,235 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
         return result;
     };
 
-    let mergedCandidates = mergeCandidates(rawCandidates);
+    let mergedCandidates: Candidate[] = [];
+
+    // Inject Anchor Provider Candidate (only if valid specific feature, not an administrative container)
+    if (geoContext.feature) {
+        const anchorName = geoContext.feature;
+        const isCountyOrAdmin = anchorName.toLowerCase().includes('county') || 
+                               anchorName.toLowerCase().includes('district') || 
+                               (geoContext.county && anchorName.toLowerCase() === geoContext.county.toLowerCase()) ||
+                               (geoContext.state && anchorName.toLowerCase() === geoContext.state.toLowerCase());
+        if (anchorName && !isCountyOrAdmin && !isLowSignificancePoi(anchorName)) {
+            const anchorCand: Candidate = {
+                id: 'anchor-feature',
+                name: anchorName,
+                type: 'natural_feature',
+                coordinates: { lat, lng },
+                providers: ['AnchorProvider'],
+                rawProviders: { AnchorProvider: geoContext },
+                pipelineStatus: "collected",
+                discoverySignals: ['Selected via click (Anchor)'],
+                populationClass: 'small',
+                identifiers: {},
+                distanceBand: 'local',
+                distanceKm: 0,
+                settlementConfidence: 0,
+                importanceScore: 100,
+                confidenceScore: 100,
+                isAnchor: true
+            } as any;
+            mergedCandidates = mergeCandidateList([anchorCand], mergedCandidates);
+        }
+    }
+
+    // STAGE 2A: ADAPTIVE POPULATED PLACE DISCOVERY
+    // Populated places have priority. Start with initial radius (e.g. 50km) and expand up to 200km if quota (<4) is unsatisfied.
+    const searchRadii = [initialRadius];
+    for (const r of [100, 150, 200]) {
+        if (r > initialRadius && !searchRadii.includes(r)) {
+            searchRadii.push(r);
+        }
+    }
+
+    const TARGET_SETTLEMENT_QUOTA = 4;
+
+    for (let passIndex = 0; passIndex < searchRadii.length; passIndex++) {
+        const currentRadius = searchRadii[passIndex];
+        const settlementContext = { lat, lng, radiusKm: currentRadius, categoryFilter: 'settlements' as const, ...geoContext };
+
+        const passResults = await Promise.allSettled(
+            providerRegistry.map(async (provider) => {
+                providersAttempted++;
+                providersAttemptedList.push(provider.name);
+                const data = await provider.searchNearby(settlementContext);
+                return {
+                    provider,
+                    name: provider.name,
+                    data
+                };
+            })
+        );
+
+        const passRawCandidates: Candidate[] = [];
+        let hadSettlementProviderFailure = false;
+
+        for (const result of passResults) {
+            if (result.status === 'fulfilled') {
+                const { provider, name, data } = result.value;
+                const status = provider.lastStatus || (data.length > 0 ? 'SUCCESS_WITH_RESULTS' : 'SUCCESS_EMPTY');
+                const msg = provider.lastStatusMessage ? ` (${provider.lastStatusMessage})` : '';
+                providerStatusList.push(`${name} (r=${currentRadius}km): ${status}${msg}`);
+
+                if (status === 'RATE_LIMITED' || status === 'FAILED' || status === 'TIMEOUT') {
+                    providerFailures++;
+                    hadSettlementProviderFailure = true;
+                    providerFailuresList.push(`${name}: ${provider.lastStatusMessage || status}`);
+                }
+
+                for (const genericItem of data) {
+                    const item = genericItem as any;
+                    candidatesReceived++;
+                    candidateSourcesUsed.add(name);
+
+                    const itemLat = item.lat || item.coordinates?.lat || 0;
+                    const itemLng = item.lng || item.coordinates?.lng || 0;
+                    const distKm = Math.sqrt(Math.pow(itemLat - lat, 2) + Math.pow(itemLng - lng, 2)) * 111;
+
+                    if (distKm > currentRadius) {
+                        rejectedByDistance++;
+                        continue;
+                    }
+
+                    let distanceBand: 'local' | 'regional' | 'extended' | 'invalid' = 'invalid';
+                    if (distKm <= 25) distanceBand = 'local';
+                    else if (distKm <= 100) distanceBand = 'regional';
+                    else if (distKm <= 250) distanceBand = 'extended';
+
+                    const candidate: Candidate = {
+                        id: item.id,
+                        name: item.name || '',
+                        type: (item.type || 'city').toLowerCase(),
+                        coordinates: { lat: itemLat, lng: itemLng },
+                        providers: [name],
+                        rawProviders: { [name]: item },
+                        pipelineStatus: "collected",
+                        discoverySignals: item.discoverySignals || [],
+                        populationClass: item.populationClass || 'small',
+                        identifiers: item.identifiers || {},
+                        distanceBand: distanceBand,
+                        distanceKm: distKm,
+                        settlementConfidence: item.settlementConfidence
+                    };
+                    if (!candidate.name) continue;
+                    passRawCandidates.push(candidate);
+                }
+            } else {
+                providerFailures++;
+                hadSettlementProviderFailure = true;
+                const failedProviderName = (result.reason as any)?.providerName || 'Unknown Provider';
+                providerFailuresList.push(`${failedProviderName}: ${result.reason?.message || result.reason}`);
+                providerStatusList.push(`${failedProviderName} (r=${currentRadius}km): FAILED (${result.reason?.message || result.reason})`);
+            }
+        }
+
+        mergedCandidates = mergeCandidateList(passRawCandidates, mergedCandidates);
+
+        // Pre-score and classify populated place candidates for quota verification
+        const balancedPass = applyCategoryBalance(mergedCandidates);
+        await Promise.all(balancedPass.map(c => computeImportanceScore(c, lat, lng)));
+        const gatedPass = applyQualityGate(balancedPass);
+
+        // Count qualified, deduplicated populated places after classification & quality gating
+        const qualifiedPopulatedPlaces = gatedPass.filter(c => {
+            if (c.eligibleForDefaultDiscovery === false) return false;
+            return c.rankingClass === 'POPULATED_PLACE' || c.entityClass === 'settlement';
+        });
+
+        // Lifecycle diagnostics logging
+        console.log(`[City Discovery]\nprovider candidates: ${passRawCandidates.length}`);
+        console.log(`[City Candidate Classification]\naccepted populated places: ${qualifiedPopulatedPlaces.length}\nrejected candidates: ${Math.max(0, passRawCandidates.length - qualifiedPopulatedPlaces.length)}`);
+
+        for (const c of passRawCandidates) {
+            const isAccepted = qualifiedPopulatedPlaces.some(q => q.id === c.id || q.name.toLowerCase() === c.name.toLowerCase());
+            if (!isAccepted && (c.pipelineStatus === 'rejected' || c.eligibleForDefaultDiscovery === false)) {
+                console.log(`[City Candidate Rejected]\nname: ${c.name}\nproviderType: ${c.originalProviderType || c.type}\nnormalizedType: ${c.normalizedEntityType || c.type}\nclassification: ${c.rankingClass || 'OTHER'}\nrejectionReason: ${c.rejectionReason || c.exclusionReason || 'Ineligible for default discovery'}`);
+            }
+        }
+
+        // Quota decision based on post-classification qualified candidates
+        if (qualifiedPopulatedPlaces.length >= TARGET_SETTLEMENT_QUOTA && !hadSettlementProviderFailure) {
+            console.log(`[City Quota]\nqualified: ${qualifiedPopulatedPlaces.length}\ntarget: ${TARGET_SETTLEMENT_QUOTA}\nexpansion required: NO`);
+            break;
+        } else {
+            if (passIndex + 1 < searchRadii.length) {
+                const nextRadius = searchRadii[passIndex + 1];
+                console.log(`[City Discovery Expansion]\npreviousRadius: ${currentRadius}\nnextRadius: ${nextRadius}\nqualifiedPlaces: ${qualifiedPopulatedPlaces.length}\ntarget: ${TARGET_SETTLEMENT_QUOTA}\nreason: quota not satisfied`);
+            } else {
+                console.log(`[City Quota]\nqualified: ${qualifiedPopulatedPlaces.length}\ntarget: ${TARGET_SETTLEMENT_QUOTA}\nexpansion completed at max radius (${currentRadius}km)`);
+            }
+        }
+    }
+
+    // STAGE 2B: DISCOVER GEOGRAPHIC FEATURES / POIS
+    const featureContext = { lat, lng, radiusKm: Math.min(200, Math.max(initialRadius, 150)), categoryFilter: 'features' as const, ...geoContext };
+    const featureResults = await Promise.allSettled(
+        providerRegistry.map(async (provider) => {
+            providersAttempted++;
+            providersAttemptedList.push(provider.name);
+            const data = await provider.searchNearby(featureContext);
+            return {
+                provider,
+                name: provider.name,
+                data
+            };
+        })
+    );
+
+    const featureRawCandidates: Candidate[] = [];
+    for (const result of featureResults) {
+        if (result.status === 'fulfilled') {
+            const { provider, name, data } = result.value;
+            const status = provider.lastStatus || (data.length > 0 ? 'SUCCESS_WITH_RESULTS' : 'SUCCESS_EMPTY');
+            const msg = provider.lastStatusMessage ? ` (${provider.lastStatusMessage})` : '';
+            providerStatusList.push(`${name} (features): ${status}${msg}`);
+
+            for (const genericItem of data) {
+                const item = genericItem as any;
+                candidatesReceived++;
+                candidateSourcesUsed.add(name);
+
+                const itemLat = item.lat || item.coordinates?.lat || 0;
+                const itemLng = item.lng || item.coordinates?.lng || 0;
+                const distKm = Math.sqrt(Math.pow(itemLat - lat, 2) + Math.pow(itemLng - lng, 2)) * 111;
+
+                if (distKm > featureContext.radiusKm) {
+                    rejectedByDistance++;
+                    continue;
+                }
+
+                let distanceBand: 'local' | 'regional' | 'extended' | 'invalid' = 'invalid';
+                if (distKm <= 25) distanceBand = 'local';
+                else if (distKm <= 100) distanceBand = 'regional';
+                else if (distKm <= 250) distanceBand = 'extended';
+
+                const candidate: Candidate = {
+                    id: item.id,
+                    name: item.name || '',
+                    type: (item.type || 'natural_feature').toLowerCase(),
+                    coordinates: { lat: itemLat, lng: itemLng },
+                    providers: [name],
+                    rawProviders: { [name]: item },
+                    pipelineStatus: "collected",
+                    discoverySignals: item.discoverySignals || [],
+                    populationClass: item.populationClass || 'small',
+                    identifiers: item.identifiers || {},
+                    distanceBand: distanceBand,
+                    distanceKm: distKm,
+                    settlementConfidence: item.settlementConfidence
+                };
+                if (!candidate.name) continue;
+                featureRawCandidates.push(candidate);
+            }
+        }
+    }
+
+    mergedCandidates = mergeCandidateList(featureRawCandidates, mergedCandidates);
+
+    console.log(`[DISCOVERY PROVIDER STATUS]\n` +
+      providerStatusList.map(s => `  ${s}`).join('\n') + '\n' +
+      `candidate sources used: ${Array.from(candidateSourcesUsed).join(', ') || 'None'}\n` +
+      `fallback stage: ${providerFailures > 0 ? 'REGIONAL_MULTI_SOURCE_FALLBACK' : 'PRIMARY_PROVIDER_DISCOVERY'}\n`);
 
     // 5. Score and Gate Candidates
     const balancedCandidates = applyCategoryBalance(mergedCandidates);
@@ -1819,29 +1944,7 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
     console.log(`[Pre-Ranking Candidates]\n` +
       (gatedCandidates.length > 0 ? gatedCandidates.map((c, i) => `  ${i + 1}. ${c.displayName || c.name} | ${c.normalizedEntityType || c.type} | ${(c.distanceKm ?? 0).toFixed(1)} km | score ${c.importanceScore ?? 0} | tier ${c.tier ?? 3}`).join('\n') : '  None'));
 
-    gatedCandidates.sort((a, b) => {
-        const tierA = a.tier || 3;
-        const tierB = b.tier || 3;
-        
-        // Priority by hierarchy tier (Tier 1 > Tier 2 > Tier 3 > Tier 4 > Tier 5)
-        if (tierA !== tierB) {
-            return tierA - tierB;
-        }
-
-        // Higher importance score wins within same tier
-        if ((a.importanceScore || 0) !== (b.importanceScore || 0)) {
-            return (b.importanceScore || 0) - (a.importanceScore || 0);
-        }
-
-        if ((a.confidenceScore || 0) !== (b.confidenceScore || 0)) {
-            return (b.confidenceScore || 0) - (a.confidenceScore || 0);
-        }
-
-        const distA = a.distanceKm ?? Math.sqrt(Math.pow(a.coordinates.lat - lat, 2) + Math.pow(a.coordinates.lng - lng, 2)) * 111;
-        const distB = b.distanceKm ?? Math.sqrt(Math.pow(b.coordinates.lat - lat, 2) + Math.pow(b.coordinates.lng - lng, 2)) * 111;
-        return distA - distB;
-    });
-
+    // Apply category-separated ranking and quota slot allocation
     const selectedCandidates = applySelection(gatedCandidates, 6);
 
     const finalMarkers: MapMarker[] = selectedCandidates.map(c => ({
@@ -2560,7 +2663,28 @@ ${contextDetails}
            kCode = data.climate.koppenCode || "";
        }
 
-       if (cName && !isPlaceholderString(cName)) {
+       const candidateClimateObj = { name: cName, description: cDesc, koppenCode: kCode };
+       const canonicalCoords = coordinates || canonicalIdentity?.coordinates;
+       const existingClimate = canonicalIdentity?.climate;
+       const cLat = canonicalCoords?.lat;
+       const cLng = canonicalCoords?.lng;
+       const cReg = canonicalIdentity?.state || canonicalIdentity?.region;
+       const cCountry = canonicalIdentity?.country;
+
+       const conflict = isClimateConflicting(
+           candidateClimateObj,
+           existingClimate,
+           cLat,
+           cLng,
+           cReg,
+           cCountry,
+           rawEType
+       );
+
+       if (conflict.isConflict) {
+           console.warn(`[CLIMATE CONTRADICTION REJECTION] Rejected LLM-generated climate "${cName}" (${kCode || 'no code'}) because it conflicts with authoritative deterministic climate/geography (${conflict.reason}). Preserving deterministic climate.`);
+           rejectedFields.push('climate');
+       } else if (cName && !isPlaceholderString(cName)) {
            metadata.climate = {
                value: cName,
                name: cName,

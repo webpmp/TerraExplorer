@@ -45,12 +45,12 @@ export const computeImportanceScore = async (candidate: Candidate, originLat: nu
     candidate.wikipediaEvidence = (candidate.providers && candidate.providers.includes('Wikipedia')) || candidate.identifiers?.wikipediaId ? "Documented on Wikipedia" : "No Wikipedia documentation";
     candidate.geographicRelevance = candidate.insideEntity ? 'high' : (distKm <= 25 ? 'medium' : 'low');
 
-    // For Tier C settlements (small local towns without regional/municipal documentation): only eligible within local range (<= 20km) or direct click
-    if (hierarchy.settlementTier === 'C' && distKm > 20.0 && !candidate.insideEntity) {
+    // For Tier C settlements (small undocumented local towns): only eligible within local range (<= 20km) or direct click
+    if (hierarchy.settlementTier === 'C' && distKm > 20.0 && !candidate.insideEntity && !candidate.identifiers?.wikipediaId && !(candidate.providers && candidate.providers.includes('Wikipedia'))) {
         candidate.eligibleForDefaultDiscovery = false;
         candidate.eligibility = 'ineligible';
-        candidate.exclusionReason = `Tier C town outside local relevance radius (${Math.round(distKm)}km > 20km)`;
-        candidate.eligibilityReason = `Tier C town outside local relevance radius (${Math.round(distKm)}km > 20km)`;
+        candidate.exclusionReason = `Tier C small town outside local relevance radius (${Math.round(distKm)}km > 20km)`;
+        candidate.eligibilityReason = `Tier C small town outside local relevance radius (${Math.round(distKm)}km > 20km)`;
     }
 
     // 1. Ineligible / Low significance POI / Country container suppression

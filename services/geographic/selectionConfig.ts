@@ -10,18 +10,23 @@ export const selectionConfig = {
         mountain: 2,
         water_body: 2,
         museum: 2,
-        landmark: 3,
+        landmark: 2,
         geology: 2
     } as Record<string, number>,
 
     maxPerClass: {
         settlement: 4,
         POPULATED_PLACE: 4,
-        major_landmark: 3,
-        geographic_feature: 3,
+        major_landmark: 2,
+        geographic_feature: 2,
         minor_poi: 0,
         generic: 2
     } as Record<string, number>,
+
+    quotas: {
+        populatedPlaces: 4,
+        geographicFeatures: 2
+    },
 
     suppression: {
         preScore: [

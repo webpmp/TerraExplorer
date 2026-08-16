@@ -6,6 +6,7 @@ export interface DiscoveryContext {
   lat: number;
   lng: number;
   radiusKm: number;
+  categoryFilter?: 'settlements' | 'features' | 'all';
   country?: string;
   state?: string;
   county?: string;
@@ -23,3 +24,4 @@ export interface DiscoveryProvider {
   lastStatusMessage?: string;
   searchNearby(context: DiscoveryContext): Promise<MapMarker[] | Candidate[]>;
 }
+

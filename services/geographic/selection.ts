@@ -73,72 +73,91 @@ export const applySelection = (sortedCandidates: Candidate[], limit: number = 6)
     // Filter eligible candidates
     const eligibleCandidates = sortedCandidates.filter(isEligible);
 
-    // Sort eligible candidates using stable hierarchy comparator
-    const sortedEligible = [...eligibleCandidates].sort((a, b) => {
-        const tierA = a.tier || 3;
-        const tierB = b.tier || 3;
-        const distA = a.distanceKm ?? 999;
-        const distB = b.distanceKm ?? 999;
-        const scoreA = a.importanceScore ?? 0;
-        const scoreB = b.importanceScore ?? 0;
+    const sortCategoryCandidates = (candidates: Candidate[]): Candidate[] => {
+        return [...candidates].sort((a, b) => {
+            const tierA = a.tier || 3;
+            const tierB = b.tier || 3;
+            const distA = a.distanceKm ?? 999;
+            const distB = b.distanceKm ?? 999;
+            const scoreA = a.importanceScore ?? 0;
+            const scoreB = b.importanceScore ?? 0;
 
-        const isSettlementA = a.rankingClass === 'POPULATED_PLACE' || a.entityClass === 'settlement';
-        const isSettlementB = b.rankingClass === 'POPULATED_PLACE' || b.entityClass === 'settlement';
+            // Direct insideEntity match always wins
+            if (a.insideEntity && !b.insideEntity) return -1;
+            if (b.insideEntity && !a.insideEntity) return 1;
 
-        // Nearby settlement (< 35km) vs distant feature (> 30km)
-        if (isSettlementA && !isSettlementB && distA < 35 && distB > 30 && tierA <= 2 && tierB >= 2) {
-            return -1;
-        }
-        if (isSettlementB && !isSettlementA && distB < 35 && distA > 30 && tierB <= 2 && tierA >= 2) {
-            return 1;
-        }
+            // Tier comparison (Tier 1 > Tier 2 > Tier 3)
+            if (tierA !== tierB) {
+                // If Tier 1 is very distant (> 80km) and Tier 2 is close (< 35km)
+                if (tierA === 1 && distA > 80 && distB < 35) return 1;
+                if (tierB === 1 && distB > 80 && distA < 35) return -1;
+                return tierA - tierB;
+            }
 
-        // Tier comparison (Tier 1 > Tier 2 > Tier 3)
-        if (tierA !== tierB) {
-            // If Tier 1 is very distant (> 80km) and Tier 2 is close (< 35km settlement)
-            if (tierA === 1 && distA > 80 && isSettlementB && distB < 35) return 1;
-            if (tierB === 1 && distB > 80 && isSettlementA && distA < 35) return -1;
-            return tierA - tierB;
-        }
+            // Same tier: significant score difference
+            if (scoreA !== scoreB && Math.abs(scoreA - scoreB) >= 10) {
+                return scoreB - scoreA;
+            }
 
-        // Same tier: score difference
-        if (scoreA !== scoreB && Math.abs(scoreA - scoreB) >= 10) {
-            return scoreB - scoreA;
-        }
+            return distA - distB;
+        });
+    };
 
-        return distA - distB;
-    });
+    // Separate candidates into independent categories
+    const settlementCandidates = sortCategoryCandidates(
+        eligibleCandidates.filter(c => c.rankingClass === 'POPULATED_PLACE' || c.entityClass === 'settlement')
+    );
+    const featureCandidates = sortCategoryCandidates(
+        eligibleCandidates.filter(c => c.rankingClass === 'GEOGRAPHIC_FEATURE' || c.entityClass === 'geographic_feature')
+    );
+    const poiCandidates = sortCategoryCandidates(
+        eligibleCandidates.filter(c => 
+            c.rankingClass !== 'POPULATED_PLACE' && 
+            c.entityClass !== 'settlement' && 
+            c.rankingClass !== 'GEOGRAPHIC_FEATURE' && 
+            c.entityClass !== 'geographic_feature'
+        )
+    );
 
-    // Dynamic caps per class to ensure a balanced, geographically meaningful result set
-    const maxSettlements = selectionConfig.maxPerClass.settlement ?? 3;
-    const maxFeatures = selectionConfig.maxPerClass.geographic_feature ?? 3;
-    const maxPois = selectionConfig.maxPerClass.major_landmark ?? 2;
+    const targetSettlements = selectionConfig.quotas?.populatedPlaces ?? 4;
+    const targetFeatures = selectionConfig.quotas?.geographicFeatures ?? 2;
 
-    let primary: Candidate | undefined = sortedEligible[0];
+    let primary: Candidate | undefined = settlementCandidates[0] || featureCandidates[0] || poiCandidates[0];
 
-    // Pass 1: Select candidates in hierarchical ranking order while enforcing diversity caps
-    for (const candidate of sortedEligible) {
+    // Pass 1: Allocate target slots to quality-gated Populated Places (up to targetSettlements)
+    for (const candidate of settlementCandidates) {
         if (selected.length >= limit) break;
-
-        const isSettlement = candidate.rankingClass === 'POPULATED_PLACE' || candidate.entityClass === 'settlement';
-        const isFeature = candidate.rankingClass === 'GEOGRAPHIC_FEATURE' || candidate.entityClass === 'geographic_feature';
-        const isPoi = !isSettlement && !isFeature;
-
         const currentSettlements = selected.filter(s => s.rankingClass === 'POPULATED_PLACE' || s.entityClass === 'settlement').length;
-        const currentFeatures = selected.filter(s => s.rankingClass === 'GEOGRAPHIC_FEATURE' || s.entityClass === 'geographic_feature').length;
-        const currentPois = selected.filter(s => s.rankingClass !== 'POPULATED_PLACE' && s.rankingClass !== 'GEOGRAPHIC_FEATURE' && s.entityClass !== 'settlement' && s.entityClass !== 'geographic_feature').length;
-
-        if (isSettlement && currentSettlements >= maxSettlements) continue;
-        if (isFeature && currentFeatures >= maxFeatures) continue;
-        if (isPoi && currentPois >= maxPois) continue;
-
+        if (currentSettlements >= targetSettlements) break;
         tryAddCandidate(candidate, primary);
         if (selected.length === 1 && !primary) primary = selected[0];
     }
 
-    // Pass 2: Fill any remaining open slots up to limit from remaining eligible candidates
+    // Pass 2: Allocate target slots to quality-gated Geographic Features (up to targetFeatures)
+    for (const candidate of featureCandidates) {
+        if (selected.length >= limit) break;
+        const currentFeatures = selected.filter(s => s.rankingClass === 'GEOGRAPHIC_FEATURE' || s.entityClass === 'geographic_feature').length;
+        if (currentFeatures >= targetFeatures) break;
+        tryAddCandidate(candidate, primary);
+        if (selected.length === 1 && !primary) primary = selected[0];
+    }
+
+    // Pass 3: Backfill remaining open slots if fewer populated places or features exist
     if (selected.length < limit) {
-        for (const candidate of sortedEligible) {
+        // First try any remaining quality-gated settlements
+        for (const candidate of settlementCandidates) {
+            if (selected.length >= limit) break;
+            if (selected.some(s => s.id === candidate.id)) continue;
+            tryAddCandidate(candidate, primary);
+        }
+        // Next try remaining quality-gated features
+        for (const candidate of featureCandidates) {
+            if (selected.length >= limit) break;
+            if (selected.some(s => s.id === candidate.id)) continue;
+            tryAddCandidate(candidate, primary);
+        }
+        // Next try quality-gated POIs/airports
+        for (const candidate of poiCandidates) {
             if (selected.length >= limit) break;
             if (selected.some(s => s.id === candidate.id)) continue;
             tryAddCandidate(candidate, primary);
@@ -155,3 +174,4 @@ export const applySelection = (sortedCandidates: Candidate[], limit: number = 6)
 
     return selected;
 };
+

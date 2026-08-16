@@ -1579,4 +1579,86 @@ describe('Geographic Discovery Prioritization Suite', () => {
     expect(selected[0].name).toBe('Duitama');
     expect(selected[0].rankingClass).toBe('POPULATED_PLACE');
   });
+
+  it('34. Verified settlements (Siak Sri Indrapura, Pangkalan Bunut, Sorek, Ukui, Pangkalan Kerinci, Langgam) must NEVER be downgraded to historical_site or natural_feature', async () => {
+    const settlements = [
+      { id: '1', name: 'Siak Sri Indrapura', type: 'city', coordinates: { lat: 0.7963, lng: 102.0489 }, providers: ['Overpass'] },
+      { id: '2', name: 'Pangkalan Bunut', type: 'town', coordinates: { lat: 0.1764, lng: 102.1524 }, providers: ['Overpass'] },
+      { id: '3', name: 'Sorek', type: 'town', coordinates: { lat: 0.1456, lng: 102.0832 }, providers: ['Overpass'] },
+      { id: '4', name: 'Ukui', type: 'town', coordinates: { lat: -0.1534, lng: 102.1523 }, providers: ['Overpass'] },
+      { id: '5', name: 'Pangkalan Kerinci', type: 'town', coordinates: { lat: 0.4042, lng: 101.8542 }, providers: ['Overpass'] },
+      { id: '6', name: 'Pangkalan Kerinci Kota', type: 'town', coordinates: { lat: 0.4080, lng: 101.8600 }, providers: ['Overpass'] },
+      { id: '7', name: 'Langgam', type: 'town', coordinates: { lat: 0.2833, lng: 101.6833 }, providers: ['Overpass'] }
+    ];
+
+    for (const c of settlements) {
+      await getGeographicHierarchy(c as any);
+      expect((c as any).rankingClass).toBe('POPULATED_PLACE');
+      expect((c as any).entityClass).toBe('settlement');
+      expect((c as any).eligibleForDefaultDiscovery).toBe(true);
+      expect(['city', 'town', 'village', 'municipality']).toContain((c as any).normalizedEntityType);
+      expect((c as any).normalizedEntityType).not.toBe('historical_site');
+      expect((c as any).normalizedEntityType).not.toBe('natural_feature');
+      expect((c as any).normalizedEntityType).not.toBe('national_park');
+    }
+  });
+
+  it('35. Indonesia click (0.1277, 102.4944) returns 4 verified settlements and 2 geographic features with proper deduplication', async () => {
+    const { overpassProvider } = await import('../geographic/providers/OverpassProvider');
+    const { wikipediaProvider } = await import('../geographic/providers/WikipediaProvider');
+    const { nominatimProvider } = await import('../geographic/providers/NominatimProvider');
+    const { regionalSearchProvider } = await import('../geographic/providers/RegionalSearchProvider');
+
+    vi.spyOn(overpassProvider, 'searchNearby').mockImplementation(async (ctx) => {
+      if (ctx.categoryFilter === 'settlements') {
+        return [
+          { id: 'ov-1', name: 'Siak Sri Indrapura', type: 'city', lat: 0.7963, lng: 102.0489, populationClass: 'medium' } as any,
+          { id: 'ov-2', name: 'Pangkalan Kerinci', type: 'town', lat: 0.4042, lng: 101.8542, populationClass: 'medium' } as any,
+          { id: 'ov-3', name: 'Pangkalan Bunut', type: 'town', lat: 0.1764, lng: 102.1524 } as any,
+          { id: 'ov-4', name: 'Sorek', type: 'town', lat: 0.1456, lng: 102.0832 } as any,
+          { id: 'ov-5', name: 'Ukui', type: 'town', lat: -0.1534, lng: 102.1523 } as any,
+          { id: 'ov-6', name: 'Langgam', type: 'town', lat: 0.2833, lng: 101.6833 } as any,
+          { id: 'ov-7', name: 'Teluk Meranti', type: 'town', lat: 0.3200, lng: 102.5800 } as any,
+          { id: 'ov-8', name: 'Pangkalan Kerinci Kota', type: 'town', lat: 0.4080, lng: 101.8600 } as any
+        ];
+      } else if (ctx.categoryFilter === 'features') {
+        return [
+          { id: 'ov-f1', name: 'Zamrud National Park', type: 'national_park', lat: 0.8500, lng: 102.1500, discoverySignals: ['national park'] } as any,
+          { id: 'ov-f2', name: 'Tesso Nilo National Park', type: 'national_park', lat: -0.1000, lng: 101.6000, discoverySignals: ['national park'] } as any
+        ];
+      }
+      return [];
+    });
+
+    // Wikipedia returns duplicate Zamrud National Park from another search grid point
+    vi.spyOn(wikipediaProvider, 'searchNearby').mockImplementation(async (ctx) => {
+      if (ctx.categoryFilter === 'features') {
+        return [
+          { id: 'wiki-f1', name: 'Zamrud National Park', type: 'national_park', lat: 0.8520, lng: 102.1510, discoverySignals: ['national park'] } as any
+        ];
+      }
+      return [];
+    });
+    vi.spyOn(nominatimProvider, 'searchNearby').mockResolvedValue([]);
+    vi.spyOn(regionalSearchProvider, 'searchNearby').mockResolvedValue([]);
+
+    const result = await getNearbyPlaces(0.1277, 102.4944);
+    expect(result.status).toBe('SUCCESS');
+    expect(result.places.length).toBe(6);
+
+    const settlements = result.places.filter(p => ['city', 'town', 'village', 'settlement'].includes(p.type));
+    const features = result.places.filter(p => ['national_park', 'natural_feature', 'mountain', 'water_body'].includes(p.type));
+
+    expect(settlements.length).toBe(4);
+    expect(features.length).toBe(2);
+
+    // Ensure Zamrud National Park appears only once (deduplicated)
+    const zamrudOccurrences = result.places.filter(p => p.name.includes('Zamrud'));
+    expect(zamrudOccurrences.length).toBe(1);
+
+    // Ensure verified settlements are in the results
+    const settlementNames = settlements.map(s => s.name);
+    expect(settlementNames.some(n => n.includes('Siak') || n.includes('Pangkalan Kerinci') || n.includes('Sorek') || n.includes('Pangkalan Bunut'))).toBe(true);
+  });
 });
+

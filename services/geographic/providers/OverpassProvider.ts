@@ -62,10 +62,10 @@ export class OverpassProvider implements DiscoveryProvider {
   }
 
   async searchNearby(context: DiscoveryContext): Promise<MapMarker[]> {
-    const { lat, lng, radiusKm } = context;
+    const { lat, lng, radiusKm, categoryFilter = 'all' } = context;
     const latRounded = lat.toFixed(4);
     const lngRounded = lng.toFixed(4);
-    const cacheKey = `${latRounded},${lngRounded},${radiusKm}`;
+    const cacheKey = `${latRounded},${lngRounded},${radiusKm},${categoryFilter}`;
 
     const cached = overpassCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
@@ -75,11 +75,12 @@ export class OverpassProvider implements DiscoveryProvider {
 
     const radiusMeters = radiusKm * 1000;
     
-    // Comprehensive Query combining nodes, ways, and relations.
-    const query = `
-      [out:json][timeout:10];
-      (
-        nwr["place"~"city|town|village|municipality|capital"](around:${radiusMeters},${lat},${lng});
+    let subQueries = '';
+    if (categoryFilter === 'settlements' || categoryFilter === 'all') {
+      subQueries += `nwr["place"~"city|town|village|municipality|capital"](around:${radiusMeters},${lat},${lng});\n`;
+    }
+    if (categoryFilter === 'features' || categoryFilter === 'all') {
+      subQueries += `
         nwr["natural"~"peak|water|bay|beach|lake|river|volcano|desert|forest|glacier|waterfall|canyon"](around:${radiusMeters},${lat},${lng});
         nwr["leisure"~"nature_reserve|park"](around:${radiusMeters},${lat},${lng});
         nwr["historic"~"monument|archaeological_site|ruins|castle|memorial|shipwreck"](around:${radiusMeters},${lat},${lng});
@@ -87,6 +88,13 @@ export class OverpassProvider implements DiscoveryProvider {
         nwr["boundary"="national_park"](around:${radiusMeters},${lat},${lng});
         nwr["aeroway"="aerodrome"](around:${radiusMeters},${lat},${lng});
         nwr["man_made"~"lighthouse|observatory|bridge|dam"](around:${radiusMeters},${lat},${lng});
+      `;
+    }
+
+    const query = `
+      [out:json][timeout:10];
+      (
+        ${subQueries}
       );
       out center 150;
     `;
@@ -120,6 +128,9 @@ export class OverpassProvider implements DiscoveryProvider {
         const elLat = element.lat || element.center?.lat;
         const elLon = element.lon || element.center?.lon;
         if (elLat === undefined || elLon === undefined) continue;
+
+        const distKmToClick = Math.sqrt(Math.pow((elLat - lat) * 111, 2) + Math.pow((elLon - lng) * 111, 2));
+        if (distKmToClick > radiusKm) continue;
 
         // Ensure we don't have extremely close duplicates BEFORE scoring
         let isProxDuplicate = false;
@@ -243,26 +254,37 @@ export class OverpassProvider implements DiscoveryProvider {
     }
 
     // Adaptive Diversification
-    const N_RESULTS = 10;
     const places: MapMarker[] = [];
-    const categoryCounts: Record<string, number> = { 'place': 0, 'natural': 0, 'poi': 0, 'infrastructure': 0 };
+    if (context.categoryFilter === 'settlements') {
+        // Return all settlement candidates up to 35
+        for (const c of candidates.slice(0, 35)) {
+            places.push(c.marker);
+        }
+    } else {
+        const N_RESULTS = 10;
+        const categoryCounts: Record<string, number> = { 'place': 0, 'natural': 0, 'poi': 0, 'infrastructure': 0 };
 
-    while (places.length < N_RESULTS && candidates.length > 0) {
-        // Sort current candidates by score descending
-        candidates.sort((a, b) => b.score - a.score);
-        
-        // Pick the top candidate
-        const topCandidate = candidates.shift()!;
-        places.push(topCandidate.marker);
-        categoryCounts[topCandidate.category]++;
+        while (places.length < N_RESULTS && candidates.length > 0) {
+            // Sort current candidates by score descending
+            candidates.sort((a, b) => b.score - a.score);
+            
+            // Pick the top candidate
+            const topCandidate = candidates.shift()!;
+            places.push(topCandidate.marker);
+            categoryCounts[topCandidate.category]++;
 
-        // Penalize remaining candidates of the same category
-        for (const candidate of candidates) {
-            if (candidate.category === topCandidate.category) {
-                candidate.score -= 30; // Adaptive penalty
+            // Penalize remaining candidates of the same category
+            for (const candidate of candidates) {
+                if (candidate.category === topCandidate.category) {
+                    candidate.score -= 30; // Adaptive penalty
+                }
             }
         }
     }
+
+    const cityCandidates = places.filter(p => ['city', 'town', 'village', 'municipality'].includes(p.type));
+    console.log(`[City Discovery - OverpassProvider]\nlocation: ${lat.toFixed(4)}, ${lng.toFixed(4)}\nradius: ${radiusKm} km\ncandidates found: ${cityCandidates.length}` +
+      (cityCandidates.length > 0 ? '\n' + cityCandidates.map(c => `  - ${c.name} | ${c.type} | ${(Math.sqrt(Math.pow((c.lat - lat)*111, 2) + Math.pow((c.lng - lng)*111, 2))).toFixed(1)} km`).join('\n') : ''));
 
     overpassCache.set(cacheKey, { result: places, timestamp: Date.now() });
     
@@ -271,6 +293,7 @@ export class OverpassProvider implements DiscoveryProvider {
       if (firstKey) overpassCache.delete(firstKey);
     }
 
+    this.lastStatus = places.length > 0 ? 'SUCCESS_WITH_RESULTS' : 'SUCCESS_EMPTY';
     return places;
   }
 }

@@ -7,7 +7,7 @@ import { validateResolvedEntity, isGenericPlaceholderDescription } from './entit
 import { mergeCoordinates } from './coordinateAuthority';
 import { CanonicalGeographicEntity } from '../domain';
 import { classifyGeographicEntity } from './classifierService';
-import { getEstimatedClimate, getClimateDescription } from './geographic/climateEstimator';
+import { getEstimatedClimate, getClimateDescription, isClimateConflicting } from './geographic/climateEstimator';
 import { reverseGeocode } from './geographic/geographicResolver';
 import { isPlaceholderString } from '../components/InfoPanel';
 
@@ -265,7 +265,8 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
           state: (resolvedData as any).state,
           city: (resolvedData as any).city,
           county: (resolvedData as any).county,
-          region: (resolvedData as any).region
+          region: (resolvedData as any).region,
+          climate: (resolvedData as any).climate
         });
         if (metadataRecovery) {
            console.log(`=== RECOVERY ENRICHMENT TRACE ===`);
@@ -327,16 +328,42 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
      
      const recoveredMetadata = (resolvedData as any)._recoveredMetadata as Partial<EnrichmentResult> | undefined;
      
+     // Authority hierarchy: deterministic geographic data > validated provider data > LLM-generated metadata
+     const initialClimate = (resolvedData as any).climate;
+     const recoveredClimate = recoveredMetadata?.climate;
+     let finalClimate = initialClimate;
+
+     if (recoveredClimate) {
+         const conflict = isClimateConflicting(
+             recoveredClimate,
+             initialClimate,
+             canonicalEntity.coordinates.lat,
+             canonicalEntity.coordinates.lng,
+             (resolvedData as any).state || (resolvedData as any).region,
+             (resolvedData as any).country,
+             canonicalEntity.entityType
+         );
+         if (conflict.isConflict) {
+             console.warn(`[CLIMATE CONTRADICTION REJECTION] Discarded conflicting recovered climate "${recoveredClimate.name || recoveredClimate.value}" during merge (${conflict.reason}). Preserving authoritative deterministic climate.`);
+             finalClimate = initialClimate;
+         } else {
+             finalClimate = recoveredClimate;
+         }
+     }
+
      // Merge deterministic/initial metadata with recovered metadata
      const finalMetadata: any = {
          description: resolvedData.description,
-         climate: (resolvedData as any).climate,
+         climate: finalClimate,
          population: (resolvedData as any).population,
          notable: (resolvedData as any).notable || [],
          news: resolvedData.news || [],
          contextNotes: (resolvedData as any).contextNotes || [],
          ...recoveredMetadata
      };
+
+     // Ensure authoritative climate is not overwritten by ...recoveredMetadata
+     finalMetadata.climate = finalClimate;
 
      if (isPlaceholder && recoveredMetadata?.description) {
          finalMetadata.description = recoveredMetadata.description;

@@ -49,8 +49,29 @@ export const classifyGeographicEntityWithEvidence = async (
         return { entityType: 'administrative_region', confidence: 'authoritative', evidence: `Matched administrative container: ${signals.join(', ')}` };
     }
 
-    // 2. Protected Areas, Reserves, Parks, and Natural Features MUST be checked BEFORE trusting upstream city tags
-    // Upstream providers often mislabel reserves and protected areas as "city" or "place".
+    // 2. Explicit Infrastructure / Airport / Transport FIRST
+    if (q.match(/\b(airport|aeropuerto|bandara|bandar udara|airfield|aerodrome|heliport|station|estación|terminal|railway station|train station|subway station|metro station|bus station|ferry terminal|harbor|harbour|bridge|dam|lighthouse)\b/i) ||
+        signals.some(s => s.includes('airport') || s.includes('aerodrome') || s.includes('aeroway') || s.includes('station') || s.includes('bridge') || s.includes('dam') || s.includes('lighthouse'))) {
+        return { entityType: 'infrastructure', confidence: 'authoritative', evidence: `Provider tag or name matched infrastructure/transport: ${signals.join(', ')}` };
+    }
+
+    // 3. AUTHORITATIVE SETTLEMENT PRECEDENCE:
+    // If the provider has already identified an entity as city, town, village, municipality, or capital,
+    // and that classification is supported by authoritative provider metadata, generic name/description heuristics
+    // must NOT override it (e.g. Siak Sri Indrapura, Pangkalan Bunut, Sorek, Ukui, Pangkalan Kerinci, Langgam).
+    const hasAuthoritativeSettlementTag = signals.some(s => 
+        s === 'city' || s === 'town' || s === 'village' || s === 'municipality' || s === 'municipio' || 
+        s === 'capital' || s === 'place' || s === 'settlement' || s.includes('populated place') ||
+        s === 'place=city' || s === 'place=town' || s === 'place=village' || s === 'place=municipality'
+    ) || ['city', 'town', 'village', 'municipality'].includes(adminContext?.type);
+
+    const isExplicitProtectedAreaName = q.match(/\b(special reserve|national reserve|nature reserve|wildlife reserve|game reserve|forest reserve|faunal reserve|biosphere reserve|ecological reserve|national park|state park|provincial park|tribal park|parque nacional|parc national|wildlife sanctuary|national monument)\b/i) !== null;
+
+    if (hasAuthoritativeSettlementTag && !isExplicitProtectedAreaName) {
+        return { entityType: 'settlement', confidence: 'authoritative', evidence: `Authoritative provider settlement type: ${signals.join(', ')}` };
+    }
+
+    // 4. Protected Areas, Reserves, Parks, and Natural Features (only when not an authoritative settlement)
     const isReserveOrPark = 
         q.match(/\b(special reserve|national reserve|nature reserve|wildlife reserve|game reserve|forest reserve|faunal reserve|reserve|reserva|réserve|biosphere reserve|ecological reserve)\b/i) ||
         q.match(/\b(national park|state park|provincial park|tribal park|parque nacional|parc national|conservation area|protected area|wilderness area|wilderness)\b/i) ||
@@ -100,8 +121,8 @@ export const classifyGeographicEntityWithEvidence = async (
         return { entityType: 'historical_site', confidence: 'authoritative', evidence: `Provider tag matched historic site: ${signals.join(', ')}` };
     }
 
-    // 3. Legitimate Verified Populated Places
-    if (signals.some(s => s === 'city' || s === 'town' || s === 'village' || s === 'municipality' || s === 'municipio' || s === 'hamlet' || s === 'suburb' || s === 'neighbourhood' || s === 'locality' || s === 'place' || s.includes('populated place') || s.includes('settlement')) ||
+    // 5. Legitimate Verified Populated Places via suffix or broader signals
+    if (signals.some(s => s === 'hamlet' || s === 'suburb' || s === 'neighbourhood' || s === 'locality') ||
         rawName.match(/,\s*(Texas|Washington|California|Oregon|Hawaii|Western Cape|BC|British Columbia|[A-Z]{2})$/i)) {
         return { entityType: 'settlement', confidence: 'authoritative', evidence: `Verified populated place: ${signals.join(', ')}` };
     }

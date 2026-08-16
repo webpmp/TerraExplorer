@@ -1,4 +1,8 @@
 /* TerraExplorer AI custom styles */
+.font-garamond {
+  font-family: 'EB Garamond', serif;
+}
+
 .parchment-drop-cap::first-letter { 
   font-family: "IM Fell Double Pica", serif;
   float: left;

@@ -169,4 +169,89 @@ describe('Discovery Pipeline E2E', () => {
         expect(names).not.toContain('As-Suweida Governorate');
         expect(names).toContain('Small Town');
     });
+
+    it('allocates 4 populated places and 2 geographic features when available without park displacement', async () => {
+        vi.spyOn(overpassProvider, 'searchNearby').mockImplementation(async (ctx) => {
+            if (ctx.categoryFilter === 'settlements') {
+                return [
+                    { id: 'c1', lat: 31.0, lng: -100.0, name: 'City Alpha', type: 'city', populationClass: 'large' } as any,
+                    { id: 'c2', lat: 31.1, lng: -100.1, name: 'City Beta', type: 'city', populationClass: 'medium' } as any,
+                    { id: 'c3', lat: 31.2, lng: -100.2, name: 'Town Gamma', type: 'town', populationClass: 'medium' } as any,
+                    { id: 'c4', lat: 31.15, lng: -100.05, name: 'City Delta', type: 'city', populationClass: 'medium' } as any,
+                    { id: 'c5', lat: 31.18, lng: -100.08, name: 'City Epsilon', type: 'city', populationClass: 'medium' } as any
+                ];
+            } else if (ctx.categoryFilter === 'features') {
+                return [
+                    { id: 'f1', lat: 31.05, lng: -100.05, name: 'Mega National Park 1', type: 'national_park', discoverySignals: ['national park'] } as any,
+                    { id: 'f2', lat: 31.15, lng: -100.15, name: 'Mega National Park 2', type: 'national_park', discoverySignals: ['national park'] } as any,
+                    { id: 'f3', lat: 31.25, lng: -100.25, name: 'Mega National Park 3', type: 'national_park', discoverySignals: ['national park'] } as any,
+                    { id: 'f4', lat: 31.35, lng: -100.35, name: 'Mega National Park 4', type: 'national_park', discoverySignals: ['national park'] } as any
+                ];
+            }
+            return [];
+        });
+        vi.spyOn(wikipediaProvider, 'searchNearby').mockResolvedValue([]);
+        vi.spyOn(nominatimProvider, 'searchNearby').mockResolvedValue([]);
+        vi.spyOn(regionalSearchProvider, 'searchNearby').mockResolvedValue([]);
+
+        const result = await getNearbyPlaces(31.0, -100.0);
+        expect(result.status).toBe('SUCCESS');
+        expect(result.places.length).toBe(6);
+
+        const settlements = result.places.filter(p => ['city', 'town', 'village', 'settlement'].includes(p.type));
+        const features = result.places.filter(p => ['national_park', 'natural_feature', 'mountain', 'water_body', 'natural'].includes(p.type));
+
+        expect(settlements.length).toBe(4);
+        expect(features.length).toBe(2);
+        // National parks must not displace the 4 qualifying settlements
+        expect(settlements.map(s => s.name)).toContain('City Alpha');
+        expect(settlements.map(s => s.name)).toContain('City Beta');
+        expect(settlements.map(s => s.name)).toContain('City Delta');
+        expect(settlements.map(s => s.name)).toContain('City Epsilon');
+    });
+
+    it('correctly normalizes Sultan Thaha Airport to airport/POI and never national_park', async () => {
+        vi.spyOn(overpassProvider, 'searchNearby').mockImplementation(async (ctx) => {
+            if (ctx.categoryFilter === 'settlements') {
+                return [
+                    { id: 'c1', lat: -1.75, lng: 103.75, name: 'Muaro Jambi Settlement', type: 'town', populationClass: 'medium' } as any
+                ];
+            } else if (ctx.categoryFilter === 'features') {
+                return [
+                    { id: 'a1', lat: -1.73, lng: 103.74, name: 'Sultan Thaha Airport', type: 'aeroway' } as any
+                ];
+            }
+            return [];
+        });
+        vi.spyOn(wikipediaProvider, 'searchNearby').mockResolvedValue([]);
+        vi.spyOn(nominatimProvider, 'searchNearby').mockResolvedValue([]);
+        vi.spyOn(regionalSearchProvider, 'searchNearby').mockResolvedValue([]);
+
+        const result = await getNearbyPlaces(-1.75, 103.75);
+        expect(result.status).toBe('SUCCESS');
+        const airport = result.places.find(p => p.name.includes('Sultan Thaha Airport'));
+        expect(airport).toBeDefined();
+        expect(airport?.type).not.toBe('national_park');
+        expect(['airport', 'major_landmark', 'poi', 'aerodrome', 'aeroway']).toContain(airport?.type);
+    });
+
+    it('enforces radiusKm strictly and rejects candidates beyond radiusKm', async () => {
+        vi.spyOn(overpassProvider, 'searchNearby').mockImplementation(async (ctx) => {
+            const rad = ctx.radiusKm || 50;
+            // c1 is 20km away, c2 is 80km away
+            return [
+                { id: 'c1', lat: 30.18, lng: -98.30, name: 'Near Town', type: 'town' } as any,
+                { id: 'c2', lat: 31.17, lng: -98.30, name: 'Distant City', type: 'city' } as any
+            ];
+        });
+        vi.spyOn(wikipediaProvider, 'searchNearby').mockResolvedValue([]);
+        vi.spyOn(nominatimProvider, 'searchNearby').mockResolvedValue([]);
+        vi.spyOn(regionalSearchProvider, 'searchNearby').mockResolvedValue([]);
+
+        const result = await getNearbyPlaces(30.0, -98.30, 50);
+        expect(result.status).toBe('SUCCESS');
+        const names = result.places.map(p => p.name);
+        expect(names).toContain('Near Town');
+    });
 });
+

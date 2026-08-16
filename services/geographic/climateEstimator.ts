@@ -201,6 +201,89 @@ export function isClimateGeographicallyValid(
     return true;
 }
 
+export function isClimateConflicting(
+    candidateClimate: { name?: string; value?: string; koppenCode?: string } | string | null | undefined,
+    deterministicClimate: { name?: string; value?: string; koppenCode?: string } | string | null | undefined,
+    lat?: number,
+    lng?: number,
+    region?: string,
+    country?: string,
+    entityType?: string
+): { isConflict: boolean; reason?: string } {
+    if (!candidateClimate) return { isConflict: false };
+
+    const getClimateObj = (c: any) => {
+        if (!c) return { name: '', koppenCode: '' };
+        if (typeof c === 'string') return { name: c, koppenCode: '' };
+        return {
+            name: (c.name || c.value || '').toString(),
+            koppenCode: (c.koppenCode || '').toString()
+        };
+    };
+
+    const candidate = getClimateObj(candidateClimate);
+    const candName = candidate.name.toLowerCase();
+    const candCode = candidate.koppenCode.toUpperCase();
+
+    const det = getClimateObj(deterministicClimate);
+    const detName = det.name.toLowerCase();
+    const detCode = det.koppenCode.toUpperCase();
+
+    const eType = (entityType || '').toLowerCase();
+    const c = (country || '').toLowerCase();
+
+    // 1. Conflict against established Alpine / Mountain Climate or mountain terrain classification
+    const isDetAlpine = detCode === 'ET' || detName.includes('alpine') || detName.includes('mountain climate');
+    const isMountainEntity = eType === 'mountain' || eType === 'peak' || eType === 'volcano';
+
+    if (isDetAlpine || isMountainEntity) {
+        // High mountain terrain cannot have tropical, humid subtropical, Mediterranean, hot desert, or savanna climate
+        const isWarmOrTropical = candName.includes('tropical') || candName.includes('subtropical') || candName.includes('savanna') || 
+                                 candName.includes('mediterranean') || candName.includes('hot desert') ||
+                                 candCode === 'CFA' || candCode === 'CWA' || candCode === 'AF' || candCode === 'AM' || candCode === 'AW' || candCode === 'BWH' || candCode === 'CSA';
+        if (isWarmOrTropical) {
+            return {
+                isConflict: true,
+                reason: `Candidate climate "${candidate.name}" (${candidate.koppenCode || 'none'}) contradicts alpine/mountain terrain`
+            };
+        }
+    }
+
+    // 2. Conflict against established Subpolar Oceanic / Maritime (e.g. coastal Iceland)
+    const isDetSubpolarOceanic = detName.includes('subpolar oceanic') || (c.includes('iceland') && (detCode === 'CFB' || detCode === 'CFC'));
+    if (isDetSubpolarOceanic) {
+        if (candName.includes('polar') || candName.includes('tundra') || candCode === 'ET' || candCode === 'EF' || candName.includes('desert') || candCode.startsWith('BW')) {
+            return {
+                isConflict: true,
+                reason: `Candidate climate "${candidate.name}" (${candidate.koppenCode || 'none'}) contradicts maritime/subpolar oceanic baseline`
+            };
+        }
+    }
+
+    // 3. Conflict against established Humid Subtropical / Maritime (e.g. East Coast Australia / Florida)
+    const isDetHumidSubtropical = detCode === 'CFA' || detName.includes('humid subtropical');
+    if (isDetHumidSubtropical) {
+        if (candName.includes('semi-arid') || candCode === 'BSK' || candCode === 'BSH' || candName.includes('desert') || candCode.startsWith('BW') || candName.includes('polar') || candCode === 'ET') {
+            return {
+                isConflict: true,
+                reason: `Candidate climate "${candidate.name}" (${candidate.koppenCode || 'none'}) contradicts humid subtropical baseline`
+            };
+        }
+    }
+
+    // 4. Geographic plausibility check based on coordinates if available
+    if (lat !== undefined && lng !== undefined && !isNaN(lat) && !isNaN(lng)) {
+        if (candidate.koppenCode && !isClimateGeographicallyValid(candidate.koppenCode, lat, lng, region, country)) {
+            return {
+                isConflict: true,
+                reason: `Candidate climate code "${candidate.koppenCode}" is geographically invalid for coordinates ${lat}, ${lng} (${region || 'unknown'}, ${country || 'unknown'})`
+            };
+        }
+    }
+
+    return { isConflict: false };
+}
+
 export function getClimateDescription(koppenCode: string, fallbackName: string): string {
     switch (koppenCode) {
         case "Af": return "Warm temperatures persist year-round with a pronounced wet season and heavy annual rainfall.";
