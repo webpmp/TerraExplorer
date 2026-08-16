@@ -100,6 +100,16 @@ export interface NotableItem {
   wikipediaUrl?: string;
 }
 
+export interface ImageMetadata {
+  url: string;
+  caption?: string;
+  attribution?: string;
+  title?: string;
+  description?: string;
+  credit?: string;
+  source?: string;
+}
+
 export interface LocationInfo {
   name: string;
   type: LocationType;
@@ -110,7 +120,12 @@ export interface LocationInfo {
   notable?: NotableItem[];
   contextNotes?: string[];
   locationString?: string;
+  primaryImage?: string | ImageMetadata;
+  images?: Array<string | ImageMetadata>;
   imageCaption?: string;
+  imageAttribution?: string;
+  imageCredit?: string;
+  imageSource?: string;
   imageSearchTerm?: string;
   discoverySignals?: string[];
   relatedEntities?: any[];

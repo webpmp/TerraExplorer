@@ -112,15 +112,27 @@ export const runRoutePipeline = async (text: string, isUrl: boolean, generateRaw
     return true;
   });
   
-  if (rawRouteType === 'point') {
+  // Route Type / Waypoint Reconciliation
+  let effectiveRouteType = rawRouteType;
+  
+  if (normalizedItems.length === 1) {
+    if (rawRouteType === 'regional_event' || (rawRouteType && rawRouteType !== 'single_location' && rawRouteType !== 'point' && intent === 'HISTORICAL_EVENT')) {
+      effectiveRouteType = 'single_location';
+      console.log(`[ROUTE TYPE RECONCILIATION]\nGenerated routeType: ${rawRouteType}\nValid waypoint count: ${normalizedItems.length}\nIntent: ${intent || 'UNKNOWN'}\nAction: NORMALIZE_SINGLE_LOCATION_ROUTE\nNormalized routeType: ${effectiveRouteType}`);
+    } else if (rawRouteType && rawRouteType !== 'single_location' && rawRouteType !== 'point') {
+      console.log(`[ROUTE TYPE RECONCILIATION]\nGenerated routeType: ${rawRouteType}\nValid waypoint count: ${normalizedItems.length}\nIntent: ${intent || 'UNKNOWN'}\nAction: CANNOT_NORMALIZE`);
+    }
+  }
+
+  if (effectiveRouteType === 'point' || effectiveRouteType === 'single_location') {
     if (normalizedItems.length < 1) {
-      console.warn(`[Pipeline ${pipelineId}] Structural Validation failed: 'point' routeType must have at least 1 valid waypoint. Found ${normalizedItems.length}`);
-      return { waypoints: [], title: rawTitle, routeConfidence: rawRouteConfidence, routeType: rawRouteType as any };
+      console.warn(`[Pipeline ${pipelineId}] Structural Validation failed: '${effectiveRouteType}' routeType must have at least 1 valid waypoint. Found ${normalizedItems.length}`);
+      return { waypoints: [], title: rawTitle, routeConfidence: rawRouteConfidence, routeType: effectiveRouteType as any };
     }
   } else {
     if (normalizedItems.length < 2) {
-      console.warn(`[Pipeline ${pipelineId}] Structural Validation failed: Multi-location routeType '${rawRouteType}' must have at least 2 valid waypoints. Found ${normalizedItems.length}`);
-      return { waypoints: [], title: rawTitle, routeConfidence: rawRouteConfidence, routeType: rawRouteType as any };
+      console.warn(`[Pipeline ${pipelineId}] Structural Validation failed: Multi-location routeType '${effectiveRouteType}' must have at least 2 valid waypoints. Found ${normalizedItems.length}`);
+      return { waypoints: [], title: rawTitle, routeConfidence: rawRouteConfidence, routeType: effectiveRouteType as any };
     }
   }
 
@@ -466,5 +478,5 @@ export const runRoutePipeline = async (text: string, isUrl: boolean, generateRaw
   logPipelineSummary(summary);
 
   console.log(`[Pipeline ${pipelineId}] === PIPELINE COMPLETE ===`);
-  return { waypoints: cleanItems, title: rawTitle, routeConfidence: rawRouteConfidence, routeType: rawRouteType as any };
+  return { waypoints: cleanItems, title: rawTitle, routeConfidence: rawRouteConfidence, routeType: effectiveRouteType as any };
 };

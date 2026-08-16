@@ -87,7 +87,8 @@ const AuthoritativeCameraEnforcer: React.FC<{
     if (skin === 'parchment') {
        const aspect = window.innerWidth / window.innerHeight;
        const baseDistance = aspect <= 1.28985 ? 3.0 : (3.0 * 1.28985) / aspect;
-       authoritativeDistance = baseDistance / parchmentZoom;
+       const effectiveParchmentZoom = Math.max(1.0, Math.min(3.0, parchmentZoom));
+       authoritativeDistance = baseDistance / effectiveParchmentZoom;
     } else {
        if (cameraState.activeRoute) {
           authoritativeDistance = cameraState.routeSuggestedDistance;
@@ -242,18 +243,21 @@ const App: React.FC = () => {
 
   const animateParchmentZoom = useCallback(() => {
      const currentZoom = currentParchmentZoomRef.current;
-     const diff = targetParchmentZoomRef.current - currentZoom;
+     const clampedTarget = Math.max(1.0, Math.min(3.0, targetParchmentZoomRef.current));
+     targetParchmentZoomRef.current = clampedTarget;
+     const diff = clampedTarget - currentZoom;
      
      if (Math.abs(diff) < 0.001) {
-        currentParchmentZoomRef.current = targetParchmentZoomRef.current;
-        setParchmentZoom(targetParchmentZoomRef.current);
+        currentParchmentZoomRef.current = clampedTarget;
+        setParchmentZoom(clampedTarget);
         parchmentZoomAnimRef.current = null;
         return;
      }
      
      const nextZoom = currentZoom + diff * 0.08; // Buttery smooth 0.08 smoothing factor
-     currentParchmentZoomRef.current = nextZoom;
-     setParchmentZoom(nextZoom);
+     const clampedNextZoom = Math.max(1.0, Math.min(3.0, nextZoom));
+     currentParchmentZoomRef.current = clampedNextZoom;
+     setParchmentZoom(clampedNextZoom);
      
      parchmentZoomAnimRef.current = requestAnimationFrame(animateParchmentZoom);
   }, []);
@@ -360,7 +364,8 @@ const App: React.FC = () => {
         if (skin === 'parchment') {
            const aspect = window.innerWidth / window.innerHeight;
            const baseDistance = aspect <= 1.28985 ? 3.0 : (3.0 * 1.28985) / aspect;
-           targetDistance = baseDistance / parchmentZoom;
+           const effectiveParchmentZoom = Math.max(1.0, Math.min(3.0, parchmentZoom));
+           targetDistance = baseDistance / effectiveParchmentZoom;
         } else if (cameraState.activeRoute) {
            targetDistance = cameraState.routeSuggestedDistance;
         } else {
@@ -832,13 +837,38 @@ const App: React.FC = () => {
 
   const handleVisibilityChange = useCallback((visible: boolean) => {
     setIsLocationVisible(visible);
-  }, []);
-  const loadWaypointData = useCallback(async (wp: Waypoint) => {
+  }, []);  const loadWaypointData = useCallback(async (wp: Waypoint) => {
+     const stableId = wp.id || `${wp.name}-${wp.lat}-${wp.lng}`;
+     const enrichmentRequestId = ++activeMarkerRequestRef.current;
+     
+     console.log(`[InfoPanel] OPEN`);
+     console.log(`[InfoPanel] selection = ${stableId}`);
+     console.log(`[InfoPanel] enrichment started`);
+
      setInteractionState('PIN_SELECTED');
      setIsLoading(true);
      setIsNewsFetching(false);
-     setLocationInfo(null);
-     setSelectedMarkerId(wp.id);
+     
+     const initialWaypointPayload: any = {
+         id: stableId,
+         name: wp.name,
+         coordinates: { lat: wp.lat, lng: wp.lng },
+         waypoint: wp,
+         description: wp.description || "",
+         significance: wp.significance,
+         highlights: wp.highlights,
+         historicalPeriod: wp.historicalPeriod,
+         entities: wp.entities,
+         entityType: wp.entityType || (wp as any).type || "historical_waypoint",
+         climate: getEstimatedClimate(wp.lat, wp.lng, wp.historicalRegion || wp.modernLocation || "", "", wp.entityType || (wp as any).type),
+         contextNotes: [],
+         news: [],
+         relatedEntities: [],
+         sectionState: { description: wp.description ? "complete" : "loading", news: "loading" }
+     };
+     
+     setLocationInfo(initialWaypointPayload);
+     setSelectedMarkerId(stableId);
      setIsFocused(true);
 
      // Propose camera values to central state
@@ -852,8 +882,6 @@ const App: React.FC = () => {
            reconcileCameraState();
         });
      }
-
-     const enrichmentRequestId = ++activeMarkerRequestRef.current;
      
      console.log(`ENTITY_RESOLUTION_STARTED [req: ${enrichmentRequestId}] for ${wp.name}`);
      
@@ -867,11 +895,12 @@ const App: React.FC = () => {
      };
      
      const geoMarker = await resolveGeographicMetadata(anchor);
+     if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
      
      console.log(`ENTITY_RESOLUTION_COMPLETE [req: ${enrichmentRequestId}] for ${wp.name}`);
 
      let data: any = { 
-         id: geoMarker.id,
+         id: geoMarker.id || stableId,
          name: wp.name, // Protected
          coordinates: { lat: wp.lat, lng: wp.lng }, // Protected
          waypoint: wp, // Protected
@@ -893,10 +922,13 @@ const App: React.FC = () => {
          contextNotes: [],
          news: [],
          relatedEntities: [],
-         sectionState: { description: "loading", news: "loading" }
+         sectionState: { description: wp.description ? "complete" : "loading", news: "loading" }
      };
 
-     // Inject the route context so it's always available as historical context
+     setLocationInfo((prev: any) => {
+         if (!prev || enrichmentRequestId !== activeMarkerRequestRef.current) return prev;
+         return mergeLocationInfo(prev, data);
+     }); // Inject the route context so it's always available as historical context
      if (wp.context) {
          const routeLabel = wp.routeTitle || "From Route";
          data.routeContext = {
@@ -997,10 +1029,9 @@ const App: React.FC = () => {
      } else {
          setIsLoading(false);
      }
-  }, [isZoomLocked, lockedZoomDistance, reconcileCameraState]);
-  const selectEntity = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint) => {
-    const targetKey = marker.id || marker.name;
-    const now = Date.now();
+  }, [isZoomLocked, lockedZoomDistance, reconcileCameraState]);  const selectEntity = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint) => {
+    const stableId = marker.id || `${marker.name}-${marker.lat}-${marker.lng}`;
+    const targetKey = stableId;
     
     if (processingMarkerRef.current === targetKey) {
         return;
@@ -1009,10 +1040,15 @@ const App: React.FC = () => {
     processingMarkerRef.current = targetKey;
 
     try {
+        const enrichmentRequestId = ++activeMarkerRequestRef.current;
+        
+        console.log(`[InfoPanel] OPEN`);
+        console.log(`[InfoPanel] selection = ${stableId}`);
+
         setInteractionState('PIN_SELECTED');
         setSearchError(null);
         setAutoRotate(false);
-        setSelectedMarkerId(marker.id);
+        setSelectedMarkerId(stableId);
         setIsFocused(true);
         
         const fav = marker as FavoriteLocation;
@@ -1041,48 +1077,31 @@ const App: React.FC = () => {
                 setRouteWaypoints([]);
                 setCurrentWaypointIndex(-1);
             } else {
-                  setCurrentWaypointIndex(-1);
+                setCurrentWaypointIndex(-1);
             }
         }
-        
-        const enrichmentRequestId = ++activeMarkerRequestRef.current;
-        console.log(`[Entity] Resolving ${marker.name}`);
-        
-        const anchor: MapMarker = {
-             id: marker.id,
-             name: marker.name,
-             lat: marker.lat,
-             lng: marker.lng,
-             type: ('type' in marker && marker.type ? marker.type : 'generic'),
-             populationClass: 'small'
-        };
-        
-        const geoMarker = await resolveGeographicMetadata(anchor);
-        console.log(`[Entity] ${marker.name} resolved`);
 
-        const basePayload = {
-            id: geoMarker.id || marker.id,
-            name: geoMarker.name,
-            entityType: geoMarker.type || "generic",
-            type: geoMarker.type,
-            coordinates: { lat: geoMarker.lat, lng: geoMarker.lng },
-            country: geoMarker.country,
-            state: geoMarker.state,
-            city: geoMarker.city,
-            population: geoMarker.population,
-            osmId: geoMarker.osmId,
-            osmType: geoMarker.osmType,
-            wikidataId: geoMarker.wikidataId,
-            wikipedia: geoMarker.wikipedia,
+        // 1. Immediately create and display the basic payload so the user sees the title/basic identity without delay
+        const initialPayload: any = {
+            id: stableId,
+            name: marker.name,
+            entityType: ('type' in marker && marker.type ? marker.type : "generic"),
+            type: ('type' in marker && marker.type ? marker.type : undefined),
+            coordinates: { lat: marker.lat, lng: marker.lng },
+            country: ('country' in marker ? (marker as any).country : undefined),
+            state: ('state' in marker ? (marker as any).state : undefined),
+            city: ('city' in marker ? (marker as any).city : undefined),
+            population: ('population' in marker ? (marker as any).population : undefined),
             description: "",
-            climate: getEstimatedClimate(geoMarker.lat, geoMarker.lng, geoMarker.state || geoMarker.region || "", geoMarker.country || "", geoMarker.type),
+            climate: getEstimatedClimate(marker.lat, marker.lng, ('state' in marker ? (marker as any).state : "") || ('region' in marker ? (marker as any).region : ""), ('country' in marker ? (marker as any).country : "") || "", ('type' in marker ? marker.type : undefined)),
             contextNotes: [],
             news: [],
+            notable: [],
             relatedEntities: [],
             sectionState: { description: "loading", news: "loading" }
-        } as any;
+        };
 
-        setLocationInfo(basePayload);
+        setLocationInfo(initialPayload);
         setIsLoading(true);
         setIsNewsFetching(false);
 
@@ -1093,6 +1112,50 @@ const App: React.FC = () => {
             requestAnimationFrame(() => reconcileCameraState());
         }
 
+        // 2. Resolve geographic metadata asynchronously
+        console.log(`[InfoPanel] enrichment started`);
+        console.log(`[Entity] Resolving ${marker.name}`);
+        
+        const anchor: MapMarker = {
+             id: stableId,
+             name: marker.name,
+             lat: marker.lat,
+             lng: marker.lng,
+             type: ('type' in marker && marker.type ? marker.type : 'generic'),
+             populationClass: 'small'
+        };
+        
+        const geoMarker = await resolveGeographicMetadata(anchor);
+        if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
+        console.log(`[Entity] ${marker.name} resolved`);
+
+        const basePayload: any = {
+            id: geoMarker.id || stableId,
+            name: geoMarker.name || marker.name,
+            entityType: geoMarker.type || initialPayload.entityType || "generic",
+            type: geoMarker.type || initialPayload.type,
+            coordinates: { lat: geoMarker.lat, lng: geoMarker.lng },
+            country: geoMarker.country || initialPayload.country,
+            state: geoMarker.state || initialPayload.state,
+            city: geoMarker.city || initialPayload.city,
+            population: geoMarker.population || initialPayload.population,
+            osmId: geoMarker.osmId,
+            osmType: geoMarker.osmType,
+            wikidataId: geoMarker.wikidataId,
+            wikipedia: geoMarker.wikipedia,
+            description: "",
+            climate: getEstimatedClimate(geoMarker.lat, geoMarker.lng, geoMarker.state || geoMarker.region || "", geoMarker.country || "", geoMarker.type),
+            contextNotes: [],
+            news: [],
+            relatedEntities: [],
+            sectionState: { description: "loading", news: "loading" }
+        };
+
+        setLocationInfo((prev: any) => {
+            if (!prev || enrichmentRequestId !== activeMarkerRequestRef.current) return prev;
+            return mergeLocationInfo(prev, basePayload);
+        });
+
         // Stage 3: Description & Notable
         (async () => {
             try {
@@ -1100,9 +1163,10 @@ const App: React.FC = () => {
                 if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
                 
                 if (data) {
+                    console.log(`[InfoPanel] enrichment updated`);
                     console.log(`[Enrichment] ${geoMarker.name} complete`);
                     setLocationInfo((prev: any) => {
-                        if (!prev) return data;
+                        if (!prev || enrichmentRequestId !== activeMarkerRequestRef.current) return prev;
                         return mergeLocationInfo(prev, {
                             description: data.description || prev.description,
                             notable: data.notable || prev.notable,
@@ -1113,7 +1177,7 @@ const App: React.FC = () => {
                         });
                     });
                 } else {
-                    setLocationInfo((prev: any) => prev ? { ...prev, sectionState: { ...prev.sectionState, description: "error" } } : prev);
+                    setLocationInfo((prev: any) => (prev && enrichmentRequestId === activeMarkerRequestRef.current) ? { ...prev, sectionState: { ...prev.sectionState, description: "error" } } : prev);
                 }
             } catch (err) {
                 if (enrichmentRequestId === activeMarkerRequestRef.current) {
@@ -1137,8 +1201,9 @@ const App: React.FC = () => {
                 if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
                 
                 if (dataWithNews && dataWithNews.news) {
+                    console.log(`[InfoPanel] enrichment updated`);
                     setLocationInfo((prev: any) => {
-                        if (!prev) return prev;
+                        if (!prev || enrichmentRequestId !== activeMarkerRequestRef.current) return prev;
                         return mergeLocationInfo(prev, {
                             news: dataWithNews.news,
                             newsError: dataWithNews.newsError,
@@ -1146,7 +1211,7 @@ const App: React.FC = () => {
                         });
                     });
                 } else {
-                    setLocationInfo((prev: any) => prev ? { ...prev, sectionState: { ...prev.sectionState, news: "error" } } : prev);
+                    setLocationInfo((prev: any) => (prev && enrichmentRequestId === activeMarkerRequestRef.current) ? { ...prev, sectionState: { ...prev.sectionState, news: "error" } } : prev);
                 }
             } catch (err) {
                  if (enrichmentRequestId === activeMarkerRequestRef.current) {
@@ -1155,6 +1220,7 @@ const App: React.FC = () => {
             } finally {
                 if (enrichmentRequestId === activeMarkerRequestRef.current) {
                     setIsNewsFetching(false);
+                    console.log(`[InfoPanel] enrichment completed`);
                 }
             }
         })();
@@ -1173,8 +1239,10 @@ const App: React.FC = () => {
 
   const startScan = useCallback((location: GeoCoordinates) => {
      activeScanIdRef.current++;
+     activeMarkerRequestRef.current++; // Invalidate previous async requests
      scanResolvedRef.current = false;
      scanFullyProcessedRef.current = false;
+     console.log(`[InfoPanel] CLOSE reason = new_scan_started`);
      console.log("scan_started");
      console.log("triangulation_started");
      setScanningArea(location);
@@ -1240,17 +1308,19 @@ const App: React.FC = () => {
      } else {
         console.log(`[SCAN EMPTY RESULT]\nStatus: ${result.status}\nCoordinates: ${result.coords.lat}, ${result.coords.lng}\nEnvironment: ${result.diagnostics?.environment || 'unknown'}\nCandidates Received: ${result.diagnostics?.candidatesReceived || 0}\nCandidates Rejected: ${result.diagnostics?.rejectedByDistance || 0}\nFinal Candidate Count: 0\nUser Notification: true`);
         setScanStatus(null);
-        setMarkers([]);
-        setLocationInfo(null);
-        setSelectedMarkerId(null);
-        
-        if (result.status === 'PROVIDER_FAILURE') {
-            setSearchError("Unable to search this location right now.");
-        } else {
-            setSearchError("No locations found near this point.");
+        if (currentScanId === activeScanIdRef.current) {
+            console.log(`[InfoPanel] CLOSE reason = scan_empty_results`);
+            setMarkers([]);
+            setLocationInfo(null);
+            setSelectedMarkerId(null);
+            setInteractionState('GLOBE_IDLE');
+            
+            if (result.status === 'PROVIDER_FAILURE') {
+                setSearchError("Unable to search this location right now.");
+            } else {
+                setSearchError("No locations found near this point.");
+            }
         }
-        
-        // We let the interactionState revert to GLOBE_IDLE naturally at the end of resolveScan.
      }
 
      // Keep scan rings briefly, then fade out
@@ -1263,10 +1333,12 @@ const App: React.FC = () => {
      await new Promise(resolve => setTimeout(resolve, 2000));
      if (currentScanId !== activeScanIdRef.current) return;
      setScanStatus(null);
-     setIsLoading(false);
-     if (result.type === "results") {
-        setInteractionState('PINS_RENDERED');
-     }
+     
+     // Do NOT reset interactionState if a PIN is currently selected or if selection exists!
+     setInteractionState((prev) => {
+        if (prev === 'PIN_SELECTED') return 'PIN_SELECTED';
+        return result.type === "results" ? 'PINS_RENDERED' : 'GLOBE_IDLE';
+     });
   }, [setScanStatus, selectEntity]);
 
   const failScan = useCallback(async (error: string) => {
@@ -1293,9 +1365,11 @@ const App: React.FC = () => {
      await new Promise(resolve => setTimeout(resolve, 2000));
      if (currentScanId !== activeScanIdRef.current) return;
      setScanStatus(null);
-     setIsLoading(false);
-     setInteractionState('GLOBE_IDLE');
-  }, [setScanStatus]);
+     setInteractionState((prev) => {
+        if (prev === 'PIN_SELECTED') return 'PIN_SELECTED';
+        return 'GLOBE_IDLE';
+     });
+  }, [setScanStatus]);;
 
    const handleCancelScan = useCallback(() => {
       scanFullyProcessedRef.current = true;
@@ -1633,7 +1707,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
   const handleZoomIn = useCallback(() => {
     if (skin === 'parchment') {
-       targetParchmentZoomRef.current = Math.min(3.0, targetParchmentZoomRef.current * BUTTON_ZOOM_FACTOR);
+       targetParchmentZoomRef.current = Math.min(3.0, Math.max(1.0, targetParchmentZoomRef.current * BUTTON_ZOOM_FACTOR));
        if (!parchmentZoomAnimRef.current) {
           parchmentZoomAnimRef.current = requestAnimationFrame(animateParchmentZoom);
        }
@@ -1655,7 +1729,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
   const handleZoomOut = useCallback(() => {
     if (skin === 'parchment') {
-       targetParchmentZoomRef.current = Math.max(0.4, targetParchmentZoomRef.current / BUTTON_ZOOM_FACTOR);
+       targetParchmentZoomRef.current = Math.max(1.0, targetParchmentZoomRef.current / BUTTON_ZOOM_FACTOR);
        if (!parchmentZoomAnimRef.current) {
           parchmentZoomAnimRef.current = requestAnimationFrame(animateParchmentZoom);
        }
@@ -1677,7 +1751,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (skin === 'parchment') {
-         targetParchmentZoomRef.current = Math.max(0.4, Math.min(3.0, targetParchmentZoomRef.current - e.deltaY * 0.0015));
+         targetParchmentZoomRef.current = Math.max(1.0, Math.min(3.0, targetParchmentZoomRef.current - e.deltaY * 0.0015));
          if (!parchmentZoomAnimRef.current) {
             parchmentZoomAnimRef.current = requestAnimationFrame(animateParchmentZoom);
          }
@@ -1696,14 +1770,69 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       }
     };
 
+    let initialPinchDistance: number | null = null;
+    let initialParchmentZoom = 1.0;
+    let initialCameraZoom = 4.5;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        initialPinchDistance = Math.hypot(dx, dy);
+        initialParchmentZoom = currentParchmentZoomRef.current;
+        if (cameraControlsRef.current) {
+          initialCameraZoom = cameraControlsRef.current.getDistance();
+        }
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && initialPinchDistance !== null && initialPinchDistance > 0) {
+        e.preventDefault();
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const currentPinchDistance = Math.hypot(dx, dy);
+        const pinchRatio = currentPinchDistance / initialPinchDistance;
+
+        if (skin === 'parchment') {
+          targetParchmentZoomRef.current = Math.max(1.0, Math.min(3.0, initialParchmentZoom * pinchRatio));
+          if (!parchmentZoomAnimRef.current) {
+            parchmentZoomAnimRef.current = requestAnimationFrame(animateParchmentZoom);
+          }
+        } else if (!isZoomLocked && cameraControlsRef.current) {
+          targetZoomRef.current = clampZoom(initialCameraZoom / pinchRatio);
+          userModifiedZoomRef.current = true;
+          if (!zoomAnimRef.current) {
+            zoomAnimRef.current = requestAnimationFrame(animateZoom);
+          }
+        }
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) {
+        initialPinchDistance = null;
+      }
+    };
+
     const container = document.getElementById('canvas-container');
     if (container) {
       container.addEventListener('wheel', handleWheel, { passive: false });
-      return () => container.removeEventListener('wheel', handleWheel);
+      container.addEventListener('touchstart', handleTouchStart, { passive: true });
+      container.addEventListener('touchmove', handleTouchMove, { passive: false });
+      container.addEventListener('touchend', handleTouchEnd, { passive: true });
+      return () => {
+        container.removeEventListener('wheel', handleWheel);
+        container.removeEventListener('touchstart', handleTouchStart);
+        container.removeEventListener('touchmove', handleTouchMove);
+        container.removeEventListener('touchend', handleTouchEnd);
+      };
     }
-  }, [isZoomLocked, clampZoom, animateZoom, skin]);
+  }, [isZoomLocked, clampZoom, animateZoom, skin, animateParchmentZoom]);
 
   const handleClosePanel = () => {
+    console.log(`[InfoPanel] CLOSE reason = user_close`);
+    activeMarkerRequestRef.current++;
     setInteractionState('GLOBE_IDLE');
     setLocationInfo(null);
     setSelectedMarkerId(null);

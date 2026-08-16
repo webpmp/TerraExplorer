@@ -76,8 +76,9 @@ export const classifyEntity = (candidate: Candidate): EntityClass => {
         if (!name.includes('park') && !name.includes('hall') && !name.includes('museum')) return 'settlement';
     }
 
-    if (type === 'national_park' || type === 'mountain' || type === 'volcano' || type === 'lake' || type === 'river' || type === 'natural' || type === 'landmark' || type === 'historic' || type === 'museum' || type === 'tourism' || signals.some(s => s.includes('national park') || s.includes('unesco') || s.includes('major landmark') || s.includes('historic site'))) {
-        return (type === 'mountain' || type === 'lake' || type === 'river' || type === 'volcano' || type === 'natural') ? 'geographic_feature' : 'major_landmark';
+    const geoFeatureTypes = ['national_park', 'mountain', 'mountain_range', 'volcano', 'hill', 'canyon', 'valley', 'lake', 'river', 'waterfall', 'glacier', 'island', 'peninsula', 'desert', 'forest', 'cave', 'beach', 'strait', 'bay', 'ocean', 'sea', 'water_body', 'natural', 'natural_feature'];
+    if (geoFeatureTypes.includes(type) || type === 'landmark' || type === 'historic' || type === 'museum' || type === 'tourism' || signals.some(s => s.includes('national park') || s.includes('unesco') || s.includes('major landmark') || s.includes('historic site'))) {
+        return geoFeatureTypes.includes(type) ? 'geographic_feature' : 'major_landmark';
     }
 
     if (name.includes('preserve') || name.includes('management area') || name.includes('scrub') || name.includes('wetland') || name.includes('marker') || name.includes('mound') || type === 'preserve') {
@@ -298,13 +299,13 @@ export const classifyEntityWithHierarchy = async (candidate: Candidate): Promise
                       name.match(/\b(resort|hotel|motel|inn|lodge|stadium|arena|casino|station|estación|terminal|railway station|train station|golf club|country club|theme park|amusement park)\b/i) !== null;
 
     // Check Geographic Feature pattern (Strictly prevents parks, reserves, mountains, water from becoming populated places)
-    const isGeographicFeature = !isPoiType && (['national_park', 'mountain', 'water_body', 'historical_site', 'archaeological_site', 'natural_feature', 'island', 'volcano', 'lake', 'river', 'forest', 'nature_reserve', 'protected_area'].includes(type) ||
-                                ['natural', 'historic', 'lake', 'river', 'mountain', 'nature_reserve', 'national_park', 'protected_area', 'forest', 'water'].includes(rawType) ||
+    const isGeographicFeature = !isPoiType && (['national_park', 'mountain', 'mountain_range', 'volcano', 'hill', 'canyon', 'valley', 'lake', 'river', 'waterfall', 'glacier', 'island', 'peninsula', 'desert', 'forest', 'cave', 'beach', 'strait', 'bay', 'ocean', 'sea', 'water_body', 'historical_site', 'archaeological_site', 'natural_feature', 'nature_reserve', 'protected_area'].includes(type) ||
+                                ['natural', 'historic', 'lake', 'river', 'mountain', 'nature_reserve', 'national_park', 'protected_area', 'forest', 'water', 'glacier', 'canyon', 'valley'].includes(rawType) ||
                                 name.match(/\b(special reserve|national reserve|nature reserve|wildlife reserve|game reserve|forest reserve|faunal reserve|reserve|reserva|réserve|biosphere reserve|ecological reserve)\b/i) !== null ||
                                 name.match(/\b(national park|state park|provincial park|tribal park|parque nacional|parc national|conservation area|protected area|wilderness area|wilderness)\b/i) !== null ||
                                 name.match(/\b(national grassland|grassland|prairie|steppe|savannah|savanna|refuge|wildlife refuge|sanctuary|wildlife sanctuary|preserve|nature preserve)\b/i) !== null ||
                                 name.match(/\b(national forest|forest|forêt|bosque|rainforest|cloud forest|jungle|woods)\b/i) !== null ||
-                                name.match(/\b(mountain range|mountain|mount|mt\.?|peak|pico|summit|volcano|volcán|cordillera|ridge|pass|canyon|cañón|gorge)\b/i) !== null ||
+                                name.match(/\b(mountain range|mountain|mount|mt\.?|peak|pico|summit|volcano|volcán|cordillera|ridge|pass|canyon|cañón|gorge|valley|glacier|waterfall|falls|matterhorn|fuji)\b/i) !== null ||
                                 name.match(/\b(lake|lago|lac|lagoon|laguna|reservoir|embalse|bay|baie|gulf|golfe|sound|strait|ocean|sea|mer)\b/i) !== null ||
                                 name.match(/\b(river|río|fleuve|creek|stream|brook|waterfall|cascada|falls|rapids)\b/i) !== null ||
                                 name.match(/\b(island|isla|îles?|isle|archipelago|atoll|reef|cay|key|shoal|glacier|icefield|dune|desert|desierto)\b/i) !== null);
@@ -336,11 +337,13 @@ export const classifyEntityWithHierarchy = async (candidate: Candidate): Promise
         candidate.classificationReason = isAirport ? 'Airport / transportation infrastructure' : 'Infrastructure / attraction / point of interest';
     } else if (isGeographicFeature) {
         let fType = type;
-        if (fType === 'settlement' || fType === 'city' || fType === 'town' || (fType as string) === 'generic' || (fType as string) === 'poi') {
+        if (!fType || fType === 'generic' || fType === 'natural' || fType === 'settlement') {
             if (name.match(/\b(national park|parque nacional|parc national|state park)\b/i) || rawType === 'national_park') fType = 'national_park';
             else if (name.match(/\b(special reserve|nature reserve|wildlife reserve|reserve|reserva|réserve|sanctuary|preserve)\b/i)) fType = 'natural_feature';
             else if (name.match(/\b(lake|river|creek|bay|reservoir|falls)\b/i)) fType = 'water_body';
-            else if (name.match(/\b(mountain|mount|peak|volcano)\b/i)) fType = 'mountain';
+            else if (name.match(/\b(mountain range|alps|cordillera|ranges)\b/i)) fType = 'mountain_range';
+            else if (name.match(/\b(mountain|mount|peak|volcano|matterhorn|fuji)\b/i)) fType = 'mountain';
+            else if (name.match(/\b(canyon|gorge)\b/i)) fType = 'canyon';
             else if (name.match(/\b(island|isla)\b/i)) fType = 'island';
             else fType = 'natural_feature';
         }

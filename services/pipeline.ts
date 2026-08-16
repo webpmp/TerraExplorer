@@ -59,22 +59,23 @@ export interface FinalLocationResult {
 
 // --- PIPELINE ADAPTERS ---
 
-export const IntentStage = (request: SearchRequest): EntityResolutionResult => {
+export const IntentStage = (request: SearchRequest | string): EntityResolutionResult => {
+  const reqObj: SearchRequest = typeof request === 'string' ? { rawQuery: request } : request;
   console.log("=== PIPELINE STAGE: SEARCH REQUEST ===");
-  console.log(`Raw Query: "${request.rawQuery}"`);
+  console.log(`Raw Query: "${reqObj.rawQuery}"`);
   
-  let intent = request.intent;
-  let entity = request.entity;
+  let intent = reqObj.intent;
+  let entity = reqObj.entity;
   
   if (!intent || !entity) {
-    const extracted = routeIntentAndExtractEntity(request.rawQuery);
+    const extracted = routeIntentAndExtractEntity(reqObj.rawQuery);
     intent = intent || extracted.intent;
     entity = entity || extracted.entity;
   }
   
   const normalized: NormalizedQuery = {
-    request,
-    normalizedQuery: request.rawQuery.trim()
+    request: reqObj,
+    normalizedQuery: reqObj.rawQuery.trim()
   };
   console.log("=== PIPELINE STAGE: NORMALIZATION ===");
   console.log(`Normalized Query: "${normalized.normalizedQuery}"`);
@@ -211,7 +212,11 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
           }
       }
       
-      const providerSignals = (resolvedData as any).discoverySignals || [];
+      const providerSignals = [
+          ...((resolvedData as any).discoverySignals || []),
+          resolvedData.entityType,
+          resolvedData.type
+      ].filter(Boolean);
       const adminContext = [
           (resolvedData as any).country,
           (resolvedData as any).state,
@@ -222,7 +227,14 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
           canonicalName,
           resolvedData.coordinates,
           providerSignals,
-          adminContext
+          {
+              type: resolvedData.type,
+              entityType: resolvedData.entityType,
+              country: (resolvedData as any).country,
+              state: (resolvedData as any).state,
+              city: (resolvedData as any).city,
+              county: (resolvedData as any).county
+          }
       );
 
       canonicalEntity = {

@@ -28,14 +28,14 @@ describe('Geographic Entity Contract', () => {
             expect(type).toBe('island');
         });
 
-        it('classifies Grand Canyon as a natural_feature', async () => {
+        it('classifies Grand Canyon as canyon', async () => {
             const type = await classifyGeographicEntity('Grand Canyon', undefined, ['national park', 'canyon']);
-            expect(type).toBe('national_park');
+            expect(type).toBe('canyon');
         });
         
-        it('classifies Grand Canyon (no signals) as natural_feature', async () => {
+        it('classifies Grand Canyon (no signals) as canyon', async () => {
             const type = await classifyGeographicEntity('Grand Canyon', undefined, []);
-            expect(type).toBe('natural_feature');
+            expect(type).toBe('canyon');
         });
 
         it('classifies Mount Everest as a mountain', async () => {

@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ENTITY_SCHEMAS } from '../entitySchema';
 import { LocationInfo, SkinType, isValidCoordinates, LocationType } from '../types';
 import { formatUserFacingCategory, formatClimateName } from '../utils/categoryFormatting';
+import { fetchAndValidateImages } from '../services/imageService';
 import { 
   X, Users, Info, Crown, Map, Pin, ExternalLink, Loader2,
   BookOpen, Rocket, Trophy, Music, FlaskConical, Palette, Clapperboard, Image as ImageIcon,
@@ -10,6 +11,45 @@ import {
   MapPin, Route as RouteIcon
 } from 'lucide-react';
 
+
+export interface GalleryImage {
+  url: string;
+  caption?: string;
+  attribution?: string;
+}
+
+export const cleanMetadataString = (val: unknown): string | undefined => {
+  if (val === null || val === undefined) return undefined;
+  if (typeof val !== 'string' && typeof val !== 'number') return undefined;
+  const str = String(val).trim();
+  if (!str) return undefined;
+  const lower = str.toLowerCase();
+  if (
+    lower === 'undefined' ||
+    lower === 'null' ||
+    lower === 'n/a' ||
+    lower === 'none' ||
+    lower === 'unknown' ||
+    lower === '[object object]' ||
+    lower === 'placeholder' ||
+    lower === 'no description'
+  ) {
+    return undefined;
+  }
+  return str;
+};
+
+export const formatImageAttribution = (attr: string | undefined): string | undefined => {
+  const cleaned = cleanMetadataString(attr);
+  if (!cleaned) return undefined;
+  
+  // If it already contains a prefix like "Photo:", "Credit:", "Source:", "Image:", preserve it
+  if (/^(photo|credit|source|image|by|courtesy of)\s*[:\-]/i.test(cleaned)) {
+    return cleaned;
+  }
+  
+  return `Photo: ${cleaned}`;
+};
 
 export const normalizeDisplayText = (value: any): string => {
   let str = '';
@@ -432,7 +472,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   
   const [activeTab, setActiveTab] = useState<'overview' | 'news' | 'entities'>('overview');
   const [isMoreNewsLoading, setIsMoreNewsLoading] = useState(false);
-  const [images, setImages] = useState<string[]>([]);
+  const [images, setImages] = useState<GalleryImage[]>([]);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [wikiImage, setWikiImage] = useState<string | null>(null);
   const [expandedImage, setExpandedImage] = useState(false);
@@ -605,38 +645,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
     const fetchImages = async () => {
       try {
-        const foundUrls: string[] = [];
-
-        // 1. Existing image fields on info
-        if (info.primaryImage && typeof info.primaryImage === 'string' && !foundUrls.includes(info.primaryImage)) {
-          foundUrls.push(info.primaryImage);
-        }
-        if (Array.isArray(info.images)) {
-          for (const img of info.images) {
-            if (typeof img === 'string' && !foundUrls.includes(img)) {
-              foundUrls.push(img);
-            }
-          }
-        }
-
-        // 2. Fetch images from Wikipedia
-        const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(info.imageSearchTerm || info.name)}&gsrlimit=4&prop=pageimages&format=json&pithumbsize=600&origin=*`);
-        const data = await res.json();
-        const pages = data.query?.pages;
-        if (pages) {
-          const sortedPageIds = Object.keys(pages).sort((a, b) => ((pages[a] as any).index || 0) - ((pages[b] as any).index || 0));
-          for (const pageId of sortedPageIds) {
-            if (pageId !== "-1" && pages[pageId]?.thumbnail?.source) {
-              const url = pages[pageId].thumbnail.source;
-              if (!foundUrls.includes(url)) {
-                foundUrls.push(url);
-              }
-            }
-          }
-        }
-
-        setImages(foundUrls);
-        setWikiImage(foundUrls[0] || null);
+        const foundImages = await fetchAndValidateImages(info);
+        setImages(foundImages);
+        setWikiImage(foundImages[0]?.url || null);
       } catch (e) {
         console.error("Failed to fetch image", e);
         setImages([]);
@@ -644,7 +655,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       }
     };
     fetchImages();
-  }, [info?.name, info?.imageSearchTerm, info?.primaryImage]);
+  }, [info?.name, (info as any)?.canonicalName, info?.city, info?.country, info?.coordinates?.lat, info?.coordinates?.lng, info?.imageSearchTerm, info?.primaryImage, info?.images, info?.image, info?.imageCaption, (info as any)?.imageAttribution]);
 
   const handleLoadMore = async () => {
     setIsMoreNewsLoading(true);
@@ -725,7 +736,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       header: "bg-[#e8d5b5]/30",
       headerTitle: "text-[#8b5a2b] font-bold uppercase tracking-wider brand-font",
       locationTitle: "text-[#8b5a2b] font-bold font-garamond tracking-wide",
-      tag: "text-[#3e2723] bg-[#d2b48c] border border-[#8b5a2b] rounded-sm font-bold shadow-sm",
+      tag: "text-[#3e2723] bg-[#d2b48c] rounded-sm font-bold shadow-sm",
       subtext: "text-[#8b5a2b]",
       bodyText: "text-[#5c3a21]",
       card: "bg-[#f4ead5] border border-[#8b5a2b]/60 shadow-[inset_1px_1px_4px_rgba(255,255,255,0.4)] rounded-sm hover:bg-[#e8d5b5] transition-colors block relative group",
@@ -1037,7 +1048,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         const hasPop = info.population && ((info.population.historical && !isPlaceholderString(info.population.historical.formattedValue)) || (info.population.current && !isPlaceholderString(info.population.current.formattedValue)));
         const hasClimate = info.climate && !isPlaceholderString(info.climate.name);
         const hasImages = images.length > 0 || !!wikiImage;
-        const currentImgUrl = images[currentImageIndex] || wikiImage;
+        const currentImg = images[currentImageIndex];
+        const currentImgUrl = currentImg?.url || wikiImage;
         
         if (!hasPop && !hasClimate && !hasImages) return null;
         
@@ -1242,52 +1254,114 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
   return (
     <>
-      {expandedImage && (images.length > 0 || wikiImage) && (
-          <div className="fixed inset-0 z-[100] bg-black/95 flex flex-col items-center justify-center p-4 pointer-events-auto select-none" onClick={() => setExpandedImage(false)}>
-              <div className="relative max-w-full max-h-[85vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
-                  <img 
-                    src={images[currentImageIndex] || wikiImage || ''} 
-                    alt={`${info?.name} - ${currentImageIndex + 1}`} 
-                    className={`max-w-full max-h-[75vh] object-contain rounded ${isRetro ? 'grayscale contrast-125' : ''}`} 
-                  />
-                  {images.length > 1 && (
-                    <>
-                      <button 
-                        className="absolute left-2 top-1/2 -translate-y-1/2 p-2.5 bg-black/70 hover:bg-black text-white rounded-full transition-colors shadow-lg"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCurrentImageIndex((prev) => (prev > 0 ? prev - 1 : images.length - 1));
-                        }}
-                        title="Previous image"
-                      >
-                        <ChevronLeft size={24} />
-                      </button>
-                      <button 
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 bg-black/70 hover:bg-black text-white rounded-full transition-colors shadow-lg"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCurrentImageIndex((prev) => (prev < images.length - 1 ? prev + 1 : 0));
-                        }}
-                        title="Next image"
-                      >
-                        <ChevronRight size={24} />
-                      </button>
-                      <div className="mt-2 text-white/75 text-xs font-mono">
-                        {currentImageIndex + 1} of {images.length}
-                      </div>
-                    </>
-                  )}
-                  {info?.imageCaption && (
-                      <div className="mt-2 text-white/90 text-sm md:text-base max-w-2xl text-center bg-black/60 px-4 py-2 rounded">
-                          {info.imageCaption}
-                      </div>
-                  )}
-                  <button className={`absolute -top-4 -right-4 p-2 bg-black text-white rounded-full hover:bg-white/20`} onClick={(e) => { e.stopPropagation(); setExpandedImage(false); }}>
+      {expandedImage && (images.length > 0 || wikiImage) && (() => {
+        const currentImg = images[currentImageIndex] || (wikiImage ? { url: wikiImage, caption: cleanMetadataString(info?.imageCaption), attribution: undefined } : null);
+        if (!currentImg?.url) return null;
+        
+        const currentCaption = cleanMetadataString(currentImg.caption);
+        const currentAttribution = formatImageAttribution(currentImg.attribution);
+
+        let captionClass = "text-white/90 text-sm md:text-base font-normal font-sans";
+        let attributionClass = "text-white/60 text-xs mt-1 font-sans";
+
+        if (skin === 'retro-green') {
+          captionClass = "text-green-300 font-retro text-sm md:text-base";
+          attributionClass = "text-green-400/70 text-xs mt-1 font-retro";
+        } else if (skin === 'retro-amber') {
+          captionClass = "text-amber-300 font-retro text-sm md:text-base";
+          attributionClass = "text-amber-400/70 text-xs mt-1 font-retro";
+        } else if (skin === 'parchment') {
+          captionClass = "text-amber-100/90 font-serif text-sm md:text-base";
+          attributionClass = "text-[#d2b48c]/75 text-xs mt-1 font-serif";
+        }
+
+        return (
+          <div 
+            className="fixed inset-0 z-[100] bg-black/95 flex flex-col items-center justify-center p-4 pointer-events-auto select-none" 
+            onClick={() => setExpandedImage(false)}
+            data-testid="lightbox-modal"
+          >
+              <div 
+                className="relative max-w-4xl w-full max-h-[90vh] flex flex-col items-center justify-center" 
+                onClick={(e) => e.stopPropagation()}
+              >
+                  {/* Close button */}
+                  <button 
+                    className="absolute -top-4 -right-4 p-2 bg-black text-white rounded-full hover:bg-white/20 shadow-lg z-20 transition-colors" 
+                    onClick={(e) => { e.stopPropagation(); setExpandedImage(false); }}
+                    title="Close image"
+                    aria-label="Close enlarged image"
+                    data-testid="lightbox-close"
+                  >
                       <X size={24} />
                   </button>
+
+                  <div className="relative max-w-full max-h-[75vh] flex items-center justify-center overflow-hidden rounded">
+                      <img 
+                        src={currentImg.url} 
+                        alt={currentCaption || `${info?.name} - ${currentImageIndex + 1}`} 
+                        className={`max-w-full max-h-[70vh] md:max-h-[75vh] object-contain rounded ${isRetro ? 'grayscale contrast-125' : ''}`} 
+                        data-testid="lightbox-image"
+                      />
+                      {images.length > 1 && (
+                        <>
+                          <button 
+                            className="absolute left-2 top-1/2 -translate-y-1/2 p-2.5 bg-black/70 hover:bg-black text-white rounded-full transition-colors shadow-lg z-10"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCurrentImageIndex((prev) => (prev > 0 ? prev - 1 : images.length - 1));
+                            }}
+                            title="Previous image"
+                            aria-label="Previous image"
+                            data-testid="lightbox-prev"
+                          >
+                            <ChevronLeft size={24} />
+                          </button>
+                          <button 
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 bg-black/70 hover:bg-black text-white rounded-full transition-colors shadow-lg z-10"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCurrentImageIndex((prev) => (prev < images.length - 1 ? prev + 1 : 0));
+                            }}
+                            title="Next image"
+                            aria-label="Next image"
+                            data-testid="lightbox-next"
+                          >
+                            <ChevronRight size={24} />
+                          </button>
+                        </>
+                      )}
+                  </div>
+
+                  {/* Image Counter */}
+                  {images.length > 1 && (
+                    <div className="mt-2 max-w-4xl w-full text-left px-1 text-white/50 text-xs font-mono" data-testid="lightbox-counter">
+                      {currentImageIndex + 1} of {images.length}
+                    </div>
+                  )}
+
+                  {/* Lightbox Footer with Editorial Caption and Attribution */}
+                  {(currentCaption || currentAttribution) && (
+                    <div 
+                      className="mt-3 max-w-4xl w-full text-left px-1"
+                      data-testid="lightbox-footer"
+                    >
+                      {currentCaption && (
+                        <div className={`leading-snug ${captionClass}`} data-testid="lightbox-caption">
+                          {currentCaption}
+                        </div>
+                      )}
+                      {currentAttribution && (
+                        <div className={`leading-normal ${attributionClass}`} data-testid="lightbox-attribution">
+                          {currentAttribution}
+                        </div>
+                      )}
+                    </div>
+                  )}
               </div>
           </div>
-      )}
+        );
+      })()}
       <div className="absolute top-[282px] right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-342px)] flex flex-col gap-3 animate-in slide-in-from-right-12 fade-in duration-500 pointer-events-none">
         {/* Main Info Box */}
         <div className={`${theme.container} flex flex-col shrink min-h-0 overflow-hidden pointer-events-auto`}>

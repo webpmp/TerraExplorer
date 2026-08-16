@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { reverseGeocode, ReverseGeocodeContext, resolveGeographicMetadata, resolveGeographicEntity, GeographicSource, resolvePrimaryGeographicEntity } from "./geographic/geographicResolver";
+import { DETERMINISTIC_LOCATION_DB } from './geographic/geographicData';
 import { getEstimatedClimate, getClimateDescription, isClimateGeographicallyValid, isClimateConflicting } from './geographic/climateEstimator';
 import { providerRegistry } from './geographic/providers/providerRegistry';
 import { applySelection } from './geographic/selection';
@@ -371,62 +372,6 @@ export const normalizeLocationEntity = (entity: string | null | undefined | any)
   return capitalizeWords(str);
 };
 
-/**
- * Deterministic geographic resolution database for major cities, states, and landmarks.
- * Resolves exact coordinates and canonical names without relying on LLMs.
- */
-const DETERMINISTIC_LOCATION_DB: Record<string, { name: string; type: LocationType; entityType: EntityType; lat: number; lng: number; suggestedZoom?: number; country?: string; state?: string; city?: string }> = {
-  "plano, texas": { name: "Plano, Texas", type: LocationType.CITY, entityType: "city", lat: 33.0198, lng: -96.6989, suggestedZoom: 8 },
-  "plano, tx": { name: "Plano, Texas", type: LocationType.CITY, entityType: "city", lat: 33.0198, lng: -96.6989, suggestedZoom: 8 },
-  "plano tx": { name: "Plano, Texas", type: LocationType.CITY, entityType: "city", lat: 33.0198, lng: -96.6989, suggestedZoom: 8 },
-  "plano texas": { name: "Plano, Texas", type: LocationType.CITY, entityType: "city", lat: 33.0198, lng: -96.6989, suggestedZoom: 8 },
-  "plano": { name: "Plano, Texas", type: LocationType.CITY, entityType: "city", lat: 33.0198, lng: -96.6989, suggestedZoom: 8 },
-  
-  "boston, massachusetts": { name: "Boston, Massachusetts", type: LocationType.CITY, entityType: "city", lat: 42.3601, lng: -71.0589, suggestedZoom: 8 },
-  "boston, ma": { name: "Boston, Massachusetts", type: LocationType.CITY, entityType: "city", lat: 42.3601, lng: -71.0589, suggestedZoom: 8 },
-  "boston ma": { name: "Boston, Massachusetts", type: LocationType.CITY, entityType: "city", lat: 42.3601, lng: -71.0589, suggestedZoom: 8 },
-  "boston": { name: "Boston, Massachusetts", type: LocationType.CITY, entityType: "city", lat: 42.3601, lng: -71.0589, suggestedZoom: 8 },
-
-  "amsterdam": { name: "Amsterdam, Netherlands", type: LocationType.CITY, entityType: "city", lat: 52.3676, lng: 4.9041, suggestedZoom: 8 },
-  "amsterdam, netherlands": { name: "Amsterdam, Netherlands", type: LocationType.CITY, entityType: "city", lat: 52.3676, lng: 4.9041, suggestedZoom: 8 },
-
-  "paris": { name: "Paris, France", type: LocationType.CITY, entityType: "city", lat: 48.8566, lng: 2.3522, suggestedZoom: 8 },
-  "paris, france": { name: "Paris, France", type: LocationType.CITY, entityType: "city", lat: 48.8566, lng: 2.3522, suggestedZoom: 8 },
-
-  "taj mahal": { name: "Taj Mahal", type: LocationType.POI, entityType: "landmark", lat: 27.1751, lng: 78.0421, suggestedZoom: 9 },
-  "the taj mahal": { name: "Taj Mahal", type: LocationType.POI, entityType: "landmark", lat: 27.1751, lng: 78.0421, suggestedZoom: 9 },
-
-  "mount fuji": { name: "Mount Fuji", type: LocationType.POI, entityType: "mountain", lat: 35.3606, lng: 138.7274, suggestedZoom: 8 },
-  "titanic wreck site": { name: "Titanic Wreck Site", type: LocationType.POI, entityType: "shipwreck_site", lat: 41.7325, lng: -49.9469, suggestedZoom: 7 },
-  "titanic": { name: "Titanic Wreck Site", type: LocationType.POI, entityType: "shipwreck_site", lat: 41.7325, lng: -49.9469, suggestedZoom: 7 },
-  "the vasa": { name: "Vasa Shipwreck Discovery Site", type: LocationType.POI, entityType: "shipwreck_site", lat: 59.3275, lng: 18.0911, suggestedZoom: 9 },
-  "vasa": { name: "Vasa Shipwreck Discovery Site", type: LocationType.POI, entityType: "shipwreck_site", lat: 59.3275, lng: 18.0911, suggestedZoom: 9 },
-  "the vasa found": { name: "Vasa Shipwreck Discovery Site", type: LocationType.POI, entityType: "shipwreck_site", lat: 59.3275, lng: 18.0911, suggestedZoom: 9 },
-  "dead sea scrolls": { name: "Qumran Caves", type: LocationType.POI, entityType: "archaeological_site", lat: 31.7412, lng: 35.4600, suggestedZoom: 8 },
-  "dead sea scrolls discovery site": { name: "Qumran Caves", type: LocationType.POI, entityType: "archaeological_site", lat: 31.7412, lng: 35.4600, suggestedZoom: 8 },
-  "the dead sea scrolls": { name: "Qumran Caves", type: LocationType.POI, entityType: "archaeological_site", lat: 31.7412, lng: 35.4600, suggestedZoom: 8 },
-  "rosetta stone": { name: "Fort Julien", type: LocationType.POI, entityType: "discovery_site", lat: 31.3996, lng: 30.4170, suggestedZoom: 8 },
-  "the rosetta stone": { name: "Fort Julien", type: LocationType.POI, entityType: "discovery_site", lat: 31.3996, lng: 30.4170, suggestedZoom: 8 },
-  "woodstock": { name: "Bethel, New York (Woodstock Site)", type: LocationType.POI, entityType: "festival_site", lat: 41.7001, lng: -74.7871, suggestedZoom: 8 },
-  "eruption of vesuvius": { name: "Mount Vesuvius", type: LocationType.POI, entityType: "historical_event_site", lat: 40.8218, lng: 14.4264, suggestedZoom: 8 },
-  "boston massacre": { name: "Boston Massacre Site", type: LocationType.POI, entityType: "historical_event_site", lat: 42.3588, lng: -71.0578, suggestedZoom: 9 },
-  
-  // Expanded Global Cities for Deterministic Fallback
-  "cape town": { name: "Cape Town, South Africa", type: LocationType.CITY, entityType: "city", lat: -33.9249, lng: 18.4241, suggestedZoom: 8 },
-  "cape town, south africa": { name: "Cape Town, South Africa", type: LocationType.CITY, entityType: "city", lat: -33.9249, lng: 18.4241, suggestedZoom: 8, country: "South Africa", city: "Cape Town" },
-  "sydney": { name: "Sydney, Australia", type: LocationType.CITY, entityType: "city", lat: -33.8688, lng: 151.2093, suggestedZoom: 8, country: "Australia", state: "New South Wales", city: "Sydney" },
-  "sydney, australia": { name: "Sydney, Australia", type: LocationType.CITY, entityType: "city", lat: -33.8688, lng: 151.2093, suggestedZoom: 8, country: "Australia", state: "New South Wales", city: "Sydney" },
-  "london": { name: "London, UK", type: LocationType.CITY, entityType: "city", lat: 51.5074, lng: -0.1278, suggestedZoom: 8, country: "United Kingdom", city: "London" },
-  "london, uk": { name: "London, UK", type: LocationType.CITY, entityType: "city", lat: 51.5074, lng: -0.1278, suggestedZoom: 8, country: "United Kingdom", city: "London" },
-  "london, england": { name: "London, UK", type: LocationType.CITY, entityType: "city", lat: 51.5074, lng: -0.1278, suggestedZoom: 8, country: "United Kingdom", city: "London" },
-  "new york": { name: "New York, USA", type: LocationType.CITY, entityType: "city", lat: 40.7128, lng: -74.0060, suggestedZoom: 8, country: "United States", state: "New York", city: "New York" },
-  "new york city": { name: "New York, USA", type: LocationType.CITY, entityType: "city", lat: 40.7128, lng: -74.0060, suggestedZoom: 8, country: "United States", state: "New York", city: "New York" },
-  "nyc": { name: "New York, USA", type: LocationType.CITY, entityType: "city", lat: 40.7128, lng: -74.0060, suggestedZoom: 8, country: "United States", state: "New York", city: "New York" },
-  "cliffs of moher": { name: "Cliffs of Moher", type: LocationType.POI, entityType: "natural_landmark", lat: 52.9715, lng: -9.4265, suggestedZoom: 10, country: "Ireland", state: "County Clare" },
-  "statue of liberty": { name: "Statue of Liberty", type: LocationType.POI, entityType: "landmark", lat: 40.6892, lng: -74.0445, suggestedZoom: 12, country: "United States", state: "New York", city: "New York" },
-  "sydney opera house": { name: "Sydney Opera House", type: LocationType.POI, entityType: "landmark", lat: -33.8568, lng: 151.2153, suggestedZoom: 12, country: "Australia", state: "New South Wales", city: "Sydney" }
-};
-
 export const resolveLocationQuery = async (query: string, intent?: QueryIntent, rawQuery?: string): Promise<SearchResult | null> => {
   let normalizedQuery = query;
   try {
@@ -455,9 +400,11 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
         coordinates: { lat: deterministicRes.lat, lng: deterministicRes.lng, source: "deterministic" as CoordinateSource },
         coordinateSource: "deterministic" as CoordinateSource,
         identityStatus: "verified" as GeographicIdentityStatus,
-        country: deterministicRes.country,
-        state: deterministicRes.state,
-        city: deterministicRes.city,
+        country: deterministicRes.context?.country || (deterministicRes as any).country,
+        state: deterministicRes.context?.state || (deterministicRes as any).state,
+        city: deterministicRes.context?.city || (deterministicRes as any).city,
+        county: deterministicRes.context?.county,
+        region: deterministicRes.context?.region,
         description: `Information on ${deterministicRes.name}.`,
         funFacts: [],
         notable: []
@@ -2059,12 +2006,13 @@ export const generateRoute = async (text: string, intent?: string): Promise<Rout
       18. Route Type Classification:
           - Classify the routeType as one of: "single_location", "regional_event", "multi_location_campaign", "fixed_path", "network", "conceptual", or "point".
           - If the query describes distributed networks like the Silk Road, Roman roads, Viking trade routes, classification: "network".
-          - If the query resolves to a single geographic location (like "Battle of Waterloo", "Pearl Harbor", "Pompeii"), classification: "single_location".
-          - If the query is about a war, conflict, revolution, or invasion without a specific path, classification: "regional_event".
-          - If the query is about an explicit journey or military campaign, classification: "multi_location_campaign".
+          - If the query resolves to a single geographic location or single-battlefield event (like "Battle of Waterloo", "Pearl Harbor", "Pompeii", "Charge of the Light Brigade"), classification: "single_location" with 1 waypoint.
+          - If the query is about a war, conflict, revolution, or multi-theater event spanning multiple separate locations, classification: "regional_event" (requires 2 or more waypoints).
+          - If the query is about an explicit journey or military campaign route, classification: "multi_location_campaign".
       ${intent === 'HISTORICAL_EVENT' && /(war|conflict|revolution|campaign|invasion|battle)/i.test(t) && !/(route|timeline|progression|path)/i.test(t) ? `
       CRITICAL OVERRIDE: The user asked about a historical event/war but did NOT explicitly request a route. 
-      You MUST classify this as routeType: "regional_event" or "single_location". 
+      If the event occurred at a single location/battlefield, you MUST classify this as routeType: "single_location" with 1 waypoint.
+      If the event spans multiple distinct theaters/regions, classify this as routeType: "regional_event" with 2-5 waypoints. 
       Do NOT generate a fake campaign or fixed path. Limit output to maximum 5 waypoints representing major regions.
       ` : ''}
       19. Payload Constraints:
