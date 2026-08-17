@@ -30,7 +30,7 @@ const ModernPlace: Partial<EntitySchema> = {
 
 const HistoricalEntity: Partial<EntitySchema> = {
   capabilities: {
-    supportsNews: false,
+    supportsNews: true,
     supportsPopulation: true,
     supportsClimate: true,
     supportsHistoricalNarrative: true
@@ -53,6 +53,7 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
         { id: "historicalPeriod", required: false },
         { id: "keyFigures", required: false },
         { id: "modernContext", required: false },
+        { id: "liveNews", required: false },
         { id: "relatedPlaces", required: false }
       ]
     }

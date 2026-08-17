@@ -509,6 +509,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({ skin, isInteracting, o
       {isVisible && (
         <Html
           fullscreen
+          zIndexRange={[10, 0]}
           style={{
             pointerEvents: isInteractive ? 'auto' : 'none',
             opacity: opacity,

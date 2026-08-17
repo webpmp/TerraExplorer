@@ -373,4 +373,176 @@ describe('Lightbox Metadata Integration', () => {
     expect(html).not.toContain('<h4 class="font-bold text-sm text-white/95 leading-snug">Angels Landing offers one of the most challenging');
     expect(html).not.toContain('<h4 class="font-bold text-sm text-white/95 leading-snug">The Narrows hike through Zion Canyon is a unique experience');
   });
+
+  it('renders saved-route stop with single event headline and detailed description paragraph without duplication', () => {
+    const routeStopLocation = {
+      name: 'Burkhan Khaldun (Mongolia)',
+      type: 'Point of Interest' as any,
+      entityType: 'historical_waypoint',
+      coordinates: { lat: 48.9, lng: 109.0 },
+      routeContext: {
+        title: 'Campaigns of Genghis Khan',
+        text: '1206: Temüjin unites the Mongol tribes and is proclaimed Genghis Khan.'
+      },
+      waypoint: {
+        id: 'wp-genghis-1',
+        name: 'Burkhan Khaldun (Mongolia)',
+        lat: 48.9,
+        lng: 109.0,
+        context: '1206: Temüjin unites the Mongol tribes and is proclaimed Genghis Khan.',
+        description: 'Burkhan Khaldun is a sacred mountain in northeastern Mongolia where Temüjin sought spiritual refuge in his youth. Following decades of inter-tribal warfare, he convened a grand kurultai here in 1206, uniting the nomadic confederations and proclaiming the Mongol Empire.',
+        routeTitle: 'Campaigns of Genghis Khan'
+      },
+      description: 'Burkhan Khaldun is a sacred mountain in northeastern Mongolia where Temüjin sought spiritual refuge in his youth. Following decades of inter-tribal warfare, he convened a grand kurultai here in 1206, uniting the nomadic confederations and proclaiming the Mongol Empire.',
+      notable: [],
+      news: []
+    };
+
+    const html = renderToStaticMarkup(
+      <InfoPanel
+        info={routeStopLocation}
+        onClose={() => {}}
+        isLoading={false}
+        isNewsFetching={false}
+        skin="modern"
+        isFavorite={false}
+        onSaveFavorite={() => {}}
+        onRemoveFavorite={() => {}}
+        onLoadMoreNews={async () => {}}
+      />
+    );
+
+    // Route title appears as route context header
+    expect(html).toContain('Campaigns of Genghis Khan');
+
+    // Event summary appears exactly once
+    const eventSummary = '1206: Temüjin unites the Mongol tribes and is proclaimed Genghis Khan.';
+    const firstEventIdx = html.indexOf(eventSummary);
+    const secondEventIdx = html.indexOf(eventSummary, firstEventIdx + 1);
+    expect(firstEventIdx).toBeGreaterThan(-1);
+    expect(secondEventIdx).toBe(-1); // Must NOT duplicate
+
+    // Detailed description appears in the body text
+    const descText = 'Burkhan Khaldun is a sacred mountain in northeastern Mongolia';
+    expect(html).toContain(descText);
+    expect(html.indexOf(descText)).toBeGreaterThan(firstEventIdx);
+  });
+
+  it('handles legacy route stops gracefully when description equals routeContext without duplicating', () => {
+    const legacyRouteStop = {
+      name: 'Burkhan Khaldun (Mongolia)',
+      type: 'Point of Interest' as any,
+      entityType: 'historical_waypoint',
+      coordinates: { lat: 48.9, lng: 109.0 },
+      routeContext: {
+        title: 'Campaigns of Genghis Khan',
+        text: '1206: Temüjin unites the Mongol tribes and is proclaimed Genghis Khan.'
+      },
+      waypoint: {
+        id: 'wp-genghis-1',
+        name: 'Burkhan Khaldun (Mongolia)',
+        lat: 48.9,
+        lng: 109.0,
+        context: '1206: Temüjin unites the Mongol tribes and is proclaimed Genghis Khan.',
+        routeTitle: 'Campaigns of Genghis Khan'
+      },
+      description: '1206: Temüjin unites the Mongol tribes and is proclaimed Genghis Khan.',
+      notable: [],
+      news: []
+    };
+
+    const html = renderToStaticMarkup(
+      <InfoPanel
+        info={legacyRouteStop}
+        onClose={() => {}}
+        isLoading={false}
+        isNewsFetching={false}
+        skin="modern"
+        isFavorite={false}
+        onSaveFavorite={() => {}}
+        onRemoveFavorite={() => {}}
+        onLoadMoreNews={async () => {}}
+      />
+    );
+
+    const eventSummary = '1206: Temüjin unites the Mongol tribes and is proclaimed Genghis Khan.';
+    const firstEventIdx = html.indexOf(eventSummary);
+    const secondEventIdx = html.indexOf(eventSummary, firstEventIdx + 1);
+    expect(firstEventIdx).toBeGreaterThan(-1);
+    expect(secondEventIdx).toBe(-1); // Deduplicated
+  });
+
+  describe('Lazy-Loaded News State Machine', () => {
+    it('initially renders LOAD NEWS button in idle state when location is resolved', () => {
+      const location = {
+        name: 'Zion National Park',
+        type: 'Point of Interest' as any,
+        entityType: 'national_park',
+        description: 'Zion National Park is known for high plateaus and narrow sandstone canyons.',
+        coordinates: { lat: 37.2982, lng: -113.0263 },
+        notable: [],
+        news: []
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={location}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+          onFetchNews={async () => []}
+          onLoadMoreNews={async () => {}}
+        />
+      );
+
+      // Must render NEWS header and LOAD NEWS button
+      expect(html).toContain('<h3 class="font-bold uppercase tracking-wider leading-tight text-xs text-white/95">News</h3>');
+      expect(html).toContain('>Load News</button>');
+      expect(html).not.toContain('>Load More News</button>');
+    });
+
+    it('renders news articles, left-aligned layout, and LOAD MORE NEWS button when loaded', () => {
+      const locationWithNews = {
+        name: 'Zion National Park',
+        type: 'Point of Interest' as any,
+        entityType: 'national_park',
+        description: 'Zion National Park is known for high plateaus and narrow sandstone canyons.',
+        coordinates: { lat: 37.2982, lng: -113.0263 },
+        notable: [],
+        news: [
+          {
+            title: 'Zion Shuttle System Upgrades Announced',
+            summary: 'Park officials detail new electric shuttle fleet.',
+            url: 'https://example.com/zion-news',
+            source: 'Utah News',
+            date: 'August 16, 2026'
+          }
+        ]
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={locationWithNews}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+          onFetchNews={async () => []}
+          onLoadMoreNews={async () => {}}
+        />
+      );
+
+      expect(html).toContain('Zion Shuttle System Upgrades Announced');
+      expect(html).toContain('Park officials detail new electric shuttle fleet.');
+      expect(html).toContain('Utah News</span><span>·</span><span>August 16, 2026</span>');
+      expect(html).toContain('>Load More News</button>');
+      expect(html).not.toContain('>Load News</button>');
+    });
+  });
 });
+

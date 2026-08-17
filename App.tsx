@@ -13,7 +13,7 @@ import SettingsPanel from './components/SettingsPanel';
 import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint, GeoCoordinates, UserSettings, AIProvider, NewsProvider } from './types';
 import { getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, EnrichmentMetrics, cancelFeatureInfoRequests } from './services/geminiService';
 import { getEstimatedClimate } from './services/geographic/climateEstimator';
-import { enrichLocationInfo, mergeLocationInfo } from './services/locationService';
+import { enrichLocationInfo, mergeLocationInfo, fetchAndValidateLocationNews } from './services/locationService';
 import { resolveGeographicMetadata } from './services/geographic/geographicResolver';
 import { logWaypointSnapshot } from './utils/pipelineDebug';
 import { fetchLiveNews } from './services/newsService';
@@ -531,6 +531,7 @@ const App: React.FC = () => {
                 lat: 50.3755, 
                 lng: -4.1427, 
                 context: "August 8, 1914: The Endurance departs for Buenos Aires.", 
+                description: "Plymouth served as the final departure point in Great Britain for Ernest Shackleton's Imperial Trans-Antarctic Expedition aboard the Endurance. Departing on the eve of World War I after Winston Churchill authorized the journey to proceed, the expedition aimed to achieve the first land crossing of Antarctica.",
                 routeTitle: "Endurance Expedition" 
             },
             { 
@@ -539,6 +540,7 @@ const App: React.FC = () => {
                 lat: -34.6037, 
                 lng: -58.3816, 
                 context: "October 9, 1914: The ship arrives to pick up supplies and crew.", 
+                description: "Buenos Aires was the primary South American staging ground for the Endurance. Here the expedition completed final outfitting, took on vital cold-weather supplies, and recruited photographer Frank Hurley and stowaway Perce Blackborow before heading into the Southern Ocean.",
                 routeTitle: "Endurance Expedition" 
             },
             { 
@@ -547,6 +549,7 @@ const App: React.FC = () => {
                 lat: -54.2811, 
                 lng: -36.5092, 
                 context: "December 5, 1914: The expedition departs the whaling station for the Weddell Sea.", 
+                description: "Grytviken was a remote Norwegian whaling station on South Georgia Island. Whalers warned Shackleton of unusually heavy pack ice further south in the Weddell Sea, advice that prompted a month-long delay while the crew waited for favorable sea ice conditions.",
                 routeTitle: "Endurance Expedition" 
             },
             { 
@@ -555,6 +558,7 @@ const App: React.FC = () => {
                 lat: -76.5, 
                 lng: -35.0, 
                 context: "January 1915: The Endurance becomes frozen fast in the pack ice.", 
+                description: "Deep in the Weddell Sea, the Endurance encountered impassable pack ice and was frozen solid into an ice floe just miles from the Antarctic mainland. For ten months the ship drifted helplessly northward with the ice floe in sub-zero polar conditions.",
                 routeTitle: "Endurance Expedition" 
             },
             { 
@@ -563,6 +567,7 @@ const App: React.FC = () => {
                 lat: -69.08, 
                 lng: -51.5, 
                 context: "November 21, 1915: Crushed by ice, the ship sinks, stranding the crew.", 
+                description: "Under enormous pressure from shifting pack ice, the hull of the Endurance was crushed beyond repair. Shackleton ordered the crew to abandon ship, salvaging food, dog teams, and three wooden lifeboats before the ship slipped beneath the icy waters.",
                 routeTitle: "Endurance Expedition" 
             },
             { 
@@ -571,6 +576,7 @@ const App: React.FC = () => {
                 lat: -61.1417, 
                 lng: -55.2333, 
                 context: "April 1916: The crew reaches solid land for the first time in 497 days.", 
+                description: "After perilous open-boat navigation through turbulent Antarctic seas, the 28 exhausted crew members landed on the desolate spit of Elephant Island. It marked their first footing on solid ground in over sixteen months, though rescue remained thousands of miles away.",
                 routeTitle: "Endurance Expedition" 
             },
             { 
@@ -579,6 +585,7 @@ const App: React.FC = () => {
                 lat: -54.1500, 
                 lng: -37.2333, 
                 context: "May 1916: Shackleton and five men land after the perilous voyage of the James Caird.", 
+                description: "In one of history's greatest feats of small-boat navigation, Shackleton and five companions sailed 800 miles across the treacherous Drake Passage in the 22-foot James Caird lifeboat, making a miraculous landing on the uninhabited southern coast of South Georgia.",
                 routeTitle: "Endurance Expedition" 
             },
             { 
@@ -587,6 +594,7 @@ const App: React.FC = () => {
                 lat: -54.1600, 
                 lng: -36.7110, 
                 context: "May 20, 1916: Shackleton, Worsley, and Crean reach safety after crossing the mountains.", 
+                description: "Lacking climbing equipment, Shackleton, Frank Worsley, and Tom Crean trekked non-stop across South Georgia's uncharted glaciers and alpine ridges for 36 hours, finally reaching the managers at Stromness Whaling Station to organize rescue operations.",
                 routeTitle: "Endurance Expedition" 
             },
              { 
@@ -595,6 +603,7 @@ const App: React.FC = () => {
                 lat: -53.1638, 
                 lng: -70.9171, 
                 context: "August 30, 1916: The tug Yelcho, commanded by Luis Pardo, finally rescues the remaining crew from Elephant Island.", 
+                description: "From Punta Arenas, Shackleton mounted four rescue attempts before securing the Chilean steam tug Yelcho under Captain Luis Pardo. They successfully breached the winter ice at Elephant Island, rescuing all 22 stranded crewmen without a single loss of life.",
                 routeTitle: "Endurance Expedition" 
             }
         ]
@@ -613,6 +622,7 @@ const App: React.FC = () => {
                 lat: 48.9,
                 lng: 109.0,
                 context: "1206: Temüjin unites the Mongol tribes and is proclaimed Genghis Khan.",
+                description: "Burkhan Khaldun is a sacred mountain in northeastern Mongolia where Temüjin sought spiritual refuge in his youth. Following decades of inter-tribal warfare, he convened a grand kurultai here in 1206, uniting the nomadic confederations and proclaiming the Mongol Empire.",
                 routeTitle: "Campaigns of Genghis Khan"
             },
             {
@@ -621,6 +631,7 @@ const App: React.FC = () => {
                 lat: 38.4872,
                 lng: 106.2309,
                 context: "1209: The Mongols force the Western Xia emperor to submit.",
+                description: "Yinchuan was the fortified capital of the Tangut Western Xia dynasty. In 1209, Genghis Khan launched his first major external campaign, surrounding the capital and diverting the Yellow River to breach defenses, successfully forcing Western Xia into tribute and vassalage.",
                 routeTitle: "Campaigns of Genghis Khan"
             },
             {
@@ -629,6 +640,7 @@ const App: React.FC = () => {
                 lat: 39.9042,
                 lng: 116.4074,
                 context: "1215: The Jin capital is captured and sacked after a long siege.",
+                description: "Zhongdu was the formidable northern capital of the Jurchen Jin dynasty. The Mongol army laid siege to the city in 1214, cutting off supply lines and capturing the metropolis in 1215, giving the Mongols complete strategic dominance over the North China Plain.",
                 routeTitle: "Campaigns of Genghis Khan"
             },
             {
@@ -637,6 +649,7 @@ const App: React.FC = () => {
                 lat: 42.746,
                 lng: 75.25,
                 context: "1218: General Jebe conquers the Qara Khitai empire.",
+                description: "Balasagun was an ancient Silk Road trading center in modern Kyrgyzstan. In 1218, Mongol general Jebe pursued the usurper Kuchlug, granting religious freedom to the local Muslim population and annexing the vast Qara Khitai realm without prolonged bloodshed.",
                 routeTitle: "Campaigns of Genghis Khan"
             },
             {
@@ -645,6 +658,7 @@ const App: React.FC = () => {
                 lat: 42.85,
                 lng: 68.3,
                 context: "1219: The Khwarazmian governor executes Mongol envoys, triggering invasion.",
+                description: "Otrar was a key commercial oasis on the Silk Road along the Syr Darya. When its governor executed a 500-camel Mongol trade delegation, Genghis Khan retaliated with a massive western expedition, besieging and destroying the city in a five-month siege.",
                 routeTitle: "Campaigns of Genghis Khan"
             },
             {
@@ -653,6 +667,7 @@ const App: React.FC = () => {
                 lat: 39.7681,
                 lng: 64.4556,
                 context: "1220: Genghis Khan captures the city and addresses the populace in the mosque.",
+                description: "Bukhara was one of the intellectual and spiritual capitals of the Islamic Golden Age. Genghis Khan led a surprise attack across the Kyzylkum Desert, capturing the city and assembling the civic leaders in the Great Mosque before advancing along the Zeravshan Valley.",
                 routeTitle: "Campaigns of Genghis Khan"
             },
             {
@@ -661,6 +676,7 @@ const App: React.FC = () => {
                 lat: 39.6542,
                 lng: 66.9597,
                 context: "1220: The capital of the Khwarazmian Empire falls.",
+                description: "Samarkand was the grand, heavily fortified imperial capital of the Khwarazmian Empire. Despite formidable walls and war elephants, the city fell within days under coordinated Mongol assaults and advanced Chinese siege engineers.",
                 routeTitle: "Campaigns of Genghis Khan"
             },
              {
@@ -669,6 +685,7 @@ const App: React.FC = () => {
                 lat: 33.9,
                 lng: 72.2,
                 context: "1221: Genghis Khan defeats Jalal ad-Din Mingburnu on the banks of the Indus.",
+                description: "At the Battle of the Indus, Genghis Khan surrounded the last Khwarazmian ruler, Jalal ad-Din. After a desperate last stand, Jalal ad-Din galloped his stallion off a steep cliff into the swollen river, escaping to India while Genghis Khan ordered his archers to spare his life in tribute to his valor.",
                 routeTitle: "Campaigns of Genghis Khan"
             },
             {
@@ -677,6 +694,7 @@ const App: React.FC = () => {
                 lat: 35.6,
                 lng: 106.2,
                 context: "1227: Genghis Khan dies during the final campaign against Western Xia.",
+                description: "The cool highlands of the Liupan Mountains in northwestern China served as the summer headquarters for Genghis Khan's final punitive campaign against Western Xia. The great conqueror passed away here in August 1227, leaving an empire spanning from the Pacific to the Caspian.",
                 routeTitle: "Campaigns of Genghis Khan"
             }
         ]
@@ -695,6 +713,7 @@ const App: React.FC = () => {
                 lat: 38.802722,
                 lng: -90.10125,
                 context: "May 14, 1804: The Corps of Discovery departs their winter camp to begin the journey up the Missouri.",
+                description: "Camp Dubois in Illinois served as the winter training and staging base for the Corps of Discovery. Meriwether Lewis and William Clark trained soldiers, gathered equipment, and finalized navigation instruments before launching their expedition up the Missouri River.",
                 routeTitle: "Lewis and Clark Expedition"
             },
             {
@@ -703,6 +722,7 @@ const App: React.FC = () => {
                 lat: 38.7758,
                 lng: -90.4851,
                 context: "May 16-21, 1804: The expedition makes final preparations and recruits the last crew members.",
+                description: "St. Charles was the last major European-American settlement on the Missouri River. The expedition paused here for several days to recruit experienced French-Canadian boatmen, adjust cargo balances, and wait for Captain Lewis to arrive from St. Louis.",
                 routeTitle: "Lewis and Clark Expedition"
             },
             {
@@ -711,6 +731,7 @@ const App: React.FC = () => {
                 lat: 39.117,
                 lng: -94.606,
                 context: "June 26, 1804: The explorers reach the confluence of the Kansas and Missouri rivers.",
+                description: "Kaw Point, situated at the junction of the Kansas and Missouri rivers in modern-day Kansas City, provided a strategic rest stop where Clark took celestial observations and the crew repaired their keelboat and pirogues.",
                 routeTitle: "Lewis and Clark Expedition"
             },
             {
@@ -719,6 +740,7 @@ const App: React.FC = () => {
                 lat: 42.4631,
                 lng: -96.3838,
                 context: "August 20, 1804: Sergeant Charles Floyd dies of appendicitis, the expedition's only fatality.",
+                description: "On a high bluff overlooking the Missouri River near present-day Sioux City, Sergeant Charles Floyd succumbed to probable appendicitis. He was buried with military honors, remaining the sole fatality of the entire two-and-a-half-year transcontinental expedition.",
                 routeTitle: "Lewis and Clark Expedition"
             },
             {
@@ -727,6 +749,7 @@ const App: React.FC = () => {
                 lat: 41.434,
                 lng: -96.009,
                 context: "August 3, 1804: Lewis and Clark hold their first formal council with the Oto and Missouri tribes.",
+                description: "Council Bluff in eastern Nebraska was the site of the expedition's first diplomatic meeting with indigenous leaders. Lewis delivered a speech announcing United States sovereignty and distributed peace medals to chiefs of the Oto and Missouri tribes.",
                 routeTitle: "Lewis and Clark Expedition"
             },
             {
@@ -735,6 +758,7 @@ const App: React.FC = () => {
                 lat: 42.8425,
                 lng: -96.942,
                 context: "August 25, 1804: The captains climb this mound to investigate local legends of 'little people'.",
+                description: "Spirit Mound is a prominent geological landmark in South Dakota that local Native American tribes believed was inhabited by diminutive spirit-beings. Lewis, Clark, and several men hiked to the summit to map the expansive prairie views and observe wildlife.",
                 routeTitle: "Lewis and Clark Expedition"
             },
             {
@@ -743,6 +767,7 @@ const App: React.FC = () => {
                 lat: 47.297926,
                 lng: -101.08726,
                 context: "Winter 1804-1805: The expedition builds a fort for the winter and meets Sacagawea.",
+                description: "Fort Mandan was constructed near the Mandan and Hidatsa villages in North Dakota. During their winter stay, Lewis and Clark forged friendly diplomatic ties, hired French-Canadian fur trapper Toussaint Charbonneau, and met his Shoshone wife, Sacagawea.",
                 routeTitle: "Lewis and Clark Expedition"
             },
             {
@@ -751,6 +776,7 @@ const App: React.FC = () => {
                 lat: 47.375,
                 lng: -101.405,
                 context: "Major trade hub where the captains gathered vital geographical information from the Hidatsa.",
+                description: "The Knife River Villages comprised thriving agricultural and trade centers on the Upper Missouri. Hidatsa and Mandan elders provided the captains with detailed geographical descriptions and hand-drawn maps of the Rocky Mountains ahead.",
                 routeTitle: "Lewis and Clark Expedition"
             },
             {
@@ -759,6 +785,7 @@ const App: React.FC = () => {
                 lat: 47.516,
                 lng: -111.378,
                 context: "June 1805: The expedition faces a grueling month-long portage around the massive waterfalls.",
+                description: "The Great Falls of the Missouri presented a series of five cascading waterfalls over an 18-mile stretch. The crew undertook an arduous overland portage through cactus and intense heat, hauling canoes and heavy cargo by hand across rough terrain.",
                 routeTitle: "Lewis and Clark Expedition"
             },
             {
@@ -767,6 +794,7 @@ const App: React.FC = () => {
                 lat: 45.894,
                 lng: -111.927,
                 context: "July 1805: The explorers discover the headwaters of the Missouri River.",
+                description: "At Three Forks in Montana, the expedition reached the headwaters of the Missouri River where three major rivers converge. Captains Lewis and Clark named them the Jefferson, Madison, and Gallatin rivers in honor of prominent leaders.",
                 routeTitle: "Lewis and Clark Expedition"
             },
             {
@@ -775,6 +803,7 @@ const App: React.FC = () => {
                 lat: 44.975833,
                 lng: -113.441944,
                 context: "August 12, 1805: Meriwether Lewis crosses the Continental Divide, leaving US territory.",
+                description: "Lemhi Pass on the Montana-Idaho border marks the point where Meriwether Lewis crossed the Continental Divide. Standing at the pass, Lewis looked west expecting a navigable river to the Pacific, only to see endless rows of snow-capped mountains.",
                 routeTitle: "Lewis and Clark Expedition"
             },
             {
@@ -783,6 +812,7 @@ const App: React.FC = () => {
                 lat: 46.133611,
                 lng: -123.880278,
                 context: "Winter 1805-1806: The Corps achieves their goal, wintering on the Pacific Coast.",
+                description: "Fort Clatsop was established near the mouth of the Columbia River in Oregon after the expedition reached the Pacific Ocean. The crew spent the rainy winter documenting new species, drawing maps, and preparing for their return journey home.",
                 routeTitle: "Lewis and Clark Expedition"
             }
         ]
@@ -802,6 +832,7 @@ const App: React.FC = () => {
                 lat: 51.448,
                 lng: 0.283,
                 context: "May 19, 1845: The HMS Erebus and HMS Terror depart England.",
+                description: "Sir John Franklin's lost expedition set sail from Greenhithe on the Thames with 129 officers and crew aboard HMS Erebus and HMS Terror. Outfitted with auxiliary steam engines and three years of provisions, the mission was tasked with discovering the Northwest Passage.",
                 routeTitle: "Franklin Expedition Route"
             },
             {
@@ -810,6 +841,7 @@ const App: React.FC = () => {
                 lat: 58.965,
                 lng: -3.296,
                 context: "Final port of call in the UK.",
+                description: "Stromness in the Orkney Islands served as the expedition's last stop in the British Isles. The ships took on fresh water, cattle, and supplies before heading west across the North Atlantic toward Greenland.",
                 routeTitle: "Franklin Expedition Route"
             },
             {
@@ -818,6 +850,7 @@ const App: React.FC = () => {
                 lat: 69.25,
                 lng: -53.53,
                 context: "July 1845: Five men sent home, provisions loaded. Last letters sent.",
+                description: "In the Whalefish Islands off the western coast of Greenland, the expedition transferred additional coal and preserved rations from escort transport ships. Five crew members were discharged and sent home, carrying the expedition's final letters to families.",
                 routeTitle: "Franklin Expedition Route"
             },
             {
@@ -826,6 +859,7 @@ const App: React.FC = () => {
                 lat: 74.25,
                 lng: -84.0,
                 context: "Late July 1845: Last spotted by European whalers waiting for ice to clear.",
+                description: "Lancaster Sound was the eastern gateway to the Northwest Passage in northern Canada. Two whaling ships, the Prince of Wales and Enterprise, spotted the Erebus and Terror tethered to an iceberg waiting for open leads in the pack ice—the last Europeans to see Franklin alive.",
                 routeTitle: "Franklin Expedition Route"
             },
             {
@@ -834,6 +868,7 @@ const App: React.FC = () => {
                 lat: 74.716,
                 lng: -91.833,
                 context: "Winter 1845-1846: Expedition camps here. Three crewmen die and are buried.",
+                description: "Beechey Island provided a sheltered harbor where the expedition spent their first Arctic winter. Three crewmen (John Torrington, John Hartnell, and William Braine) died here of illness and were buried on the windswept shore.",
                 routeTitle: "Franklin Expedition Route"
             },
             {
@@ -842,6 +877,7 @@ const App: React.FC = () => {
                 lat: 75.15,
                 lng: -95.0,
                 context: "1846: The ships circumnavigated this island before heading south.",
+                description: "During the summer thaw of 1846, Franklin navigated north around Cornwallis Island via Wellington Channel, proving it was an island before steering south into Peel Sound toward King William Island.",
                 routeTitle: "Franklin Expedition Route"
             },
             {
@@ -850,6 +886,7 @@ const App: React.FC = () => {
                 lat: 73.0,
                 lng: -96.5,
                 context: "Summer 1846: Sailed south towards King William Island.",
+                description: "Peel Sound is an icy strait in Nunavut between Somerset Island and Prince of Wales Island. The ships sailed south through its freezing waters before becoming hopelessly trapped by multi-year pack ice off the northwestern tip of King William Island in September 1846.",
                 routeTitle: "Franklin Expedition Route"
             },
             {
@@ -858,6 +895,7 @@ const App: React.FC = () => {
                 lat: 69.63,
                 lng: -98.81,
                 context: "Sept 1846: Ships beset in ice. April 1848: Ships abandoned by survivors.",
+                description: "At Point Victory on King William Island, searchers later found the sole written record left by the expedition. The note recorded Sir John Franklin's death on June 11, 1847, and the abandonment of the iced-in ships by the remaining 105 survivors in April 1848.",
                 routeTitle: "Franklin Expedition Route"
             },
             {
@@ -866,6 +904,7 @@ const App: React.FC = () => {
                 lat: 68.89,
                 lng: -98.94,
                 context: "Resting place of the HMS Terror, discovered in 2016.",
+                description: "Terror Bay on the southwestern coast of King William Island is the resting place of HMS Terror. Discovered in 2016 in pristine condition beneath 80 feet of water, the wreck confirmed Inuit oral history that the ship had drifted south before foundering.",
                 routeTitle: "Franklin Expedition Route"
             },
             {
@@ -874,12 +913,50 @@ const App: React.FC = () => {
                 lat: 68.25,
                 lng: -98.9,
                 context: "Resting place of the HMS Erebus, discovered in 2014.",
+                description: "Queen Maud Gulf in the Canadian Arctic waters south of King William Island contains the wreck of HMS Erebus. Located by Parks Canada underwater archaeologists in 2014, the flagship's discovery resolved one of the greatest mysteries in maritime exploration history.",
                 routeTitle: "Franklin Expedition Route"
             }
         ]
     };
 
-    setFavorites([shackletonRoute, genghisRoute, lewisClarkRoute, franklinRoute]);
+    const defaultRoutes = [shackletonRoute, genghisRoute, lewisClarkRoute, franklinRoute];
+
+    // Build lookup for default waypoint descriptions to hydrate legacy cached favorites
+    const defaultWaypointMap = new Map<string, Waypoint>();
+    defaultRoutes.forEach(r => {
+      r.waypoints?.forEach(wp => {
+        defaultWaypointMap.set(wp.id, wp);
+      });
+    });
+
+    if (savedFavorites) {
+      try {
+        const parsed = JSON.parse(savedFavorites);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+            const hydratedFavorites = parsed
+              .filter((f: any) => f && typeof f.lat === 'number' && typeof f.lng === 'number' && f.name)
+              .map((f: FavoriteLocation) => {
+                if (f.type === 'route' && Array.isArray(f.waypoints)) {
+                  const updatedWaypoints = f.waypoints.map(wp => {
+                    const defaultMatch = defaultWaypointMap.get(wp.id);
+                    if (defaultMatch && (!wp.description || wp.description.trim() === '')) {
+                      return { ...wp, description: defaultMatch.description };
+                    }
+                    return wp;
+                  });
+                  return { ...f, waypoints: updatedWaypoints };
+                }
+                return f;
+              });
+            setFavorites(hydratedFavorites);
+            return;
+        }
+      } catch (e) {
+        console.error("Failed to parse favorites", e);
+      }
+    }
+
+    setFavorites(defaultRoutes);
   }, []);
 
   // Save favorites to local storage whenever they change
@@ -931,7 +1008,7 @@ const App: React.FC = () => {
          contextNotes: [],
          news: [],
          relatedEntities: [],
-         sectionState: { description: wp.description ? "complete" : "loading", news: "loading" }
+         sectionState: { description: wp.description ? "complete" : "loading", news: "idle" }
      };
      
      setLocationInfo(initialWaypointPayload);
@@ -989,7 +1066,7 @@ const App: React.FC = () => {
          contextNotes: [],
          news: [],
          relatedEntities: [],
-         sectionState: { description: wp.description ? "complete" : "loading", news: "loading" }
+         sectionState: { description: wp.description ? "complete" : "loading", news: "idle" }
      };
 
      setLocationInfo((prev: any) => {
@@ -1026,7 +1103,9 @@ const App: React.FC = () => {
                  if (enrichedData) {
                      setLocationInfo((prev: any) => {
                          if (!prev || prev.waypoint?.id !== wp.id) return prev;
-                         const desc = overwriteNarrative ? (enrichedData.description || wp.description || wp.significance || wp.context) : (wp.description || wp.significance || wp.context || enrichedData.description);
+                         const desc = overwriteNarrative 
+                              ? (enrichedData.description || wp.description || wp.significance || "") 
+                              : (wp.description || enrichedData.description || wp.significance || "");
                          let nextState = mergeLocationInfo(prev, {
                              description: desc,
                              notable: enrichedData.notable,
@@ -1058,39 +1137,6 @@ const App: React.FC = () => {
                  if (enrichmentRequestId === activeMarkerRequestRef.current) {
                      setIsInfoPanelLoading(false);
                      console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_COMPLETE');
-                 }
-             }
-         })();
-
-         // Stage 4: News
-         (async () => {
-             try {
-                 await new Promise(resolve => setTimeout(resolve, 100));
-                 if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
-                 setIsNewsFetching(true);
-                 
-                 const dataWithNews = await enrichLocationInfo(data);
-                 if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
-                 
-                 if (dataWithNews && dataWithNews.news) {
-                     setLocationInfo((prev: any) => {
-                         if (!prev || prev.waypoint?.id !== wp.id) return prev;
-                         return mergeLocationInfo(prev, {
-                             news: dataWithNews.news,
-                             newsError: dataWithNews.newsError,
-                             sectionState: { ...prev.sectionState, news: "complete" }
-                         });
-                     });
-                 } else {
-                     setLocationInfo((prev: any) => prev ? { ...prev, sectionState: { ...prev.sectionState, news: "error" } } : prev);
-                 }
-             } catch (err) {
-                 if (enrichmentRequestId === activeMarkerRequestRef.current) {
-                     setLocationInfo((prev: any) => prev ? { ...prev, sectionState: { ...prev.sectionState, news: "error" } } : prev);
-                 }
-             } finally {
-                 if (enrichmentRequestId === activeMarkerRequestRef.current) {
-                     setIsNewsFetching(false);
                  }
              }
          })();
@@ -1221,7 +1267,7 @@ const App: React.FC = () => {
             news: [],
             notable: [],
             relatedEntities: [],
-            sectionState: { description: "loading", news: "loading" }
+            sectionState: { description: "loading", news: "idle" }
         };
 
         setLocationInfo((prev: any) => {
@@ -1260,41 +1306,6 @@ const App: React.FC = () => {
                 if (enrichmentRequestId === activeMarkerRequestRef.current) {
                     setIsInfoPanelLoading(false);
                     console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_COMPLETE');
-                }
-            }
-        })();;
-
-        // Stage 4: News
-        (async () => {
-            try {
-                await new Promise(resolve => setTimeout(resolve, 100));
-                if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
-                setIsNewsFetching(true);
-                
-                const dataWithNews = await enrichLocationInfo(basePayload);
-                if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
-                
-                if (dataWithNews && dataWithNews.news) {
-                    console.log(`[InfoPanel] enrichment updated`);
-                    setLocationInfo((prev: any) => {
-                        if (!prev || enrichmentRequestId !== activeMarkerRequestRef.current) return prev;
-                        return mergeLocationInfo(prev, {
-                            news: dataWithNews.news,
-                            newsError: dataWithNews.newsError,
-                            sectionState: { ...prev.sectionState, news: "complete" }
-                        });
-                    });
-                } else {
-                    setLocationInfo((prev: any) => (prev && enrichmentRequestId === activeMarkerRequestRef.current) ? { ...prev, sectionState: { ...prev.sectionState, news: "error" } } : prev);
-                }
-            } catch (err) {
-                 if (enrichmentRequestId === activeMarkerRequestRef.current) {
-                    setLocationInfo((prev: any) => prev ? { ...prev, sectionState: { ...prev.sectionState, news: "error" } } : prev);
-                }
-            } finally {
-                if (enrichmentRequestId === activeMarkerRequestRef.current) {
-                    setIsNewsFetching(false);
-                    console.log(`[InfoPanel] enrichment completed`);
                 }
             }
         })();
@@ -2091,20 +2102,49 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       }
   };
 
+  const handleFetchNews = useCallback(async () => {
+    if (!locationInfo) return;
+    setIsNewsFetching(true);
+    try {
+      const newsItems = await fetchAndValidateLocationNews(locationInfo.name, locationInfo);
+      setLocationInfo(prev => {
+         if (!prev) return null;
+         return {
+            ...prev,
+            news: newsItems,
+            sectionState: { ...prev.sectionState, news: "complete" }
+         };
+      });
+      return newsItems;
+    } catch (err) {
+      console.error("Failed to fetch news:", err);
+      setLocationInfo(prev => prev ? { ...prev, sectionState: { ...prev.sectionState, news: "error" } } : prev);
+      throw err;
+    } finally {
+      setIsNewsFetching(false);
+    }
+  }, [locationInfo]);
+
   const handleLoadMoreNews = useCallback(async () => {
     if (!locationInfo) return;
-    
-    const currentTitles = locationInfo.news.map(n => n.title);
-    const newNews = await fetchLiveNews(locationInfo.name);
-    
-    setLocationInfo(prev => {
-       if(!prev) return null;
-       const uniqueNewNews = newNews.filter(n => !prev.news.some(pn => pn.title === n.title));
-       return {
-          ...prev,
-          news: [...prev.news, ...uniqueNewNews]
-       }
-    });
+    setIsNewsFetching(true);
+    try {
+      const currentTitles = (locationInfo.news || []).map((n: any) => n.title);
+      const newNews = await fetchAndValidateLocationNews(locationInfo.name, locationInfo);
+      setLocationInfo(prev => {
+         if(!prev) return null;
+         const uniqueNewNews = newNews.filter((n: any) => !currentTitles.includes(n.title));
+         return {
+            ...prev,
+            news: [...(prev.news || []), ...uniqueNewNews]
+         };
+      });
+    } catch (err) {
+      console.error("Failed to load more news:", err);
+      throw err;
+    } finally {
+      setIsNewsFetching(false);
+    }
   }, [locationInfo]);
 
 
@@ -2340,6 +2380,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           onSaveFavorite={handleSaveFavorite}
           onRemoveFavorite={() => handleRemoveFavorite()}
           currentFavoriteName={currentFavorite?.name}
+          onFetchNews={handleFetchNews}
           onLoadMoreNews={handleLoadMoreNews}
           routeNav={(routeWaypoints.length > 0 && currentWaypointIndex !== -1) ? {
               current: currentWaypointIndex + 1,

@@ -149,6 +149,11 @@ const UniversalMarker: React.FC<{
   scanOffsetsRef
 }) => {
   const meshRef = useRef<THREE.Group>(null);
+  const domPinRef = useRef<HTMLDivElement>(null);
+  const { camera, size: viewportSize } = useThree();
+
+  const colorStr = typeof color === 'string' ? color : (color instanceof THREE.Color ? `#${color.getHexString()}` : '#ff0000');
+  const outlineStr = typeof outlineColor === 'string' ? outlineColor : (outlineColor instanceof THREE.Color ? `#${outlineColor.getHexString()}` : '#ffffff');
 
   useFrame((state) => {
     if (meshRef.current) {
@@ -158,9 +163,6 @@ const UniversalMarker: React.FC<{
 
       // Subtle size scaling formula: size multiplier goes from 0.8 to 0.95
       const sizeMultiplier = 0.8 + zoomLevel * 0.15;
-      const baseScale = isSelected 
-        ? (1 + Math.sin(state.clock.elapsedTime * 3) * 0.3)
-        : 1;
         
       let roleScale = 1;
       if (isWaypoint && waypointRole) {
@@ -168,7 +170,7 @@ const UniversalMarker: React.FC<{
         else if (waypointRole === 'administrative') roleScale = 0.8;
       }
       
-      meshRef.current.scale.setScalar(baseScale * sizeMultiplier * roleScale);
+      meshRef.current.scale.setScalar(sizeMultiplier * roleScale);
 
       // 2. Fetch screen-space collision offset computed in parent's useFrame loop
       const displacement = scanOffsetsRef?.current?.[markerId] || new THREE.Vector3(0, 0, 0);
@@ -183,6 +185,47 @@ const UniversalMarker: React.FC<{
          meshRef.current.position.copy(localPos);
       } else {
          meshRef.current.position.copy(position);
+      }
+
+      // 3. Screen-space DOM overlay projection & size calculation for OSM map visibility
+      if (domPinRef.current) {
+        const wp = new THREE.Vector3();
+        meshRef.current.getWorldPosition(wp);
+
+        // Check if marker is facing the camera
+        const isFacingCam = wp.dot(camera.position) > 0.6;
+        if (!isFacingCam) {
+          domPinRef.current.style.display = 'none';
+        } else {
+          domPinRef.current.style.display = 'flex';
+          
+          const markerVisualSize = size * sizeMultiplier * roleScale;
+          const centerScreen = wp.clone().project(camera);
+          const edgeWp = wp.clone().add(camera.up.clone().multiplyScalar(markerVisualSize));
+          const edgeScreen = edgeWp.project(camera);
+
+          const heightHalf = viewportSize.height / 2;
+          const centerY = -(centerScreen.y * heightHalf) + heightHalf;
+          const edgeY = -(edgeScreen.y * heightHalf) + heightHalf;
+          
+          const radius = Math.max(3.5, Math.abs(centerY - edgeY));
+          const diameter = radius * 2;
+          const strokeWidth = Math.max(1.5, radius * 0.22);
+
+          domPinRef.current.style.width = `${diameter}px`;
+          domPinRef.current.style.height = `${diameter}px`;
+          domPinRef.current.style.borderWidth = `${strokeWidth}px`;
+
+          // Selected Marker Pure Uniform Scale Pulse (animates scale only, zero color/shadow/opacity shift)
+          if (isSelected) {
+            const pulseScale = 1.0 + (Math.sin(state.clock.elapsedTime * 3) * 0.5 + 0.5) * 0.25;
+            domPinRef.current.style.transform = `scale(${pulseScale})`;
+            domPinRef.current.style.transformOrigin = 'center center';
+          } else {
+            domPinRef.current.style.transform = 'scale(1)';
+            domPinRef.current.style.transformOrigin = 'center center';
+          }
+        }
       }
     }
   });
@@ -204,50 +247,56 @@ const UniversalMarker: React.FC<{
          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
 
-      {/* Border Outline (Inverted Hull) - Thinner stroke (1.2 instead of 1.4) */}
-      <mesh scale={[1.2, 1.2, 1.2]} pointerEvents="none" renderOrder={998}>
-           <sphereGeometry args={[size, 16, 16]} />
-           <meshBasicMaterial 
-              color={outlineColor} 
-              side={THREE.BackSide} 
-              toneMapped={false} 
-              transparent={true} 
-              opacity={1.0}
-              depthTest={true}
-              depthWrite={false}
-           />
-      </mesh>
 
-      {/* Main Dot (Visual) */}
-      <mesh pointerEvents="none" renderOrder={999}>
-        <sphereGeometry args={[size, 16, 16]} />
-        <meshBasicMaterial 
-          color={color} 
-          toneMapped={false} 
-          transparent={true}
-          opacity={isWaypoint && waypointRole === 'administrative' ? 0.6 : 1.0} 
-          depthTest={true}
-          depthWrite={false}
-        />
-      </mesh>
 
-      {/* Waypoint Number */}
-      {isWaypoint && waypointIndex !== undefined && (
-         <Billboard follow={true}>
-            <Text
-              fontSize={size * 1.5} // Increased font size relative to dot for better legibility
-              color={isRetro ? "black" : (skin === 'parchment' ? "#3e2723" : "black")}
-              anchorX="center"
-              anchorY="middle"
-              outlineWidth={isRetro ? 0 : "8%"}
-              outlineColor={skin === 'parchment' ? "#f4ead5" : "white"}
-              fontWeight="bold"
-              position={[0, 0, size + 0.005]}
+      {/* DOM Overlay Pin (Layered at z-index 40, guarantees 100% visibility above OSM raster layer) */}
+      <Html 
+        center 
+        zIndexRange={[40, 0]} 
+        style={{ 
+          pointerEvents: 'auto',
+          userSelect: 'none'
+        }}
+      >
+        <div 
+          ref={domPinRef}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (meshRef.current) {
+              const wp = new THREE.Vector3();
+              meshRef.current.getWorldPosition(wp);
+              onClick({ ...e, object: meshRef.current, point: wp });
+            } else {
+              onClick(e);
+            }
+          }}
+          className="rounded-full flex items-center justify-center cursor-pointer"
+          style={{
+            backgroundColor: colorStr,
+            borderColor: outlineStr,
+            borderStyle: 'solid',
+            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.5)',
+            opacity: isWaypoint && waypointRole === 'administrative' ? 0.6 : 1.0,
+            pointerEvents: 'auto',
+            transformOrigin: 'center center'
+          }}
+        >
+          {isWaypoint && waypointIndex !== undefined && (
+            <span 
+              style={{
+                fontSize: '10px',
+                fontWeight: 'bold',
+                color: isRetro ? 'black' : (skin === 'parchment' ? '#3e2723' : 'black'),
+                lineHeight: 1,
+                userSelect: 'none',
+                textShadow: skin === 'parchment' ? '0 0 2px #f4ead5' : '0 0 2px white'
+              }}
             >
               {waypointIndex + 1}
-            </Text>
-         </Billboard>
-      )}
+            </span>
+          )}
+        </div>
+      </Html>
     </group>
   );
 };
@@ -466,7 +515,7 @@ const HoverOverlay: React.FC<{
       }
     }
 
-    if (!currentActivePin || !currentActiveObject || !containerGroupRef.current) return;
+    if (!currentActivePin || !currentActiveObject || !containerGroupRef.current || typeof currentActiveObject.getWorldPosition !== 'function') return;
 
     // 1. Refresh world position every frame
     const wp = new THREE.Vector3();
@@ -1023,19 +1072,31 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     props.onLocationClick(lat, lng, e.point);
   };
 
-  const handleMarkerClick = (e: any, marker: MapMarker | FavoriteLocation) => {
-    e.stopPropagation();
+  const handleMarkerClick = (e: any, marker: MapMarker | FavoriteLocation | Waypoint | any) => {
+    if (e && typeof e.stopPropagation === 'function') {
+      e.stopPropagation();
+    }
 
-    // Prevent click if user was dragging
-    if (e.delta > 5) return;
+    // Prevent click if user was dragging (for Three.js pointer events)
+    if (e && typeof e.delta === 'number' && e.delta > 5) return;
 
-    // Get the object's world position to correctly position camera
-    // e.object.position is local to the Earth group which is rotating
-    const worldPos = new THREE.Vector3();
-    e.object.getWorldPosition(worldPos);
+    // Resolve world position if Object3D is available, or compute from marker coordinates
+    let worldPos: THREE.Vector3 | undefined = undefined;
+    if (e && e.object && typeof e.object.getWorldPosition === 'function') {
+      worldPos = new THREE.Vector3();
+      e.object.getWorldPosition(worldPos);
+    } else if (e && e.point instanceof THREE.Vector3) {
+      worldPos = e.point.clone();
+    } else if (marker && typeof marker.lat === 'number' && typeof marker.lng === 'number') {
+      worldPos = latLngToVector3(marker.lat, marker.lng, 1.015);
+      if (groupRef.current) {
+        worldPos.applyMatrix4(groupRef.current.matrixWorld);
+      }
+    }
 
-    props.onMarkerClick(marker, worldPos);
-  }
+    // Marker identity/data is always available and opens the InfoPanel regardless of Three.js object presence
+    props.onMarkerClick(marker, worldPos || new THREE.Vector3());
+  };
 
   return (
     <>

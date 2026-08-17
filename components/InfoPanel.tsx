@@ -4,6 +4,7 @@ import { ENTITY_SCHEMAS } from '../entitySchema';
 import { LocationInfo, SkinType, isValidCoordinates, LocationType } from '../types';
 import { formatUserFacingCategory, formatClimateName } from '../utils/categoryFormatting';
 import { fetchAndValidateImages } from '../services/imageService';
+import { fetchAndValidateLocationNews } from '../services/locationService';
 import { 
   X, Users, Info, Crown, Map, Pin, ExternalLink, Loader2,
   BookOpen, Rocket, Trophy, Music, FlaskConical, Palette, Clapperboard, Image as ImageIcon,
@@ -72,13 +73,14 @@ interface InfoPanelProps {
   info: any; // Raw input (can be LocationInfo or waypoint wrapper)
   onClose: () => void;
   isLoading: boolean;
-  isNewsFetching: boolean;
+  isNewsFetching?: boolean;
   skin: SkinType;
   isFavorite: boolean;
   onSaveFavorite: (name: string) => void;
   onRemoveFavorite: () => void;
   currentFavoriteName?: string;
-  onLoadMoreNews: () => Promise<void>;
+  onFetchNews?: () => Promise<any>;
+  onLoadMoreNews?: () => Promise<void>;
   routeNav?: {
     current: number;
     total: number;
@@ -282,6 +284,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   onSaveFavorite, 
   onRemoveFavorite, 
   currentFavoriteName, 
+  onFetchNews,
   onLoadMoreNews, 
   routeNav,
   isError,
@@ -297,7 +300,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     const name = wp.name || rawInfo.name || "Unknown Location";
 
     // 2. Description fallback
-    // Priority: rawInfo.description > wp.description > wp.significance > routeContext
+    // Priority: wp.description > rawInfo.description > wp.significance
     const extractText = (val: any): string => {
        if (!val) return "";
        if (typeof val === "string") return normalizeDisplayText(val);
@@ -328,13 +331,25 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
     const geographicDesc = extractText(rawInfo.description) || null;
     const historicalDesc = extractText(wp.description) || null;
-    const routeContextText = rawInfo.routeContext?.text || null;
+    const routeContextText = rawInfo.routeContext?.text ? extractText(rawInfo.routeContext.text) : null;
     
     let combinedDescParts: string[] = [];
-    let descSource = "combined";
 
-    const rawDesc = geographicDesc || historicalDesc || routeContextText;
-    if (rawDesc) {
+    // Determine the primary narrative description:
+    // 1. Prefer explicit stop narrative in wp.description
+    // 2. Otherwise use geographic / enriched description if it differs from the route event summary (routeContext)
+    let rawDesc = "";
+    if (historicalDesc && historicalDesc !== routeContextText) {
+      rawDesc = historicalDesc;
+    } else if (geographicDesc && geographicDesc !== routeContextText) {
+      rawDesc = geographicDesc;
+    } else if (historicalDesc) {
+      rawDesc = historicalDesc;
+    } else if (geographicDesc && !routeContextText) {
+      rawDesc = geographicDesc;
+    }
+
+    if (rawDesc && rawDesc !== routeContextText) {
       let cleanDesc = rawDesc;
       if (/^#+\s+description/i.test(cleanDesc.trim())) {
         cleanDesc = cleanDesc.replace(/^#+\s+description/i, '').trim();
@@ -342,7 +357,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       combinedDescParts.push(cleanDesc);
     }
 
-    if (wp.significance) {
+    if (wp.significance && wp.significance !== rawDesc && wp.significance !== routeContextText) {
       combinedDescParts.push(`## Significance\n\n${wp.significance}`);
     }
 
@@ -500,8 +515,22 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     };
   }, [rawInfo]);
   
-  const [activeTab, setActiveTab] = useState<'overview' | 'news' | 'entities'>('overview');
+  const [newsState, setNewsState] = useState<'idle' | 'loading' | 'loaded' | 'empty' | 'error'>(() => {
+    if (rawInfo?.news && Array.isArray(rawInfo.news) && rawInfo.news.length > 0) {
+      return 'loaded';
+    }
+    return 'idle';
+  });
+  const [newsList, setNewsList] = useState<any[]>(() => {
+    if (rawInfo?.news && Array.isArray(rawInfo.news) && rawInfo.news.length > 0) {
+      return rawInfo.news;
+    }
+    return [];
+  });
   const [isMoreNewsLoading, setIsMoreNewsLoading] = useState(false);
+  const locationNewsRef = useRef<string | null>(rawInfo?.name || null);
+
+  const [activeTab, setActiveTab] = useState<'overview' | 'news' | 'entities'>('overview');
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [wikiImage, setWikiImage] = useState<string | null>(null);
@@ -524,7 +553,66 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     setWikiImage(null);
     setActiveTab('overview');
     setShowFavoriteDialog(false);
-  }, [info?.name]);
+
+    const locName = info?.name || "";
+    if (locationNewsRef.current !== locName) {
+      locationNewsRef.current = locName;
+      if (rawInfo?.news && Array.isArray(rawInfo.news) && rawInfo.news.length > 0) {
+        setNewsState('loaded');
+        setNewsList(rawInfo.news);
+      } else {
+        setNewsState('idle');
+        setNewsList([]);
+      }
+    } else if (rawInfo?.news && Array.isArray(rawInfo.news) && rawInfo.news.length > 0) {
+      setNewsList(rawInfo.news);
+      setNewsState('loaded');
+    }
+  }, [info?.name, rawInfo?.news]);
+
+  const handleLoadInitialNews = async () => {
+    if (!info?.name) return;
+    setNewsState('loading');
+    try {
+      if (onFetchNews) {
+        const res = await onFetchNews();
+        const items = Array.isArray(res) ? res : (rawInfo?.news || []);
+        if (items && items.length > 0) {
+          setNewsList(items);
+          setNewsState('loaded');
+        } else {
+          setNewsList([]);
+          setNewsState('empty');
+        }
+      } else {
+        const items = await fetchAndValidateLocationNews(info.name, info);
+        if (items && items.length > 0) {
+          setNewsList(items);
+          setNewsState('loaded');
+        } else {
+          setNewsList([]);
+          setNewsState('empty');
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load news:", err);
+      setNewsState('error');
+    }
+  };
+
+  const handleLoadMore = async () => {
+    if (!info?.name) return;
+    setIsMoreNewsLoading(true);
+    try {
+      if (onLoadMoreNews) {
+        await onLoadMoreNews();
+      }
+    } catch (err) {
+      console.error("Failed to load more news:", err);
+    } finally {
+      setIsMoreNewsLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!info) {
@@ -687,12 +775,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     fetchImages();
   }, [info?.name, (info as any)?.canonicalName, info?.city, info?.country, info?.coordinates?.lat, info?.coordinates?.lng, info?.imageSearchTerm, info?.primaryImage, info?.images, info?.image, info?.imageCaption, (info as any)?.imageAttribution]);
 
-  const handleLoadMore = async () => {
-    setIsMoreNewsLoading(true);
-    await onLoadMoreNews();
-    setIsMoreNewsLoading(false);
-  };
-
   const themes = {
     'modern': {
       container: "bg-black/75 backdrop-blur-md border border-cyan-400/30 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] text-white font-sans",
@@ -853,18 +935,27 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     overview: {
       copyText: () => {
         if (!info) return '';
+        let parts: string[] = [];
+        if (info.routeContext?.title && info.routeContext?.text) {
+          parts.push(`${info.routeContext.title}\n${info.routeContext.text}`);
+        }
         const lines = getCleanDescriptionLines(info);
         const cleanText = lines.map(line => line.replace(/^#{1,3}\s/, '').replace(/\*\*(.*?)\*\*/g, '$1').replace(/__(.*?)__/g, '$1')).join('\n');
-        return cleanText.trim();
+        if (cleanText.trim() && cleanText.trim() !== info.routeContext?.text?.trim()) {
+          parts.push(cleanText.trim());
+        }
+        return parts.join('\n\n').trim();
       },
       render: () => {
-        const hasDesc = info.description && info.description.trim().length > 0;
-        const hasRoute = !!info.routeContext;
+        const routeText = info.routeContext?.text?.trim() || "";
+        const descText = info.description?.trim() || "";
+        const hasRoute = !!info.routeContext && routeText.length > 0;
+        const hasDesc = descText.length > 0 && (!hasRoute || descText !== routeText);
         if (!hasDesc && !hasRoute) return null;
 
         return (
           <div className="space-y-4">
-            {info.routeContext && (
+            {hasRoute && (
               <div className="mb-2">
                 <h3 className={`text-xs font-bold uppercase tracking-widest mb-1 ${isRetro ? 'text-current' : isParchment ? 'text-[#8b5a2b]' : 'text-cyan-400'}`}>
                   {info.routeContext.title}
@@ -1226,17 +1317,16 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
     liveNews: {
       copyText: () => {
-         if (!info || !info.news || info.news.length === 0) return '';
+         const effectiveNews = newsList.length > 0 ? newsList : (info?.news || []);
+         if (!info || effectiveNews.length === 0) return '';
          let txt = `News\n`;
-         info.news.forEach((item: any) => {
+         effectiveNews.forEach((item: any) => {
              txt += `- ${normalizeDisplayText(item.title)}\n`;
          });
          return txt.trim();
       },
       render: () => {
-        if (!info.news || info.news.length === 0) {
-           return null;
-        }
+        const effectiveNews = newsList.length > 0 ? newsList : (info?.news || []);
         
         return (
         <div className="space-y-3">
@@ -1247,52 +1337,92 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
               isParchment={isParchment} 
               className="!mt-0 !mb-2" 
           />
-          <div className="space-y-4">
-            {info.news.map((item: any, idx: number) => (
-               <div key={idx} className="space-y-1">
-                  <a 
-                    href={item.url} 
-                    target="_blank" 
-                    rel="noopener noreferrer" 
-                    className={`block ${semanticTitleStyle} hover:underline decoration-1 underline-offset-2`}
-                  >
-                    {normalizeDisplayText(item.title)}
-                  </a>
-                  {normalizeDisplayText(item.summary) && (
-                     <p className={bodyTextStyle}>
-                       {normalizeDisplayText(item.summary)}
-                     </p>
-                  )}
-                  <div className={`flex items-center flex-wrap gap-1.5 ${metaStyle} pt-0.5`}>
-                    <span>{item.source}</span>
-                    {item.date && (
-                      <>
+
+          {newsState === 'idle' && (
+            <button 
+              onClick={handleLoadInitialNews} 
+              className={`w-full py-2.5 transition-colors ${theme.loadMoreBtn}`}
+            >
+              Load News
+            </button>
+          )}
+
+          {newsState === 'loading' && (
+            <p className={`${bodyTextStyle} italic opacity-80`}>
+              Loading news...
+            </p>
+          )}
+
+          {newsState === 'empty' && (
+            <p className={`${bodyTextStyle} opacity-80`}>
+              No recent news found for this location.
+            </p>
+          )}
+
+          {newsState === 'error' && (
+            <div className="space-y-2">
+              <p className={`${bodyTextStyle} text-red-400 opacity-90`}>
+                Unable to load news.
+              </p>
+              <button 
+                onClick={handleLoadInitialNews} 
+                className={`w-full py-2.5 transition-colors ${theme.loadMoreBtn}`}
+              >
+                Try Again
+              </button>
+            </div>
+          )}
+
+          {newsState === 'loaded' && effectiveNews.length > 0 && (
+            <>
+              <div className="space-y-4">
+                {effectiveNews.map((item: any, idx: number) => (
+                   <div key={idx} className="space-y-1">
+                      <a 
+                        href={item.url} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className={`block ${semanticTitleStyle} hover:underline decoration-1 underline-offset-2`}
+                      >
+                        {normalizeDisplayText(item.title)}
+                      </a>
+                      {normalizeDisplayText(item.summary) && (
+                         <p className={bodyTextStyle}>
+                           {normalizeDisplayText(item.summary)}
+                         </p>
+                      )}
+                      <div className={`flex items-center flex-wrap gap-1.5 ${metaStyle} pt-0.5`}>
+                        <span>{item.source}</span>
+                        {item.date && (
+                          <>
+                            <span>·</span>
+                            <span>{item.date}</span>
+                          </>
+                        )}
                         <span>·</span>
-                        <span>{item.date}</span>
-                      </>
-                    )}
-                    <span>·</span>
-                    <a 
-                      href={item.url} 
-                      target="_blank" 
-                      rel="noopener noreferrer" 
-                      className="inline-flex items-center gap-0.5 hover:opacity-100 opacity-80 transition-opacity" 
-                      title="Open news link"
-                    >
-                       <span>Read</span>
-                       <ExternalLink size={11} className="inline" />
-                    </a>
-                  </div>
-               </div>
-            ))}
-          </div>
-          <button 
-            onClick={handleLoadMore} 
-            disabled={isMoreNewsLoading}
-            className={`w-full py-2.5 mt-2 transition-colors ${theme.loadMoreBtn}`}
-          >
-            {isMoreNewsLoading ? "Scanning..." : "Load More News"}
-          </button>
+                        <a 
+                          href={item.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="inline-flex items-center gap-0.5 hover:opacity-100 opacity-80 transition-opacity" 
+                          title="Open news link"
+                        >
+                           <span>Read</span>
+                           <ExternalLink size={11} className="inline" />
+                        </a>
+                      </div>
+                   </div>
+                ))}
+              </div>
+              <button 
+                onClick={handleLoadMore} 
+                disabled={isMoreNewsLoading}
+                className={`w-full py-2.5 mt-2 transition-colors ${theme.loadMoreBtn}`}
+              >
+                {isMoreNewsLoading ? "Scanning..." : "Load More News"}
+              </button>
+            </>
+          )}
         </div>
         );
       }

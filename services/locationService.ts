@@ -1,4 +1,4 @@
-import { LocationInfo } from '../types';
+import { LocationInfo, NewsItem } from '../types';
 import { getUserSettings, sanitizeLocationInfo } from './geminiService';
 import { fetchLiveNews } from './newsService';
 import { logWaypointSnapshot } from '../utils/pipelineDebug';
@@ -108,7 +108,10 @@ export const mergeLocationInfo = (prev: any, next: any): any => {
 // Alias for backwards compatibility where used
 export const mergeRichestFields = mergeLocationInfo;
 
-export const enrichLocationInfo = async (resolvedData: any): Promise<any> => {
+export const fetchAndValidateLocationNews = async (
+    locationName: string,
+    locationData?: { name?: string; waypoint?: { country?: string; region?: string; state?: string; canonicalName?: string; name?: string } }
+): Promise<NewsItem[]> => {
     const settings = getUserSettings();
     const getEnv = () => typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env : (typeof process !== 'undefined' ? process.env : {});
     const nytKey = settings.nytApiKey || getEnv().VITE_NYT_API_KEY;
@@ -121,64 +124,64 @@ export const enrichLocationInfo = async (resolvedData: any): Promise<any> => {
         (settings.newsProvider === 'newsdata' && newsDataKey)
     );
     
-    // Check missing API Key
     if (settings.newsProvider && !apiKeyPresent) {
         console.warn(`News provider ${settings.newsProvider} requires an API key`);
-        resolvedData.news = [];
-        resolvedData.newsError = `${settings.newsProvider.toUpperCase()} API key required`;
-        return sanitizeLocationInfo(resolvedData);
-    } else if (settings.newsProvider && apiKeyPresent) {
-        // We have a real news provider. Fetch real articles.
-        const query = (resolvedData.waypoint && resolvedData.waypoint.canonicalName) ?? (resolvedData.waypoint && resolvedData.waypoint.name) ?? resolvedData.name ?? "Historical Location";
-        try {
-            const realNews = await fetchLiveNews(query);
-            // Apply strict geographic scoring to real news
-            const locName = (resolvedData.name || "").toLowerCase().split(',')[0].trim();
-            const countryName = (resolvedData.waypoint?.country || "").toLowerCase();
-            const regionName = (resolvedData.waypoint?.region || resolvedData.waypoint?.state || "").toLowerCase();
-            
-            resolvedData.news = realNews.filter(item => {
-                const titleLower = (item.title || "").toLowerCase();
-                const summaryLower = (item.summary || "").toLowerCase();
-                const fullText = titleLower + " " + summaryLower;
-                
-                const rejectKeywords = ["hotel", "shopping", "lifestyle", "travel deals", "best places to stay", "cheap flights", "vacation rentals", "restaurants", "recipe", "ingredient", "obituary", "itinerary", "product", "listing", "address", "shipping"];
-                for (const kw of rejectKeywords) {
-                     if (fullText.includes(kw)) {
-                         console.log(`[NEWS VALIDATION] {\n  queryLocation: "${locName}",\n  articleTitle: "${item.title}",\n  accepted: false,\n  reason: "Spam keyword: ${kw}"\n}`);
-                         return false;
-                     }
-                }
-                
-                const hasLoc = locName && (titleLower.includes(locName) || summaryLower.includes(locName));
-                const hasRegion = regionName && (titleLower.includes(regionName) || summaryLower.includes(regionName));
-                const hasCountry = countryName && (titleLower.includes(countryName) || summaryLower.includes(countryName));
-                
-                let accepted = false;
-                let reason = "Rejected: unrelated";
-                
-                if (hasLoc) {
-                    accepted = true;
-                    reason = "Exact location match";
-                } else if (hasRegion && hasCountry) {
-                    accepted = true;
-                    reason = "Region + country match";
-                } else if (hasCountry && !hasRegion) {
-                    accepted = false;
-                    reason = "Rejected: country-only match";
-                }
-                
-                console.log(`[NEWS VALIDATION] {\n  "queryLocation": "${locName}",\n  "articleTitle": "${item.title}",\n  "accepted": ${accepted},\n  "reason": "${reason}"\n}`);
-                return accepted;
-            });
-        } catch (err) {
-            console.error("Failed to fetch real news:", err);
-            resolvedData.news = [];
-        }
-    } else {
-        // Never use LLM hallucinated news
-        resolvedData.news = [];
+        return [];
     }
+    if (!settings.newsProvider || !apiKeyPresent) {
+        return [];
+    }
+
+    const query = locationName || (locationData?.waypoint && locationData.waypoint.canonicalName) || (locationData?.waypoint && locationData.waypoint.name) || locationData?.name || "Historical Location";
+    try {
+        const realNews = await fetchLiveNews(query);
+        const locName = (locationData?.name || locationName || "").toLowerCase().split(',')[0].trim();
+        const countryName = (locationData?.waypoint?.country || "").toLowerCase();
+        const regionName = (locationData?.waypoint?.region || locationData?.waypoint?.state || "").toLowerCase();
+        
+        return realNews.filter(item => {
+            const titleLower = (item.title || "").toLowerCase();
+            const summaryLower = (item.summary || "").toLowerCase();
+            const fullText = titleLower + " " + summaryLower;
+            
+            const rejectKeywords = ["hotel", "shopping", "lifestyle", "travel deals", "best places to stay", "cheap flights", "vacation rentals", "restaurants", "recipe", "ingredient", "obituary", "itinerary", "product", "listing", "address", "shipping"];
+            for (const kw of rejectKeywords) {
+                 if (fullText.includes(kw)) {
+                     console.log(`[NEWS VALIDATION] {\n  queryLocation: "${locName}",\n  articleTitle: "${item.title}",\n  accepted: false,\n  reason: "Spam keyword: ${kw}"\n}`);
+                     return false;
+                 }
+            }
+            
+            const hasLoc = locName && (titleLower.includes(locName) || summaryLower.includes(locName));
+            const hasRegion = regionName && (titleLower.includes(regionName) || summaryLower.includes(regionName));
+            const hasCountry = countryName && (titleLower.includes(countryName) || summaryLower.includes(countryName));
+            
+            let accepted = false;
+            let reason = "Rejected: unrelated";
+            
+            if (hasLoc) {
+                accepted = true;
+                reason = "Exact location match";
+            } else if (hasRegion && hasCountry) {
+                accepted = true;
+                reason = "Region + country match";
+            } else if (hasCountry && !hasRegion) {
+                accepted = false;
+                reason = "Rejected: country-only match";
+            }
+            
+            console.log(`[NEWS VALIDATION] {\n  "queryLocation": "${locName}",\n  "articleTitle": "${item.title}",\n  "accepted": ${accepted},\n  "reason": "${reason}"\n}`);
+            return accepted;
+        });
+    } catch (err) {
+        console.error("Failed to fetch real news:", err);
+        return [];
+    }
+};
+
+export const enrichLocationInfo = async (resolvedData: any): Promise<any> => {
+    // News is strictly lazy-loaded on-demand and excluded from the initial blocking enrichment path
+    resolvedData.news = resolvedData.news || [];
     
     const wp = resolvedData.waypoint;
     
