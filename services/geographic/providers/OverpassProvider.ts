@@ -9,56 +9,85 @@ interface CacheEntry {
 const overpassCache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 24 hours
 
+interface EndpointHealth {
+  url: string;
+  cooldownUntil: number;
+  consecutiveFailures: number;
+}
+
+const discoveryEndpoints: EndpointHealth[] = [
+  { url: "https://lz4.overpass-api.de/api/interpreter", cooldownUntil: 0, consecutiveFailures: 0 },
+  { url: "https://overpass.kumi.systems/api/interpreter", cooldownUntil: 0, consecutiveFailures: 0 },
+  { url: "https://overpass-api.de/api/interpreter", cooldownUntil: 0, consecutiveFailures: 0 }
+];
+
 export class OverpassProvider implements DiscoveryProvider {
   name = "OpenStreetMap";
   lastStatus?: 'SUCCESS_WITH_RESULTS' | 'SUCCESS_EMPTY' | 'RATE_LIMITED' | 'TIMEOUT' | 'FAILED';
   lastStatusMessage?: string;
 
   private async fetchOverpass(query: string, timeoutMs: number): Promise<any> {
-    const endpoints = [
-      "https://lz4.overpass-api.de/api/interpreter",
-      "https://overpass.kumi.systems/api/interpreter",
-      "https://overpass-api.de/api/interpreter"
-    ];
+    const now = Date.now();
+    const availableEndpoints = discoveryEndpoints
+      .filter(ep => ep.cooldownUntil <= now)
+      .sort((a, b) => a.consecutiveFailures - b.consecutiveFailures)
+      .slice(0, 3); // Max 3 endpoint attempts
 
-    const startTime = Date.now();
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    if (availableEndpoints.length === 0) {
+      console.log('[OSM Discovery] UNAVAILABLE reason=all-endpoints-in-cooldown');
+      this.lastStatus = 'FAILED';
+      this.lastStatusMessage = 'All Overpass endpoints in cooldown';
+      return { elements: [] };
+    }
 
-    try {
-      // Use Promise.any to race the endpoints and take the first successful one
-      const response = await Promise.any(endpoints.map(async endpoint => {
-        const res = await fetch(endpoint, {
+    for (const ep of availableEndpoints) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+      try {
+        const res = await fetch(ep.url, {
           method: "POST",
           body: "data=" + encodeURIComponent(query),
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           signal: controller.signal
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        if (res.status === 429) {
+          ep.consecutiveFailures++;
+          ep.cooldownUntil = Date.now() + 60000;
+          this.lastStatus = 'RATE_LIMITED';
+          this.lastStatusMessage = 'HTTP 429 Too Many Requests';
+          continue;
+        }
+
+        if (res.status === 503 || res.status === 504 || !res.ok) {
+          ep.consecutiveFailures++;
+          ep.cooldownUntil = Date.now() + 30000;
+          continue;
+        }
+
         const data = await res.json();
-        return { data, endpoint };
-      }));
-      
-      controller.abort(); // Abort remaining requests
-      this.lastStatus = response.data?.elements?.length > 0 ? 'SUCCESS_WITH_RESULTS' : 'SUCCESS_EMPTY';
-      this.lastStatusMessage = undefined;
-      return response.data;
-    } catch (error: any) {
-      const errStr = String(error?.message || error || '');
-      if (errStr.includes('429')) {
-        this.lastStatus = 'RATE_LIMITED';
-        this.lastStatusMessage = 'HTTP 429 Too Many Requests';
-      } else if (errStr.includes('abort') || errStr.includes('timeout')) {
-        this.lastStatus = 'TIMEOUT';
-        this.lastStatusMessage = 'Request timed out';
-      } else {
-        this.lastStatus = 'FAILED';
-        this.lastStatusMessage = errStr || 'Endpoint request failed';
+        clearTimeout(timeoutId);
+
+        if (data && Array.isArray(data.elements)) {
+          ep.consecutiveFailures = 0;
+          ep.cooldownUntil = 0;
+          console.log(`[OSM Discovery] SOURCE=OVERPASS elements=${data.elements.length}`);
+          this.lastStatus = data.elements.length > 0 ? 'SUCCESS_WITH_RESULTS' : 'SUCCESS_EMPTY';
+          this.lastStatusMessage = undefined;
+          return data;
+        }
+      } catch (err: any) {
+        clearTimeout(timeoutId);
+        ep.consecutiveFailures++;
+        ep.cooldownUntil = Date.now() + 30000;
       }
-      return { elements: [] };
-    } finally {
-      clearTimeout(timeoutId);
     }
+
+    console.log('[OSM Discovery] UNAVAILABLE');
+    this.lastStatus = 'FAILED';
+    this.lastStatusMessage = 'Overpass endpoints unreachable';
+    return { elements: [] };
   }
 
   async searchNearby(context: DiscoveryContext): Promise<MapMarker[]> {

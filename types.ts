@@ -95,9 +95,11 @@ export interface HistoricalIssue {
 
 export interface NotableItem {
   title: string;
-  summary: string;
-  entityType: string;
+  description?: string;
+  summary?: string;
+  entityType?: string;
   wikipediaUrl?: string;
+  [key: string]: any;
 }
 
 export interface ImageMetadata {

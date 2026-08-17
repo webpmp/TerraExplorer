@@ -218,13 +218,58 @@ export const SectionHeader: React.FC<{
   className?: string;
 }> = ({ title, icon, theme = {}, isRetro = false, isParchment = false, className = "" }) => {
   return (
-    <div className={`info-panel-section-header flex items-center gap-2 mt-5 mb-2 ${theme.icon || ''} ${className}`}>
+    <div className={`info-panel-section-header flex items-center gap-1.5 mb-1.5 ${theme.icon || ''} ${className}`}>
       {icon && <span className="shrink-0 opacity-80">{icon}</span>}
-      <h3 className={`font-bold uppercase tracking-wider leading-tight ${isRetro ? 'text-lg text-current' : isParchment ? 'text-lg text-[#8b5a2b]' : 'text-base text-white/95'}`}>
+      <h3 className={`font-bold uppercase tracking-wider leading-tight ${isRetro ? 'text-sm text-current' : isParchment ? 'text-xs text-[#8b5a2b]' : 'text-xs text-white/95'}`}>
         {title}
       </h3>
     </div>
   );
+};
+
+export const parseNotableFactItem = (n: any): { title: string; description: string; wikipediaUrl?: string } | null => {
+  if (!n) return null;
+  if (typeof n === 'string') {
+    const text = n.trim();
+    if (!text) return null;
+    const colonIdx = text.indexOf(':');
+    if (colonIdx !== -1 && colonIdx < 50) {
+      return { title: text.substring(0, colonIdx).trim(), description: text.substring(colonIdx + 1).trim() };
+    }
+    const dashIdx = text.indexOf(' — ') !== -1 ? text.indexOf(' — ') : (text.indexOf(' - ') !== -1 ? text.indexOf(' - ') : -1);
+    if (dashIdx !== -1 && dashIdx < 50) {
+      return { title: text.substring(0, dashIdx).trim(), description: text.substring(dashIdx + 3).trim() };
+    }
+    const match = text.match(/^([A-Z][A-Za-z0-9\s'-]{2,35}?)\s+(?:is|offers|features|was|has|provides|known for|designated|consists of|contains|serves as|stretches|lies|stands|showcases|serves|attracts)\b\s*(.*)$/i);
+    if (match && match[1]) {
+      const descPart = text.substring(match[1].length).trim();
+      return {
+        title: match[1].trim(),
+        description: descPart.charAt(0).toUpperCase() + descPart.slice(1)
+      };
+    }
+    if (text.length > 50) {
+      return { title: "Notable Feature", description: text };
+    }
+    return { title: text, description: "" };
+  }
+  if (typeof n === 'object' && n !== null) {
+    const title = (n.title || n.name || (n.text && !n.summary && !n.description ? n.text : "") || "").trim();
+    const description = (n.description || n.summary || n.significance || (n.text && n.text !== title ? n.text : "") || "").trim();
+    if (!title && description) {
+      return parseNotableFactItem(description);
+    }
+    if (title && !description && title.length > 50) {
+      return parseNotableFactItem(title);
+    }
+    if (!title && !description) return null;
+    return {
+      ...n,
+      title,
+      description
+    };
+  }
+  return null;
 };
 
 const InfoPanel: React.FC<InfoPanelProps> = ({ 
@@ -420,34 +465,19 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
        title: n.title || n.headline || "News Update",
        summary: n.summary || n.description || n.snippet || "",
        url: n.url || n.link || "#",
-       source: n.source || n.publisher || "News Source"
+       source: n.source || n.publisher || "News Source",
+       date: n.date || n.publishedDate || n.pubDate || n.time || ""
     }));
 
     let notable: any[] = [];
     if (Array.isArray(rawInfo.notable)) {
-        notable = rawInfo.notable.map((n: any) => {
-            if (typeof n === 'string') {
-                const splitIndex = n.indexOf(':');
-                if (splitIndex !== -1 && splitIndex < 50) {
-                    return { title: n.substring(0, splitIndex).trim(), summary: n.substring(splitIndex + 1).trim() };
-                }
-                return { title: n, summary: "" };
-            }
-            if (typeof n === 'object') {
-                if (n.name && !n.title && !n.summary) {
-                    const splitIndex = n.name.indexOf(':');
-                    if (splitIndex !== -1 && splitIndex < 50) {
-                        return { title: n.name.substring(0, splitIndex).trim(), summary: n.name.substring(splitIndex + 1).trim() };
-                    }
-                    return { title: n.name, summary: "" };
-                }
-            }
-            return n;
-        });
+        notable = rawInfo.notable.map(parseNotableFactItem).filter(Boolean);
     } else if (rawInfo.notable && typeof rawInfo.notable === 'object') {
-        notable = [rawInfo.notable];
+        const parsed = parseNotableFactItem(rawInfo.notable);
+        if (parsed) notable = [parsed];
     } else if (typeof rawInfo.notable === 'string') {
-        notable = [{ title: rawInfo.notable, summary: "" }];
+        const parsed = parseNotableFactItem(rawInfo.notable);
+        if (parsed) notable = [parsed];
     }
 
     const relatedEntities = (rawInfo.relatedEntities && rawInfo.relatedEntities.length > 0) ? rawInfo.relatedEntities : [];
@@ -765,6 +795,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const tabTextSize = isRetro ? 'text-xl' : 'text-xs';
   const tabIconSize = isRetro ? 18 : 14;
 
+  const sectionHeaderStyle = isRetro ? 'text-sm font-bold uppercase tracking-wider text-current leading-tight' : isParchment ? 'text-xs font-bold uppercase tracking-wider text-[#8b5a2b] leading-tight' : 'text-xs font-bold uppercase tracking-wider text-white/95 leading-tight';
+  const semanticTitleStyle = isRetro ? 'font-bold text-base text-current leading-snug' : isParchment ? 'font-bold text-sm text-[#8b5a2b] leading-snug' : 'font-bold text-sm text-white/95 leading-snug';
+  const bodyTextStyle = `font-normal ${bodySize} ${theme.bodyText} opacity-90 leading-relaxed`;
+  const metaStyle = isRetro ? (skin === 'retro-amber' ? 'text-xs text-amber-300/70 font-mono' : 'text-xs text-green-300/70 font-mono') : isParchment ? 'text-xs text-[#8b5a2b]/75 font-sans' : 'text-xs text-white/60 font-sans';
+
   const renderNoteText = (text: string) => {
     const parts = text.split(/(https?:\/\/[^\s]+)/g);
     return parts.map((part, i) => {
@@ -785,8 +820,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       return part;
     });
   };
-
-
 
   const schema = ENTITY_SCHEMAS[info?.entityType || 'city'] || ENTITY_SCHEMAS['city'];
 
@@ -822,132 +855,220 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         if (!info) return '';
         const lines = getCleanDescriptionLines(info);
         const cleanText = lines.map(line => line.replace(/^#{1,3}\s/, '').replace(/\*\*(.*?)\*\*/g, '$1').replace(/__(.*?)__/g, '$1')).join('\n');
-        let txt = `${cleanText}\n`;
-        if (Array.isArray(info.notable) && info.notable.length > 0) {
-            txt += `\nNotable Facts\n\n`;
-            txt += info.notable.map((n: any) => `${normalizeDisplayText(n.title)}${n.summary ? `\n${normalizeDisplayText(n.summary)}` : ''}`).join('\n\n');
-        }
-        return txt.trim();
+        return cleanText.trim();
       },
-      render: () => (
-      <div className="space-y-5">
-          {info.routeContext && (
+      render: () => {
+        const hasDesc = info.description && info.description.trim().length > 0;
+        const hasRoute = !!info.routeContext;
+        if (!hasDesc && !hasRoute) return null;
+
+        return (
+          <div className="space-y-4">
+            {info.routeContext && (
               <div className="mb-2">
-                   <h3 className={`text-sm font-bold uppercase tracking-widest mb-1 ${isRetro ? 'text-current' : isParchment ? 'text-[#8b5a2b]' : 'text-cyan-400'}`}>
-                      {info.routeContext.title}
-                  </h3>
-                  <p className={`leading-relaxed ${bodySize} font-normal ${theme.bodyText} mb-4 border-b ${isRetro ? 'border-current/30' : isParchment ? 'border-[#8b5a2b]/30' : 'border-white/10'} pb-4`}>
-                      {info.routeContext.text}
-                  </p>
+                <h3 className={`text-xs font-bold uppercase tracking-widest mb-1 ${isRetro ? 'text-current' : isParchment ? 'text-[#8b5a2b]' : 'text-cyan-400'}`}>
+                  {info.routeContext.title}
+                </h3>
+                <p className={`${bodyTextStyle} mb-3 border-b ${isRetro ? 'border-current/30' : isParchment ? 'border-[#8b5a2b]/30' : 'border-white/10'} pb-3`}>
+                  {info.routeContext.text}
+                </p>
               </div>
-          )}
-          {(info.description || (Array.isArray(info.notable) && info.notable.length > 0)) && (
-            <div className="relative group/desc">
-              <div className="absolute top-0 -right-2 opacity-0 group-hover/desc:opacity-100 transition-opacity z-10">
-                <CopyButton text={fullCopyText} skin={skin} className={`p-1.5 transition-colors ${theme.actionBtn}`} />
-              </div>
-              <div className={`leading-relaxed ${bodySize} font-normal ${theme.bodyText} pr-8 space-y-4`}>
-                {(() => {
+            )}
+            {hasDesc && (
+              <div className="relative group/desc">
+                <div className="absolute top-0 -right-2 opacity-0 group-hover/desc:opacity-100 transition-opacity z-10">
+                  <CopyButton text={fullCopyText} skin={skin} className={`p-1.5 transition-colors ${theme.actionBtn}`} />
+                </div>
+                <div className={`pr-8 space-y-3`}>
+                  {(() => {
                     const lines = getCleanDescriptionLines(info);
-                    
                     const blocks: React.ReactNode[] = [];
                     let currentList: string[] = [];
-                    
+
                     const flushList = (keyPrefix: number) => {
-                        if (currentList.length > 0) {
-                            blocks.push(
-                                <ul key={`list-${keyPrefix}`} className="list-disc pl-5 space-y-1">
-                                    {currentList.map((b, bIdx) => (
-                                        <li key={bIdx}>{b}</li>
-                                    ))}
-                                </ul>
-                            );
-                            currentList = [];
-                        }
+                      if (currentList.length > 0) {
+                        blocks.push(
+                          <ul key={`list-${keyPrefix}`} className={`list-disc pl-5 space-y-1 ${bodyTextStyle}`}>
+                            {currentList.map((b, bIdx) => (
+                              <li key={bIdx}>{b}</li>
+                            ))}
+                          </ul>
+                        );
+                        currentList = [];
+                      }
                     };
 
                     lines.forEach((line: string, i: number) => {
-                        let text = line.replace(/\*\*(.*?)\*\*/g, '$1').replace(/__(.*?)__/g, '$1'); 
-                        
-                        if (text.match(/^[-*]\s/)) {
-                            currentList.push(text.replace(/^[-*]\s/, ''));
-                            return;
-                        }
-                        
-                        flushList(i);
-                        
-                        const isMarkdownHeading = text.startsWith('## ') || text.startsWith('# ');
-                        const cleanedText = text.replace(/^#{1,3}\s/, '');
-                        const isHeuristicHeading = cleanedText.split(' ').length <= 8 && cleanedText.length < 60 && !cleanedText.match(/[.!?:;]$/) && !cleanedText.match(/^[a-z]/) && lines[i+1] && !lines[i+1].match(/^[-*]\s/);
-                        
-                        if (isMarkdownHeading || isHeuristicHeading) {
-                            blocks.push(
-                                <h3 key={`h-${i}`} 
-                                    className={`mt-4 mb-2 ${isParchment ? 'text-[#8b5a2b] font-bold text-lg' : 'font-bold'}`}>
-                                    {cleanedText}
-                                </h3>
-                            );
+                      let text = line.replace(/\*\*(.*?)\*\*/g, '$1').replace(/__(.*?)__/g, '$1'); 
+                      
+                      if (text.match(/^[-*]\s/)) {
+                        currentList.push(text.replace(/^[-*]\s/, ''));
+                        return;
+                      }
+                      
+                      flushList(i);
+                      
+                      const isMarkdownHeading = text.startsWith('## ') || text.startsWith('# ');
+                      const cleanedText = text.replace(/^#{1,3}\s/, '');
+                      const isHeuristicHeading = cleanedText.split(' ').length <= 8 && cleanedText.length < 60 && !cleanedText.match(/[.!?:;]$/) && !cleanedText.match(/^[a-z]/) && lines[i+1] && !lines[i+1].match(/^[-*]\s/);
+                      
+                      if (isMarkdownHeading || isHeuristicHeading) {
+                        blocks.push(
+                          <h3 key={`h-${i}`} 
+                            className={`mt-3 mb-1.5 ${semanticTitleStyle}`}>
+                            {cleanedText}
+                          </h3>
+                        );
+                      } else {
+                        const isFirstParagraph = !blocks.some(b => (b as any).type === 'p');
+                        if (isParchment && isFirstParagraph && cleanedText.length > 0) {
+                          blocks.push(
+                            <p key={`p-${i}`} className={`clear-both parchment-drop-cap ${bodyTextStyle}`}>
+                              {cleanedText}
+                            </p>
+                          );
                         } else {
-                            const isFirstParagraph = !blocks.some(b => (b as any).type === 'p');
-                            if (isParchment && isFirstParagraph && cleanedText.length > 0) {
-                                blocks.push(
-                                    <p key={`p-${i}`} className="clear-both parchment-drop-cap">
-                                        {cleanedText}
-                                    </p>
-                                );
-                            } else {
-                                blocks.push(<p key={`p-${i}`}>{cleanedText}</p>);
-                            }
+                          blocks.push(<p key={`p-${i}`} className={bodyTextStyle}>{cleanedText}</p>);
                         }
+                      }
                     });
                     
                     flushList(lines.length);
-                    
-                    if (Array.isArray(info.notable) && info.notable.length > 0) {
-                        blocks.push(
-                            <SectionHeader 
-                                key={`h-notable`}
-                                title="Notable Facts"
-                                theme={theme}
-                                isRetro={isRetro}
-                                isParchment={isParchment}
-                            />
-                        );
-                        blocks.push(
-                            <div key={`list-notable`} className="space-y-4 mt-3">
-                              {info.notable.map((n: any, i: number) => {
-                                const title = n.title || (typeof n === 'string' ? n : '');
-                                const summary = n.summary || (n.text && n.text !== title ? n.text : '');
-                                return (
-                                  <div key={`notable-${i}`} className={`space-y-1 font-normal ${bodySize} ${theme.bodyText} leading-relaxed`}>
-                                    <h4 className={`font-bold tracking-normal ${isRetro ? 'text-current text-sm' : isParchment ? 'text-[#8b5a2b] text-sm' : 'text-white/95 text-sm'}`}>
-                                      {title}
-                                    </h4>
-                                    {summary ? (
-                                      <p className="opacity-90 leading-relaxed text-sm">
-                                        {summary}
-                                      </p>
-                                    ) : null}
-                                    {n.wikipediaUrl && (
-                                      <a href={n.wikipediaUrl} target="_blank" rel="noopener noreferrer" className={`text-xs inline-flex items-center gap-1 mt-1 hover:opacity-80 transition-opacity ${(theme as any).actionText || 'text-blue-400'}`}>
-                                        Learn more →
-                                      </a>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                        );
-                    }
-                    
                     return blocks;
-                })()}
+                  })()}
+                </div>
               </div>
-            </div>
-          )}
-      </div>
-      )
+            )}
+          </div>
+        );
+      }
     },
+
+    gallery: {
+      render: () => {
+        const availableImages: GalleryImage[] = images.length > 0 
+          ? images 
+          : (Array.isArray(info.images) && info.images.length > 0 
+              ? info.images.map((im: any) => typeof im === 'string' ? { url: im } : im) 
+              : (info.primaryImage ? [typeof info.primaryImage === 'string' ? { url: info.primaryImage } : info.primaryImage] : []));
+        const hasImages = availableImages.length > 0 || !!wikiImage;
+        const currentImg = availableImages[currentImageIndex] || (wikiImage ? { url: wikiImage, caption: cleanMetadataString(info?.imageCaption) } : null);
+        const currentImgUrl = currentImg?.url || wikiImage;
+        
+        if (!hasImages || !currentImgUrl) return null;
+
+        return (
+          <div 
+            className={`p-0 overflow-hidden relative h-32 ${theme.card} group cursor-pointer select-none`}
+            onClick={() => setExpandedImage(true)}
+          >
+            <img 
+              src={currentImgUrl} 
+              alt={`${info.name} - ${currentImageIndex + 1}`} 
+              className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${isRetro ? 'grayscale contrast-125' : ''}`} 
+            />
+            
+            {/* Multi-image gallery controls */}
+            {availableImages.length > 1 && (
+              <>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCurrentImageIndex((prev) => (prev > 0 ? prev - 1 : availableImages.length - 1));
+                  }}
+                  className="absolute left-1.5 top-1/2 -translate-y-1/2 p-1 rounded-full bg-black/60 hover:bg-black/85 text-white/90 transition-all opacity-80 group-hover:opacity-100 shadow-md"
+                  title="Previous image"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCurrentImageIndex((prev) => (prev < availableImages.length - 1 ? prev + 1 : 0));
+                  }}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded-full bg-black/60 hover:bg-black/85 text-white/90 transition-all opacity-80 group-hover:opacity-100 shadow-md"
+                  title="Next image"
+                >
+                  <ChevronRight size={16} />
+                </button>
+                <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-sm text-white/90 text-[10px] font-mono px-2 py-0.5 rounded-full border border-white/10 shadow-sm pointer-events-none">
+                  {currentImageIndex + 1} / {availableImages.length}
+                </div>
+              </>
+            )}
+
+            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-2 pt-4 flex items-end gap-2 pointer-events-none">
+               <ImageIcon size={14} className="text-white/80 shrink-0" />
+               {info.imageCaption && !isPlaceholderString(info.imageCaption) ? (
+                 <span className="text-white/90 text-xs truncate font-medium">
+                   {info.imageCaption}
+                 </span>
+               ) : (
+                 <span className="text-white/80 text-[11px] truncate font-medium">
+                   {info.name}
+                 </span>
+               )}
+            </div>
+          </div>
+        );
+      }
+    },
+
+    notable: {
+      copyText: () => {
+        if (!info || !Array.isArray(info.notable) || info.notable.length === 0) return '';
+        let txt = `Notable Facts\n\n`;
+        txt += info.notable.map((n: any) => {
+          const title = normalizeDisplayText(n.title || n.name || (typeof n === 'string' ? n : ''));
+          const desc = normalizeDisplayText(n.description || n.summary || '');
+          return `${title}${desc ? `\n${desc}` : ''}`;
+        }).join('\n\n');
+        return txt.trim();
+      },
+      render: () => {
+        if (!Array.isArray(info.notable) || info.notable.length === 0) return null;
+
+        return (
+          <div className="space-y-2">
+            <SectionHeader 
+              title="Notable Facts"
+              theme={theme}
+              isRetro={isRetro}
+              isParchment={isParchment}
+              className="!mt-0 !mb-1.5"
+            />
+            <div className="space-y-3">
+              {info.notable.map((rawN: any, i: number) => {
+                const n = parseNotableFactItem(rawN) || rawN;
+                const title = normalizeDisplayText(n.title || n.name || (typeof n === 'string' ? n : ''));
+                const description = normalizeDisplayText(n.description || n.summary || (n.text && n.text !== title ? n.text : ''));
+                if (!title && !description) return null;
+                return (
+                  <div key={`notable-${i}`} className="space-y-0.5">
+                    {title && (
+                      <h4 className={semanticTitleStyle}>
+                        {title}
+                      </h4>
+                    )}
+                    {description && (
+                      <p className={bodyTextStyle}>
+                        {description}
+                      </p>
+                    )}
+                    {n.wikipediaUrl && (
+                      <a href={n.wikipediaUrl} target="_blank" rel="noopener noreferrer" className={`text-xs inline-flex items-center gap-1 mt-0.5 hover:opacity-80 transition-opacity ${(theme as any).actionText || 'text-blue-400'}`}>
+                        Learn more →
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      }
+    },
+
     historicalContext: {
       render: () => (
       (info.waypoint?.canonicalName || (info.waypoint?.alternateNames && info.waypoint.alternateNames.length > 0)) ? (
@@ -963,7 +1084,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             {info.waypoint?.canonicalName && (
                <div className="mb-2">
                    <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Canonical Name</span>
-                   <p className={`${isRetro ? 'text-base' : 'text-sm'} font-bold`}>{info.waypoint.canonicalName}</p>
+                   <p className={semanticTitleStyle}>{info.waypoint.canonicalName}</p>
                </div>
             )}
             {info.waypoint?.alternateNames && info.waypoint.alternateNames.length > 0 && (
@@ -971,7 +1092,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                    <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Known As</span>
                    <div className="flex flex-wrap gap-1">
                      {info.waypoint.alternateNames.map((alt: string, i: number) => (
-                        <span key={i} className={`px-2 py-0.5 text-[10px] rounded border ${isRetro ? 'border-current text-current' : isParchment ? 'border-[#8b5a2b] bg-[#d2b48c] text-[#3e2723]' : 'border-cyan-500/30 bg-cyan-900/30 text-cyan-300'}`}>{alt}</span>
+                        <span key={i} className={`px-2 py-0.5 text-xs rounded border ${isRetro ? 'border-current text-current' : isParchment ? 'border-[#8b5a2b] bg-[#d2b48c] text-[#3e2723]' : 'border-cyan-500/30 bg-cyan-900/30 text-cyan-300'}`}>{alt}</span>
                      ))}
                    </div>
                </div>
@@ -980,6 +1101,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       ) : null
       )
     },
+
     historicalPeriod: {
       render: () => (
       info.historicalPeriod ? (
@@ -992,11 +1114,12 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                 isParchment={isParchment} 
                 className="!mt-0 !mb-1" 
             />
-            <p className={`${isRetro ? 'text-base' : 'text-sm'} font-normal`}>{info.historicalPeriod}</p>
+            <p className={bodyTextStyle}>{info.historicalPeriod}</p>
         </div>
       ) : null
       )
     },
+
     keyFigures: {
       render: () => (
       info.entities && info.entities.length > 0 ? (
@@ -1025,6 +1148,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       copyText: () => {
          if (!info) return '';
          let txt = '';
+         if (info.climate && !isPlaceholderString(info.climate.name)) {
+             txt += `Climate\n${info.climate.name}\n${!isPlaceholderString(info.climate.description) ? info.climate.description : ''}\n\n`;
+         }
          if (info.population) {
              txt += `Population\n`;
              if (info.population.historical && !isPlaceholderString(info.population.historical.formattedValue)) {
@@ -1039,118 +1165,57 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
              }
              txt += `\n`;
          }
-         if (info.climate && !isPlaceholderString(info.climate.name)) {
-             txt += `Climate\n${info.climate.name}\n${!isPlaceholderString(info.climate.description) ? info.climate.description : ''}\n\n`;
-         }
          return txt.trim();
       },
       render: () => {
         const hasPop = info.population && ((info.population.historical && !isPlaceholderString(info.population.historical.formattedValue)) || (info.population.current && !isPlaceholderString(info.population.current.formattedValue)));
         const hasClimate = info.climate && !isPlaceholderString(info.climate.name);
-        const hasImages = images.length > 0 || !!wikiImage;
-        const currentImg = images[currentImageIndex];
-        const currentImgUrl = currentImg?.url || wikiImage;
         
-        if (!hasPop && !hasClimate && !hasImages) return null;
+        if (!hasPop && !hasClimate) return null;
         
         return (
-         <div className="flex flex-col gap-3">
-           {hasImages && currentImgUrl && (
-             <div 
-               className={`p-0 overflow-hidden relative h-32 ${theme.card} group cursor-pointer select-none`}
-               onClick={() => setExpandedImage(true)}
-             >
-                <img 
-                  src={currentImgUrl} 
-                  alt={`${info.name} - ${currentImageIndex + 1}`} 
-                  className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${isRetro ? 'grayscale contrast-125' : ''}`} 
-                />
-                
-                {/* Multi-image gallery controls */}
-                {images.length > 1 && (
-                  <>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCurrentImageIndex((prev) => (prev > 0 ? prev - 1 : images.length - 1));
-                      }}
-                      className="absolute left-1.5 top-1/2 -translate-y-1/2 p-1 rounded-full bg-black/60 hover:bg-black/85 text-white/90 transition-all opacity-80 group-hover:opacity-100 shadow-md"
-                      title="Previous image"
-                    >
-                      <ChevronLeft size={16} />
-                    </button>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCurrentImageIndex((prev) => (prev < images.length - 1 ? prev + 1 : 0));
-                      }}
-                      className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded-full bg-black/60 hover:bg-black/85 text-white/90 transition-all opacity-80 group-hover:opacity-100 shadow-md"
-                      title="Next image"
-                    >
-                      <ChevronRight size={16} />
-                    </button>
-                    <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-sm text-white/90 text-[10px] font-mono px-2 py-0.5 rounded-full border border-white/10 shadow-sm pointer-events-none">
-                      {currentImageIndex + 1} / {images.length}
-                    </div>
-                  </>
-                )}
-
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-2 pt-4 flex items-end gap-2 pointer-events-none">
-                   <ImageIcon size={14} className="text-white/80 shrink-0" />
-                   {info.imageCaption && !isPlaceholderString(info.imageCaption) ? (
-                     <span className="text-white/90 text-xs truncate font-medium">
-                       {info.imageCaption}
-                     </span>
-                   ) : (
-                     <span className="text-white/80 text-[11px] truncate font-medium">
-                       {info.name}
-                     </span>
-                   )}
-                </div>
+         <div className="space-y-4">
+           {hasClimate && (
+             <div className="space-y-1">
+                 <SectionHeader 
+                     title="Climate" 
+                     theme={theme} 
+                     isRetro={isRetro} 
+                     isParchment={isParchment} 
+                     className="!mt-0 !mb-1" 
+                 />
+                 <p className={semanticTitleStyle} style={{ textTransform: 'none' }}>
+                   {formatClimateName(info.climate.name)}
+                 </p>
+                 {info.climate.description && !isPlaceholderString(info.climate.description) && (
+                   <p className={bodyTextStyle}>{info.climate.description}</p>
+                 )}
              </div>
            )}
 
            {hasPop && (
-             <div className="space-y-1 pt-1">
+             <div className="space-y-1">
                  <SectionHeader 
                      title="Population" 
                      theme={theme} 
                      isRetro={isRetro} 
                      isParchment={isParchment} 
-                     className="!mt-1 !mb-1" 
+                     className="!mt-0 !mb-1" 
                  />
                  {info.population.historical && !isPlaceholderString(info.population.historical.formattedValue) && (
                    <div className="mb-1">
                      <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Historical</span>
-                     <p className={`${isRetro ? 'text-base' : 'text-sm'} font-normal font-mono`}>{info.population.historical.formattedValue}</p>
+                     <p className={`${semanticTitleStyle} font-mono`}>{info.population.historical.formattedValue}</p>
                      {info.population.historical.timeframe && !isPlaceholderString(info.population.historical.timeframe) && (
-                       <p className="text-xs opacity-70 font-mono mt-0.5">{info.population.historical.timeframe}</p>
+                       <p className={`${metaStyle} font-mono mt-0.5`}>{info.population.historical.timeframe}</p>
                      )}
                    </div>
                  )}
                  {info.population.current && !isPlaceholderString(info.population.current.formattedValue) && (
                    <div>
                      <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Modern</span>
-                     <p className={`${isRetro ? 'text-base' : 'text-sm'} font-normal font-mono`}>{info.population.current.formattedValue}</p>
+                     <p className={`${semanticTitleStyle} font-mono`}>{info.population.current.formattedValue}</p>
                    </div>
-                 )}
-             </div>
-           )}
-
-           {hasClimate && (
-             <div className="space-y-1 pt-1">
-                 <SectionHeader 
-                     title="Climate" 
-                     theme={theme} 
-                     isRetro={isRetro} 
-                     isParchment={isParchment} 
-                     className="!mt-1 !mb-1" 
-                 />
-                 <p className={`${isRetro ? 'text-base' : 'text-sm'} font-medium leading-tight ${theme.bodyText}`} style={{ textTransform: 'none' }}>
-                   {formatClimateName(info.climate.name)}
-                 </p>
-                 {info.climate.description && !isPlaceholderString(info.climate.description) && (
-                   <p className={`text-xs opacity-90 font-normal leading-relaxed ${theme.bodyText}`}>{info.climate.description}</p>
                  )}
              </div>
            )}
@@ -1158,6 +1223,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         );
       }
     },
+
     liveNews: {
       copyText: () => {
          if (!info || !info.news || info.news.length === 0) return '';
@@ -1168,48 +1234,67 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
          return txt.trim();
       },
       render: () => {
-      if (!info.news || info.news.length === 0) {
-         return null;
-      }
-      
-      return (
-      <div className="space-y-4">
-        <SectionHeader 
-            title="News" 
-            theme={theme} 
-            isRetro={isRetro} 
-            isParchment={isParchment} 
-            className="!mt-0 !mb-2" 
-        />
-        <>
-          {info.news.map((item: any, idx: number) => (
-             <div key={idx} className={`p-4 ${theme.card} flex flex-col gap-2 group/news`}>
-                <div className="flex justify-between items-start gap-2">
-                  <span className={`text-[10px] uppercase tracking-wider opacity-70 ${theme.subtext}`}>{item.source}</span>
-                  <a href={item.url} target="_blank" rel="noopener noreferrer" className="opacity-0 group-hover/news:opacity-100 transition-opacity p-1 hover:bg-white/10 rounded">
-                     <ExternalLink size={14} className={theme.icon} />
+        if (!info.news || info.news.length === 0) {
+           return null;
+        }
+        
+        return (
+        <div className="space-y-3">
+          <SectionHeader 
+              title="News" 
+              theme={theme} 
+              isRetro={isRetro} 
+              isParchment={isParchment} 
+              className="!mt-0 !mb-2" 
+          />
+          <div className="space-y-4">
+            {info.news.map((item: any, idx: number) => (
+               <div key={idx} className="space-y-1">
+                  <a 
+                    href={item.url} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className={`block ${semanticTitleStyle} hover:underline decoration-1 underline-offset-2`}
+                  >
+                    {normalizeDisplayText(item.title)}
                   </a>
-                </div>
-                <a href={item.url} target="_blank" rel="noopener noreferrer" className={`${bodySize} font-normal leading-tight ${theme.headerTitle} hover:underline decoration-1 underline-offset-2`}>
-                  {normalizeDisplayText(item.title)}
-                </a>
-                {normalizeDisplayText(item.summary) && (
-                   <p className={`${subtextSize} ${theme.bodyText} opacity-90 leading-relaxed`}>
-                     {normalizeDisplayText(item.summary)}
-                   </p>
-                )}
-             </div>
-          ))}
+                  {normalizeDisplayText(item.summary) && (
+                     <p className={bodyTextStyle}>
+                       {normalizeDisplayText(item.summary)}
+                     </p>
+                  )}
+                  <div className={`flex items-center flex-wrap gap-1.5 ${metaStyle} pt-0.5`}>
+                    <span>{item.source}</span>
+                    {item.date && (
+                      <>
+                        <span>·</span>
+                        <span>{item.date}</span>
+                      </>
+                    )}
+                    <span>·</span>
+                    <a 
+                      href={item.url} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      className="inline-flex items-center gap-0.5 hover:opacity-100 opacity-80 transition-opacity" 
+                      title="Open news link"
+                    >
+                       <span>Read</span>
+                       <ExternalLink size={11} className="inline" />
+                    </a>
+                  </div>
+               </div>
+            ))}
+          </div>
           <button 
             onClick={handleLoadMore} 
             disabled={isMoreNewsLoading}
-            className={`w-full py-3 mt-2 transition-colors ${theme.loadMoreBtn}`}
+            className={`w-full py-2.5 mt-2 transition-colors ${theme.loadMoreBtn}`}
           >
             {isMoreNewsLoading ? "Scanning..." : "Load More News"}
           </button>
-        </>
-      </div>
-      );
+        </div>
+        );
       }
     },
     relatedPlaces: {
@@ -1233,6 +1318,13 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       }
     }
   };
+
+  // Section aliases
+  SECTION_RENDERERS.images = SECTION_RENDERERS.gallery;
+  SECTION_RENDERERS.image = SECTION_RENDERERS.gallery;
+  SECTION_RENDERERS.notableFacts = SECTION_RENDERERS.notable;
+  SECTION_RENDERERS.climate = SECTION_RENDERERS.modernContext;
+  SECTION_RENDERERS.news = SECTION_RENDERERS.liveNews;
 
   const fullCopyText = useMemo(() => {
       if (!info) return '';
@@ -1493,7 +1585,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                  </div>
                </div>
             ) : (
-                <div className="p-5 space-y-8 animate-in fade-in duration-300">
+                <div className="p-5 space-y-5 animate-in fade-in duration-300">
                     {schema.ui.sections.map((section: any) => {
                         const renderer = SECTION_RENDERERS[section.id];
                         if (renderer && renderer.render) return <React.Fragment key={section.id}>{renderer.render()}</React.Fragment>;

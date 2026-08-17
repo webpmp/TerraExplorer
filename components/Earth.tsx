@@ -21,9 +21,11 @@ interface EarthProps {
   routeWaypoints?: Waypoint[];
   currentWaypointIndex?: number;
   scanningArea?: GeoCoordinates | null;
+  onCameraChange?: (lat: number, lng: number, distance: number) => void;
 }
 
 import { latLngToVector3, vector3ToLatLng } from '../utils/globeCoordinates';
+import { OSMMapLayer } from './OSMMapLayer';
 
 // Custom Shader for Retro Effect
 const RetroShader = {
@@ -1094,6 +1096,9 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
           <primitive object={retroMaterial} attach="material" />
         )}
       </mesh>
+
+      {/* OpenStreetMap Geographic Detail Layer (Zoom-dependent) */}
+      <OSMMapLayer skin={skin} isInteracting={isInteracting} onCameraChange={props.onCameraChange} />
 
       {/* Render All Markers */}
       {processedMarkers.map((marker, index) => {

@@ -47,6 +47,8 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
     ui: {
       sections: [
         { id: "overview", required: true },
+        { id: "gallery", required: false },
+        { id: "notable", required: false },
         { id: "historicalContext", required: true },
         { id: "historicalPeriod", required: false },
         { id: "keyFigures", required: false },
@@ -64,6 +66,8 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
     ui: {
       sections: [
         { id: "overview", required: true },
+        { id: "gallery", required: false },
+        { id: "notable", required: false },
         { id: "modernContext", required: true },
         { id: "liveNews", required: false },
         { id: "relatedPlaces", required: false }
@@ -79,6 +83,8 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
     ui: {
       sections: [
         { id: "overview", required: true },
+        { id: "gallery", required: false },
+        { id: "notable", required: false },
         { id: "modernContext", required: true },
         { id: "liveNews", required: false },
         { id: "relatedPlaces", required: false }
@@ -99,6 +105,52 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
     ui: {
       sections: [
         { id: "overview", required: true },
+        { id: "gallery", required: false },
+        { id: "notable", required: false },
+        { id: "modernContext", required: true },
+        { id: "liveNews", required: false },
+        { id: "relatedPlaces", required: false }
+      ]
+    }
+  },
+  national_park: {
+    capabilities: {
+      supportsNews: true,
+      supportsPopulation: false,
+      supportsClimate: true,
+      supportsHistoricalNarrative: true
+    },
+    enrichment: {
+      overwriteNarrative: true,
+      fetchNews: true
+    },
+    ui: {
+      sections: [
+        { id: "overview", required: true },
+        { id: "gallery", required: false },
+        { id: "notable", required: false },
+        { id: "modernContext", required: true },
+        { id: "liveNews", required: false },
+        { id: "relatedPlaces", required: false }
+      ]
+    }
+  },
+  natural_feature: {
+    capabilities: {
+      supportsNews: true,
+      supportsPopulation: false,
+      supportsClimate: true,
+      supportsHistoricalNarrative: true
+    },
+    enrichment: {
+      overwriteNarrative: true,
+      fetchNews: true
+    },
+    ui: {
+      sections: [
+        { id: "overview", required: true },
+        { id: "gallery", required: false },
+        { id: "notable", required: false },
         { id: "modernContext", required: true },
         { id: "liveNews", required: false },
         { id: "relatedPlaces", required: false }

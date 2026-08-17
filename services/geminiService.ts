@@ -221,15 +221,17 @@ const mainInfoSchemaConfig = {
     },
     notable: {
       type: Type.ARRAY,
+      description: "3-5 structured notable facts about this place. Each fact MUST have a concise title/label and a substantive 1-3 sentence description.",
       items: {
         type: Type.OBJECT,
         properties: {
-          title: { type: Type.STRING },
+          title: { type: Type.STRING, description: "Short, concise fact title or topic name (e.g. 'The Narrows', 'Angels Landing', 'Wildlife', 'Historical Significance')" },
+          description: { type: Type.STRING, description: "1-3 sentence substantive explanatory description of the fact in normal weight." },
           summary: { type: Type.STRING },
           entityType: { type: Type.STRING },
           wikipediaUrl: { type: Type.STRING }
         },
-        required: ["title", "summary", "entityType"]
+        required: ["title", "description"]
       }
     },
     imageCaption: { type: Type.STRING }
@@ -502,7 +504,7 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
         - 'description': Write 2-4 concise paragraphs explaining what this place is, why it exists, why it is significant, and why someone should care. The first sentence must immediately identify what makes the place distinctive. Use Markdown headings. The Description and Notable Facts must NEVER overlap. Forbidden phrases: "is a location in", "is situated in", "serves surrounding communities", "an important regional feature". Do not output a single generic paragraph.
         - 'population': A number representing the population. Omit if not applicable.
         - 'climate': Object containing 'name' (e.g. "Oceanic climate"), 'description' (plain language summary), and 'koppenCode'.
-        - 'notable': Generate 3-5 genuinely informative notable facts. Every fact MUST contain a concise heading ('title') AND a 1-3 sentence substantive explanation ('summary') explaining what the fact is, specific context/scale/history, and why it matters. Never output empty generic topic labels without substantive explanation.
+        - 'notable': Generate 3-5 genuinely informative notable facts. Every fact MUST be an object containing a concise heading ('title') AND a 1-3 sentence substantive explanation ('description') explaining what the fact is, specific context/scale/history, and why it matters. Never output empty generic topic labels without substantive explanation.
         - 'imageCaption': A concise caption (10-25 words) for an iconic photograph of this feature. Do not merely restate the title.
         - 'imageSearchTerm': A highly specific Wikipedia search term to fetch the best iconic image of this feature.
 
@@ -706,11 +708,12 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
 
   console.log(`[ENRICHMENT FLOW TRACE]\n{\n stage: "Before sanitize",\n description: "${(data.description || "").substring(0,20)}",\n notable: ${data.notable?.length || 0},\n contextNotes: ${data.contextNotes?.length || 0}\n}`);
 
-  const normalizeArray = (arr: any[]): string[] => {
+  const normalizeStringArray = (arr: any[]): string[] => {
       if (!Array.isArray(arr)) return [];
       return arr.map(item => {
           if (typeof item === 'string') return item;
           if (item && typeof item === 'object') {
+              if (typeof item.text === 'string') return item.text;
               if (typeof item.summary === 'string') return item.summary;
               if (typeof item.title === 'string') return item.title;
           }
@@ -721,8 +724,62 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
   if (data.news !== undefined && data.news !== null) {
       data.news = (Array.isArray(data.news) ? data.news : undefined) as any;
   }
-  data.notable = normalizeArray(data.notable as any) as any;
-  data.contextNotes = normalizeArray(data.contextNotes as any) as any;
+  
+  if (Array.isArray(data.notable)) {
+      data.notable = data.notable.map((item: any) => {
+          if (typeof item === 'string') {
+              const colonIdx = item.indexOf(':');
+              if (colonIdx !== -1 && colonIdx < 50) {
+                  return { title: item.substring(0, colonIdx).trim(), description: item.substring(colonIdx + 1).trim() };
+              }
+              const dashIdx = item.indexOf(' — ') !== -1 ? item.indexOf(' — ') : (item.indexOf(' - ') !== -1 ? item.indexOf(' - ') : -1);
+              if (dashIdx !== -1 && dashIdx < 50) {
+                  return { title: item.substring(0, dashIdx).trim(), description: item.substring(dashIdx + 3).trim() };
+              }
+              const match = item.match(/^([A-Z][A-Za-z0-9\s'-]{2,35}?)\s+(?:is|offers|features|was|has|provides|known for|designated|consists of|contains|serves as|stretches|lies|stands|showcases|serves|attracts)\b\s*(.*)$/i);
+              if (match && match[1]) {
+                  const descPart = item.substring(match[1].length).trim();
+                  return {
+                      title: match[1].trim(),
+                      description: descPart.charAt(0).toUpperCase() + descPart.slice(1)
+                  };
+              }
+              if (item.length > 50) {
+                  return { title: "Notable Feature", description: item.trim() };
+              }
+              return { title: item.trim(), description: "" };
+          }
+          if (item && typeof item === 'object') {
+              const title = item.title || item.name || "";
+              const description = item.description || item.summary || item.significance || "";
+              if (!title && description) {
+                  if (description.length > 50) {
+                      return { title: "Notable Feature", description: description.trim() };
+                  }
+                  return { title: description.trim(), description: "" };
+              }
+              if (title && !description && title.length > 50) {
+                  const match = title.match(/^([A-Z][A-Za-z0-9\s'-]{2,35}?)\s+(?:is|offers|features|was|has|provides|known for|designated|consists of|contains|serves as|stretches|lies|stands|showcases|serves|attracts)\b\s*(.*)$/i);
+                  if (match && match[1]) {
+                      const descPart = title.substring(match[1].length).trim();
+                      return {
+                          ...item,
+                          title: match[1].trim(),
+                          description: descPart.charAt(0).toUpperCase() + descPart.slice(1)
+                      };
+                  }
+                  return { ...item, title: "Notable Feature", description: title.trim() };
+              }
+              return {
+                  ...item,
+                  title: (title || "").trim(),
+                  description: (description || "").trim()
+              };
+          }
+          return null;
+      }).filter(Boolean) as any;
+  }
+  data.contextNotes = normalizeStringArray(data.contextNotes as any) as any;
 
   if (data.description) {
     // 1. Remove coordinates patterns like 44.315949, 142.306349
@@ -2452,7 +2509,16 @@ ${contextDetails}
           "koppenCode": "string (e.g. Cfa, Cfb, ET)"
         },
         "contextNotes": ["substantive fact 1 in English", "substantive fact 2 in English", "substantive fact 3 in English"],
-        "notable": ["notable point 1 in English", "notable point 2 in English", "notable point 3 in English"]
+        "notable": [
+          {
+            "title": "Short Fact Title 1",
+            "description": "1-2 sentence substantive explanatory description of this fact in English."
+          },
+          {
+            "title": "Short Fact Title 2",
+            "description": "1-2 sentence substantive explanatory description of this fact in English."
+          }
+        ]
       }
 
       Do NOT allow Markdown headings, nested explanatory sections, prose before/after JSON, or multiple JSON objects.
@@ -2471,6 +2537,7 @@ ${contextDetails}
       5. Do NOT output partial JSON or nested climate objects as root.
       6. You MUST include ALL of the following top-level keys: "description", "population", "climate", "contextNotes", "notable".
       7. "description" must be substantive paragraphs in English about the entity, not just climate notes.
+      8. "notable" MUST be an array of structured objects, each with "title" (short topic/feature name) and "description" (1-2 sentence explanation). Never return plain strings for notable.
     `;
 
     const fetchAndParse = async (isRetry: boolean) => {
@@ -2661,21 +2728,84 @@ ${contextDetails}
     
     if (data.notable && !isBlank(data.notable)) {
        const notableArray = Array.isArray(data.notable) ? data.notable : [data.notable];
-       metadata.notable = notableArray.map((e: any) => (
-           typeof e === 'string' ? {
-               name: e,
-               entityType: "unknown",
-               relationship: "custom",
-               customRelationship: "unknown",
-               provenance
-           } : {
-               name: e.name,
-               entityType: e.type,
-               relationship: "custom",
-               customRelationship: e.type,
-               provenance
+       metadata.notable = notableArray.map((e: any) => {
+           if (typeof e === 'string') {
+               const colonIdx = e.indexOf(':');
+               if (colonIdx !== -1 && colonIdx < 50) {
+                   return {
+                       title: e.substring(0, colonIdx).trim(),
+                       description: e.substring(colonIdx + 1).trim(),
+                       name: e.substring(0, colonIdx).trim(),
+                       provenance
+                   };
+               }
+               const dashIdx = e.indexOf(' — ') !== -1 ? e.indexOf(' — ') : (e.indexOf(' - ') !== -1 ? e.indexOf(' - ') : -1);
+               if (dashIdx !== -1 && dashIdx < 50) {
+                   return {
+                       title: e.substring(0, dashIdx).trim(),
+                       description: e.substring(dashIdx + 3).trim(),
+                       name: e.substring(0, dashIdx).trim(),
+                       provenance
+                   };
+               }
+               const match = e.match(/^([A-Z][A-Za-z0-9\s'-]{2,35}?)\s+(?:is|offers|features|was|has|provides|known for|designated|consists of|contains|serves as|stretches|lies|stands|showcases|serves|attracts)\b\s*(.*)$/i);
+               if (match && match[1]) {
+                   const descPart = e.substring(match[1].length).trim();
+                   return {
+                       title: match[1].trim(),
+                       description: descPart.charAt(0).toUpperCase() + descPart.slice(1),
+                       name: match[1].trim(),
+                       provenance
+                   };
+               }
+               if (e.length > 50) {
+                   return {
+                       title: "Notable Feature",
+                       description: e.trim(),
+                       name: "Notable Feature",
+                       provenance
+                   };
+               }
+               return {
+                   title: e.trim(),
+                   description: "",
+                   name: e.trim(),
+                   provenance
+               };
            }
-       ));
+           if (typeof e === 'object' && e !== null) {
+               const title = e.title || e.name || "";
+               const description = e.description || e.summary || e.significance || "";
+               if (!title && description) {
+                   if (description.length > 50) {
+                       return { title: "Notable Feature", description: description.trim(), name: "Notable Feature", provenance };
+                   }
+                   return { title: description.trim(), description: "", name: description.trim(), provenance };
+               }
+               if (title && !description && title.length > 50) {
+                   const match = title.match(/^([A-Z][A-Za-z0-9\s'-]{2,35}?)\s+(?:is|offers|features|was|has|provides|known for|designated|consists of|contains|serves as|stretches|lies|stands|showcases|serves|attracts)\b\s*(.*)$/i);
+                   if (match && match[1]) {
+                       const descPart = title.substring(match[1].length).trim();
+                       return {
+                           ...e,
+                           title: match[1].trim(),
+                           description: descPart.charAt(0).toUpperCase() + descPart.slice(1),
+                           name: match[1].trim(),
+                           provenance
+                       };
+                   }
+                   return { ...e, title: "Notable Feature", description: title.trim(), name: "Notable Feature", provenance };
+               }
+               return {
+                   ...e,
+                   title: (title || "").trim(),
+                   description: (description || "").trim(),
+                   name: (title || e.name || "").trim(),
+                   provenance
+               };
+           }
+           return null;
+       }).filter(Boolean) as any;
        validFields.push('notable');
     } else {
        rejectedFields.push('notable');

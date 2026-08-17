@@ -632,9 +632,9 @@ const Controls: React.FC<ControlsProps> = ({
         )}
       </form>
       
-      {/* Copyright Text */}
+      {/* Copyright & Map Attribution Text */}
       <div className={`text-[10px] md:text-xs text-center -mt-1 ${theme.copyright}`}>
-        TerraExplorer by Chris Adkins
+        TerraExplorer by Chris Adkins • Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" className="underline hover:opacity-80 pointer-events-auto">OpenStreetMap contributors</a>
       </div>
     </div>
   );

@@ -53,15 +53,33 @@ const DISTANCE_EPSILON = 0.01;
 const CameraAnimator: React.FC<{
   targetPosRef: React.MutableRefObject<THREE.Vector3 | null>;
   cameraControlsRef: React.RefObject<any>;
-}> = ({ targetPosRef, cameraControlsRef }) => {
+  cameraStateRef: React.MutableRefObject<any>;
+  activeScanIdRef: React.MutableRefObject<number>;
+}> = ({ targetPosRef, cameraControlsRef, cameraStateRef, activeScanIdRef }) => {
+  const animStartTimeRef = useRef<number>(0);
+
   useFrame(({ camera }) => {
     if (targetPosRef.current && cameraControlsRef.current) {
-        camera.position.lerp(targetPosRef.current, 0.05);
+        if (!animStartTimeRef.current) {
+          animStartTimeRef.current = Date.now();
+        }
+
+        camera.position.lerp(targetPosRef.current, 0.08);
         cameraControlsRef.current.update(); // Update controls to reflect new position
         
-        if (camera.position.distanceTo(targetPosRef.current) < 0.05) {
+        const dist = camera.position.distanceTo(targetPosRef.current);
+        const timedOut = Date.now() - animStartTimeRef.current > 1200;
+
+        if (dist < 0.05 || timedOut) {
             targetPosRef.current = null;
+            animStartTimeRef.current = 0;
+            if (cameraStateRef.current) {
+                cameraStateRef.current.targetRotation = null;
+            }
+            console.log(`[Camera] DISCOVERY_POSITIONING_COMPLETE discoveryId=${activeScanIdRef.current}`);
         }
+    } else {
+        animStartTimeRef.current = 0;
     }
   });
   return null;
@@ -87,8 +105,8 @@ const AuthoritativeCameraEnforcer: React.FC<{
     if (skin === 'parchment') {
        const aspect = window.innerWidth / window.innerHeight;
        const baseDistance = aspect <= 1.28985 ? 3.0 : (3.0 * 1.28985) / aspect;
-       const effectiveParchmentZoom = Math.max(1.0, Math.min(3.0, parchmentZoom));
-       authoritativeDistance = baseDistance / effectiveParchmentZoom;
+       const effectiveParchmentZoom = Math.max(1.0, Math.min(50.0, parchmentZoom));
+       authoritativeDistance = Math.max(1.018, baseDistance / effectiveParchmentZoom);
     } else {
        if (cameraState.activeRoute) {
           authoritativeDistance = cameraState.routeSuggestedDistance;
@@ -102,16 +120,15 @@ const AuthoritativeCameraEnforcer: React.FC<{
         authoritativeDistance = 4.5;
     }
     
-    // Force set camera distance strictly while preserving normalized rotation
-    if (camera.position.lengthSq() > 0.0001) {
+    // Maintain distance magnitude along camera's current view vector
+    const currentDist = camera.position.length();
+    if (currentDist > 0.001 && Math.abs(currentDist - authoritativeDistance) > 0.01) {
         camera.position.normalize().multiplyScalar(authoritativeDistance);
     }
     
     if (targetCameraPosRef.current && targetCameraPosRef.current.lengthSq() > 0.0001) {
        targetCameraPosRef.current.normalize().multiplyScalar(authoritativeDistance);
     }
-    
-    controls.update();
   });
   return null;
 };
@@ -229,6 +246,7 @@ const App: React.FC = () => {
   
   const activeMarkerRequestRef = useRef<number>(0);
   const processingMarkerRef = useRef<string | null>(null);
+  const isManualControlActiveRef = useRef<boolean>(false);
 
   useEffect(() => {
     const handleResize = () => {
@@ -307,7 +325,8 @@ const App: React.FC = () => {
   const [isTraceModalOpen, setIsTraceModalOpen] = useState(false);
 
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isDiscoveryLoading, setIsDiscoveryLoading] = useState(false); // Controls input search / discovery scan spinner
+  const [isInfoPanelLoading, setIsInfoPanelLoading] = useState(false); // Controls InfoPanel enrichment skeleton
   const [isNewsFetching, setIsNewsFetching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isInteracting, setIsInteracting] = useState(false); // Interaction with Earth mesh
@@ -332,10 +351,55 @@ const App: React.FC = () => {
   });
 
   const updateCameraDistance = useCallback((dist: number) => {
-
     currentCameraDistanceRef.current = dist;
     cameraStateRef.current.themeSuggestedDistance = dist;
     cameraStateRef.current.routeSuggestedDistance = dist;
+  }, []);
+
+  const previousGeoCenterRef = useRef<{ lat: number; lng: number }>({ lat: 0, lng: 0 });
+
+  const updateAuthoritativeCamera = useCallback((lat: number, lng: number, distance: number) => {
+    // Normalize longitude to [-180, 180]
+    let normalizedLng = ((lng + 180) % 360 + 360) % 360 - 180;
+    const clampedLat = Math.max(-85.0511, Math.min(85.0511, lat));
+
+    const prevLat = previousGeoCenterRef.current.lat;
+    const prevLng = previousGeoCenterRef.current.lng;
+    const deltaLat = clampedLat - prevLat;
+    const deltaLng = ((normalizedLng - prevLng + 540) % 360) - 180;
+
+    console.log(`[Camera Sync] OSM_ABSOLUTE_CENTER lat=${clampedLat.toFixed(4)} lng=${normalizedLng.toFixed(4)}`);
+    console.log(`[Camera Sync] PREVIOUS_CENTER lat=${prevLat.toFixed(4)} lng=${prevLng.toFixed(4)}`);
+    console.log(`[Camera Sync] DELTA lat=${deltaLat.toFixed(4)} lng=${deltaLng.toFixed(4)}`);
+    console.log(`[Camera Sync] GLOBE_TARGET lat=${clampedLat.toFixed(4)} lng=${normalizedLng.toFixed(4)}`);
+    console.log(`[Camera Sync] MODE=ABSOLUTE_TARGET`);
+    console.log(`[Camera] GEO_CENTER lat=${clampedLat.toFixed(4)} lng=${normalizedLng.toFixed(4)} distance=${distance.toFixed(4)}`);
+
+    previousGeoCenterRef.current = { lat: clampedLat, lng: normalizedLng };
+
+    const localCameraVec = latLngToVector3(clampedLat, normalizedLng, distance);
+    let worldCameraPos = localCameraVec;
+    if (earthRef.current) {
+      worldCameraPos = localCameraVec.clone().applyMatrix4(earthRef.current.matrixWorld);
+    }
+
+    if (cameraControlsRef.current) {
+      const controls = cameraControlsRef.current;
+      const cam = controls.object;
+      cam.position.copy(worldCameraPos);
+      cam.lookAt(0, 0, 0);
+      controls.target.set(0, 0, 0);
+      if (controls.sphericalDelta) {
+        controls.sphericalDelta.set(0, 0, 0);
+      }
+      controls.update();
+    }
+    
+    if (cameraStateRef.current) {
+      cameraStateRef.current.themeSuggestedDistance = distance;
+      cameraStateRef.current.routeSuggestedDistance = distance;
+    }
+    currentCameraDistanceRef.current = distance;
   }, []);
 
   const programmaticTransitionUntilRef = useRef<number>(0);
@@ -375,6 +439,8 @@ const App: React.FC = () => {
         const localCameraVec = latLngToVector3(lat, lng, targetDistance);
         const worldCameraPos = localCameraVec.clone().applyMatrix4(earthRef.current.matrixWorld);
         targetCameraPosRef.current = worldCameraPos;
+        // Consume target rotation immediately so it executes as a strict one-shot command
+        cameraState.targetRotation = null;
      }
   }, [skin, locationInfo, routeWaypoints.length, parchmentZoom]);
 
@@ -846,8 +912,9 @@ const App: React.FC = () => {
      console.log(`[InfoPanel] enrichment started`);
 
      setInteractionState('PIN_SELECTED');
-     setIsLoading(true);
+     setIsInfoPanelLoading(true);
      setIsNewsFetching(false);
+     console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_STARTED');
      
      const initialWaypointPayload: any = {
          id: stableId,
@@ -943,7 +1010,7 @@ const App: React.FC = () => {
 
      setLocationInfo(data);
      // InfoPanel mounting state ready
-     setIsLoading(true);
+     setIsInfoPanelLoading(true);
 
      const schema = ENTITY_SCHEMAS[data.entityType || 'city'] || ENTITY_SCHEMAS['city'];
      const fetchGeographicMetadata = schema.capabilities.supportsPopulation || schema.capabilities.supportsClimate;
@@ -989,7 +1056,8 @@ const App: React.FC = () => {
                  }
              } finally {
                  if (enrichmentRequestId === activeMarkerRequestRef.current) {
-                     setIsLoading(false);
+                     setIsInfoPanelLoading(false);
+                     console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_COMPLETE');
                  }
              }
          })();
@@ -1027,7 +1095,8 @@ const App: React.FC = () => {
              }
          })();
      } else {
-         setIsLoading(false);
+         setIsInfoPanelLoading(false);
+         console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_COMPLETE');
      }
   }, [isZoomLocked, lockedZoomDistance, reconcileCameraState]);  const selectEntity = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint) => {
     const stableId = marker.id || `${marker.name}-${marker.lat}-${marker.lng}`;
@@ -1044,6 +1113,8 @@ const App: React.FC = () => {
         
         console.log(`[InfoPanel] OPEN`);
         console.log(`[InfoPanel] selection = ${stableId}`);
+        console.log(`[Marker Lifecycle] MARKER_SELECTED name="${marker.name}"`);
+        console.log(`[Marker Lifecycle] INFOPANEL_OPEN`);
 
         setInteractionState('PIN_SELECTED');
         setSearchError(null);
@@ -1102,8 +1173,9 @@ const App: React.FC = () => {
         };
 
         setLocationInfo(initialPayload);
-        setIsLoading(true);
+        setIsInfoPanelLoading(true);
         setIsNewsFetching(false);
+        console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_STARTED');
 
         if (cameraControlsRef.current) {
             const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.5;
@@ -1147,6 +1219,7 @@ const App: React.FC = () => {
             climate: getEstimatedClimate(geoMarker.lat, geoMarker.lng, geoMarker.state || geoMarker.region || "", geoMarker.country || "", geoMarker.type),
             contextNotes: [],
             news: [],
+            notable: [],
             relatedEntities: [],
             sectionState: { description: "loading", news: "loading" }
         };
@@ -1185,10 +1258,11 @@ const App: React.FC = () => {
                 }
             } finally {
                 if (enrichmentRequestId === activeMarkerRequestRef.current) {
-                    setIsLoading(false);
+                    setIsInfoPanelLoading(false);
+                    console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_COMPLETE');
                 }
             }
-        })();
+        })();;
 
         // Stage 4: News
         (async () => {
@@ -1243,6 +1317,7 @@ const App: React.FC = () => {
      scanResolvedRef.current = false;
      scanFullyProcessedRef.current = false;
      console.log(`[InfoPanel] CLOSE reason = new_scan_started`);
+     console.log("[Scan Lifecycle] DISCOVERY_STARTED");
      console.log("scan_started");
      console.log("triangulation_started");
      setScanningArea(location);
@@ -1250,10 +1325,11 @@ const App: React.FC = () => {
      setScanStatus("Starting scan");
 
      setInteractionState('GLOBE_SEARCHING');
-     setIsLoading(true);
+     setIsDiscoveryLoading(true);
      setLocationInfo(null); // Ensure NO overlay is opened
      setSearchError(null);
      setAutoRotate(false); 
+     console.log(`[Marker Lifecycle] DISCOVERY_REPLACED oldCount=${markers.length} newCount=0`);
      setMarkers([]); // Clear transient markers
      
      if (!activeRouteId) {
@@ -1276,7 +1352,7 @@ const App: React.FC = () => {
           reconcileCameraState();
        });
      }
-  }, [activeRouteId, isZoomLocked, lockedZoomDistance, reconcileCameraState, setScanStatus]);
+  }, [activeRouteId, isZoomLocked, lockedZoomDistance, reconcileCameraState, setScanStatus, markers.length]);
 
   const resolveScan = useCallback(async (result: { type: "results", data: MapMarker[] } | { type: "empty", status: "NO_RESULTS" | "PROVIDER_FAILURE", coords: { lat: number, lng: number }, diagnostics: any, environment?: string }) => {
      const currentScanId = activeScanIdRef.current;
@@ -1292,22 +1368,31 @@ const App: React.FC = () => {
      console.log("SCAN RESOLVED");
 
      if (result.type === "results") {
+        console.log("[Scan Lifecycle] DISCOVERY_RESULTS_RECEIVED");
         console.log(JSON.stringify({
             stage: "marker-mapping",
             received: result.data.length,
             mapped: result.data.length, // No additional filtering here
             returned: result.data.length
         }));
-        setScanStatus("Scan complete");
         console.log("[DEBUG] setMarkers called with length:", result.data.length); 
         setMarkers(result.data);
+        console.log(`[Marker Lifecycle] DISCOVERY_RESULTS_SET count=${result.data.length}`);
+        console.log("[Scan Lifecycle] MARKERS_RENDERED");
         
+        // Immediately terminate primary discovery spinner & clear scan status text
+        setIsDiscoveryLoading(false);
+        setScanStatus(null);
+        console.log("[Scan Lifecycle] DISCOVERY_COMPLETE");
+
         if (result.data.length === 1) {
             selectEntity(result.data[0]);
         }
      } else {
         console.log(`[SCAN EMPTY RESULT]\nStatus: ${result.status}\nCoordinates: ${result.coords.lat}, ${result.coords.lng}\nEnvironment: ${result.diagnostics?.environment || 'unknown'}\nCandidates Received: ${result.diagnostics?.candidatesReceived || 0}\nCandidates Rejected: ${result.diagnostics?.rejectedByDistance || 0}\nFinal Candidate Count: 0\nUser Notification: true`);
         setScanStatus(null);
+        setIsDiscoveryLoading(false);
+        console.log("[Scan Lifecycle] DISCOVERY_COMPLETE");
         if (currentScanId === activeScanIdRef.current) {
             console.log(`[InfoPanel] CLOSE reason = scan_empty_results`);
             setMarkers([]);
@@ -1330,7 +1415,7 @@ const App: React.FC = () => {
      setIsScanningArea(false);
 
      // Return to default state after short delay
-     await new Promise(resolve => setTimeout(resolve, 2000));
+     await new Promise(resolve => setTimeout(resolve, 500));
      if (currentScanId !== activeScanIdRef.current) return;
      setScanStatus(null);
      
@@ -1353,7 +1438,9 @@ const App: React.FC = () => {
 
      scanResolvedRef.current = true;
      console.log("SCAN RESOLVED");
-     setScanStatus(error);
+     setScanStatus(null);
+     setIsDiscoveryLoading(false);
+     console.log("[Scan Lifecycle] DISCOVERY_FAILED");
 
      // Keep scan rings briefly, then fade out
      await new Promise(resolve => setTimeout(resolve, 1500));
@@ -1362,19 +1449,22 @@ const App: React.FC = () => {
      setIsScanningArea(false);
 
      // Return to default state after short delay
-     await new Promise(resolve => setTimeout(resolve, 2000));
+     await new Promise(resolve => setTimeout(resolve, 500));
      if (currentScanId !== activeScanIdRef.current) return;
      setScanStatus(null);
      setInteractionState((prev) => {
         if (prev === 'PIN_SELECTED') return 'PIN_SELECTED';
         return 'GLOBE_IDLE';
      });
-  }, [setScanStatus]);;
+  }, [setScanStatus]);
 
    const handleCancelScan = useCallback(() => {
       scanFullyProcessedRef.current = true;
+      setIsDiscoveryLoading(false);
+      setScanStatus(null);
+      console.log("[Scan Lifecycle] DISCOVERY_CANCELLED");
       failScan("Scan cancelled");
-   }, [failScan]);
+   }, [failScan, setScanStatus]);
 
   const handleGlobeClick = useCallback(async (lat: number, lng: number, point: THREE.Vector3) => {
      // Guard against programmatic transitions and ongoing camera animations
@@ -1495,7 +1585,7 @@ const App: React.FC = () => {
             await failScan("Scan took too long to complete");
          }, 10000);
       })();
-   }, [routeWaypoints, handleMarkerClick, startScan, resolveScan, failScan, setScanStatus]);;
+   }, [routeWaypoints, handleMarkerClick, startScan, resolveScan, failScan, setScanStatus]);
 
   const handleSearch = async (query: string) => {
     const cleanQuery = query.trim();
@@ -1510,11 +1600,13 @@ const App: React.FC = () => {
     }
 
     setInteractionState('PIN_SELECTED');
-    setIsLoading(true);
+    setIsDiscoveryLoading(true);
+    console.log('[Scan Lifecycle] DISCOVERY_STARTED');
     setIsNewsFetching(false);
     setLocationInfo(null);
     setSearchError(null);
     setAutoRotate(false);
+    console.log(`[Marker Lifecycle] DISCOVERY_REPLACED oldCount=${markers.length} newCount=0`);
     setMarkers([]); 
     setScanningArea(null);
     
@@ -1543,10 +1635,13 @@ const App: React.FC = () => {
         
         setRouteWaypoints(pipelineResult.waypoints);
         setCurrentWaypointIndex(0);
+        setIsDiscoveryLoading(false);
+        console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
         loadWaypointData(pipelineResult.waypoints[0]);
       } else {
         setSearchError("No identifiable locations found in the route.");
-        setIsLoading(false);
+        setIsDiscoveryLoading(false);
+        console.log('[Scan Lifecycle] DISCOVERY_FAILED');
       }
       return;
     }
@@ -1573,9 +1668,11 @@ const App: React.FC = () => {
       programmaticTransitionUntilRef.current = Date.now() + 1500;
 
       setMarkers([searchMarker]);
+      console.log(`[Marker Lifecycle] DISCOVERY_RESULTS_SET count=1`);
       setSelectedMarkerId(searchMarker.id);
       setLocationInfo((pipelineResult as any).finalData!);
-      setIsLoading(false);
+      setIsDiscoveryLoading(false);
+      console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
 
       const zoom = (pipelineResult as any).metadataResult?.coordinateResult?.suggestedZoom || 5;
       const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : Math.max(1.3, 4.5 - ((zoom / 10) * (4.5 - 1.2)));
@@ -1586,8 +1683,6 @@ const App: React.FC = () => {
       requestAnimationFrame(() => {
          reconcileCameraState();
       });
-
-
 
     } else {
       const errorData = (pipelineResult as any).metadataResult?.enrichedData;
@@ -1614,13 +1709,15 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         userError = "LOCATION IS TOO AMBIGUOUS TO RESOLVE";
       }
       setSearchError(userError);
-      setIsLoading(false);
+      setIsDiscoveryLoading(false);
+      console.log('[Scan Lifecycle] DISCOVERY_FAILED');
     }
   };
 
   const handleTraceRoute = async (text: string) => {
       setInteractionState('PIN_SELECTED');
-      setIsLoading(true);
+      setIsDiscoveryLoading(true);
+      console.log('[Scan Lifecycle] DISCOVERY_STARTED');
       setSearchError(null);
       setLocationInfo(null);
       setAutoRotate(false);
@@ -1636,18 +1733,19 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       if (route.waypoints && route.waypoints.length > 0) {
           setRouteWaypoints(route.waypoints);
           
-          // Optionally, you might want to add a state for the route title or confidence if you choose to display it,
-          // for now we'll log it or let it be.
           console.log(`Route Generated: ${route.title}`);
           if (route.routeConfidence) {
               console.log(`Confidence: ${route.routeConfidence.level} - ${route.routeConfidence.reasoning}`);
           }
           
           setCurrentWaypointIndex(0);
+          setIsDiscoveryLoading(false);
+          console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
           loadWaypointData(route.waypoints[0]);
       } else {
           setSearchError("No identifiable locations found in the text.");
-          setIsLoading(false);
+          setIsDiscoveryLoading(false);
+          console.log('[Scan Lifecycle] DISCOVERY_FAILED');
       }
   };
 
@@ -1673,7 +1771,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
        const baseDistance = aspect <= 1.28985 ? 3.0 : (3.0 * 1.28985) / aspect;
        return baseDistance;
     }
-    const minZ = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.2;
+    const minZ = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.018;
     const maxZ = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 8;
     return Math.max(minZ, Math.min(maxZ, z));
   }, [isZoomLocked, lockedZoomDistance, skin]);
@@ -1707,7 +1805,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
   const handleZoomIn = useCallback(() => {
     if (skin === 'parchment') {
-       targetParchmentZoomRef.current = Math.min(3.0, Math.max(1.0, targetParchmentZoomRef.current * BUTTON_ZOOM_FACTOR));
+       targetParchmentZoomRef.current = Math.min(50.0, Math.max(1.0, targetParchmentZoomRef.current * BUTTON_ZOOM_FACTOR));
        if (!parchmentZoomAnimRef.current) {
           parchmentZoomAnimRef.current = requestAnimationFrame(animateParchmentZoom);
        }
@@ -1751,7 +1849,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (skin === 'parchment') {
-         targetParchmentZoomRef.current = Math.max(1.0, Math.min(3.0, targetParchmentZoomRef.current - e.deltaY * 0.0015));
+         targetParchmentZoomRef.current = Math.max(1.0, Math.min(50.0, targetParchmentZoomRef.current - e.deltaY * 0.003));
          if (!parchmentZoomAnimRef.current) {
             parchmentZoomAnimRef.current = requestAnimationFrame(animateParchmentZoom);
          }
@@ -1795,7 +1893,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         const pinchRatio = currentPinchDistance / initialPinchDistance;
 
         if (skin === 'parchment') {
-          targetParchmentZoomRef.current = Math.max(1.0, Math.min(3.0, initialParchmentZoom * pinchRatio));
+          targetParchmentZoomRef.current = Math.max(1.0, Math.min(50.0, initialParchmentZoom * pinchRatio));
           if (!parchmentZoomAnimRef.current) {
             parchmentZoomAnimRef.current = requestAnimationFrame(animateParchmentZoom);
           }
@@ -1833,13 +1931,12 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
   const handleClosePanel = () => {
     console.log(`[InfoPanel] CLOSE reason = user_close`);
     activeMarkerRequestRef.current++;
-    setInteractionState('GLOBE_IDLE');
+    setInteractionState(markers.length > 0 ? 'PINS_RENDERED' : 'GLOBE_IDLE');
     setLocationInfo(null);
     setSelectedMarkerId(null);
     setIsNewsFetching(false);
     setIsFocused(false);
-    setMarkers([]); // Clear markers on close
-    setScanningArea(null);
+    console.log(`[Marker Lifecycle] INFOPANEL_CLOSED markersPreserved=${markers.length}`);
   };
 
   const getCurrentFavorite = () => {
@@ -2063,7 +2160,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
       {/* 3D Scene */}
       <div id="canvas-container" style={canvasContainerStyle}>
-        <Canvas camera={{ position: [0, 0, 4.5], fov: 45 }}>
+        <Canvas camera={{ position: [0, 0, 4.5], fov: 45, near: 0.001, far: 1000 }}>
           <Suspense fallback={null}>
             <ambientLight intensity={skin === 'modern' || skin === 'parchment' ? 0.4 : 1.5} color={skin === 'modern' || skin === 'parchment' ? "#ccccff" : "#ffffff"} />
         <Sun skin={skin} />
@@ -2088,6 +2185,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           routeWaypoints={displayRouteWaypoints}
           currentWaypointIndex={currentWaypointIndex}
           scanningArea={scanningArea}
+          onCameraChange={updateAuthoritativeCamera}
         />
         
         <VisibilityTracker 
@@ -2097,7 +2195,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
         <OrbitControls 
           ref={cameraControlsRef} 
-          minDistance={isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.2} 
+          minDistance={isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.018} 
           maxDistance={isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 8}
           enablePan={false}
           enableRotate={true}
@@ -2114,9 +2212,17 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
             setAutoRotate(false);
             userModifiedZoomRef.current = true;
             targetCameraPosRef.current = null;
+            if (cameraStateRef.current) {
+              cameraStateRef.current.targetRotation = null;
+            }
+            if (!isManualControlActiveRef.current) {
+              isManualControlActiveRef.current = true;
+              console.log('[Camera] MANUAL_CONTROL_STARTED');
+            }
           }}
           onEnd={() => {
             setIsDragging(false);
+            isManualControlActiveRef.current = false;
             if (cameraControlsRef.current) {
               updateCameraDistance(cameraControlsRef.current.getDistance());
             }
@@ -2128,6 +2234,8 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         <CameraAnimator 
            targetPosRef={targetCameraPosRef} 
            cameraControlsRef={cameraControlsRef} 
+           cameraStateRef={cameraStateRef}
+           activeScanIdRef={activeScanIdRef}
         />
 
         <AuthoritativeCameraEnforcer 
@@ -2149,7 +2257,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
                  setIsZoomedOut(zoomedOut);
                  if (zoomedOut) setIsFocused(false);
               }}
-              disabled={isLoading || routeWaypoints.length > 0 || !!locationInfo || markers.length > 0}
+              disabled={isDiscoveryLoading || routeWaypoints.length > 0 || !!locationInfo || markers.length > 0}
             />
           </Suspense>
         </Canvas>
@@ -2224,7 +2332,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       {interactionState === 'PIN_SELECTED' && (
         <InfoPanel 
           info={locationInfo} 
-          isLoading={isLoading}
+          isLoading={isInfoPanelLoading}
           isNewsFetching={isNewsFetching}
           onClose={handleClosePanel} 
           skin={skin}
@@ -2247,7 +2355,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         onTraceRoute={handleTraceRoute}
         onZoomIn={handleUserZoomIn} 
         onZoomOut={handleZoomOut}
-        isSearching={isLoading}
+        isSearching={isDiscoveryLoading}
         searchError={searchError}
         onClearError={() => setSearchError(null)}
         skin={skin}
