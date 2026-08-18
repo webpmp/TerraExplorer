@@ -524,7 +524,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
   const isVisible = opacity > 0.01;
   const isInteractive = opacity > 0.05;
 
-  // Theme styling filter for the overlay (clean native rendering for standard skin, high-contrast parchment palette)
+  // Theme styling filter for the overlay (clean native rendering for standard and parchment skin)
   const themeStyle = useMemo<React.CSSProperties>(() => {
     if (skin === 'retro-green') {
       return {
@@ -534,11 +534,6 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
     if (skin === 'retro-amber') {
       return {
         filter: 'grayscale(100%) brightness(0.88) sepia(100%) hue-rotate(5deg) contrast(1.5)'
-      };
-    }
-    if (skin === 'parchment') {
-      return {
-        filter: 'sepia(45%) saturate(85%) contrast(1.18) brightness(0.92)'
       };
     }
     return {

@@ -150,12 +150,11 @@ describe('OSM Tile Service & Tile Spherical Mesh Tests', () => {
     expect(osmTileService.getNextAdjacentTileZoom(19, 1.02).reason).toBe('HYSTERESIS');
   });
 
-  it('provides appropriate high-contrast tile URLs based on theme skin', () => {
+  it('provides identical high-contrast tile URLs for modern and parchment skins', () => {
     const modernUrl = osmTileService.getTileUrl(14, 2048, 1360, 'modern');
-    expect(modernUrl).toMatch(/^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/rastertiles\/voyager\/14\/2048\/1360\.png$/);
-
     const parchmentUrl = osmTileService.getTileUrl(14, 2048, 1360, 'parchment');
-    expect(parchmentUrl).toMatch(/^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/rastertiles\/voyager\/14\/2048\/1360\.png$/);
+    expect(modernUrl).toMatch(/^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/rastertiles\/voyager\/14\/2048\/1360\.png$/);
+    expect(parchmentUrl).toBe(modernUrl);
 
     const retroGreenUrl = osmTileService.getTileUrl(14, 2048, 1360, 'retro-green');
     expect(retroGreenUrl).toMatch(/^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/dark_all\/14\/2048\/1360\.png$/);
