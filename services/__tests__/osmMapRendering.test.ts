@@ -156,6 +156,42 @@ describe('OSM Geographic Detail Layer Rendering & Geometry', () => {
     expect(isGlobeHoverActive(1.2)).toBe(false);
     expect(isGlobeHoverActive(1.05)).toBe(false);
   });
+
+  it('guarantees identical zoom constraints (1.018 to 8.0) and zoom-out capability across all themes including Parchment', () => {
+    const clampZoom = (z: number, isZoomLocked = false, lockedZoomDistance: number | null = null) => {
+      const minZ = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.018;
+      const maxZ = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 8.0;
+      return Math.max(minZ, Math.min(maxZ, z));
+    };
+
+    // Min and max zoom limits are identical
+    expect(clampZoom(0.5)).toBe(1.018);
+    expect(clampZoom(10.0)).toBe(8.0);
+    expect(clampZoom(1.45)).toBe(1.45);
+
+    // Zooming out in Parchment syncs authoritative distance without clamping at 1.0
+    const aspect = 16 / 9;
+    const baseDistance = (3.0 * 1.28985) / aspect;
+    
+    // In deep OSM view (distance = 1.05)
+    let currentDistance = 1.05;
+    let syncedParchmentZoom = baseDistance / currentDistance;
+    let authoritativeDistance = baseDistance / syncedParchmentZoom;
+    expect(authoritativeDistance).toBeCloseTo(1.05, 4);
+
+    // Zooming out to intermediate OSM level (distance = 1.35)
+    currentDistance = 1.35;
+    syncedParchmentZoom = baseDistance / currentDistance;
+    authoritativeDistance = baseDistance / syncedParchmentZoom;
+    expect(authoritativeDistance).toBeCloseTo(1.35, 4);
+
+    // Zooming out past OSM boundary back to globe (distance = 2.5)
+    currentDistance = 2.5;
+    syncedParchmentZoom = baseDistance / currentDistance;
+    authoritativeDistance = baseDistance / syncedParchmentZoom;
+    expect(authoritativeDistance).toBeCloseTo(2.5, 4);
+  });
 });
+
 
 

@@ -105,8 +105,8 @@ const AuthoritativeCameraEnforcer: React.FC<{
     if (skin === 'parchment') {
        const aspect = window.innerWidth / window.innerHeight;
        const baseDistance = aspect <= 1.28985 ? 3.0 : (3.0 * 1.28985) / aspect;
-       const effectiveParchmentZoom = Math.max(1.0, Math.min(50.0, parchmentZoom));
-       authoritativeDistance = Math.max(1.018, baseDistance / effectiveParchmentZoom);
+       const effectiveParchmentZoom = Math.max(0.375, Math.min(50.0, parchmentZoom));
+       authoritativeDistance = Math.max(1.018, Math.min(8.0, baseDistance / effectiveParchmentZoom));
     } else {
        if (cameraState.activeRoute) {
           authoritativeDistance = cameraState.routeSuggestedDistance;
@@ -261,7 +261,7 @@ const App: React.FC = () => {
 
   const animateParchmentZoom = useCallback(() => {
      const currentZoom = currentParchmentZoomRef.current;
-     const clampedTarget = Math.max(1.0, Math.min(3.0, targetParchmentZoomRef.current));
+     const clampedTarget = Math.max(0.375, Math.min(50.0, targetParchmentZoomRef.current));
      targetParchmentZoomRef.current = clampedTarget;
      const diff = clampedTarget - currentZoom;
      
@@ -273,7 +273,7 @@ const App: React.FC = () => {
      }
      
      const nextZoom = currentZoom + diff * 0.08; // Buttery smooth 0.08 smoothing factor
-     const clampedNextZoom = Math.max(1.0, Math.min(3.0, nextZoom));
+     const clampedNextZoom = Math.max(0.375, Math.min(50.0, nextZoom));
      currentParchmentZoomRef.current = clampedNextZoom;
      setParchmentZoom(clampedNextZoom);
      
@@ -400,7 +400,16 @@ const App: React.FC = () => {
       cameraStateRef.current.routeSuggestedDistance = distance;
     }
     currentCameraDistanceRef.current = distance;
-  }, []);
+
+    if (skin === 'parchment') {
+      const aspect = window.innerWidth / window.innerHeight;
+      const baseDistance = aspect <= 1.28985 ? 3.0 : (3.0 * 1.28985) / aspect;
+      const syncZoom = Math.max(0.375, Math.min(50.0, baseDistance / Math.max(1.018, distance)));
+      currentParchmentZoomRef.current = syncZoom;
+      targetParchmentZoomRef.current = syncZoom;
+      setParchmentZoom(syncZoom);
+    }
+  }, [skin]);
 
   const programmaticTransitionUntilRef = useRef<number>(0);
 
@@ -428,8 +437,8 @@ const App: React.FC = () => {
         if (skin === 'parchment') {
            const aspect = window.innerWidth / window.innerHeight;
            const baseDistance = aspect <= 1.28985 ? 3.0 : (3.0 * 1.28985) / aspect;
-           const effectiveParchmentZoom = Math.max(1.0, Math.min(3.0, parchmentZoom));
-           targetDistance = baseDistance / effectiveParchmentZoom;
+           const effectiveParchmentZoom = Math.max(0.375, Math.min(50.0, parchmentZoom));
+           targetDistance = Math.max(1.018, Math.min(8.0, baseDistance / effectiveParchmentZoom));
         } else if (cameraState.activeRoute) {
            targetDistance = cameraState.routeSuggestedDistance;
         } else {
@@ -1777,15 +1786,10 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
   };
 
   const clampZoom = useCallback((z: number) => {
-    if (skin === 'parchment') {
-       const aspect = window.innerWidth / window.innerHeight;
-       const baseDistance = aspect <= 1.28985 ? 3.0 : (3.0 * 1.28985) / aspect;
-       return baseDistance;
-    }
     const minZ = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.018;
-    const maxZ = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 8;
+    const maxZ = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 8.0;
     return Math.max(minZ, Math.min(maxZ, z));
-  }, [isZoomLocked, lockedZoomDistance, skin]);
+  }, [isZoomLocked, lockedZoomDistance]);
 
   const animateZoom = useCallback(() => {
     if (!cameraControlsRef.current || targetZoomRef.current === null) {
