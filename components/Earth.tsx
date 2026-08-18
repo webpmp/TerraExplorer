@@ -157,8 +157,17 @@ const UniversalMarker: React.FC<{
 
   useFrame((state) => {
     if (meshRef.current) {
-      // 1. Zoom scale calculation (0.0 = zoomed out, 1.0 = zoomed in)
       const distance = state.camera.position.length();
+
+      // When distance <= 1.45 (OSM detail view active), hide the 3D globe DOM pins so OSM markers handle presentation
+      if (distance <= 1.45) {
+        if (domPinRef.current) {
+          domPinRef.current.style.display = 'none';
+        }
+        return;
+      }
+
+      // 1. Zoom scale calculation (0.0 = zoomed out, 1.0 = zoomed in)
       const zoomLevel = THREE.MathUtils.clamp((8.0 - distance) / (8.0 - 1.2), 0, 1);
 
       // Subtle size scaling formula: size multiplier goes from 0.8 to 0.95
@@ -433,7 +442,8 @@ const HoverOverlay: React.FC<{
     let throttleTimeout: any = null;
 
     const handleMouseMove = (e: MouseEvent) => {
-      if (isInteracting) {
+      const distance = camera.position.length();
+      if (isInteracting || distance <= 1.45) {
          if (hoveredPin) {
              setHoveredPin(null);
              setHoveredObject(null);
@@ -503,7 +513,16 @@ const HoverOverlay: React.FC<{
     };
   }, [isInteracting, camera, size, gl, hoveredPin, groupRef]);
 
-  useFrame(() => {
+  useFrame((state) => {
+    const distance = state.camera.position.length();
+    if (distance <= 1.45) {
+      if (hoveredPin) {
+        setHoveredPin(null);
+        setHoveredObject(null);
+      }
+      return;
+    }
+
     let currentActivePin = hoveredPin;
     let currentActiveObject = hoveredObject;
 
@@ -555,6 +574,9 @@ const HoverOverlay: React.FC<{
        lineRef.current.setAttribute('y2', '0');
     }
   });
+
+  const currentDist = camera.position.length();
+  if (currentDist <= 1.45) return null;
 
   let activePin = hoveredPin;
   let activeObject = hoveredObject;
@@ -954,6 +976,18 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     // Dynamic screen-space repulsion for region scan markers
     const scanMarkers = processedMarkers.filter(m => m.type === 'marker');
     if (scanMarkers.length > 0 && groupRef.current) {
+       const distance = state.camera.position.length();
+
+       // In OSM mode (distance <= 1.55), do not apply artificial globe repulsion
+       if (distance <= 1.55) {
+          scanMarkers.forEach(m => {
+             if (scanOffsetsRef.current[m.id]) {
+                scanOffsetsRef.current[m.id].set(0, 0, 0);
+             }
+          });
+          return;
+       }
+
        const parent = groupRef.current;
        const widthHalf = state.size.width * 0.5;
        const heightHalf = state.size.height * 0.5;
@@ -975,7 +1009,6 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
        const screenOffsetsY = new Float32Array(scanMarkers.length);
 
        // Calculate zoom Level and dynamic minPixelDistance
-       const distance = state.camera.position.length();
        const zoomLevel = THREE.MathUtils.clamp((8.0 - distance) / (8.0 - 1.2), 0, 1);
        
        const baseDistance = 14; // base distance in pixels
@@ -1159,7 +1192,14 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
       </mesh>
 
       {/* OpenStreetMap Geographic Detail Layer (Zoom-dependent) */}
-      <OSMMapLayer skin={skin} isInteracting={isInteracting} onCameraChange={props.onCameraChange} />
+      <OSMMapLayer
+        skin={skin}
+        isInteracting={isInteracting}
+        onCameraChange={props.onCameraChange}
+        markers={processedMarkers}
+        selectedMarkerId={selectedMarkerId}
+        onMarkerClick={handleMarkerClick}
+      />
 
       {/* Render All Markers */}
       {processedMarkers.map((marker, index) => {

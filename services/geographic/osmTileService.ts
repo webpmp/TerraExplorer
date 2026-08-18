@@ -240,14 +240,14 @@ export class OSMTileService {
 
   /**
    * Get public CartoDB raster tile URL styled per application skin.
-   * Uses 'light_all' (Positron) for clean light land with high-contrast road hierarchy.
+   * Uses Carto Voyager ('rastertiles/voyager') for rich cartographic detail, high-contrast roads, vegetation, and water.
    */
   public getTileUrl(z: number, x: number, y: number, skin: string): string {
     const subdomain = ['a', 'b', 'c', 'd'][(x + y) % 4];
     if (skin === 'retro-amber' || skin === 'retro-green') {
       return `https://${subdomain}.basemaps.cartocdn.com/dark_all/${z}/${x}/${y}.png`;
     }
-    return `https://${subdomain}.basemaps.cartocdn.com/light_all/${z}/${x}/${y}.png`;
+    return `https://${subdomain}.basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`;
   }
 
   /**

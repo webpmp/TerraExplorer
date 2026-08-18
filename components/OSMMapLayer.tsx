@@ -13,6 +13,9 @@ interface OSMMapLayerProps {
   skin: SkinType;
   isInteracting: boolean;
   onCameraChange?: (lat: number, lng: number, distance: number) => void;
+  markers?: any[];
+  selectedMarkerId?: string | null;
+  onMarkerClick?: (e: any, marker: any) => void;
 }
 
 interface TileDisplay {
@@ -25,7 +28,22 @@ interface TileDisplay {
   top: number;
 }
 
-export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({ skin, isInteracting, onCameraChange }) => {
+interface OSMProjection {
+  z: number;
+  exactX: number;
+  exactY: number;
+  screenCenterX: number;
+  screenCenterY: number;
+}
+
+export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
+  skin,
+  isInteracting,
+  onCameraChange,
+  markers = [],
+  selectedMarkerId = null,
+  onMarkerClick
+}) => {
   const { camera, controls } = useThree();
   const rootGroupRef = useRef<THREE.Group>(null);
   const containerDivRef = useRef<HTMLDivElement | null>(null);
@@ -37,6 +55,8 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({ skin, isInteracting, o
 
   const [opacity, setOpacity] = useState<number>(0);
   const opacityRef = useRef<number>(0);
+  const [osmProjection, setOsmProjection] = useState<OSMProjection | null>(null);
+  const [hoveredMarkerId, setHoveredMarkerId] = useState<string | null>(null);
 
   // Active primary tiles and fallback tiles for smooth transitions
   const activeTilesMapRef = useRef<Map<string, TileDisplay>>(new Map());
@@ -68,6 +88,8 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({ skin, isInteracting, o
   const panStartPointerRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const panStartCenterRef = useRef<{ lat: number; lng: number; distance: number }>({ lat: 0, lng: 0, distance: 1.5 });
   const panStartZoomRef = useRef<number>(14);
+  const pressedMarkerRef = useRef<any | null>(null);
+  const hasDraggedRef = useRef<boolean>(false);
 
   // Track window resize events
   useEffect(() => {
@@ -160,6 +182,13 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({ skin, isInteracting, o
     activeTilesMapRef.current = updatedTilesMap;
     const newTilesList = Array.from(updatedTilesMap.values());
     setActiveTilesList(newTilesList);
+    setOsmProjection({
+      z,
+      exactX,
+      exactY,
+      screenCenterX,
+      screenCenterY
+    });
 
     const bounds = osmTileService.tileToBounds(z, centerTile.x, centerTile.y);
     console.log(
@@ -200,6 +229,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({ skin, isInteracting, o
     const startGeo = vector3ToLatLng(localCamPos);
 
     isOSMPanningRef.current = true;
+    hasDraggedRef.current = false;
     panStartPointerRef.current = { x: e.clientX, y: e.clientY };
     panStartCenterRef.current = { lat: startGeo.lat, lng: startGeo.lng, distance: startDist };
     panStartZoomRef.current = activeTileZoomRef.current;
@@ -218,6 +248,10 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({ skin, isInteracting, o
 
     const dx = e.clientX - panStartPointerRef.current.x;
     const dy = e.clientY - panStartPointerRef.current.y;
+
+    if (Math.hypot(dx, dy) > 4) {
+      hasDraggedRef.current = true;
+    }
 
     const z = panStartZoomRef.current;
     const n = Math.pow(2, z);
@@ -275,6 +309,13 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({ skin, isInteracting, o
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch (_) {}
 
+    // Check if this was a marker click without significant drag
+    if (pressedMarkerRef.current && !hasDraggedRef.current && onMarkerClick) {
+      onMarkerClick(e, pressedMarkerRef.current.data || pressedMarkerRef.current);
+    }
+    pressedMarkerRef.current = null;
+    hasDraggedRef.current = false;
+
     const committedCenter = { ...osmCameraCenterRef.current };
     committedCenterRef.current = committedCenter;
     const dist = panStartCenterRef.current.distance;
@@ -301,7 +342,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({ skin, isInteracting, o
 
     // Immediately render viewport with the exact committed coordinates
     loadViewportTiles(committedCenter.lat, committedCenter.lng, dist, activeTileZoomRef.current, 'OSM_COMMITTED');
-  }, [onCameraChange, loadViewportTiles]);
+  }, [onCameraChange, onMarkerClick, loadViewportTiles]);
 
   // Non-passive wheel handler attached directly to DOM container
   useEffect(() => {
@@ -348,10 +389,10 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({ skin, isInteracting, o
     const localCamPos = rootGroupRef.current.worldToLocal(state.camera.position.clone());
     const dist = localCamPos.length();
 
-    // 1. Progressive Opacity with Hysteresis
+    // 1. Progressive Opacity with Hysteresis (full opacity at close and street levels)
     let targetOpacity = 0;
     if (dist <= 1.55) {
-      const t = Math.max(0, Math.min(1, (1.55 - dist) / (1.55 - 1.25)));
+      const t = Math.max(0, Math.min(1, (1.55 - dist) / (1.55 - 1.40)));
       targetOpacity = t * t * (3 - 2 * t);
     }
 
@@ -483,7 +524,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({ skin, isInteracting, o
   const isVisible = opacity > 0.01;
   const isInteractive = opacity > 0.05;
 
-  // Theme styling filter for the overlay (clean native rendering for standard skin)
+  // Theme styling filter for the overlay (clean native rendering for standard skin, high-contrast parchment palette)
   const themeStyle = useMemo<React.CSSProperties>(() => {
     if (skin === 'retro-green') {
       return {
@@ -497,11 +538,12 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({ skin, isInteracting, o
     }
     if (skin === 'parchment') {
       return {
-        filter: 'sepia(35%) contrast(1.1) brightness(0.96)',
-        mixBlendMode: 'multiply'
+        filter: 'sepia(45%) saturate(85%) contrast(1.18) brightness(0.92)'
       };
     }
-    return {};
+    return {
+      filter: 'contrast(1.05)'
+    };
   }, [skin]);
 
   return (
@@ -577,6 +619,142 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({ skin, isInteracting, o
                 }}
               />
             ))}
+
+            {/* OSM Geographic Markers & Labels Layer (Anchored to true Lat/Lng via Web Mercator projection) */}
+            {osmProjection && markers && markers.map((marker, idx) => {
+              if (typeof marker.lat !== 'number' || typeof marker.lng !== 'number') return null;
+
+              const n = Math.pow(2, osmProjection.z);
+              const markerX = ((marker.lng + 180) / 360) * n;
+              const latRad = (Math.max(-85.0511, Math.min(85.0511, marker.lat)) * Math.PI) / 180;
+              const markerY = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n;
+
+              const left = osmProjection.screenCenterX + (markerX - osmProjection.exactX) * 256;
+              const top = osmProjection.screenCenterY + (markerY - osmProjection.exactY) * 256;
+
+              // Viewport culling with margin
+              if (
+                left < -150 || left > viewportSize.width + 150 ||
+                top < -150 || top > viewportSize.height + 150
+              ) {
+                return null;
+              }
+
+              const isSelected = selectedMarkerId === marker.id;
+              const isHovered = hoveredMarkerId === marker.id;
+              const isWaypoint = marker.isWaypoint;
+              const pinSize = isSelected ? 22 : 16;
+              const color = marker.color || (skin === 'parchment' ? '#8b5a2b' : '#3b82f6');
+              const outlineColor = skin === 'parchment' ? '#f4ead5' : (skin === 'retro-green' ? '#4ade80' : (skin === 'retro-amber' ? '#fbbf24' : '#ffffff'));
+
+              const markerDisplayName =
+                (marker.data as any)?.displayName ||
+                marker.data?.name ||
+                marker.name ||
+                (isWaypoint ? `Waypoint ${marker.index !== undefined ? marker.index + 1 : ''}` : 'Location');
+
+              return (
+                <div
+                  key={`osm-marker-container-${marker.id ?? idx}`}
+                  style={{
+                    position: 'absolute',
+                    left: `${left}px`,
+                    top: `${top}px`,
+                    pointerEvents: 'auto',
+                    zIndex: isSelected || isHovered ? 35 : 20
+                  }}
+                >
+                  {/* Small Geographic Pin */}
+                  <div
+                    onPointerDown={() => {
+                      pressedMarkerRef.current = marker;
+                      hasDraggedRef.current = false;
+                    }}
+                    onPointerCancel={() => {
+                      pressedMarkerRef.current = null;
+                      hasDraggedRef.current = false;
+                    }}
+                    onMouseEnter={() => setHoveredMarkerId(marker.id)}
+                    onMouseLeave={() => {
+                      if (hoveredMarkerId === marker.id) {
+                        setHoveredMarkerId(null);
+                      }
+                    }}
+                    title={markerDisplayName}
+                    style={{
+                      position: 'absolute',
+                      left: '0px',
+                      top: '0px',
+                      transform: 'translate(-50%, -50%)',
+                      width: `${pinSize}px`,
+                      height: `${pinSize}px`,
+                      backgroundColor: color,
+                      borderRadius: '50%',
+                      border: `2px solid ${outlineColor}`,
+                      boxShadow: isSelected
+                        ? '0 0 0 3px rgba(255, 255, 255, 0.85), 0 2px 6px rgba(0, 0, 0, 0.5)'
+                        : '0 1px 4px rgba(0, 0, 0, 0.4)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                      transition: 'transform 0.15s ease-out, box-shadow 0.15s ease-out'
+                    }}
+                  >
+                    {isWaypoint && marker.index !== undefined && (
+                      <span
+                        style={{
+                          fontSize: isSelected ? '11px' : '9px',
+                          fontWeight: 'bold',
+                          color: '#ffffff',
+                          lineHeight: 1,
+                          pointerEvents: 'none'
+                        }}
+                      >
+                        {marker.index + 1}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Co-located OSM Marker Label (Visible on Hover or Selection) */}
+                  {(isSelected || isHovered) && (
+                    <div
+                      onPointerDown={() => {
+                        pressedMarkerRef.current = marker;
+                        hasDraggedRef.current = false;
+                      }}
+                      onPointerCancel={() => {
+                        pressedMarkerRef.current = null;
+                        hasDraggedRef.current = false;
+                      }}
+                      style={{
+                        position: 'absolute',
+                        bottom: `${pinSize / 2 + 6}px`,
+                        left: '0px',
+                        transform: 'translateX(-50%)',
+                        cursor: 'pointer',
+                        userSelect: 'none',
+                        whiteSpace: 'nowrap'
+                      }}
+                      className={`px-2.5 py-1 rounded-md text-xs font-bold shadow-lg border backdrop-blur-md transition-all duration-150
+                        ${skin === 'parchment'
+                          ? 'bg-[#2a221b]/95 text-[#f4ead5] border-[#8b5a2b]/60 hover:bg-[#2a221b]'
+                          : skin === 'retro-amber'
+                            ? 'bg-black text-amber-300 border-amber-400 font-mono hover:bg-amber-900/40'
+                            : skin === 'retro-green'
+                              ? 'bg-black text-green-300 border-green-400 font-mono hover:bg-green-900/40'
+                              : 'bg-black/80 text-white border-white/30 hover:bg-black/95'
+                        }`}
+                    >
+                      {isWaypoint && marker.index !== undefined
+                        ? `${marker.index + 1}. ${markerDisplayName}`
+                        : markerDisplayName}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </Html>
       )}

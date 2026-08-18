@@ -149,4 +149,65 @@ describe('OSM Tile Service & Tile Spherical Mesh Tests', () => {
     expect(osmTileService.getNextAdjacentTileZoom(18, 1.03).reason).toBe('HYSTERESIS');
     expect(osmTileService.getNextAdjacentTileZoom(19, 1.02).reason).toBe('HYSTERESIS');
   });
+
+  it('provides appropriate high-contrast tile URLs based on theme skin', () => {
+    const modernUrl = osmTileService.getTileUrl(14, 2048, 1360, 'modern');
+    expect(modernUrl).toMatch(/^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/rastertiles\/voyager\/14\/2048\/1360\.png$/);
+
+    const parchmentUrl = osmTileService.getTileUrl(14, 2048, 1360, 'parchment');
+    expect(parchmentUrl).toMatch(/^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/rastertiles\/voyager\/14\/2048\/1360\.png$/);
+
+    const retroGreenUrl = osmTileService.getTileUrl(14, 2048, 1360, 'retro-green');
+    expect(retroGreenUrl).toMatch(/^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/dark_all\/14\/2048\/1360\.png$/);
+
+    const retroAmberUrl = osmTileService.getTileUrl(14, 2048, 1360, 'retro-amber');
+    expect(retroAmberUrl).toMatch(/^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/dark_all\/14\/2048\/1360\.png$/);
+  });
+
+  it('projects geographic marker coordinates to exact Web Mercator pixel positions and separates them naturally with zoom', () => {
+    const centerLat = 37.7749;
+    const centerLng = -122.4194;
+    const screenWidth = 1920;
+    const screenHeight = 1080;
+    const screenCenterX = screenWidth / 2;
+    const screenCenterY = screenHeight / 2;
+
+    const project = (lat: number, lng: number, z: number, cLat: number, cLng: number) => {
+      const n = Math.pow(2, z);
+      const exactX = ((cLng + 180) / 360) * n;
+      const cLatRad = (Math.max(-85.0511, Math.min(85.0511, cLat)) * Math.PI) / 180;
+      const exactY = ((1 - Math.log(Math.tan(cLatRad) + 1 / Math.cos(cLatRad)) / Math.PI) / 2) * n;
+
+      const markerX = ((lng + 180) / 360) * n;
+      const latRad = (Math.max(-85.0511, Math.min(85.0511, lat)) * Math.PI) / 180;
+      const markerY = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n;
+
+      return {
+        x: screenCenterX + (markerX - exactX) * 256,
+        y: screenCenterY + (markerY - exactY) * 256
+      };
+    };
+
+    // Center marker projects exactly to viewport center
+    const centerPos = project(centerLat, centerLng, 14, centerLat, centerLng);
+    expect(centerPos.x).toBeCloseTo(screenCenterX, 4);
+    expect(centerPos.y).toBeCloseTo(screenCenterY, 4);
+
+    // Nearby marker 1km away
+    const nearbyLat = 37.7849;
+    const nearbyLng = -122.4094;
+
+    const posZ12 = project(nearbyLat, nearbyLng, 12, centerLat, centerLng);
+    const posZ14 = project(nearbyLat, nearbyLng, 14, centerLat, centerLng);
+    const posZ16 = project(nearbyLat, nearbyLng, 16, centerLat, centerLng);
+
+    const distZ12 = Math.hypot(posZ12.x - screenCenterX, posZ12.y - screenCenterY);
+    const distZ14 = Math.hypot(posZ14.x - screenCenterX, posZ14.y - screenCenterY);
+    const distZ16 = Math.hypot(posZ16.x - screenCenterX, posZ16.y - screenCenterY);
+
+    // Geographic separation doubles with each zoom level (2^2 = 4x from z12 to z14, 4x from z14 to z16)
+    expect(distZ14 / distZ12).toBeCloseTo(4, 1);
+    expect(distZ16 / distZ14).toBeCloseTo(4, 1);
+  });
 });
+
