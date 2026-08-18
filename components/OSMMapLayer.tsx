@@ -659,7 +659,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                     zIndex: isSelected || isHovered ? 35 : 20
                   }}
                 >
-                  {/* Small Geographic Pin */}
+                  {/* Invisible 40px x 40px Interactive Hit Area */}
                   <div
                     onPointerDown={() => {
                       pressedMarkerRef.current = marker;
@@ -680,66 +680,73 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                       position: 'absolute',
                       left: '0px',
                       top: '0px',
+                      width: '40px',
+                      height: '40px',
                       transform: 'translate(-50%, -50%)',
-                      width: `${pinSize}px`,
-                      height: `${pinSize}px`,
-                      backgroundColor: color,
-                      borderRadius: '50%',
-                      border: `2px solid ${outlineColor}`,
-                      boxShadow: isSelected
-                        ? '0 0 0 3px rgba(255, 255, 255, 0.85), 0 2px 6px rgba(0, 0, 0, 0.5)'
-                        : '0 1px 4px rgba(0, 0, 0, 0.4)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       cursor: 'pointer',
+                      pointerEvents: 'auto',
                       userSelect: 'none',
-                      transition: 'transform 0.15s ease-out, box-shadow 0.15s ease-out'
+                      background: 'transparent'
                     }}
                   >
-                    {isWaypoint && marker.index !== undefined && (
-                      <span
-                        style={{
-                          fontSize: isSelected ? '11px' : '9px',
-                          fontWeight: 'bold',
-                          color: '#ffffff',
-                          lineHeight: 1,
-                          pointerEvents: 'none'
-                        }}
-                      >
-                        {marker.index + 1}
-                      </span>
-                    )}
+                    {/* Small Geographic Visual Pin */}
+                    <div
+                      style={{
+                        width: `${pinSize}px`,
+                        height: `${pinSize}px`,
+                        backgroundColor: color,
+                        borderRadius: '50%',
+                        border: `2px solid ${outlineColor}`,
+                        boxShadow: isSelected
+                          ? '0 0 0 3px rgba(255, 255, 255, 0.85), 0 2px 6px rgba(0, 0, 0, 0.5)'
+                          : '0 1px 4px rgba(0, 0, 0, 0.4)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        pointerEvents: 'none',
+                        userSelect: 'none',
+                        transition: 'transform 0.15s ease-out, box-shadow 0.15s ease-out'
+                      }}
+                    >
+                      {isWaypoint && marker.index !== undefined && (
+                        <span
+                          style={{
+                            fontSize: isSelected ? '11px' : '9px',
+                            fontWeight: 'bold',
+                            color: '#ffffff',
+                            lineHeight: 1,
+                            pointerEvents: 'none'
+                          }}
+                        >
+                          {marker.index + 1}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
-                  {/* Co-located OSM Marker Label (Visible on Hover or Selection) */}
+                  {/* Co-located OSM Marker Label (Visible on Hover or Selection, strictly pointer-events: none) */}
                   {(isSelected || isHovered) && (
                     <div
-                      onPointerDown={() => {
-                        pressedMarkerRef.current = marker;
-                        hasDraggedRef.current = false;
-                      }}
-                      onPointerCancel={() => {
-                        pressedMarkerRef.current = null;
-                        hasDraggedRef.current = false;
-                      }}
                       style={{
                         position: 'absolute',
-                        bottom: `${pinSize / 2 + 6}px`,
+                        bottom: `${pinSize / 2 + 8}px`,
                         left: '0px',
                         transform: 'translateX(-50%)',
-                        cursor: 'pointer',
+                        pointerEvents: 'none',
                         userSelect: 'none',
                         whiteSpace: 'nowrap'
                       }}
                       className={`px-2.5 py-1 rounded-md text-xs font-bold shadow-lg border backdrop-blur-md transition-all duration-150
                         ${skin === 'parchment'
-                          ? 'bg-[#2a221b]/95 text-[#f4ead5] border-[#8b5a2b]/60 hover:bg-[#2a221b]'
+                          ? 'bg-[#2a221b]/95 text-[#f4ead5] border-[#8b5a2b]/60'
                           : skin === 'retro-amber'
-                            ? 'bg-black text-amber-300 border-amber-400 font-mono hover:bg-amber-900/40'
+                            ? 'bg-black text-amber-300 border-amber-400 font-mono'
                             : skin === 'retro-green'
-                              ? 'bg-black text-green-300 border-green-400 font-mono hover:bg-green-900/40'
-                              : 'bg-black/80 text-white border-white/30 hover:bg-black/95'
+                              ? 'bg-black text-green-300 border-green-400 font-mono'
+                              : 'bg-black/80 text-white border-white/30'
                         }`}
                     >
                       {isWaypoint && marker.index !== undefined

@@ -26,6 +26,7 @@ interface EarthProps {
 
 import { latLngToVector3, vector3ToLatLng } from '../utils/globeCoordinates';
 import { OSMMapLayer } from './OSMMapLayer';
+import { evaluateLabelPlacement, MarkerScreenTarget, ScreenRect } from '../utils/labelCollisionHelper';
 
 // Custom Shader for Retro Effect
 const RetroShader = {
@@ -129,6 +130,8 @@ const UniversalMarker: React.FC<{
   markerData?: any,
   skin?: SkinType,
   onClick: (e: any) => void,
+  onMouseEnter?: () => void,
+  onMouseLeave?: () => void,
   markerId?: string,
   scanOffsetsRef?: React.RefObject<Record<string, THREE.Vector3>>
 }> = ({ 
@@ -145,10 +148,13 @@ const UniversalMarker: React.FC<{
   markerData,
   skin,
   onClick,
+  onMouseEnter,
+  onMouseLeave,
   markerId = '',
   scanOffsetsRef
 }) => {
   const meshRef = useRef<THREE.Group>(null);
+  const domHitRef = useRef<HTMLDivElement>(null);
   const domPinRef = useRef<HTMLDivElement>(null);
   const { camera, size: viewportSize } = useThree();
 
@@ -161,8 +167,8 @@ const UniversalMarker: React.FC<{
 
       // When distance <= 1.45 (OSM detail view active), hide the 3D globe DOM pins so OSM markers handle presentation
       if (distance <= 1.45) {
-        if (domPinRef.current) {
-          domPinRef.current.style.display = 'none';
+        if (domHitRef.current) {
+          domHitRef.current.style.display = 'none';
         }
         return;
       }
@@ -197,16 +203,16 @@ const UniversalMarker: React.FC<{
       }
 
       // 3. Screen-space DOM overlay projection & size calculation for OSM map visibility
-      if (domPinRef.current) {
+      if (domHitRef.current && domPinRef.current) {
         const wp = new THREE.Vector3();
         meshRef.current.getWorldPosition(wp);
 
         // Check if marker is facing the camera
         const isFacingCam = wp.dot(camera.position) > 0.6;
         if (!isFacingCam) {
-          domPinRef.current.style.display = 'none';
+          domHitRef.current.style.display = 'none';
         } else {
-          domPinRef.current.style.display = 'flex';
+          domHitRef.current.style.display = 'flex';
           
           const markerVisualSize = size * sizeMultiplier * roleScale;
           const centerScreen = wp.clone().project(camera);
@@ -221,6 +227,7 @@ const UniversalMarker: React.FC<{
           const diameter = radius * 2;
           const strokeWidth = Math.max(1.5, radius * 0.22);
 
+          // Update visual marker size inside 40px hit area
           domPinRef.current.style.width = `${diameter}px`;
           domPinRef.current.style.height = `${diameter}px`;
           domPinRef.current.style.borderWidth = `${strokeWidth}px`;
@@ -241,7 +248,7 @@ const UniversalMarker: React.FC<{
 
   return (
     <group position={position} onClick={onClick} ref={meshRef}>
-      {/* Invisible Hitbox - ensures easy clicking even if visual dot is small */}
+      {/* 3D Hitbox - ensures raycasting target */}
       <mesh 
         userData={{ 
           isPin: true, 
@@ -256,8 +263,6 @@ const UniversalMarker: React.FC<{
          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
 
-
-
       {/* DOM Overlay Pin (Layered at z-index 40, guarantees 100% visibility above OSM raster layer) */}
       <Html 
         center 
@@ -267,8 +272,12 @@ const UniversalMarker: React.FC<{
           userSelect: 'none'
         }}
       >
+        {/* Invisible 40px x 40px Hit Area */}
         <div 
-          ref={domPinRef}
+          ref={domHitRef}
+          data-marker-hit-id={markerId}
+          onMouseEnter={onMouseEnter}
+          onMouseLeave={onMouseLeave}
           onClick={(e) => {
             e.stopPropagation();
             if (meshRef.current) {
@@ -279,31 +288,50 @@ const UniversalMarker: React.FC<{
               onClick(e);
             }
           }}
-          className="rounded-full flex items-center justify-center cursor-pointer"
+          className="flex items-center justify-center cursor-pointer"
           style={{
-            backgroundColor: colorStr,
-            borderColor: outlineStr,
-            borderStyle: 'solid',
-            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.5)',
-            opacity: isWaypoint && waypointRole === 'administrative' ? 0.6 : 1.0,
+            width: '40px',
+            height: '40px',
+            position: 'absolute',
+            left: '0px',
+            top: '0px',
+            transform: 'translate(-50%, -50%)',
             pointerEvents: 'auto',
-            transformOrigin: 'center center'
+            userSelect: 'none',
+            background: 'transparent'
           }}
         >
-          {isWaypoint && waypointIndex !== undefined && (
-            <span 
-              style={{
-                fontSize: '10px',
-                fontWeight: 'bold',
-                color: isRetro ? 'black' : (skin === 'parchment' ? '#3e2723' : 'black'),
-                lineHeight: 1,
-                userSelect: 'none',
-                textShadow: skin === 'parchment' ? '0 0 2px #f4ead5' : '0 0 2px white'
-              }}
-            >
-              {waypointIndex + 1}
-            </span>
-          )}
+          {/* Visual Marker Pin (strictly pointer-events: none) */}
+          <div 
+            ref={domPinRef}
+            className="rounded-full flex items-center justify-center"
+            style={{
+              backgroundColor: colorStr,
+              borderColor: outlineStr,
+              borderStyle: 'solid',
+              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.5)',
+              opacity: isWaypoint && waypointRole === 'administrative' ? 0.6 : 1.0,
+              pointerEvents: 'none',
+              transformOrigin: 'center center',
+              userSelect: 'none'
+            }}
+          >
+            {isWaypoint && waypointIndex !== undefined && (
+              <span 
+                style={{
+                  fontSize: '10px',
+                  fontWeight: 'bold',
+                  color: isRetro ? 'black' : (skin === 'parchment' ? '#3e2723' : 'black'),
+                  lineHeight: 1,
+                  userSelect: 'none',
+                  textShadow: skin === 'parchment' ? '0 0 2px #f4ead5' : '0 0 2px white',
+                  pointerEvents: 'none'
+                }}
+              >
+                {waypointIndex + 1}
+              </span>
+            )}
+          </div>
         </div>
       </Html>
     </group>
@@ -382,25 +410,21 @@ const HoverOverlay: React.FC<{
   onMarkerClick: (marker: any, point: THREE.Vector3) => void;
   outlineColor: string;
   selectedMarkerId?: string | null;
-}> = ({ isInteracting, groupRef, skin, onMarkerClick, outlineColor, selectedMarkerId }) => {
+  hoveredMarkerId?: string | null;
+  setHoveredMarkerId?: (id: string | null) => void;
+}> = ({ isInteracting, groupRef, skin, onMarkerClick, outlineColor, selectedMarkerId, hoveredMarkerId, setHoveredMarkerId }) => {
   const isParchment = skin === 'parchment';
   const isModern = skin === 'modern' || isParchment;
   const isAmber = skin === 'retro-amber';
   
   const { camera, gl, size, scene } = useThree();
-  const [hoveredPin, setHoveredPin] = useState<any>(null);
-  const [hoveredObject, setHoveredObject] = useState<THREE.Object3D | null>(null);
+  const [rayHoveredPin, setRayHoveredPin] = useState<any>(null);
+  const [rayHoveredObject, setRayHoveredObject] = useState<THREE.Object3D | null>(null);
 
   const containerGroupRef = useRef<THREE.Group>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
   const lineRef = useRef<SVGLineElement>(null);
-  const capRef = useRef<SVGCircleElement>(null);
-
-  // Compute label offset constants
-  const labelX = 30;
-  const labelY = -30;
-  const length = Math.sqrt(labelX * labelX + labelY * labelY);
-  const nDirX = labelX / length;
-  const nDirY = labelY / length;
+  const labelDivRef = useRef<HTMLDivElement>(null);
 
   const cachedSelectedPinRef = useRef<{ pin: any; object: THREE.Object3D; id: string } | null>(null);
 
@@ -411,13 +435,12 @@ const HoverOverlay: React.FC<{
     }
   }, [selectedMarkerId]);
 
-  const findSelectedPinObject = useCallback(() => {
-    if (!selectedMarkerId || !groupRef.current) {
-      cachedSelectedPinRef.current = null;
+  const findPinObjectById = useCallback((id: string) => {
+    if (!id || !groupRef.current) {
       return null;
     }
 
-    if (cachedSelectedPinRef.current && cachedSelectedPinRef.current.id === selectedMarkerId && cachedSelectedPinRef.current.object.parent) {
+    if (cachedSelectedPinRef.current && cachedSelectedPinRef.current.id === id && cachedSelectedPinRef.current.object.parent) {
       return cachedSelectedPinRef.current;
     }
 
@@ -425,16 +448,16 @@ const HoverOverlay: React.FC<{
     groupRef.current.traverse((obj) => {
       if (!match && obj.userData?.isPin) {
         const markerData = obj.userData.markerData;
-        if (markerData && (markerData.id === selectedMarkerId || String(markerData.id) === String(selectedMarkerId))) {
-          match = { pin: markerData, object: obj, id: selectedMarkerId };
+        if (markerData && (markerData.id === id || String(markerData.id) === String(id))) {
+          match = { pin: markerData, object: obj, id: id };
         }
       }
     });
 
-    if (match) {
+    if (match && id === selectedMarkerId) {
       cachedSelectedPinRef.current = match;
     }
-    return match || cachedSelectedPinRef.current;
+    return match;
   }, [selectedMarkerId, groupRef]);
 
   useEffect(() => {
@@ -444,9 +467,9 @@ const HoverOverlay: React.FC<{
     const handleMouseMove = (e: MouseEvent) => {
       const distance = camera.position.length();
       if (isInteracting || distance <= 1.45) {
-         if (hoveredPin) {
-             setHoveredPin(null);
-             setHoveredObject(null);
+         if (rayHoveredPin) {
+             setRayHoveredPin(null);
+             setRayHoveredObject(null);
              document.body.style.cursor = 'auto';
          }
          return;
@@ -482,27 +505,29 @@ const HoverOverlay: React.FC<{
             const firstHit = intersects[0].object;
             const markerData = firstHit.userData.markerData;
             
-            if (markerData && (!hoveredPin || hoveredPin.id !== markerData.id)) {
-                setHoveredPin(markerData);
-                setHoveredObject(firstHit);
+            if (markerData && (!rayHoveredPin || rayHoveredPin.id !== markerData.id)) {
+                setRayHoveredPin(markerData);
+                setRayHoveredObject(firstHit);
                 document.body.style.cursor = 'pointer';
             }
           } else {
-            if (hoveredPin) {
-               setHoveredPin(null);
-               setHoveredObject(null);
-               document.body.style.cursor = 'auto';
+            if (rayHoveredPin) {
+               setRayHoveredPin(null);
+               setRayHoveredObject(null);
+               if (!hoveredMarkerId) {
+                 document.body.style.cursor = 'auto';
+               }
             }
           }
         }
-      }, 50); // 50ms throttle
+      }, 30);
     };
 
     const container = gl.domElement;
     container.addEventListener('mousemove', handleMouseMove);
     container.addEventListener('mouseout', () => {
-        setHoveredPin(null);
-        setHoveredObject(null);
+        setRayHoveredPin(null);
+        setRayHoveredObject(null);
         document.body.style.cursor = 'auto';
     });
 
@@ -511,38 +536,51 @@ const HoverOverlay: React.FC<{
       clearTimeout(throttleTimeout);
       document.body.style.cursor = 'auto';
     };
-  }, [isInteracting, camera, size, gl, hoveredPin, groupRef]);
+  }, [isInteracting, camera, size, gl, rayHoveredPin, hoveredMarkerId, groupRef]);
 
   useFrame((state) => {
     const distance = state.camera.position.length();
     if (distance <= 1.45) {
-      if (hoveredPin) {
-        setHoveredPin(null);
-        setHoveredObject(null);
+      if (rayHoveredPin) {
+        setRayHoveredPin(null);
+        setRayHoveredObject(null);
       }
       return;
     }
 
-    let currentActivePin = hoveredPin;
-    let currentActiveObject = hoveredObject;
+    let activePin = null;
+    let activeObject = null;
 
-    if (!currentActivePin && selectedMarkerId) {
-      const match = findSelectedPinObject();
+    if (hoveredMarkerId) {
+      const match = findPinObjectById(hoveredMarkerId);
       if (match) {
-        currentActivePin = match.pin;
-        currentActiveObject = match.object;
+        activePin = match.pin;
+        activeObject = match.object;
       }
     }
 
-    if (!currentActivePin || !currentActiveObject || !containerGroupRef.current || typeof currentActiveObject.getWorldPosition !== 'function') return;
+    if (!activePin && rayHoveredPin) {
+      activePin = rayHoveredPin;
+      activeObject = rayHoveredObject;
+    }
+
+    if (!activePin && selectedMarkerId) {
+      const match = findPinObjectById(selectedMarkerId);
+      if (match) {
+        activePin = match.pin;
+        activeObject = match.object;
+      }
+    }
+
+    if (!activePin || !activeObject || !containerGroupRef.current || typeof activeObject.getWorldPosition !== 'function') return;
 
     // 1. Refresh world position every frame
     const wp = new THREE.Vector3();
-    currentActiveObject.getWorldPosition(wp);
+    activeObject.getWorldPosition(wp);
     containerGroupRef.current.position.copy(wp);
 
     // 2. Compute dynamic pin radius in screen pixels
-    const markerVisualSize = (currentActiveObject.userData.visualSize || 0.01) * 1.2;
+    const markerVisualSize = (activeObject.userData.visualSize || 0.01) * 1.2;
     
     // Project center
     const centerScreen = wp.clone().project(camera);
@@ -553,36 +591,115 @@ const HoverOverlay: React.FC<{
 
     // Convert projected coords to screen pixels
     const heightHalf = size.height / 2;
-    const centerY = -(centerScreen.y * heightHalf) + heightHalf;
+    const widthHalf = size.width / 2;
+    const markerScreenX = (centerScreen.x * widthHalf) + widthHalf;
+    const markerScreenY = -(centerScreen.y * heightHalf) + heightHalf;
     const edgeY = -(edgeScreen.y * heightHalf) + heightHalf;
     
-    const pinScreenRadius = Math.abs(centerY - edgeY);
+    const pinScreenRadius = Math.abs(markerScreenY - edgeY);
 
-    // 3. Update the SVG line endpoints
+    // 3. Project other visible markers on screen
+    const otherMarkers: MarkerScreenTarget[] = [];
+    if (groupRef.current) {
+      groupRef.current.traverse((obj) => {
+        if (obj.userData?.isPin && obj.userData?.markerData) {
+          const mData = obj.userData.markerData;
+          if (mData.id === activePin.id) return;
+          const otherWp = new THREE.Vector3();
+          obj.getWorldPosition(otherWp);
+
+          // Check if facing camera
+          if (otherWp.dot(camera.position) > 0.5) {
+            const sc = otherWp.clone().project(camera);
+            const ox = (sc.x * widthHalf) + widthHalf;
+            const oy = -(sc.y * heightHalf) + heightHalf;
+            
+            const otherEdgeWp = otherWp.clone().add(camera.up.clone().multiplyScalar((obj.userData.visualSize || 0.01) * 1.2));
+            const otherEdgeSc = otherEdgeWp.project(camera);
+            const otherEdgeY = -(otherEdgeSc.y * heightHalf) + heightHalf;
+            const otherRadius = Math.max(4, Math.abs(oy - otherEdgeY));
+
+            otherMarkers.push({
+              id: mData.id,
+              x: ox,
+              y: oy,
+              radius: otherRadius,
+              hitRadius: 20
+            });
+          }
+        }
+      });
+    }
+
+    // 4. Measure actual rendered label dimensions
+    let labelWidth = 140;
+    let labelHeight = 32;
+    if (labelDivRef.current) {
+      const rect = labelDivRef.current.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        labelWidth = rect.width;
+        labelHeight = rect.height;
+      }
+    }
+
+    // 5. Evaluate best collision-free placement
+    const bestLayout = evaluateLabelPlacement(
+      {
+        x: markerScreenX,
+        y: markerScreenY,
+        visualRadius: pinScreenRadius,
+        hitRadius: 20,
+        id: activePin.id
+      },
+      labelWidth,
+      labelHeight,
+      otherMarkers,
+      [],
+      { width: size.width, height: size.height }
+    );
+
+    // 6. Update SVG and Label positions
+    if (svgRef.current) {
+      svgRef.current.style.left = `${bestLayout.svgBox.left}px`;
+      svgRef.current.style.top = `${bestLayout.svgBox.top}px`;
+      svgRef.current.style.width = `${bestLayout.svgBox.width}px`;
+      svgRef.current.style.height = `${bestLayout.svgBox.height}px`;
+    }
+
     if (lineRef.current) {
-       // Start point from pin edge towards label
-       const startX = nDirX * pinScreenRadius;
-       // Y goes from +30 to 0 relative to SVG origin, so we adjust accordingly.
-       // The SVG is positioned at top: -30px. Label is at bottom: 30px, left: 30px relative to pin.
-       // That means pin center is at x=0, y=30 within the SVG.
-       const startY = 30 + nDirY * pinScreenRadius;
+      lineRef.current.setAttribute('x1', bestLayout.svgLine.x1.toString());
+      lineRef.current.setAttribute('y1', bestLayout.svgLine.y1.toString());
+      lineRef.current.setAttribute('x2', bestLayout.svgLine.x2.toString());
+      lineRef.current.setAttribute('y2', bestLayout.svgLine.y2.toString());
+    }
 
-       lineRef.current.setAttribute('x1', startX.toString());
-       lineRef.current.setAttribute('y1', startY.toString());
-       // End point is still at the label (top right of SVG box)
-       lineRef.current.setAttribute('x2', '30');
-       lineRef.current.setAttribute('y2', '0');
+    if (labelDivRef.current) {
+      labelDivRef.current.style.left = `${bestLayout.labelOffset.left}px`;
+      labelDivRef.current.style.top = `${bestLayout.labelOffset.top}px`;
     }
   });
 
   const currentDist = camera.position.length();
   if (currentDist <= 1.45) return null;
 
-  let activePin = hoveredPin;
-  let activeObject = hoveredObject;
+  let activePin = null;
+  let activeObject = null;
+
+  if (hoveredMarkerId) {
+    const match = findPinObjectById(hoveredMarkerId);
+    if (match) {
+      activePin = match.pin;
+      activeObject = match.object;
+    }
+  }
+
+  if (!activePin && rayHoveredPin) {
+    activePin = rayHoveredPin;
+    activeObject = rayHoveredObject;
+  }
 
   if (!activePin && selectedMarkerId) {
-    const match = findSelectedPinObject();
+    const match = findPinObjectById(selectedMarkerId);
     if (match) {
       activePin = match.pin;
       activeObject = match.object;
@@ -591,41 +708,71 @@ const HoverOverlay: React.FC<{
 
   if (!activePin || !activeObject) return null;
 
+  // Resolve world position directly for the group position prop
+  const initWorldPos = new THREE.Vector3();
+  if (typeof activeObject.getWorldPosition === 'function') {
+    activeObject.getWorldPosition(initWorldPos);
+  }
+
   const isWaypoint = activeObject?.userData?.isWaypoint;
   const waypointIndex = activeObject?.userData?.waypointIndex;
 
   return (
-    <group ref={containerGroupRef}>
-      <Html center zIndexRange={[100, 0]} style={{ pointerEvents: 'auto' }}>
+    <group ref={containerGroupRef} position={initWorldPos}>
+      <Html 
+        center 
+        zIndexRange={[100, 0]} 
+        style={{ 
+          pointerEvents: 'none',
+          userSelect: 'none'
+        }}
+      >
         <div 
-          style={{ position: 'relative', cursor: 'pointer' }}
-          onClick={(e) => {
-              e.stopPropagation();
-              if (containerGroupRef.current) {
-                  onMarkerClick(activePin, containerGroupRef.current.position.clone());
-              }
+          style={{ 
+            position: 'relative', 
+            pointerEvents: 'none',
+            userSelect: 'none'
           }}
         >
-          {/* Connector Line */}
-          <svg style={{ position: 'absolute', top: '-30px', left: '0px', width: '30px', height: '30px', overflow: 'visible', pointerEvents: 'none' }}>
+          {/* Dynamic Connector Line */}
+          <svg 
+            ref={svgRef}
+            style={{ 
+              position: 'absolute', 
+              top: '-32px', 
+              left: '0px', 
+              width: '32px', 
+              height: '32px', 
+              overflow: 'visible', 
+              pointerEvents: 'none',
+              userSelect: 'none'
+            }}
+          >
             <line 
               ref={lineRef}
-              x1="0" y1="30"
-              x2="30" y2="0"
-              stroke={isModern ? "rgba(255,255,255,0.6)" : outlineColor} 
+              x1="0" y1="0"
+              x2="32" y2="-32"
+              stroke={isModern ? "rgba(255,255,255,0.7)" : outlineColor} 
               strokeWidth="1.5" 
             />
           </svg>
 
-          {/* Label Content */}
+          {/* Dynamic Label Content (pointer-events: none) */}
           <div 
-            style={{ position: 'absolute', bottom: '30px', left: '30px' }}
-            className={`px-3 py-1.5 rounded-lg whitespace-nowrap text-sm font-bold shadow-xl border backdrop-blur-md transition-opacity duration-200 hover:scale-105 active:scale-95
+            ref={labelDivRef}
+            style={{ 
+              position: 'absolute', 
+              left: '32px', 
+              top: '-32px',
+              pointerEvents: 'none',
+              userSelect: 'none'
+            }}
+            className={`px-3 py-1.5 rounded-lg whitespace-nowrap text-sm font-bold shadow-xl border backdrop-blur-md transition-opacity duration-150
             ${isModern 
-                ? 'bg-black/60 text-white border-white/20 hover:bg-black/80' 
+                ? 'bg-black/75 text-white border-white/20' 
                 : isAmber
-                  ? 'bg-black text-amber-300 border-amber-400 font-mono hover:bg-amber-900/40'
-                  : 'bg-black text-green-300 border-green-400 font-mono hover:bg-green-900/40'}`}
+                  ? 'bg-black text-amber-300 border-amber-400 font-mono'
+                  : 'bg-black text-green-300 border-green-400 font-mono'}`}
           >
             {isWaypoint && waypointIndex !== undefined 
               ? `${waypointIndex + 1}. ${(activePin as any).displayName || activePin.name || 'Unknown Location'}` 
@@ -640,6 +787,7 @@ const HoverOverlay: React.FC<{
 const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
   const groupRef = useRef<THREE.Group>(null);
   const scanOffsetsRef = useRef<Record<string, THREE.Vector3>>({});
+  const [hoveredMarkerId, setHoveredMarkerId] = useState<string | null>(null);
   const { autoRotate, isInteracting, skin, markers, favorites, showFavorites, selectedMarkerId, routeWaypoints, currentWaypointIndex, scanningArea } = props;
 
   // Rotate the entire group
@@ -1220,6 +1368,10 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
           markerData={marker.data}
           skin={skin}
           onClick={(e) => handleMarkerClick(e, marker.data)}
+          onMouseEnter={() => setHoveredMarkerId(marker.id)}
+          onMouseLeave={() => {
+            setHoveredMarkerId((prev) => (prev === marker.id ? null : prev));
+          }}
           markerId={marker.id}
           scanOffsetsRef={scanOffsetsRef}
         />
@@ -1320,6 +1472,8 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
       onMarkerClick={props.onMarkerClick} 
       outlineColor={outlineColor}
       selectedMarkerId={selectedMarkerId}
+      hoveredMarkerId={hoveredMarkerId}
+      setHoveredMarkerId={setHoveredMarkerId}
     />
     </>
   );
