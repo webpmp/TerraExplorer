@@ -22,6 +22,7 @@ import { ENTITY_SCHEMAS } from './entitySchema';
 import logoImageBlack from './assets/logo-terra-explorer-black.png';
 import logoImageGreen from './assets/logo-terra-explorer-green.png';
 import logoImageAmber from './assets/logo-terra-explorer-amber.png';
+import { calculateClampedZoomDelta, normalizeWheelDelta } from './utils/cameraZoomUtils';
 
 // Helper to convert Lat/Lng to 3D Cartesian coordinates (Local Space)
 const latLngToVector3 = (lat: number, lng: number, radius: number = 1) => {
@@ -325,6 +326,7 @@ const App: React.FC = () => {
   const [isTraceModalOpen, setIsTraceModalOpen] = useState(false);
 
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
+  const [selectedMarkerCoordinates, setSelectedMarkerCoordinates] = useState<{ lat: number; lng: number } | null>(null);
   const [isDiscoveryLoading, setIsDiscoveryLoading] = useState(false); // Controls input search / discovery scan spinner
   const [isInfoPanelLoading, setIsInfoPanelLoading] = useState(false); // Controls InfoPanel enrichment skeleton
   const [isNewsFetching, setIsNewsFetching] = useState(false);
@@ -1022,6 +1024,7 @@ const App: React.FC = () => {
      
      setLocationInfo(initialWaypointPayload);
      setSelectedMarkerId(stableId);
+     setSelectedMarkerCoordinates({ lat: wp.lat, lng: wp.lng });
      setIsFocused(true);
 
      // Propose camera values to central state
@@ -1175,6 +1178,7 @@ const App: React.FC = () => {
         setSearchError(null);
         setAutoRotate(false);
         setSelectedMarkerId(stableId);
+        setSelectedMarkerCoordinates({ lat: marker.lat, lng: marker.lng });
         setIsFocused(true);
         
         const fav = marker as FavoriteLocation;
@@ -1360,6 +1364,7 @@ const App: React.FC = () => {
      }
      
      setSelectedMarkerId(null);
+     setSelectedMarkerCoordinates(null);
      setIsFocused(false);
 
      if (cameraControlsRef.current) {
@@ -1690,6 +1695,7 @@ const App: React.FC = () => {
       setMarkers([searchMarker]);
       console.log(`[Marker Lifecycle] DISCOVERY_RESULTS_SET count=1`);
       setSelectedMarkerId(searchMarker.id);
+      setSelectedMarkerCoordinates({ lat, lng });
       setLocationInfo((pipelineResult as any).finalData!);
       setIsDiscoveryLoading(false);
       console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
@@ -1801,14 +1807,14 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
     const currentZoom = cameraControlsRef.current.getDistance();
     const diff = targetZoomRef.current - currentZoom;
 
-    // smoothing factor (tune 0.08-0.15)
-    const nextZoom = currentZoom + diff * 0.12;
+    // Smooth cinematic damping factor (0.075 for gradual, responsive deceleration)
+    const nextZoom = currentZoom + diff * 0.075;
     camera.position.normalize().multiplyScalar(nextZoom);
     cameraControlsRef.current?.update();
 
     updateCameraDistance(nextZoom);
 
-    if (Math.abs(diff) > 0.001) {
+    if (Math.abs(diff) > 0.0008) {
       zoomAnimRef.current = requestAnimationFrame(animateZoom);
     } else {
       zoomAnimRef.current = null;
@@ -1859,12 +1865,13 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
   }, [isZoomLocked, clampZoom, animateZoom, skin, animateParchmentZoom]);
 
   useEffect(() => {
-    const WHEEL_SENSITIVITY = 0.02;
-
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (skin === 'parchment') {
-         targetParchmentZoomRef.current = Math.max(1.0, Math.min(50.0, targetParchmentZoomRef.current - e.deltaY * 0.003));
+         const normalizedDelta = normalizeWheelDelta(e.deltaY, e.deltaMode);
+         const parchmentScale = targetParchmentZoomRef.current / 15 + 0.4;
+         const parchmentStep = Math.max(-2.5, Math.min(2.5, normalizedDelta * 0.0018 * parchmentScale));
+         targetParchmentZoomRef.current = Math.max(1.0, Math.min(50.0, targetParchmentZoomRef.current - parchmentStep));
          if (!parchmentZoomAnimRef.current) {
             parchmentZoomAnimRef.current = requestAnimationFrame(animateParchmentZoom);
          }
@@ -1872,8 +1879,9 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       }
 
       if (!isZoomLocked && cameraControlsRef.current) {
-        targetZoomRef.current = targetZoomRef.current ?? cameraControlsRef.current.getDistance();
-        targetZoomRef.current = clampZoom(targetZoomRef.current + e.deltaY * WHEEL_SENSITIVITY);
+        const currentDist = targetZoomRef.current ?? cameraControlsRef.current.getDistance();
+        const zoomDelta = calculateClampedZoomDelta(e.deltaY, e.deltaMode, currentDist);
+        targetZoomRef.current = clampZoom(currentDist + zoomDelta);
         
         userModifiedZoomRef.current = true;
 
@@ -1949,6 +1957,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
     setInteractionState(markers.length > 0 ? 'PINS_RENDERED' : 'GLOBE_IDLE');
     setLocationInfo(null);
     setSelectedMarkerId(null);
+    setSelectedMarkerCoordinates(null);
     setIsNewsFetching(false);
     setIsFocused(false);
     console.log(`[Marker Lifecycle] INFOPANEL_CLOSED markersPreserved=${markers.length}`);
@@ -2226,6 +2235,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           favorites={earthFavorites}
           showFavorites={showSavedItems}
           selectedMarkerId={selectedMarkerId}
+          selectedMarkerCoordinates={selectedMarkerCoordinates}
           routeWaypoints={displayRouteWaypoints}
           currentWaypointIndex={currentWaypointIndex}
           scanningArea={scanningArea}

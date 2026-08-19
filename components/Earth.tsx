@@ -18,6 +18,7 @@ interface EarthProps {
   favorites: FavoriteLocation[];
   showFavorites: boolean;
   selectedMarkerId: string | null;
+  selectedMarkerCoordinates?: { lat: number; lng: number } | null;
   routeWaypoints?: Waypoint[];
   currentWaypointIndex?: number;
   scanningArea?: GeoCoordinates | null;
@@ -26,7 +27,9 @@ interface EarthProps {
 
 import { latLngToVector3, vector3ToLatLng } from '../utils/globeCoordinates';
 import { OSMMapLayer } from './OSMMapLayer';
+import { OSMTransitionFog } from './OSMTransitionFog';
 import { evaluateLabelPlacement, MarkerScreenTarget, ScreenRect } from '../utils/labelCollisionHelper';
+import { OSM_DETAIL_THRESHOLD } from '../services/geographic/osmTileService';
 
 // Custom Shader for Retro Effect
 const RetroShader = {
@@ -164,9 +167,10 @@ const UniversalMarker: React.FC<{
   useFrame((state) => {
     if (meshRef.current) {
       const distance = state.camera.position.length();
+      const isOSMDetailActive = distance <= OSM_DETAIL_THRESHOLD;
 
-      // When distance <= 1.45 (OSM detail view active), hide the 3D globe DOM pins so OSM markers handle presentation
-      if (distance <= 1.45) {
+      // When OSM detail view is active, hide the 3D globe DOM pins so OSM markers handle presentation
+      if (isOSMDetailActive) {
         if (domHitRef.current) {
           domHitRef.current.style.display = 'none';
         }
@@ -422,6 +426,7 @@ const HoverOverlay: React.FC<{
   const [rayHoveredObject, setRayHoveredObject] = useState<THREE.Object3D | null>(null);
 
   const containerGroupRef = useRef<THREE.Group>(null);
+  const overlayContainerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const lineRef = useRef<SVGLineElement>(null);
   const labelDivRef = useRef<HTMLDivElement>(null);
@@ -466,7 +471,8 @@ const HoverOverlay: React.FC<{
 
     const handleMouseMove = (e: MouseEvent) => {
       const distance = camera.position.length();
-      if (isInteracting || distance <= 1.45) {
+      const isOSMDetailActive = distance <= OSM_DETAIL_THRESHOLD;
+      if (isInteracting || isOSMDetailActive) {
          if (rayHoveredPin) {
              setRayHoveredPin(null);
              setRayHoveredObject(null);
@@ -540,7 +546,13 @@ const HoverOverlay: React.FC<{
 
   useFrame((state) => {
     const distance = state.camera.position.length();
-    if (distance <= 1.45) {
+    const isOSMDetailActive = distance <= OSM_DETAIL_THRESHOLD;
+
+    if (overlayContainerRef.current) {
+      overlayContainerRef.current.style.display = isOSMDetailActive ? 'none' : 'block';
+    }
+
+    if (isOSMDetailActive) {
       if (rayHoveredPin) {
         setRayHoveredPin(null);
         setRayHoveredObject(null);
@@ -572,7 +584,16 @@ const HoverOverlay: React.FC<{
       }
     }
 
-    if (!activePin || !activeObject || !containerGroupRef.current || typeof activeObject.getWorldPosition !== 'function') return;
+    if (!activePin || !activeObject || !containerGroupRef.current || typeof activeObject.getWorldPosition !== 'function') {
+      if (overlayContainerRef.current) {
+        overlayContainerRef.current.style.display = 'none';
+      }
+      return;
+    }
+
+    if (overlayContainerRef.current) {
+      overlayContainerRef.current.style.display = 'block';
+    }
 
     // 1. Refresh world position every frame
     const wp = new THREE.Vector3();
@@ -680,7 +701,8 @@ const HoverOverlay: React.FC<{
   });
 
   const currentDist = camera.position.length();
-  if (currentDist <= 1.45) return null;
+  const isOSMDetailActive = currentDist <= OSM_DETAIL_THRESHOLD;
+  if (isOSMDetailActive) return null;
 
   let activePin = null;
   let activeObject = null;
@@ -728,10 +750,12 @@ const HoverOverlay: React.FC<{
         }}
       >
         <div 
+          ref={overlayContainerRef}
           style={{ 
             position: 'relative', 
             pointerEvents: 'none',
-            userSelect: 'none'
+            userSelect: 'none',
+            display: isOSMDetailActive ? 'none' : 'block'
           }}
         >
           {/* Dynamic Connector Line */}
@@ -788,6 +812,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
   const groupRef = useRef<THREE.Group>(null);
   const scanOffsetsRef = useRef<Record<string, THREE.Vector3>>({});
   const [hoveredMarkerId, setHoveredMarkerId] = useState<string | null>(null);
+  const [isStreetMapReady, setIsStreetMapReady] = useState<boolean>(false);
   const { autoRotate, isInteracting, skin, markers, favorites, showFavorites, selectedMarkerId, routeWaypoints, currentWaypointIndex, scanningArea } = props;
 
   // Rotate the entire group
@@ -1346,7 +1371,16 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
         onCameraChange={props.onCameraChange}
         markers={processedMarkers}
         selectedMarkerId={selectedMarkerId}
+        selectedMarkerCoordinates={props.selectedMarkerCoordinates}
         onMarkerClick={handleMarkerClick}
+        onMapReady={setIsStreetMapReady}
+      />
+
+      {/* Atmospheric Fog Transition Layer (Three-Phase Transition, 1.85 -> 1.35) */}
+      <OSMTransitionFog
+        skin={skin}
+        isMapReady={isStreetMapReady}
+        isInteracting={isInteracting}
       />
 
       {/* Render All Markers */}

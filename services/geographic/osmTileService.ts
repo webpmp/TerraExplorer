@@ -32,6 +32,7 @@ export interface CachedTile {
 
 export const VALID_OSM_ZOOMS = [12, 14, 16, 18, 19] as const;
 
+export const OSM_DETAIL_THRESHOLD = 1.45;
 export const OSM_RASTER_ALTITUDE = 1.017;
 const MAX_CONCURRENT_REQUESTS = 6;
 const MAX_CACHE_ENTRIES = 300;
