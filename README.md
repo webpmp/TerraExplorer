@@ -19,8 +19,8 @@ Terra Explorer is an interactive 3D globe application that lets users freely nav
 
 - **Interactive 3D Globe**: Seamlessly rotate, zoom, and explore a high-fidelity 3D model of the Earth.
 - **OpenStreetMap Street Data**: Zoom from the 3D globe into detailed street-level map data powered by [OpenStreetMap contributors](https://openstreetmap.org).
-- **AI-Powered Insights**: Click anywhere or search for a location to receive instant, AI-generated encyclopedic summaries, population data, climate info, and fun facts using the Gemini 2.5 Flash model.
-- **Real-Time News**: Fetches live news headlines relevant to the selected location using Google Search Grounding.
+- **AI-Powered Insights**: Click anywhere or search for a location to receive instant, AI-generated encyclopedic summaries, population data, climate info, and fun facts. Supports Google Gemini by default or a local AI model through LM Studio for locally hosted inference.
+- **Real-Time News**: Fetches live news headlines relevant to the selected location using configurable news providers and API keys.
 - **Visual Themes (Skins)**:
   - **Modern**: Sleek, glassmorphism UI with high-resolution textures.
   - **CRT Green**: Retro monochrome monitor effect with scanlines and pixelated fonts.
