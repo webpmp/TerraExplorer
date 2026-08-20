@@ -234,6 +234,8 @@ const UniversalMarker: React.FC<{
           // Update visual marker size inside 40px hit area
           domPinRef.current.style.width = `${diameter}px`;
           domPinRef.current.style.height = `${diameter}px`;
+          domPinRef.current.style.minWidth = `${diameter}px`;
+          domPinRef.current.style.minHeight = `${diameter}px`;
           domPinRef.current.style.borderWidth = `${strokeWidth}px`;
 
           // Selected Marker Pure Uniform Scale Pulse (animates scale only, zero color/shadow/opacity shift)
@@ -292,7 +294,7 @@ const UniversalMarker: React.FC<{
               onClick(e);
             }
           }}
-          className="flex items-center justify-center cursor-pointer"
+          className="cursor-pointer"
           style={{
             width: '40px',
             height: '40px',
@@ -300,16 +302,26 @@ const UniversalMarker: React.FC<{
             left: '0px',
             top: '0px',
             transform: 'translate(-50%, -50%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             pointerEvents: 'auto',
             userSelect: 'none',
             background: 'transparent'
           }}
         >
-          {/* Visual Marker Pin (strictly pointer-events: none) */}
+          {/* Visual Marker Pin (strictly pointer-events: none, rigid 1:1 circular geometry) */}
           <div 
             ref={domPinRef}
-            className="rounded-full flex items-center justify-center"
+            className="rounded-full"
             style={{
+              flexShrink: 0,
+              aspectRatio: '1 / 1',
+              boxSizing: 'border-box',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               backgroundColor: colorStr,
               borderColor: outlineStr,
               borderStyle: 'solid',

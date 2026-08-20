@@ -936,11 +936,16 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                         background: 'transparent'
                       }}
                     >
-                      {/* Small Geographic Visual Pin */}
+                      {/* Small Geographic Visual Pin (strictly 1:1 circular geometry) */}
                       <div
                         style={{
                           width: `${pinSize}px`,
                           height: `${pinSize}px`,
+                          minWidth: `${pinSize}px`,
+                          minHeight: `${pinSize}px`,
+                          flexShrink: 0,
+                          aspectRatio: '1 / 1',
+                          boxSizing: 'border-box',
                           backgroundColor: color,
                           borderRadius: '50%',
                           border: `2px solid ${outlineColor}`,
