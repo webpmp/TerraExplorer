@@ -1,12 +1,13 @@
 <p align="center" style="background-color:black; padding:20px;">
   <img src="https://github.com/webpmp/webpmp.github.io/blob/master/terra-explorer-parchment.png" 
        alt="Terra Explorer Parchment Theme" 
-       width="640" height="480">
-  <br><br>
+       width="320" height="240"
+       style="margin-right: 15px; vertical-align: middle;">
   <a href="assets/parchment-zoom.gif">
     <img src="assets/parchment-zoom.gif" 
          alt="Parchment Zoom Animation" 
-         width="320" height="240">
+         width="320" height="240"
+         style="margin-left: 15px; vertical-align: middle;">
   </a>
 </p>
 
