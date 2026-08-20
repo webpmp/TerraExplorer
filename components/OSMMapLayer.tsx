@@ -978,6 +978,8 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                 const isSelected = selectedMarkerId === marker.id;
                 const isHovered = hoveredMarkerId === marker.id;
                 const isWaypoint = marker.isWaypoint;
+                const isMultiLocation = marker.isMultiLocation ?? false;
+                const showMarkerNumber = isWaypoint && isMultiLocation && marker.index !== undefined;
                 const pinSize = isSelected ? 22 : 16;
                 const color = marker.color || (skin === 'parchment' ? '#8b5a2b' : '#3b82f6');
                 const outlineColor = skin === 'parchment' ? '#f4ead5' : (skin === 'retro-green' ? '#4ade80' : (skin === 'retro-amber' ? '#fbbf24' : '#ffffff'));
@@ -986,7 +988,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                   (marker.data as any)?.displayName ||
                   marker.data?.name ||
                   marker.name ||
-                  (isWaypoint ? `Waypoint ${marker.index !== undefined ? marker.index + 1 : ''}` : 'Location');
+                  (showMarkerNumber ? `Waypoint ${marker.index + 1}` : 'Location');
 
                 return (
                   <div
@@ -1056,7 +1058,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                           transition: 'transform 0.15s ease-out, box-shadow 0.15s ease-out'
                         }}
                       >
-                        {isWaypoint && marker.index !== undefined && (
+                        {showMarkerNumber && (
                           <span
                             style={{
                               fontSize: isSelected ? '11px' : '9px',
@@ -1094,7 +1096,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                                 : 'bg-black/80 text-white border-white/30'
                           }`}
                       >
-                        {isWaypoint && marker.index !== undefined
+                        {showMarkerNumber
                           ? `${marker.index + 1}. ${markerDisplayName}`
                           : markerDisplayName}
                       </div>

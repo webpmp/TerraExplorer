@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, ZoomIn, ZoomOut, Loader2, Star, AlertTriangle, X, Lock, Unlock, Palette, Settings } from 'lucide-react';
+import { Search, ZoomIn, ZoomOut, Loader2, Star, X, Lock, Unlock, Palette, Settings } from 'lucide-react';
 import { SkinType } from '../types';
 
 interface ControlsProps {
@@ -258,7 +258,9 @@ const Controls: React.FC<ControlsProps> = ({
       submitBtn: "bg-white/10 text-cyan-400 hover:bg-white/20 hover:text-cyan-300 rounded-full",
       resetBtn: "text-gray-400 hover:text-white mr-2 p-1 rounded-full hover:bg-white/10 transition-colors",
       glow: "absolute inset-0 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full blur opacity-20 group-hover:opacity-40",
-      error: "bg-red-900/80 border border-red-500 text-white text-sm px-4 py-2 rounded-lg backdrop-blur-md flex items-center gap-2",
+      statusRow: "bg-black/80 backdrop-blur-md border border-white/15 text-white/90 rounded-full shadow-lg",
+      statusText: "text-gray-200 font-sans",
+      statusDismiss: "text-white/40 hover:text-white transition-colors p-0.5 rounded-full",
       copyright: "text-white/40 font-sans",
       modal: "bg-black/80 backdrop-blur-md border border-cyan-400/30 text-white rounded-xl shadow-2xl"
     },
@@ -274,7 +276,9 @@ const Controls: React.FC<ControlsProps> = ({
       submitBtn: "bg-green-900/40 text-green-300 hover:bg-green-400 hover:text-black rounded-none font-retro uppercase",
       resetBtn: "text-green-300 hover:text-green-100 mr-2 p-1",
       glow: "hidden",
-      error: "bg-black border border-green-400 text-green-300 font-retro px-4 py-2 uppercase blinking",
+      statusRow: "bg-black border border-green-400 text-green-300 font-retro uppercase tracking-wider rounded-none",
+      statusText: "text-green-300 font-retro",
+      statusDismiss: "text-green-400/70 hover:text-green-200 transition-colors p-0.5",
       copyright: "text-green-400/60 font-retro uppercase tracking-widest",
       modal: "bg-black/85 backdrop-blur-sm border-2 border-green-400 text-green-300 font-retro shadow-[0_0_20px_rgba(74,222,128,0.2)] rounded-none"
     },
@@ -290,7 +294,9 @@ const Controls: React.FC<ControlsProps> = ({
       submitBtn: "bg-amber-900/40 text-amber-300 hover:bg-amber-400 hover:text-black rounded-none font-retro uppercase",
       resetBtn: "text-amber-300 hover:text-amber-100 mr-2 p-1",
       glow: "hidden",
-      error: "bg-black border border-amber-400 text-amber-300 font-retro px-4 py-2 uppercase blinking",
+      statusRow: "bg-black border border-amber-400 text-amber-300 font-retro uppercase tracking-wider rounded-none",
+      statusText: "text-amber-300 font-retro",
+      statusDismiss: "text-amber-400/70 hover:text-amber-200 transition-colors p-0.5",
       copyright: "text-amber-400/60 font-retro uppercase tracking-widest",
       modal: "bg-black/85 backdrop-blur-sm border-2 border-amber-400 text-amber-300 font-retro shadow-[0_0_20px_rgba(251,191,36,0.2)] rounded-none"
     },
@@ -305,7 +311,9 @@ const Controls: React.FC<ControlsProps> = ({
       submitBtn: "bg-[#e8d5b5] text-[#5c3a21] hover:bg-[#d2b48c]/80 rounded-[0_3px_3px_0] font-sans font-bold uppercase",
       resetBtn: "text-[#8b5a2b] hover:text-[#3e2723] mr-2 p-1",
       glow: "hidden",
-      error: "bg-[#f4ead5] border border-[#8b5a2b] text-[#8b0000] font-sans px-4 py-2 shadow-md",
+      statusRow: "bg-[#f4ead5]/95 border border-[#8b5a2b]/40 text-[#5c3a21] font-sans shadow-sm rounded",
+      statusText: "text-[#522B07] font-sans",
+      statusDismiss: "text-[#8b5a2b]/70 hover:text-[#3e2723] transition-colors p-0.5",
       copyright: "text-[#f4ead5]/70 font-sans",
       modal: "bg-[#f4ead5] border-2 border-[#8b5a2b] text-[#3e2723] font-sans shadow-[0_4px_20px_rgba(0,0,0,0.4)] rounded-sm"
     }
@@ -328,18 +336,6 @@ const Controls: React.FC<ControlsProps> = ({
        onClearError();
     }
   };
-
-  const tooltipStyle = 
-    skin === 'modern' ? 'bg-slate-900 border border-red-500/40 text-red-200' :
-    skin === 'retro-green' ? 'bg-black border-2 border-green-400 text-green-400 font-retro rounded-none' :
-    skin === 'retro-amber' ? 'bg-black border-2 border-amber-400 text-amber-400 font-retro rounded-none' :
-    'bg-[#f4ead5] border border-[#8b5a2b] text-[#8b0000] font-sans rounded-sm';
-
-  const errorIconColor = 
-    skin === 'modern' ? 'text-red-500' :
-    skin === 'retro-green' ? 'text-green-400' :
-    skin === 'retro-amber' ? 'text-amber-400' :
-    'text-[#8b0000]';
 
   // Format placeholder for retro skins, clear on focus
   const displayPlaceholder = isFocused ? "" : (skin === 'modern' ? placeholder : placeholder.toUpperCase());
@@ -545,16 +541,6 @@ const Controls: React.FC<ControlsProps> = ({
                 className={`w-full bg-transparent border-none px-4 py-4 focus:ring-0 outline-none ${theme.inputField}`}
               />
 
-              {searchError && (
-                <div className="relative flex items-center mr-2 select-none group/error-tooltip">
-                  <AlertTriangle className={`cursor-pointer animate-pulse shrink-0 ${errorIconColor}`} size={20} />
-                  {/* Tooltip Content */}
-                  <div className={`absolute bottom-full mb-2 right-1/2 translate-x-1/2 pointer-events-none opacity-0 group-hover/error-tooltip:opacity-100 transition-opacity duration-200 z-50 whitespace-nowrap text-xs font-bold uppercase tracking-wider px-3 py-1.5 shadow-xl border backdrop-blur-md ${tooltipStyle}`}>
-                    {searchError}
-                  </div>
-                </div>
-              )}
-              
               {query && !scanningStatusText && (
                 <button
                   type="button"
@@ -596,16 +582,6 @@ const Controls: React.FC<ControlsProps> = ({
               className={`w-full bg-transparent border-none px-4 py-4 focus:ring-0 outline-none ${theme.inputField}`}
             />
 
-            {searchError && (
-              <div className="relative flex items-center mr-2 select-none group/error-tooltip">
-                <AlertTriangle className={`cursor-pointer animate-pulse shrink-0 ${errorIconColor}`} size={20} />
-                {/* Tooltip Content */}
-                <div className={`absolute bottom-full mb-2 right-1/2 translate-x-1/2 pointer-events-none opacity-0 group-hover/error-tooltip:opacity-100 transition-opacity duration-200 z-50 whitespace-nowrap text-xs font-bold uppercase tracking-wider px-3 py-1.5 shadow-xl border backdrop-blur-md ${tooltipStyle}`}>
-                  {searchError}
-                </div>
-              </div>
-            )}
-            
             {query && !scanningStatusText && (
               <button
                 type="button"
@@ -631,6 +607,28 @@ const Controls: React.FC<ControlsProps> = ({
           </div>
         )}
       </form>
+
+      {/* Search Error / Status Message */}
+      {searchError && (
+        <div 
+          className={`w-full max-w-[532px] pointer-events-auto flex items-center justify-between px-3.5 py-1.5 -mt-2.5 text-xs transition-all animate-in fade-in duration-200 ${theme.statusRow}`}
+          role="status"
+          aria-live="polite"
+        >
+          <span className={`truncate text-xs ${theme.statusText}`}>
+            {searchError}
+          </span>
+          <button
+            type="button"
+            onClick={onClearError}
+            className={`ml-2 shrink-0 ${theme.statusDismiss}`}
+            aria-label="Dismiss error"
+            title="Dismiss"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
       
       {/* Copyright & Map Attribution Text */}
       <div className={`text-[10px] md:text-xs text-center -mt-1 ${theme.copyright}`}>

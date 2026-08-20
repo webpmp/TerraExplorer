@@ -128,6 +128,7 @@ const UniversalMarker: React.FC<{
   isRetro: boolean,
   isSelected: boolean,
   isWaypoint?: boolean,
+  isMultiLocation?: boolean,
   waypointIndex?: number,
   waypointRole?: string,
   markerData?: any,
@@ -146,6 +147,7 @@ const UniversalMarker: React.FC<{
   isRetro, 
   isSelected,
   isWaypoint,
+  isMultiLocation,
   waypointIndex,
   waypointRole,
   markerData,
@@ -262,6 +264,7 @@ const UniversalMarker: React.FC<{
           worldPos: position, 
           visualSize: size,
           isWaypoint,
+          isMultiLocation,
           waypointIndex
         }}
       >
@@ -332,7 +335,7 @@ const UniversalMarker: React.FC<{
               userSelect: 'none'
             }}
           >
-            {isWaypoint && waypointIndex !== undefined && (
+            {isWaypoint && isMultiLocation && waypointIndex !== undefined && (
               <span 
                 style={{
                   fontSize: '10px',
@@ -749,6 +752,7 @@ const HoverOverlay: React.FC<{
   }
 
   const isWaypoint = activeObject?.userData?.isWaypoint;
+  const isMultiLocation = activeObject?.userData?.isMultiLocation;
   const waypointIndex = activeObject?.userData?.waypointIndex;
 
   return (
@@ -799,8 +803,8 @@ const HoverOverlay: React.FC<{
             style={{ 
               position: 'absolute', 
               left: '32px', 
-              top: '-32px',
-              pointerEvents: 'none',
+              top: '-32px', 
+              pointerEvents: 'none', 
               userSelect: 'none'
             }}
             className={`px-3 py-1.5 rounded-lg whitespace-nowrap text-sm font-bold shadow-xl border backdrop-blur-md transition-opacity duration-150
@@ -810,7 +814,7 @@ const HoverOverlay: React.FC<{
                   ? 'bg-black text-amber-300 border-amber-400 font-mono'
                   : 'bg-black text-green-300 border-green-400 font-mono'}`}
           >
-            {isWaypoint && waypointIndex !== undefined 
+            {isWaypoint && isMultiLocation && waypointIndex !== undefined 
               ? `${waypointIndex + 1}. ${(activePin as any).displayName || activePin.name || 'Unknown Location'}` 
               : ((activePin as any).displayName || activePin.name || 'Unknown Location')}
           </div>
@@ -862,6 +866,8 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     // Altitude
     const MARKER_ALTITUDE = 1.015;
 
+    const isMultiLocation = Boolean(routeWaypoints && routeWaypoints.length > 1);
+
     // 0. Waypoints (High priority)
     if (routeWaypoints && routeWaypoints.length > 0) {
         routeWaypoints.forEach((wp, idx) => {
@@ -874,6 +880,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
                 color: waypointColor,
                 id: wp.id,
                 isWaypoint: true,
+                isMultiLocation,
                 index: idx,
                 role: wp.role
              });
@@ -1409,6 +1416,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
           isRetro={!isModern}
           isSelected={selectedMarkerId === marker.id}
           isWaypoint={marker.isWaypoint}
+          isMultiLocation={marker.isMultiLocation}
           waypointIndex={marker.index}
           waypointRole={marker.role}
           markerData={marker.data}

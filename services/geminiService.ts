@@ -415,44 +415,50 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
     }
 
     // Step 2.5: Authoritative Nominatim / OSM Resolution before AI
+    // NOTE: Event, discovery, route, and exploratory intents represent actions/events, NOT physical place names.
+    // Querying Nominatim with an event phrase (e.g., "launch of Sputnik") causes false keyword matches (e.g., Site No. 33)
+    // and must be bypassed in favor of semantic event-to-location resolution.
+    const isEventOrDiscoveryIntent = intent === 'HISTORICAL_EVENT' || intent === 'DISCOVERY_OBJECT_LOCATION' || intent === 'DISCOVERY_LOCATION' || intent === 'EXPLORATORY' || intent === 'route';
     if (!resolvedData || !resolvedData.coordinates) {
-      try {
-        console.log(`COORDINATE_VERIFICATION_ATTEMPT\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}`);
-        const geoEntity = await resolveGeographicEntity(normalizedQuery || query);
-        if (geoEntity && !('status' in geoEntity) && geoEntity.coordinates && isValidCoordinates(geoEntity.coordinates)) {
-          console.log(`COORDINATE_VERIFICATION_SUCCESS\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}\ncoordinates: ${geoEntity.coordinates.lat}, ${geoEntity.coordinates.lng}`);
-          
-          resolvedData = {
-            name: geoEntity.name.split(',')[0].trim(),
-            locationString: geoEntity.name,
-            type: geoEntity.entityType === 'city' ? LocationType.CITY : (geoEntity.entityType === 'country' ? LocationType.COUNTRY : LocationType.POI),
-            entityType: geoEntity.entityType,
-            coordinates: {
-              lat: geoEntity.coordinates.lat,
-              lng: geoEntity.coordinates.lng,
-              source: (geoEntity.source === GeographicSource.NOMINATIM ? "geocoder" : "deterministic") as CoordinateSource
-            },
-            coordinateSource: (geoEntity.source === GeographicSource.NOMINATIM ? "geocoder" : "deterministic") as CoordinateSource,
-            identityStatus: (geoEntity.identityStatus || "verified") as GeographicIdentityStatus,
-            country: geoEntity.context?.country,
-            state: geoEntity.context?.state,
-            city: geoEntity.context?.city,
-            county: geoEntity.context?.county,
-            region: geoEntity.context?.region,
-            osmId: geoEntity.osmId,
-            osmType: geoEntity.osmType,
-            wikidataId: geoEntity.wikidataId,
-            wikipedia: geoEntity.wikipedia,
-            description: `Information on ${geoEntity.name.split(',')[0].trim()}.`,
-            funFacts: [],
-            notable: []
-          };
-          suggestedZoom = geoEntity.suggestedZoom || 8;
-        } else {
-          console.log(`COORDINATE_VERIFICATION_FAILED\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}\nreason: no_authoritative_match`);
+      if (!isEventOrDiscoveryIntent) {
+        try {
+          console.log(`COORDINATE_VERIFICATION_ATTEMPT\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}`);
+          const geoEntity = await resolveGeographicEntity(normalizedQuery || query);
+          if (geoEntity && !('status' in geoEntity) && geoEntity.coordinates && isValidCoordinates(geoEntity.coordinates)) {
+            console.log(`COORDINATE_VERIFICATION_SUCCESS\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}\ncoordinates: ${geoEntity.coordinates.lat}, ${geoEntity.coordinates.lng}`);
+            
+            resolvedData = {
+              name: geoEntity.name.split(',')[0].trim(),
+              locationString: geoEntity.name,
+              type: geoEntity.entityType === 'city' ? LocationType.CITY : (geoEntity.entityType === 'country' ? LocationType.COUNTRY : LocationType.POI),
+              entityType: geoEntity.entityType,
+              coordinates: {
+                lat: geoEntity.coordinates.lat,
+                lng: geoEntity.coordinates.lng,
+                source: (geoEntity.source === GeographicSource.NOMINATIM ? "geocoder" : "deterministic") as CoordinateSource
+              },
+              coordinateSource: (geoEntity.source === GeographicSource.NOMINATIM ? "geocoder" : "deterministic") as CoordinateSource,
+              identityStatus: (geoEntity.identityStatus || "verified") as GeographicIdentityStatus,
+              country: geoEntity.context?.country,
+              state: geoEntity.context?.state,
+              city: geoEntity.context?.city,
+              county: geoEntity.context?.county,
+              region: geoEntity.context?.region,
+              osmId: geoEntity.osmId,
+              osmType: geoEntity.osmType,
+              wikidataId: geoEntity.wikidataId,
+              wikipedia: geoEntity.wikipedia,
+              description: `Information on ${geoEntity.name.split(',')[0].trim()}.`,
+              funFacts: [],
+              notable: []
+            };
+            suggestedZoom = geoEntity.suggestedZoom || 8;
+          } else {
+            console.log(`COORDINATE_VERIFICATION_FAILED\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}\nreason: no_authoritative_match`);
+          }
+        } catch (err: any) {
+          console.warn(`[Nominatim Resolution Error]:`, err.message);
         }
-      } catch (err: any) {
-        console.warn(`[Nominatim Resolution Error]:`, err.message);
       }
     }
 
@@ -480,11 +486,21 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
 
         INSTRUCTIONS BY INTENT:
         1. HISTORICAL_EVENT:
-           - Resolve the physical event location/site (e.g. Old State House grounds for Boston Massacre, Bethel Woods for Woodstock, Mount Vesuvius eruption site).
-           - Set 'entityType' to 'historical_event_site', 'battlefield', or 'festival_site'.
-           - Set 'type' to 'Point of Interest'. DO NOT return generic surrounding city names like "Boston, Massachusetts".
+           - Identify the EXACT physical site, facility, launchpad, or battlefield where the specific queried historical event occurred.
+           - Event Semantic Anchoring: The queried event MUST remain the primary anchor of the location resolution, coordinates, description, and notable facts.
+             Examples:
+             - "Where did the launch of Sputnik take place?" / "launch of Sputnik" -> Resolve to "Site No. 1, Baikonur Cosmodrome" at ~45.92° N, 63.34° E in present-day Kazakhstan (the specific launch site of Sputnik 1 on Oct 4, 1957; do NOT select Site No. 33 or unrelated later facilities).
+             - "Where did Yuri Gagarin launch into space?" -> Resolve to "Site No. 1 (Gagarin's Start), Baikonur Cosmodrome" at ~45.92° N, 63.34° E in present-day Kazakhstan (the launch site of Vostok 1 on Apr 12, 1961).
+             - "Where did the first atomic bomb test take place?" -> Resolve to "Trinity Site, White Sands" at ~33.677° N, 106.475° W.
+             - "Where was the signing of the Declaration of Independence?" -> Resolve to "Pennsylvania State House (Independence Hall)" at ~39.948° N, 75.150° W in Philadelphia.
+             - "Where was the Apollo 11 launch?" -> Resolve to "Launch Complex 39A, Kennedy Space Center" at ~28.608° N, 80.604° W in Florida.
+             - "Where was the Hindenburg disaster?" -> Resolve to "Lakehurst Naval Air Station" at ~40.033° N, 74.333° W in New Jersey.
+           - Set 'name' to the specific physical site name.
+           - Set 'entityType' to 'historical_event_site', 'historical_site', or 'battlefield'.
+           - Set 'type' to 'Point of Interest'. DO NOT return generic surrounding city names.
+           - Other events at the same broader facility (e.g. Gagarin in 1961 for a Sputnik query) may only appear as secondary context and must NEVER displace the queried event.
         2. DISCOVERY_OBJECT_LOCATION:
-           - Resolve the original discovery / recovery site coordinates (e.g. North Atlantic ocean floor for Titanic, Stockholm Harbor for Vasa discovery site, Fort Julien for Rosetta Stone, Qumran Caves for Dead Sea Scrolls).
+           - Resolve the original discovery / recovery site coordinates (e.g. North Atlantic ocean floor for Titanic, Stockholm Harbor for Vasa discovery site, Terror Bay / King William Island in Nunavut for HMS Terror, Wilmot and Crampton Bay in Nunavut for HMS Erebus, Fort Julien for Rosetta Stone, Qumran Caves for Dead Sea Scrolls).
            - Set 'entityType' to 'historical_site'.
            - Set 'locationType' to 'discovery_location'.
            - Set 'type' to 'Point of Interest'. DO NOT return current display museum locations unless query explicitly asks for the museum.
@@ -518,9 +534,9 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
           const histPrompt = `You are resolving a historical discovery location.
 
 Entity:
-${targetSearchTerm}
+${targetSearchTerm} (Query: "${rawQuery || query}")
 
-Return the physical discovery location, not a namesake location.
+Return the physical discovery / recovery location (e.g. Terror Bay, Nunavut for HMS Terror; Wilmot and Crampton Bay, Nunavut for HMS Erebus; North Atlantic floor for Titanic; Stockholm Harbor for Vasa), not a namesake location.
 
 Ignore:
 - towns
@@ -1078,10 +1094,10 @@ const logInfoPanelTrace = (event: string, marker: any, elapsedMs?: number, state
 
 import { descriptionCache } from './cacheService';
 
-export const getInfoFromFeature = async (marker: MapMarker): Promise<LocationInfo | null> => {
+export const getInfoFromFeature = async (marker: MapMarker, queryContext?: string): Promise<LocationInfo | null> => {
   const { name, lat, lng } = marker;
   const startTime = Date.now();
-  const cacheKey = `${name}_${lat.toFixed(4)}_${lng.toFixed(4)}`;
+  const cacheKey = `${name}_${lat.toFixed(4)}_${lng.toFixed(4)}${queryContext ? '_' + queryContext.slice(0, 30) : ''}`;
   if (descriptionCache.has(cacheKey)) {
     logInfoPanelTrace("INFO_REQUEST_CACHE_HIT", name, Date.now() - startTime);
     return descriptionCache.get(cacheKey)!;
@@ -1109,7 +1125,7 @@ export const getInfoFromFeature = async (marker: MapMarker): Promise<LocationInf
       signals: marker.discoverySignals || []
     };
     console.log("[DISCOVERY BRIEF SENT TO LLM]", JSON.stringify(discoveryBrief, null, 2));
-    const discoveryPrompt = getDiscoveryPrompt(discoveryBrief.type, discoveryBrief.entity, discoveryBrief.signals);
+    const discoveryPrompt = getDiscoveryPrompt(discoveryBrief.type, discoveryBrief.entity, discoveryBrief.signals, queryContext);
     
     const mainPrompt = `
       AUTHORITATIVE CANONICAL GEOGRAPHIC IDENTITY:
@@ -1126,11 +1142,13 @@ export const getInfoFromFeature = async (marker: MapMarker): Promise<LocationInf
       ${wikidataId ? wikidataId : ''}
       ${wikipedia ? wikipedia : ''}
       ${marker.population?.value ? `Population: ${marker.population.value}` : ''}
+      ${queryContext ? `USER RESEARCH QUERY / CONTEXT: "${queryContext}"` : ''}
       
       CRITICAL INSTRUCTIONS:
       You are enriching the EXACT verified geographic entity specified above.
       You must describe THIS ${marker.name} in ${country} (${region}) and must NOT substitute another entity with the same or similar name.
       The coordinates, country, region, city, and identity are authoritative.
+      ${queryContext ? 'The narrative, significance, and notable facts MUST directly address and answer the user query/context, keeping the queried event as the primary semantic anchor.' : ''}
       
       Return a JSON object conforming to the schema with substantive, educational information (do NOT output generic placeholder text like "Information on ${marker.name}.").
       CRITICAL INSTRUCTION: You MUST keep semantic boundaries strict. Do not duplicate information across fields.
@@ -2031,7 +2049,13 @@ export const generateRoute = async (text: string, intent?: string): Promise<Rout
       6. Do not treat cities, states, countries, or regions containing the primary location as separate equal waypoints.
       7. Include related locations only when they have a direct historical, geographic, or strategic relationship.
       8. Administrative parents should provide context, not compete with the primary location.
-      9. For specific historical events, prioritize the event location over associated locations.
+      9. CRITICAL EVENT-TO-LOCATION RESOLUTION & SEMANTIC ANCHOR:
+         For queries asking where a specific historical event occurred (e.g. "Where did the launch of Sputnik take place?", "Where did Yuri Gagarin launch into space?", "Where was the Apollo 11 launch?", "Where did the first atomic bomb test take place?"):
+         - Identify the EXACT physical site, facility, launchpad, or battlefield where that specific event occurred.
+         - For Sputnik 1 launch (October 4, 1957) -> The physical site is "Site No. 1, Baikonur Cosmodrome" (approx 45.92° N, 63.34° E in present-day Kazakhstan). Do NOT select Site No. 33 or later facilities.
+         - For Yuri Gagarin / Vostok 1 launch (April 12, 1961) -> The physical site is "Site No. 1 (Gagarin's Start), Baikonur Cosmodrome" (approx 45.92° N, 63.34° E in present-day Kazakhstan).
+         - The queried event MUST remain the primary focus of the location's title, description, significance, and coordinates.
+         - Other historical events at the same site (e.g., Yuri Gagarin's 1961 flight at Baikonur for a Sputnik query) may only appear as secondary context and must NEVER displace the queried event as the primary subject or milestone.
       10. For historical routes, prioritize specific named stops, cities, ports, crossings, and settlements.
       11. Historical routes must consist of specific, physical stops. NEVER use modern political borders, vast empires (like 'Persian Empire', 'Roman Empire'), continents (like 'Europe'), or generic regions as waypoints. The waypoints must be exact, point-like locations that were physically traversed.
       12. Avoid generic containers such as: "Central Asia", "The Balkans", "Europe", "China". Convert these into contextual relationships or administrative parents.
@@ -2280,6 +2304,9 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
     /^\s*where\s+did\s+(.+?)\s+happen\s*\??\s*$/i,
     /^\s*where\s+did\s+(.+?)\s+occur\s*\??\s*$/i,
     /^\s*when\s+and\s+where\s+did\s+(.+?)\s+take\s+place\s*\??\s*$/i,
+    /^\s*where\s+did\s+(.+?)\s+(?:launch|land|crash|sink|surrender|sign|fight|battle|die|originate|occur|erupt)\b.*?\??\s*$/i,
+    /^\s*where\s+was\s+(?:the\s+)?(.+?)\s+(?:signed|fought|launched|tested|built|founded|assassinated|executed)\s*\??\s*$/i,
+    /^\s*where\s+was\s+(?:the\s+)?(.+?(?:battle|massacre|signing|treaty|launch|landing|bombing|disaster|explosion|siege|revolution|protest|riot|summit))\s*\??\s*$/i,
   ];
 
   for (const pattern of historicalPatterns) {
@@ -2411,8 +2438,9 @@ export const recoverCoordinatesFromAi = async (rawQuery: string, intent: string,
 
       if (valid && intent === 'DISCOVERY_OBJECT_LOCATION') {
           const revGeo = await reverseGeocode(parsedCoords.lat, parsedCoords.lng);
+          const locationDesc = revGeo?.displayName || (revGeo ? `${revGeo.country || ''} ${revGeo.state || revGeo.region || ''}`.trim() : null) || `coordinates (${parsedCoords.lat.toFixed(4)}, ${parsedCoords.lng.toFixed(4)})`;
           
-          const validationPrompt = `Is ${revGeo?.country || "this location"} (${revGeo?.state || revGeo?.region || "unknown region"}) the historically correct documented discovery or recovery location for "${entity}"?
+          const validationPrompt = `Are the coordinates ${parsedCoords.lat.toFixed(4)}, ${parsedCoords.lng.toFixed(4)}${locationDesc ? ` (${locationDesc})` : ''} the historically correct documented discovery or recovery location for "${entity}"?
           Answer with ONLY a JSON object: {"valid": true/false, "reason": "why"}`;
           
           const valRes = await generateContentWithRetry({

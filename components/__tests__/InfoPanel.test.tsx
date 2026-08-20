@@ -409,6 +409,7 @@ describe('Lightbox Metadata Integration', () => {
         onSaveFavorite={() => {}}
         onRemoveFavorite={() => {}}
         onLoadMoreNews={async () => {}}
+        routeNav={{ current: 1, total: 5, onNext: () => {}, onPrev: () => {} }}
       />
     );
 
@@ -462,6 +463,7 @@ describe('Lightbox Metadata Integration', () => {
         onSaveFavorite={() => {}}
         onRemoveFavorite={() => {}}
         onLoadMoreNews={async () => {}}
+        routeNav={{ current: 1, total: 5, onNext: () => {}, onPrev: () => {} }}
       />
     );
 
@@ -544,5 +546,334 @@ describe('Lightbox Metadata Integration', () => {
       expect(html).not.toContain('>Load News</button>');
     });
   });
+
+  describe('Dedicated Single-Location Layout & Presentation Mode', () => {
+    const sputnikLocation = {
+      name: 'Site No. 1, Baikonur Cosmodrome',
+      type: 'Point of Interest' as any,
+      entityType: 'historical_waypoint',
+      locationString: 'Baikonur Cosmodrome, Kazakhstan',
+      coordinates: { lat: 45.92, lng: 63.34 },
+      routeContext: {
+        title: 'Launch of Sputnik',
+        text: 'Site No. 1, also known as the Baikonur Cosmodrome, was the launch site for Sputnik 1, the world’s first artificial satellite.'
+      },
+      waypoint: {
+        id: 'wp-sputnik-1',
+        name: 'Site No. 1, Baikonur Cosmodrome',
+        canonicalName: 'Site No. 1',
+        alternateNames: ["Gagarin's Start", "Tyuratam", "Barking Ranch"],
+        lat: 45.92,
+        lng: 63.34,
+        context: '1957: Launch of Sputnik 1 from Site No. 1.',
+        description: 'Sputnik 1 was launched by the Soviet Union on October 4, 1957, from this site in present-day Kazakhstan, marking the beginning of the Space Age. The same launch complex later became the site from which Yuri Gagarin began the first human spaceflight in 1961.',
+        significance: 'Site No. 1 is the oldest space launch facility in the world and the focal point of early Soviet space exploration.',
+        historicalRegion: 'Central Asia',
+        historicalPeriod: '1950s',
+        entities: ['Soviet Union', 'Sergei Korolev', 'Sputnik 1']
+      },
+      description: 'Sputnik 1 was launched by the Soviet Union on October 4, 1957, from this site in present-day Kazakhstan, marking the beginning of the Space Age. The same launch complex later became the site from which Yuri Gagarin began the first human spaceflight in 1961.',
+      significance: 'Site No. 1 is the oldest space launch facility in the world and the focal point of early Soviet space exploration.',
+      historicalBackground: 'The facility was originally associated with Tyuratam and became one of the most important launch facilities in the history of space exploration.',
+      notable: [],
+      news: []
+    };
+
+    it('renders single-location result with "Historical Site" and never "Historical Waypoint"', () => {
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={sputnikLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      // Must display HISTORICAL SITE
+      expect(html).toContain('HISTORICAL SITE');
+      // Must NEVER display HISTORICAL WAYPOINT
+      expect(html).not.toContain('HISTORICAL WAYPOINT');
+      expect(html).not.toContain('Historical Waypoint');
+    });
+
+    it('does NOT render route navigation bar or "Waypoint 1 of 1" for single-location results', () => {
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={sputnikLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+          routeNav={undefined}
+        />
+      );
+
+      expect(html).not.toContain('Waypoint 1 of 1');
+      expect(html).not.toContain('Waypoint');
+    });
+
+    it('removes the three metadata cards (Historical Identity, Historical Period, Key Entities)', () => {
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={sputnikLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      // Section cards must NOT be rendered as standalone card containers
+      expect(html).not.toContain('Historical Identity');
+      expect(html).not.toContain('Historical Period');
+      expect(html).not.toContain('Key Entities');
+      expect(html).not.toContain('Canonical Name');
+    });
+
+    it('displays alternate names as clean inline text under the header title', () => {
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={sputnikLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      // Title is query/event title
+      expect(html).toContain('Launch of Sputnik');
+      // Subtitle is site name
+      expect(html).toContain('Site No. 1, Baikonur Cosmodrome');
+      // Alternate names displayed inline as clean text
+      expect(html).toContain('Also known as');
+      expect(html).toContain("Gagarin&#x27;s Start, Tyuratam, Barking Ranch");
+    });
+
+    it('consolidates narrative paragraphs and avoids redundant section headings', () => {
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={sputnikLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      // Primary narrative about Sputnik exists
+      expect(html).toContain('Sputnik 1 was launched by the Soviet Union on October 4, 1957');
+      // Consolidated historical context exists
+      expect(html).toContain('Historical context');
+      expect(html).toContain('The facility was originally associated with Tyuratam');
+
+      // Fragment headings must NOT be rendered as separate h3 elements
+      expect(html).not.toContain('>Significance</h3>');
+      expect(html).not.toContain('>Historical Region</h3>');
+      expect(html).not.toContain('>Historical Milestone</h3>');
+      expect(html).not.toContain('>Strategic Location</h3>');
+      expect(html).not.toContain('>Cultural Symbol</h3>');
+    });
+
+    it('preserves multi-location route presentation when routeNav has 2+ waypoints', () => {
+      const multiLocationNav = {
+        current: 1,
+        total: 3,
+        onNext: () => {},
+        onPrev: () => {}
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={sputnikLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+          routeNav={multiLocationNav}
+        />
+      );
+
+      // Multi-location MUST render navigation bar
+      expect(html).toContain('Waypoint 1 of 3');
+    });
+
+    it('removes the redundant title and short description block immediately below the header for single locations', () => {
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={sputnikLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      // Main header renders the title and site name
+      expect(html).toContain('Launch of Sputnik');
+      expect(html).toContain('Site No. 1, Baikonur Cosmodrome');
+
+      // The body MUST NOT contain duplicate h3 route context title or duplicate short text
+      // Note: `info.routeContext.text` was "Site No. 1, also known as the Baikonur Cosmodrome, was the launch site for Sputnik 1, the world’s first artificial satellite."
+      expect(html).not.toContain('<h3 class="text-xs font-bold uppercase tracking-widest mb-1 text-cyan-400">Launch of Sputnik</h3>');
+      expect(html).not.toContain('<h3 class="text-xs font-bold uppercase tracking-widest mb-1 text-current">Launch of Sputnik</h3>');
+      expect(html).not.toContain('<h3 class="text-xs font-bold uppercase tracking-widest mb-1 text-[#8b5a2b]">Launch of Sputnik</h3>');
+
+      // The body begins directly with the substantive narrative
+      expect(html).toContain('Sputnik 1 was launched by the Soviet Union on October 4, 1957');
+    });
+
+    it('renders route context block for multi-location waypoint stops', () => {
+      const multiLocationNav = {
+        current: 1,
+        total: 3,
+        onNext: () => {},
+        onPrev: () => {}
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={sputnikLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+          routeNav={multiLocationNav}
+        />
+      );
+
+      // Multi-location MUST render route context block for the waypoint stop
+      expect(html).toContain('Launch of Sputnik');
+      expect(html).toContain('Site No. 1, also known as the Baikonur Cosmodrome, was the launch site for Sputnik 1');
+      expect(html).toContain('Waypoint 1 of 3');
+    });
+
+    it('renders cleanly with Parchment theme with drop-cap on the first paragraph', () => {
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={sputnikLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="parchment"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('parchment-drop-cap');
+      expect(html).toContain('Launch of Sputnik');
+      expect(html).toContain('HISTORICAL SITE');
+    });
+  });
+
+  describe('Marker Presentation Mode Tests', () => {
+    test('single resolved location produces isMultiLocation = false and showMarkerNumber = false (no numeric element)', () => {
+      const singleWaypoints = [
+        {
+          id: 'wp-sputnik-1',
+          name: 'Site No. 1, Baikonur Cosmodrome',
+          lat: 45.92,
+          lng: 63.34,
+          sequence: 1,
+          role: 'primary',
+          description: 'Sputnik 1 launch site'
+        }
+      ];
+
+      const isMultiLocation = singleWaypoints.length > 1;
+      expect(isMultiLocation).toBe(false);
+
+      const marker = {
+        isWaypoint: true,
+        isMultiLocation,
+        index: 0
+      };
+
+      const showMarkerNumber = Boolean(marker.isWaypoint && marker.isMultiLocation && marker.index !== undefined);
+      expect(showMarkerNumber).toBe(false);
+    });
+
+    test('multi-location route produces isMultiLocation = true and showMarkerNumber = true with numbers 1, 2, 3', () => {
+      const multiWaypoints = [
+        { id: 'wp-1', name: 'Chang\'an', lat: 34.26, lng: 108.94, sequence: 1 },
+        { id: 'wp-2', name: 'Dunhuang', lat: 40.14, lng: 94.66, sequence: 2 },
+        { id: 'wp-3', name: 'Samarkand', lat: 39.65, lng: 66.97, sequence: 3 }
+      ];
+
+      const isMultiLocation = multiWaypoints.length > 1;
+      expect(isMultiLocation).toBe(true);
+
+      const processedMarkers = multiWaypoints.map((wp, idx) => ({
+        isWaypoint: true,
+        isMultiLocation,
+        index: idx,
+        data: wp
+      }));
+
+      processedMarkers.forEach((marker, idx) => {
+        const showMarkerNumber = Boolean(marker.isWaypoint && marker.isMultiLocation && marker.index !== undefined);
+        expect(showMarkerNumber).toBe(true);
+        expect(marker.index + 1).toBe(idx + 1);
+      });
+    });
+
+    test('marker display name format for single location vs multi-location', () => {
+      const formatDisplayName = (marker: any) => {
+        const isWaypoint = marker.isWaypoint;
+        const isMultiLocation = marker.isMultiLocation ?? false;
+        const showMarkerNumber = isWaypoint && isMultiLocation && marker.index !== undefined;
+        const markerDisplayName = marker.data?.name || marker.name || 'Location';
+
+        return showMarkerNumber ? `${marker.index + 1}. ${markerDisplayName}` : markerDisplayName;
+      };
+
+      // Single location - unnumbered
+      const single = {
+        isWaypoint: true,
+        isMultiLocation: false,
+        index: 0,
+        data: { name: 'Site No. 1, Baikonur Cosmodrome' }
+      };
+      expect(formatDisplayName(single)).toBe('Site No. 1, Baikonur Cosmodrome');
+      expect(formatDisplayName(single)).not.toContain('1.');
+
+      // Multi location - numbered
+      const multiFirst = {
+        isWaypoint: true,
+        isMultiLocation: true,
+        index: 0,
+        data: { name: 'Chang\'an' }
+      };
+      expect(formatDisplayName(multiFirst)).toBe('1. Chang\'an');
+
+      const multiSecond = {
+        isWaypoint: true,
+        isMultiLocation: true,
+        index: 1,
+        data: { name: 'Dunhuang' }
+      };
+      expect(formatDisplayName(multiSecond)).toBe('2. Dunhuang');
+    });
+  });
 });
+
+
 

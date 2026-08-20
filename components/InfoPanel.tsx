@@ -291,6 +291,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   errorMessage,
   onRetry
 }: InfoPanelProps) => {
+  const isMultiLocation = Boolean(routeNav?.total && routeNav.total > 1);
+  const isSingleLocation = !isMultiLocation;
+
   const info = React.useMemo(() => {
     if (!rawInfo) return null;
 
@@ -336,8 +339,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     let combinedDescParts: string[] = [];
 
     // Determine the primary narrative description:
-    // 1. Prefer explicit stop narrative in wp.description
-    // 2. Otherwise use geographic / enriched description if it differs from the route event summary (routeContext)
     let rawDesc = "";
     if (historicalDesc && historicalDesc !== routeContextText) {
       rawDesc = historicalDesc;
@@ -345,11 +346,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       rawDesc = geographicDesc;
     } else if (historicalDesc) {
       rawDesc = historicalDesc;
-    } else if (geographicDesc && !routeContextText) {
+    } else if (geographicDesc) {
       rawDesc = geographicDesc;
     }
 
-    if (rawDesc && rawDesc !== routeContextText) {
+    if (rawDesc) {
       let cleanDesc = rawDesc;
       if (/^#+\s+description/i.test(cleanDesc.trim())) {
         cleanDesc = cleanDesc.replace(/^#+\s+description/i, '').trim();
@@ -357,14 +358,31 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       combinedDescParts.push(cleanDesc);
     }
 
+    // Add significance if unique
     if (wp.significance && wp.significance !== rawDesc && wp.significance !== routeContextText) {
-      combinedDescParts.push(`## Significance\n\n${wp.significance}`);
+      if (isSingleLocation) {
+        if (!combinedDescParts.some(p => p.includes(wp.significance))) {
+          combinedDescParts.push(wp.significance);
+        }
+      } else {
+        combinedDescParts.push(`## Significance\n\n${wp.significance}`);
+      }
     }
 
+    // Consolidated historical context (from background, region, context notes)
+    const contextList: string[] = [];
     if ((rawInfo as any).historicalBackground) {
-      combinedDescParts.push(`## Historical Background\n\n${(rawInfo as any).historicalBackground}`);
-    } else if (wp.historicalRegion) {
-      combinedDescParts.push(`## Historical Region\n\n${wp.historicalRegion}`);
+      contextList.push((rawInfo as any).historicalBackground);
+    }
+    if (wp.historicalRegion && !combinedDescParts.some(p => p.includes(wp.historicalRegion))) {
+      if (wp.historicalRegion.length > 20 || !rawInfo.country?.includes(wp.historicalRegion)) {
+        contextList.push(wp.historicalRegion);
+      }
+    }
+
+    if (contextList.length > 0) {
+      const mergedContext = contextList.join(' ');
+      combinedDescParts.push(`## Historical context\n\n${mergedContext}`);
     }
     
     let desc = combinedDescParts.join('\n\n');
@@ -513,7 +531,58 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       notable,
       relatedEntities
     };
-  }, [rawInfo]);
+  }, [rawInfo, isSingleLocation, isMultiLocation]);
+
+  const displayCategory = useMemo(() => {
+    if (!info) return '';
+    const rawType = (info.entityType || (info.waypoint as any)?.entityType || info.type || '').toString().toLowerCase();
+    const isHistorical = rawType.includes('historical') || rawType.includes('historic') || rawType === 'battlefield' || (info.waypoint && isSingleLocation);
+    
+    if (isSingleLocation && isHistorical) {
+      return 'Historical Site';
+    }
+    const formatted = formatUserFacingCategory(info.entityType, info.name, info.type);
+    if (isSingleLocation && (formatted.toLowerCase() === 'historical waypoint' || formatted.toLowerCase() === 'waypoint')) {
+      return 'Historical Site';
+    }
+    return formatted;
+  }, [info, isSingleLocation]);
+
+  const { displayTitle, displaySubtitle, displayAltNames } = useMemo(() => {
+    if (!info) return { displayTitle: '', displaySubtitle: null, displayAltNames: null };
+    const queryOrRouteTitle = info.routeContext?.title || info.waypoint?.routeTitle;
+    const locName = (info as any).displayName || info.name || '';
+    let title = locName;
+    let subtitle = info.locationString || '';
+
+    if (isSingleLocation && queryOrRouteTitle && queryOrRouteTitle.toLowerCase() !== locName.toLowerCase()) {
+      title = queryOrRouteTitle;
+      subtitle = locName;
+    } else if (!subtitle && info.city && info.country && locName !== `${info.city}, ${info.country}`) {
+      subtitle = `${info.city}, ${info.country}`;
+    }
+
+    const altNamesList: string[] = [];
+    if (info.waypoint?.canonicalName && info.waypoint.canonicalName.toLowerCase() !== title.toLowerCase() && info.waypoint.canonicalName.toLowerCase() !== subtitle.toLowerCase()) {
+      altNamesList.push(info.waypoint.canonicalName);
+    }
+    if (Array.isArray(info.waypoint?.alternateNames)) {
+      info.waypoint.alternateNames.forEach((a: string) => {
+        if (a && typeof a === 'string') {
+          const trimmed = a.trim();
+          if (trimmed && trimmed.toLowerCase() !== title.toLowerCase() && trimmed.toLowerCase() !== subtitle.toLowerCase() && !altNamesList.includes(trimmed)) {
+            altNamesList.push(trimmed);
+          }
+        }
+      });
+    }
+
+    return {
+      displayTitle: title,
+      displaySubtitle: subtitle || null,
+      displayAltNames: altNamesList.length > 0 ? `Also known as ${altNamesList.join(', ')}` : null
+    };
+  }, [info, isSingleLocation]);
   
   const [newsState, setNewsState] = useState<'idle' | 'loading' | 'loaded' | 'empty' | 'error'>(() => {
     if (rawInfo?.news && Array.isArray(rawInfo.news) && rawInfo.news.length > 0) {
@@ -936,13 +1005,21 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       copyText: () => {
         if (!info) return '';
         let parts: string[] = [];
-        if (info.routeContext?.title && info.routeContext?.text) {
+        const isDuplicateHeader = Boolean(
+          info.routeContext?.title &&
+          (displayTitle.trim().toLowerCase() === info.routeContext.title.trim().toLowerCase() ||
+           (displaySubtitle && displaySubtitle.trim().toLowerCase() === info.routeContext.title.trim().toLowerCase()))
+        );
+        const shouldIncludeRoute = !isDuplicateHeader && info.routeContext?.title && info.routeContext?.text;
+        if (shouldIncludeRoute) {
           parts.push(`${info.routeContext.title}\n${info.routeContext.text}`);
         }
         const lines = getCleanDescriptionLines(info);
         const cleanText = lines.map(line => line.replace(/^#{1,3}\s/, '').replace(/\*\*(.*?)\*\*/g, '$1').replace(/__(.*?)__/g, '$1')).join('\n');
-        if (cleanText.trim() && cleanText.trim() !== info.routeContext?.text?.trim()) {
-          parts.push(cleanText.trim());
+        if (cleanText.trim()) {
+          if (!shouldIncludeRoute || cleanText.trim() !== info.routeContext?.text?.trim()) {
+            parts.push(cleanText.trim());
+          }
         }
         return parts.join('\n\n').trim();
       },
@@ -950,12 +1027,18 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         const routeText = info.routeContext?.text?.trim() || "";
         const descText = info.description?.trim() || "";
         const hasRoute = !!info.routeContext && routeText.length > 0;
-        const hasDesc = descText.length > 0 && (!hasRoute || descText !== routeText);
-        if (!hasDesc && !hasRoute) return null;
+        const isDuplicateHeader = Boolean(
+          info.routeContext?.title &&
+          (displayTitle.trim().toLowerCase() === info.routeContext.title.trim().toLowerCase() ||
+           (displaySubtitle && displaySubtitle.trim().toLowerCase() === info.routeContext.title.trim().toLowerCase()))
+        );
+        const renderRouteContext = !isDuplicateHeader && hasRoute;
+        const hasDesc = descText.length > 0 && (!renderRouteContext || descText !== routeText);
+        if (!hasDesc && !renderRouteContext) return null;
 
         return (
           <div className="space-y-4">
-            {hasRoute && (
+            {renderRouteContext && (
               <div className="mb-2">
                 <h3 className={`text-xs font-bold uppercase tracking-widest mb-1 ${isRetro ? 'text-current' : isParchment ? 'text-[#8b5a2b]' : 'text-cyan-400'}`}>
                   {info.routeContext.title}
@@ -972,7 +1055,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                 </div>
                 <div className={`pr-8 space-y-3`}>
                   {(() => {
-                    const lines = getCleanDescriptionLines(info);
+                    const allLines = getCleanDescriptionLines(info);
+                    const lines = renderRouteContext ? allLines.filter(l => l.trim() !== routeText) : allLines;
                     const blocks: React.ReactNode[] = [];
                     let currentList: string[] = [];
 
@@ -989,6 +1073,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                       }
                     };
 
+                    const redundantHeadings = [
+                      'significance', 'historical region', 'historical milestone', 
+                      'strategic location', 'cultural symbol', 'description', 'overview'
+                    ];
+
                     lines.forEach((line: string, i: number) => {
                       let text = line.replace(/\*\*(.*?)\*\*/g, '$1').replace(/__(.*?)__/g, '$1'); 
                       
@@ -1001,6 +1090,13 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                       
                       const isMarkdownHeading = text.startsWith('## ') || text.startsWith('# ');
                       const cleanedText = text.replace(/^#{1,3}\s/, '');
+                      const isRedundantHeading = redundantHeadings.includes(cleanedText.toLowerCase().trim());
+                      
+                      if (isRedundantHeading) {
+                        // Skip redundant fragment headings - keep content dense and unified
+                        return;
+                      }
+
                       const isHeuristicHeading = cleanedText.split(' ').length <= 8 && cleanedText.length < 60 && !cleanedText.match(/[.!?:;]$/) && !cleanedText.match(/^[a-z]/) && lines[i+1] && !lines[i+1].match(/^[-*]\s/);
                       
                       if (isMarkdownHeading || isHeuristicHeading) {
@@ -1122,7 +1218,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         return (
           <div className="space-y-2">
             <SectionHeader 
-              title="Notable Facts"
+              title="Notable Facts" 
               theme={theme}
               isRetro={isRetro}
               isParchment={isParchment}
@@ -1160,80 +1256,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       }
     },
 
-    historicalContext: {
-      render: () => (
-      (info.waypoint?.canonicalName || (info.waypoint?.alternateNames && info.waypoint.alternateNames.length > 0)) ? (
-        <div className={`p-3 ${theme.card}`}>
-            <SectionHeader 
-                title="Historical Identity" 
-                icon={<Info size={16} />} 
-                theme={theme} 
-                isRetro={isRetro} 
-                isParchment={isParchment} 
-                className="!mt-0 !mb-2" 
-            />
-            {info.waypoint?.canonicalName && (
-               <div className="mb-2">
-                   <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Canonical Name</span>
-                   <p className={semanticTitleStyle}>{info.waypoint.canonicalName}</p>
-               </div>
-            )}
-            {info.waypoint?.alternateNames && info.waypoint.alternateNames.length > 0 && (
-               <div>
-                   <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Known As</span>
-                   <div className="flex flex-wrap gap-1">
-                     {info.waypoint.alternateNames.map((alt: string, i: number) => (
-                        <span key={i} className={`px-2 py-0.5 text-xs rounded border ${isRetro ? 'border-current text-current' : isParchment ? 'border-[#8b5a2b] bg-[#d2b48c] text-[#3e2723]' : 'border-cyan-500/30 bg-cyan-900/30 text-cyan-300'}`}>{alt}</span>
-                     ))}
-                   </div>
-               </div>
-            )}
-        </div>
-      ) : null
-      )
-    },
-
-    historicalPeriod: {
-      render: () => (
-      info.historicalPeriod ? (
-        <div className={`p-3 ${theme.card}`}>
-            <SectionHeader 
-                title="Historical Period" 
-                icon={<Crown size={16} />} 
-                theme={theme} 
-                isRetro={isRetro} 
-                isParchment={isParchment} 
-                className="!mt-0 !mb-1" 
-            />
-            <p className={bodyTextStyle}>{info.historicalPeriod}</p>
-        </div>
-      ) : null
-      )
-    },
-
-    keyFigures: {
-      render: () => (
-      info.entities && info.entities.length > 0 ? (
-        <div className="relative group/facts">
-          <SectionHeader 
-              title="Key Entities" 
-              icon={<Users size={16} />} 
-              theme={theme} 
-              isRetro={isRetro} 
-              isParchment={isParchment} 
-              className="!mt-0 !mb-2" 
-          />
-          <div className="flex flex-wrap gap-2">
-            {info.entities.map((e: any, i: number) => {
-               const text = normalizeDisplayText(e);
-               if (!text) return null;
-               return <span key={i} className={`px-2 py-1 text-xs rounded-full border ${isRetro ? 'border-current text-current' : isParchment ? 'border-[#8b5a2b] bg-[#d2b48c] text-[#3e2723]' : 'border-cyan-500/30 bg-cyan-900/30 text-cyan-300'}`}>{text}</span>
-            })}
-          </div>
-        </div>
-      ) : null
-      )
-    },
+    historicalContext: { render: () => null },
+    historicalPeriod: { render: () => null },
+    keyFigures: { render: () => null },
 
     modernContext: {
       copyText: () => {
@@ -1654,15 +1679,20 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             <div className="flex flex-col gap-2 items-center text-center">
               <div className="flex flex-col items-center justify-center gap-1">
                  <h2 className={`${titleSize} font-bold text-center ${theme.locationTitle || theme.headerTitle}`}>
-                   {(info as any).displayName || info.name}
+                   {displayTitle}
                  </h2>
                  <span className={`${smallTextSize} uppercase px-2 py-0.5 ${theme.tag}`}>
-                   {formatUserFacingCategory(info.entityType, info.name, info.type).toUpperCase()}
+                   {displayCategory.toUpperCase()}
                  </span>
-                 {info.locationString && (
+                 {displaySubtitle && (
                    <div className={`mt-1 text-sm font-medium ${isRetro ? 'text-current opacity-90' : isParchment ? 'text-[#5a3e1b]' : 'text-slate-300'}`}>
-                     Location: {info.locationString}
+                     {displaySubtitle}
                    </div>
+                 )}
+                 {displayAltNames && (
+                   <p className={`mt-0.5 text-xs ${isRetro ? 'text-current opacity-70' : isParchment ? 'text-[#5a3e1b]/80' : 'text-slate-400'}`}>
+                     {displayAltNames}
+                   </p>
                  )}
               </div>
               <p className={`${subtextSize} font-mono ${theme.subtext}`}>
@@ -1674,7 +1704,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           </div>
 
           {/* Route Navigation */}
-          {routeNav && (
+          {isMultiLocation && routeNav && (
              <div className={`p-3 border-b flex items-center justify-between ${isRetro ? 'border-current opacity-80' : isParchment ? 'border-[#8b5a2b]/30 bg-[#e8d5b5]/20' : 'border-white/10 bg-white/5'}`}>
                 <button onClick={routeNav.onPrev} className={`p-1.5 rounded-full ${theme.navBtn}`}>
                     <ChevronLeft size={16} />
@@ -1715,7 +1745,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                  </div>
                </div>
             ) : (
-                <div className="p-5 space-y-5 animate-in fade-in duration-300">
+                <div className="p-5 pb-6 space-y-5 animate-in fade-in duration-300">
                     {schema.ui.sections.map((section: any) => {
                         const renderer = SECTION_RENDERERS[section.id];
                         if (renderer && renderer.render) return <React.Fragment key={section.id}>{renderer.render()}</React.Fragment>;

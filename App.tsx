@@ -1116,7 +1116,8 @@ const App: React.FC = () => {
          // Stage 3: Description & Notable
          (async () => {
              try {
-                 const enrichedData = await getInfoFromFeature(geoMarker);
+                 const queryContext = wp.description || wp.context || wp.routeTitle;
+                 const enrichedData = await getInfoFromFeature(geoMarker, queryContext);
                  if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
                  
                  if (enrichedData) {
@@ -1728,18 +1729,18 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 ===============================`);
       }
 
-      let userError = "COULD NOT RESOLVE LOCATION";
+      let userError = "Unable to resolve location.";
       const errorCode = pipelineResult.error;
       if (errorCode === "LOCATION_SYSTEM_UNAVAILABLE") {
-        userError = "LOCATION SYSTEM UNAVAILABLE";
+        userError = "Location system unavailable.";
       } else if (errorCode === "NOT_FOUND") {
-        userError = "COULD NOT FIND LOCATION";
+        userError = "Could not find location.";
       } else if (errorCode === "NO_GEOGRAPHIC_DATA") {
-        userError = "NO RESULTS FOUND FOR THIS QUERY";
+        userError = "No results found for this query.";
       } else if (errorCode === "TEMP_FAILURE") {
-        userError = "TEMPORARILY UNABLE TO LOAD LOCATION DATA";
+        userError = "Unable to load location data.";
       } else if (errorCode === "AMBIGUOUS") {
-        userError = "LOCATION IS TOO AMBIGUOUS TO RESOLVE";
+        userError = "Location is too ambiguous to resolve.";
       }
       setSearchError(userError);
       setIsDiscoveryLoading(false);
@@ -2403,7 +2404,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           currentFavoriteName={currentFavorite?.name}
           onFetchNews={handleFetchNews}
           onLoadMoreNews={handleLoadMoreNews}
-          routeNav={(routeWaypoints.length > 0 && currentWaypointIndex !== -1) ? {
+          routeNav={(routeWaypoints.length > 1 && currentWaypointIndex !== -1) ? {
               current: currentWaypointIndex + 1,
               total: routeWaypoints.length,
               onNext: handleNextWaypoint,

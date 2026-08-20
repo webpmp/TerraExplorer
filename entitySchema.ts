@@ -49,9 +49,40 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
         { id: "overview", required: true },
         { id: "gallery", required: false },
         { id: "notable", required: false },
-        { id: "historicalContext", required: true },
-        { id: "historicalPeriod", required: false },
-        { id: "keyFigures", required: false },
+        { id: "modernContext", required: false },
+        { id: "liveNews", required: false },
+        { id: "relatedPlaces", required: false }
+      ]
+    }
+  },
+  historical_site: {
+    capabilities: HistoricalEntity.capabilities!,
+    enrichment: {
+      overwriteNarrative: false,
+      fetchNews: false
+    },
+    ui: {
+      sections: [
+        { id: "overview", required: true },
+        { id: "gallery", required: false },
+        { id: "notable", required: false },
+        { id: "modernContext", required: false },
+        { id: "liveNews", required: false },
+        { id: "relatedPlaces", required: false }
+      ]
+    }
+  },
+  historical_event_site: {
+    capabilities: HistoricalEntity.capabilities!,
+    enrichment: {
+      overwriteNarrative: false,
+      fetchNews: false
+    },
+    ui: {
+      sections: [
+        { id: "overview", required: true },
+        { id: "gallery", required: false },
+        { id: "notable", required: false },
         { id: "modernContext", required: false },
         { id: "liveNews", required: false },
         { id: "relatedPlaces", required: false }

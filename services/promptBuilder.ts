@@ -1,4 +1,4 @@
-export function getDiscoveryPrompt(entityType?: string, entityName?: string, discoverySignals?: string[]): string {
+export function getDiscoveryPrompt(entityType?: string, entityName?: string, discoverySignals?: string[], queryContext?: string): string {
     return `
 ## 1. ENTITY CLASSIFICATION REQUIREMENTS
 
@@ -20,21 +20,29 @@ The location context belongs in the description only when relevant.
 
 ---
 
-# 2. OVERVIEW GENERATION RULES
+# 2. OVERVIEW GENERATION RULES & SEMANTIC ANCHOR INVARIANT
 
-The Overview is not a location description.
+The Overview is not a generic location description.
 The Overview must answer: "What is this place and why should someone care?"
 Generate 3-5 sentences.
 
+CRITICAL INVARIANT - SEMANTIC ANCHOR FOR EVENT QUERIES:
+When the query or context relates to a specific historical event (e.g. "Where did the launch of Sputnik take place?"), that specific event MUST remain the semantic anchor of the overview and narrative.
+The narrative must immediately establish the connection:
+[Queried Event] -> [Exact Date / Milestone] -> [Specific Facility / Site Name] -> [Geographic Context / Country].
+Other events associated with the same location (e.g., Yuri Gagarin's 1961 flight at Baikonur) are secondary supporting context and must NEVER replace, overshadow, or be labeled as the primary event over the queried subject.
+
+NARRATIVE DENSITY & CONSOLIDATION:
+Maintain high narrative density in 1-2 coherent paragraphs rather than fragmented fact cards or short bullet points. Avoid generating artificial subsection headings like "Significance", "Historical Milestone", "Historical Region", "Strategic Location", or "Cultural Symbol".
+
 Structure:
-Sentence 1: Define the identity of the place.
-Good: "Pedra Lavrada is a small Brazilian municipality known for its distinctive granite landscapes and traditional stone quarrying."
-Bad: "Pedra Lavrada is a location in Paraíba, Brazil."
+Sentence 1: Define the identity of the place or event.
+Good: "Site No. 1 at the Baikonur Cosmodrome was the launch site for Sputnik 1, the world's first artificial satellite, launched on October 4, 1957."
+Bad: "Site No. 1 is a location in Kazakhstan."
 
-Sentence 2-3: Explain significance. Choose relevant topics: historical importance, economic importance, cultural traditions, famous industries, scientific discoveries, natural resources, environmental importance, architecture, famous residents, archaeological importance, unique events.
-
-Sentence 4-5: Explain why this place is memorable.
-The user should finish reading and understand: "I learned something interesting about this place."
+Sentence 2-3: Explain significance. Detail the core event, its impact, and its legacy.
+Sentence 4-5: Provide concise secondary historical context if relevant.
+The user should finish reading and understand: "I learned something substantive and directly answering my question."
 
 ---
 
@@ -126,6 +134,7 @@ Reject Notable facts if they are only: coordinates, borders, climate description
 
 The final InfoPanel should feel like a museum exhibit, documentary narration, or expert tour guide. The goal is not to describe where something is. The goal is to explain why it matters.
 
+${queryContext ? `USER RESEARCH QUERY CONTEXT: "${queryContext}". You MUST directly address this specific queried event or topic, keeping it as the primary semantic anchor.` : ''}
 ${entityName ? `Focus specifically on: ${entityName}` : ''}
 ${discoverySignals && discoverySignals.length > 0 ? `Incorporate these discovery signals into your narrative: ${discoverySignals.join(", ")}` : ''}
 ---
