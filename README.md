@@ -34,36 +34,42 @@ Terra Explorer is an interactive 3D globe application that lets users freely nav
 ## Technologies Used
 
 - **Frontend Framework**: React 19
-- **3D Engine**: Three.js / React Three Fiber (@react-three/fiber, @react-three/drei)
+- **3D Engine**: Three.js / React Three Fiber (`@react-three/fiber`, `@react-three/drei`)
+- **Map & Geodata**: OpenStreetMap Tile Layer, Slippy Map Projection
 - **Styling**: Tailwind CSS
-- **AI & Data**: Google GenAI SDK (`@google/genai`)
+- **AI & Data**: Google GenAI SDK (`@google/genai`), LM Studio (Local OpenAI-compatible API)
 - **Icons**: Lucide React
 
 ## Setup
 
 1. **Environment Variables**:
-   This application requires a Google Gemini API key.
-   Ensure `process.env.API_KEY` is available in your environment configuration.
+   Copy `.env.example` to `.env` and add your Google Gemini API key:
+   ```env
+   GEMINI_API_KEY="your-gemini-api-key"
+   ```
+   *(Optional news provider keys and LM Studio endpoints can be configured in `.env` or directly within the in-app Settings panel).*
 
 2. **Installation**:
    ```bash
    npm install
-   npm start
+   npm run dev
    ```
 
 ## Key Components
 
-- **`Earth.tsx`**: Renders the 3D globe, handles interaction events, shaders for retro effects, and marker rendering.
-- **`geminiService.ts`**: Handles all communication with the Google Gemini API, including robust error handling for rate limits (429) and JSON parsing.
-- **`InfoPanel.tsx`**: The main UI overlay displaying location details, news, notable people, and user notes.
-- **`Controls.tsx`**: The HUD for search, zoom controls, and theme toggling.
+- **`Earth.tsx`**: Renders the 3D globe, interaction events, shaders for retro monitor effects, and marker rendering.
+- **`OSMMapLayer.tsx`**: Slippy-map overlay rendering OpenStreetMap street data with discrete zoom levels.
+- **`InfoPanel.tsx`**: UI overlay displaying encyclopedic summaries, live news, climate data, notable people, and notes.
+- **`Controls.tsx`**: Main HUD for search, trace route journeys, zoom controls, theme cycling, and settings.
+- **`SettingsPanel.tsx`**: In-app modal to toggle and test AI providers (Gemini / LM Studio) and news providers.
+- **`geminiService.ts`**: Communication with the Google Gemini API, schema validation, and grounding.
 
 ## Usage
 
-1. **Explore**: Drag to rotate the earth. Scroll to zoom.
-2. **Interact**: Click on any landmass to identify it, or click on specific markers (dots) to see details.
-3. **Search**: Use the search bar to find cities, landmarks, or historical events.
-4. **Customize**: Toggle between Modern and Retro skins using the buttons in the top right.
+1. **Explore**: Drag to rotate the Earth. Scroll to zoom from orbit down to street-level OpenStreetMap detail.
+2. **Interact**: Click on any landmass to identify it, or click on markers to view encyclopedic data.
+3. **Search & Trace**: Use the search bar for natural-language place discovery, or open Trace Route to plot connected journeys from text.
+4. **Customize**: Cycle between visual themes (Modern, CRT Green, CRT Amber, Parchment) or open Settings to configure AI and news providers.
 
 ## AI Development Context
 
