@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { ENTITY_SCHEMAS } from '../entitySchema';
 import { LocationInfo, SkinType, isValidCoordinates, LocationType } from '../types';
 import { formatUserFacingCategory, formatClimateName } from '../utils/categoryFormatting';
@@ -117,9 +117,14 @@ export const isPlaceholderString = (val: any): boolean => {
     s === '0' ||
     s === 'uninhabited' ||
     s === 'no permanent population' ||
+    s === 'lookup_failed' ||
     s.startsWith('climate data unavailable') ||
     s.startsWith('climate data is unavailable') ||
-    s.startsWith('specific climate data is unavailable')
+    s.startsWith('specific climate data is unavailable') ||
+    s.startsWith('documentary enrichment unavailable') ||
+    s.startsWith('information unavailable') ||
+    s.includes('enrichment unavailable') ||
+    s.includes('information unavailable')
   );
 };
 
@@ -182,7 +187,7 @@ const renderSafeText = (item: any): React.ReactNode => {
   return String(item);
 };
 
-  const CopyButton: React.FC<{ text: string; className?: string; skin: SkinType }> = ({ text, className = "", skin }) => {
+export const CopyButton: React.FC<{ text: string; className?: string; skin: SkinType }> = ({ text, className = "", skin }) => {
   const [copied, setCopied] = useState(false);
   const isRetro = skin === 'retro-green' || skin === 'retro-amber';
   const isParchment = skin === 'parchment';
@@ -203,7 +208,7 @@ const renderSafeText = (item: any): React.ReactNode => {
   return (
     <button
       onClick={handleCopy}
-      className={`p-1.5 transition-all opacity-60 hover:opacity-100 ${themeClass} ${className}`}
+      className={`p-1.5 transition-all opacity-60 hover:opacity-100 ${themeClass} ${className}`.trim()}
       title="Copy to clipboard"
     >
       {copied ? <Check size={14} /> : <Copy size={14} />}
@@ -350,16 +355,18 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       rawDesc = geographicDesc;
     }
 
-    if (rawDesc) {
+    if (rawDesc && !isPlaceholderString(rawDesc)) {
       let cleanDesc = rawDesc;
       if (/^#+\s+description/i.test(cleanDesc.trim())) {
         cleanDesc = cleanDesc.replace(/^#+\s+description/i, '').trim();
       }
-      combinedDescParts.push(cleanDesc);
+      if (cleanDesc && !isPlaceholderString(cleanDesc)) {
+        combinedDescParts.push(cleanDesc);
+      }
     }
 
     // Add significance if unique
-    if (wp.significance && wp.significance !== rawDesc && wp.significance !== routeContextText) {
+    if (wp.significance && !isPlaceholderString(wp.significance) && wp.significance !== rawDesc && wp.significance !== routeContextText) {
       if (isSingleLocation) {
         if (!combinedDescParts.some(p => p.includes(wp.significance))) {
           combinedDescParts.push(wp.significance);
@@ -371,10 +378,10 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
     // Consolidated historical context (from background, region, context notes)
     const contextList: string[] = [];
-    if ((rawInfo as any).historicalBackground) {
+    if ((rawInfo as any).historicalBackground && !isPlaceholderString((rawInfo as any).historicalBackground)) {
       contextList.push((rawInfo as any).historicalBackground);
     }
-    if (wp.historicalRegion && !combinedDescParts.some(p => p.includes(wp.historicalRegion))) {
+    if (wp.historicalRegion && !isPlaceholderString(wp.historicalRegion) && !combinedDescParts.some(p => p.includes(wp.historicalRegion))) {
       if (wp.historicalRegion.length > 20 || !rawInfo.country?.includes(wp.historicalRegion)) {
         contextList.push(wp.historicalRegion);
       }
@@ -418,7 +425,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     const rawEntityType = (wp.entityType || rawInfo.entityType || rawInfo.type || '').toString().toLowerCase();
     const isSettlement = rawEntityType === 'city' || rawEntityType === 'town' || rawEntityType === 'village' || rawEntityType === 'municipality' || rawEntityType === 'settlement' || rawEntityType === 'country' || rawEntityType === 'state';
 
-    if (rawInfo.population && isSettlement) {
+    if (rawInfo.population && isSettlement && rawInfo.population.status !== 'lookup_failed') {
         let currentText = "";
         let historicalText = "";
         let timeframe = "";
@@ -441,7 +448,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                     historicalText = String(rawInfo.population.historical);
                 }
             }
-            if (!currentText && rawInfo.population.value) {
+            if (!currentText && rawInfo.population.value && rawInfo.population.status !== 'lookup_failed') {
                 currentText = String(rawInfo.population.value);
             }
         }
@@ -915,8 +922,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       container: "bg-[#f4ead5] border border-[#8b5a2b] shadow-[4px_4px_10px_rgba(0,0,0,0.3)] text-[#3e2723] font-sans",
       panelBg: "bg-transparent",
       header: "bg-[#e8d5b5]/30",
-      headerTitle: "text-[#8b5a2b] font-bold uppercase tracking-wider brand-font",
-      locationTitle: "text-[#8b5a2b] font-bold font-garamond tracking-wide",
+      headerTitle: "text-[#8b5a2b] uppercase tracking-wider brand-font",
+      locationTitle: "text-[#8b5a2b] font-garamond tracking-wide",
       tag: "text-[#3e2723] bg-[#d2b48c] rounded-sm font-bold shadow-sm",
       subtext: "text-[#8b5a2b]",
       bodyText: "text-[#5c3a21]",
@@ -950,6 +957,22 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const semanticTitleStyle = isRetro ? 'font-bold text-base text-current leading-snug' : isParchment ? 'font-bold text-sm text-[#8b5a2b] leading-snug' : 'font-bold text-sm text-white/95 leading-snug';
   const bodyTextStyle = `font-normal ${bodySize} ${theme.bodyText} opacity-90 leading-relaxed`;
   const metaStyle = isRetro ? (skin === 'retro-amber' ? 'text-xs text-amber-300/70 font-mono' : 'text-xs text-green-300/70 font-mono') : isParchment ? 'text-xs text-[#8b5a2b]/75 font-sans' : 'text-xs text-white/60 font-sans';
+
+  const handleFetchNews = useCallback(() => {
+    if (!onFetchNews) return;
+    setNewsState('loading');
+    onFetchNews();
+  }, [onFetchNews]);
+
+  const handleLoadMoreNews = async () => {
+    if (isMoreNewsLoading || !onLoadMoreNews) return;
+    setIsMoreNewsLoading(true);
+    try {
+      await onLoadMoreNews();
+    } finally {
+      setIsMoreNewsLoading(false);
+    }
+  };
 
   const renderNoteText = (text: string) => {
     const parts = text.split(/(https?:\/\/[^\s]+)/g);
@@ -985,7 +1008,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         ? info.description
         : (info.description?.text || (Array.isArray(info.description?.paragraphs) ? info.description.paragraphs.join('\n\n') : ''));
       
-      const lines = descText.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0);
+      if (isPlaceholderString(descText)) return [];
+
+      const lines = descText.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0 && !isPlaceholderString(l));
       
       if (lines.length > 0) {
           const firstLineClean = lines[0].replace(/^#+\s*/, '').trim().toLowerCase();
@@ -1033,7 +1058,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
            (displaySubtitle && displaySubtitle.trim().toLowerCase() === info.routeContext.title.trim().toLowerCase()))
         );
         const renderRouteContext = !isDuplicateHeader && hasRoute;
-        const hasDesc = descText.length > 0 && (!renderRouteContext || descText !== routeText);
+        const hasDesc = descText.length > 0 && !isPlaceholderString(descText) && (!renderRouteContext || descText !== routeText);
         if (!hasDesc && !renderRouteContext) return null;
 
         return (
@@ -1051,7 +1076,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             {hasDesc && (
               <div className="relative group/desc">
                 <div className="absolute top-0 -right-2 opacity-0 group-hover/desc:opacity-100 transition-opacity z-10">
-                  <CopyButton text={fullCopyText} skin={skin} className={`p-1.5 transition-colors ${theme.actionBtn}`} />
+                  <CopyButton text={fullCopyText} skin={skin} />
                 </div>
                 <div className={`pr-8 space-y-3`}>
                   {(() => {

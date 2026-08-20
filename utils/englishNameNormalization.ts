@@ -6,6 +6,44 @@
 
 // Common geographic mappings for non-Latin script entities
 const KNOWN_ENGLISH_NAMES: Record<string, string> = {
+    // Pakistan & South Asia
+    'سبی': 'Sibi',
+    'کوئٹہ': 'Quetta',
+    'پشاور': 'Peshawar',
+    'لاہور': 'Lahore',
+    'کراچی': 'Karachi',
+    'اسلام آباد': 'Islamabad',
+    'راولپنڈی': 'Rawalpindi',
+    'ملتان': 'Multan',
+    'فیصل آباد': 'Faisalabad',
+    'حیدرآباد': 'Hyderabad',
+    'سکھر': 'Sukkur',
+    'گوادر': 'Gwadar',
+    'ژوب': 'Zhob',
+    'خضدار': 'Khuzdar',
+    'تربت': 'Turbat',
+    'ڈیرہ غازی خان': 'Dera Ghazi Khan',
+    'ڈیرہ اسماعیل خان': 'Dera Ismail Khan',
+    'بہاولپور': 'Bahawalpur',
+    'سرگودھا': 'Sargodha',
+    'سیالکوٹ': 'Sialkot',
+    'گوجرانوالہ': 'Gujranwala',
+    'مظفر آباد': 'Muzaffarabad',
+    'گلگت': 'Gilgit',
+    'سکردو': 'Skardu',
+
+    // Afghanistan & Central Asia
+    'کابل': 'Kabul',
+    'قندھار': 'Kandahar',
+    'ہرات': 'Herat',
+    'مزار شریف': 'Mazar-i-Sharif',
+    'جلال آباد': 'Jalalabad',
+    'بلخ': 'Balkh',
+    'دوشنبه': 'Dushanbe',
+    'سمرقند': 'Samarkand',
+    'بخارا': 'Bukhara',
+    'تاشکند': 'Tashkent',
+
     // Iran / Persian Gulf / Middle East
     'میناب': 'Minab',
     'بندرعباس': 'Bandar Abbas',
@@ -103,7 +141,16 @@ export function transliterateToLatin(text: string): string {
 
     for (let i = 0; i < lower.length; i++) {
         const char = lower[i];
-        if (ARABIC_PERSIAN_CHAR_MAP[char] !== undefined) {
+        if (char === 'ی' || char === 'ي') {
+            // Word-final or post-consonant 'ی' in Arabic/Urdu/Persian geographic names typically transliterates to 'i'
+            const isWordEnd = i === lower.length - 1 || /\s/.test(lower[i + 1]);
+            const isPrecededByConsonant = i > 0 && ARABIC_PERSIAN_CHAR_MAP[lower[i - 1]] !== undefined && !['a', 'i', 'u', 'o', 'e'].includes(ARABIC_PERSIAN_CHAR_MAP[lower[i - 1]]);
+            if (isWordEnd || isPrecededByConsonant) {
+                result += 'i';
+            } else {
+                result += 'y';
+            }
+        } else if (ARABIC_PERSIAN_CHAR_MAP[char] !== undefined) {
             result += ARABIC_PERSIAN_CHAR_MAP[char];
         } else if (CYRILLIC_CHAR_MAP[char] !== undefined) {
             result += CYRILLIC_CHAR_MAP[char];
@@ -139,7 +186,7 @@ export function normalizeEnglishDisplayName(name: string, rawProviders?: Record<
 
             // Overpass tags
             const tags = raw.tags || raw;
-            const enTag = tags['name:en'] || tags['int_name'] || tags['name_en'] || tags['official_name:en'] || tags['alt_name:en'];
+            const enTag = tags['name:en'] || tags['int_name'] || tags['name_en'] || tags['official_name:en'] || tags['alt_name:en'] || tags['name:latin'];
             if (enTag && typeof enTag === 'string' && !containsNonLatinScript(enTag)) {
                 return enTag.trim();
             }
@@ -147,9 +194,17 @@ export function normalizeEnglishDisplayName(name: string, rawProviders?: Record<
             // Nominatim namedetails or extratags
             const nameDetails = raw.namedetails || raw.extratags;
             if (nameDetails) {
-                const nomEn = nameDetails['name:en'] || nameDetails['int_name'] || nameDetails['name_en'];
+                const nomEn = nameDetails['name:en'] || nameDetails['int_name'] || nameDetails['name_en'] || nameDetails['official_name:en'];
                 if (nomEn && typeof nomEn === 'string' && !containsNonLatinScript(nomEn)) {
                     return nomEn.trim();
+                }
+            }
+
+            // Nominatim address fields
+            if (raw.address && typeof raw.address === 'object') {
+                const addrCity = raw.address.city || raw.address.town || raw.address.village || raw.address.municipality;
+                if (addrCity && typeof addrCity === 'string' && !containsNonLatinScript(addrCity)) {
+                    return addrCity.trim();
                 }
             }
 
@@ -158,7 +213,10 @@ export function normalizeEnglishDisplayName(name: string, rawProviders?: Record<
                 const parts = raw.display_name.split(',').map((p: string) => p.trim());
                 for (const part of parts) {
                     if (part && !containsNonLatinScript(part) && !/^\d+$/.test(part)) {
-                        return part;
+                        const cleanPart = part.replace(/\s+(District|Division|Tehsil|Taluka|County|Province|State|Region)$/i, '').trim();
+                        if (cleanPart && !containsNonLatinScript(cleanPart)) {
+                            return cleanPart;
+                        }
                     }
                 }
             }

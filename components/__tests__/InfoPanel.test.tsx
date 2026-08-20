@@ -873,6 +873,169 @@ describe('Lightbox Metadata Integration', () => {
       expect(formatDisplayName(multiSecond)).toBe('2. Dunhuang');
     });
   });
+
+  describe('Location Resolution, Scoped Population, and Clean Fallback Presentation', () => {
+    it('correctly renders Sibi, Pakistan with exact title, subtitle, coordinates, and clean omission of unavailable enrichment/population', () => {
+      const sibiLocation = {
+        name: 'Sibi',
+        city: 'Sibi',
+        country: 'Pakistan',
+        locationString: 'Sibi, Pakistan',
+        type: 'town' as any,
+        entityType: 'city',
+        description: 'Documentary enrichment unavailable.',
+        coordinates: { lat: 29.55, lng: 67.88 },
+        population: { value: null, source: null, status: 'lookup_failed' },
+        notable: [],
+        news: []
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={sibiLocation}
+          onClose={() => {}}
+          isLoading={false}
+          isNewsFetching={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+          onLoadMoreNews={async () => {}}
+        />
+      );
+
+      // 1. Title must display Sibi without truncation or abbreviation (not Sby)
+      expect(html).toContain('Sibi</h2>');
+      expect(html).not.toContain('Sby</h2>');
+
+      // 2. Subtitle must display Sibi, Pakistan
+      expect(html).toContain('Sibi, Pakistan');
+
+      // 3. Coordinates must display 29.55° N, 67.88° E
+      expect(html).toContain('29.55° N, 67.88° E');
+
+      // 4. "Documentary enrichment unavailable." must NOT be rendered as a description paragraph
+      expect(html).not.toContain('Documentary enrichment unavailable.');
+
+      // 5. Population must be omitted when city-level data is unavailable
+      expect(html).not.toContain('<h3 class="font-bold uppercase tracking-wider leading-tight text-xs text-white/95">Population</h3>');
+
+      // 6. No duplicate classes (e.g. p-1.5 p-1.5 or font-bold font-bold)
+      expect(html).not.toMatch(/p-1\.5\s+[^"]*p-1\.5/);
+      expect(html).not.toMatch(/rounded-full\s+[^"]*rounded-full/);
+      expect(html).not.toMatch(/font-bold\s+[^"]*font-bold/);
+    });
+
+    it('handles Quetta, Pakistan gracefully with scoped data and clean presentation', () => {
+      const quettaLocation = {
+        name: 'Quetta',
+        city: 'Quetta',
+        country: 'Pakistan',
+        locationString: 'Quetta, Pakistan',
+        type: 'city' as any,
+        entityType: 'city',
+        description: 'Quetta is the provincial capital and largest city of Balochistan, Pakistan.',
+        coordinates: { lat: 30.18, lng: 66.97 },
+        population: {
+          current: { formattedValue: '1,001,205' }
+        },
+        notable: [],
+        news: []
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={quettaLocation}
+          onClose={() => {}}
+          isLoading={false}
+          isNewsFetching={false}
+          skin="parchment"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+          onLoadMoreNews={async () => {}}
+        />
+      );
+
+      expect(html).toContain('Quetta</h2>');
+      expect(html).toContain('Quetta, Pakistan');
+      expect(html).toContain('30.18° N, 66.97° E');
+      expect(html).toContain('1,001,205');
+      expect(html).toContain('Quetta is the provincial capital');
+      expect(html).not.toMatch(/font-bold\s+[^"]*font-bold/);
+    });
+
+    it('handles Minab, Iran cleanly in retro-green mode', () => {
+      const minabLocation = {
+        name: 'Minab',
+        city: 'Minab',
+        country: 'Iran',
+        locationString: 'Minab, Iran',
+        type: 'town' as any,
+        entityType: 'city',
+        description: 'Minab is a city and capital of Minab County, Hormozgan Province, Iran.',
+        coordinates: { lat: 27.14, lng: 57.08 },
+        notable: [],
+        news: []
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={minabLocation}
+          onClose={() => {}}
+          isLoading={false}
+          isNewsFetching={false}
+          skin="retro-green"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+          onLoadMoreNews={async () => {}}
+        />
+      );
+
+      expect(html).toContain('Minab</h2>');
+      expect(html).toContain('Minab, Iran');
+      expect(html).toContain('27.14° N, 57.08° E');
+      expect(html).toContain('Minab is a city');
+    });
+
+    it('handles Paris, France with verified population and structured content in modern mode', () => {
+      const parisLocation = {
+        name: 'Paris',
+        city: 'Paris',
+        country: 'France',
+        locationString: 'Paris, France',
+        type: 'city' as any,
+        entityType: 'city',
+        description: 'Paris is the capital and most populous city of France.',
+        coordinates: { lat: 48.8566, lng: 2.3522 },
+        population: {
+          current: { formattedValue: '2,161,000' }
+        },
+        notable: [],
+        news: []
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={parisLocation}
+          onClose={() => {}}
+          isLoading={false}
+          isNewsFetching={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+          onLoadMoreNews={async () => {}}
+        />
+      );
+
+      expect(html).toContain('Paris</h2>');
+      expect(html).toContain('Paris, France');
+      expect(html).toContain('48.86° N, 2.35° E');
+      expect(html).toContain('2,161,000');
+    });
+  });
 });
 
 

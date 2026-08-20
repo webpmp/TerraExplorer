@@ -173,11 +173,18 @@ describe('Geographic Discovery: Major Features, Non-Geographic Rejection, and En
   });
 
   describe('3. English Display Name Normalization', () => {
-    it('normalizes Persian and Arabic geographic names to English', () => {
+    it('normalizes Persian, Arabic, and Urdu geographic names to English', () => {
       expect(normalizeEnglishDisplayName('میناب')).toBe('Minab');
       expect(normalizeEnglishDisplayName('صنعاء')).toBe('Sanaa');
       expect(normalizeEnglishDisplayName('لحج')).toBe('Lahij');
       expect(normalizeEnglishDisplayName('بندر عباس')).toBe('Bandar Abbas');
+      expect(normalizeEnglishDisplayName('سبی')).toBe('Sibi');
+      expect(normalizeEnglishDisplayName('کوئٹہ')).toBe('Quetta');
+      expect(normalizeEnglishDisplayName('پشاور')).toBe('Peshawar');
+      expect(normalizeEnglishDisplayName('لاہور')).toBe('Lahore');
+      expect(normalizeEnglishDisplayName('کراچی')).toBe('Karachi');
+      expect(normalizeEnglishDisplayName('کابل')).toBe('Kabul');
+      expect(normalizeEnglishDisplayName('ہرات')).toBe('Herat');
     });
 
     it('extracts English name from provider metadata if available', () => {
@@ -193,23 +200,33 @@ describe('Geographic Discovery: Major Features, Non-Geographic Rejection, and En
       expect(normalizeEnglishDisplayName('میناب', rawProviders)).toBe('Minab');
     });
 
+    it('extracts clean city name from Nominatim display_name and address without administrative suffixes', () => {
+      const rawProviders = {
+        Nominatim: {
+          display_name: 'سبی, Sibi District, Balochistan, Pakistan'
+        }
+      };
+
+      expect(normalizeEnglishDisplayName('سبی', rawProviders)).toBe('Sibi');
+    });
+
     it('preserves canonical name while setting displayName on candidate', async () => {
       const candidate: Candidate = {
-        id: 'ov-minab',
-        name: 'میناب',
-        coordinates: { lat: 27.14, lng: 57.08 },
+        id: 'ov-sibi',
+        name: 'سبی',
+        coordinates: { lat: 29.55, lng: 67.88 },
         type: 'town',
         providers: ['Overpass'],
         rawProviders: {
-          Overpass: { tags: { name: 'میناب', 'name:en': 'Minab' } }
+          Overpass: { tags: { name: 'سبی', 'name:en': 'Sibi' } }
         },
         pipelineStatus: 'collected'
       };
 
       await getGeographicHierarchy(candidate);
 
-      expect(candidate.name).toBe('میناب');
-      expect(candidate.displayName).toBe('Minab');
+      expect(candidate.name).toBe('سبی');
+      expect(candidate.displayName).toBe('Sibi');
     });
   });
 });

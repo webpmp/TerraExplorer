@@ -839,24 +839,34 @@ export async function enrichSettlementPopulation(result: any, marker: any, origi
       let popFound = false;
       const attemptedSources: string[] = [];
 
-      // 1. Provided directly by marker (e.g. from OSM tags)
-      // 1. Explicit marker population (e.g. from Overpass)
+      // 1. Explicit marker population (e.g. from Overpass place tags)
       if (marker && marker.population && typeof marker.population === 'number' && marker.population > 0) {
           result.population = { value: marker.population, source: "Overpass OSM", status: "available", current: { formattedValue: marker.population.toLocaleString(), description: `Population as of latest census` } };
           popFound = true;
       }
 
-      // 2. Direct Overpass/Nominatim Place Lookup for the exact name
+      // 2. Direct Overpass/Nominatim Place Lookup for the exact settlement
       if (!popFound) {
           attemptedSources.push("OSM Place Metadata");
           try {
-              const query = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(result.name)}&format=jsonv2&extratags=1&limit=3`;
+              const query = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(result.name)}&format=jsonv2&extratags=1&limit=5`;
               const res = await fetch(query);
               if (res.ok) {
                   const data = await res.json();
                   if (Array.isArray(data)) {
                       for (const place of data) {
-                          if (place.extratags && place.extratags.population) {
+                          const pType = (place.type || '').toLowerCase();
+                          const pCategory = (place.category || '').toLowerCase();
+                          const pAddressType = (place.addresstype || '').toLowerCase();
+                          
+                          // STRICT SCOPING: Must be a populated settlement, NEVER an administrative container / district / province / state / county
+                          const isAdministrative = pCategory === 'boundary' || pType === 'administrative' || ['district', 'county', 'state', 'province', 'region', 'country', 'state_district'].includes(pType) || ['district', 'county', 'state', 'province', 'region', 'country', 'state_district'].includes(pAddressType);
+                          const isSettlement = ['city', 'town', 'village', 'municipality', 'hamlet'].includes(pType) || (pCategory === 'place' && !isAdministrative);
+
+                          const cleanPlaceName = (place.name || place.display_name?.split(',')[0] || '').toLowerCase().trim();
+                          const cleanResultName = result.name.toLowerCase().split(',')[0].trim();
+
+                          if (!isAdministrative && isSettlement && cleanPlaceName === cleanResultName && place.extratags && place.extratags.population) {
                               const popNum = parseInt(place.extratags.population, 10);
                               if (!isNaN(popNum) && popNum > 0) {
                                   result.population = { value: popNum, source: "OSM Place Metadata", status: "available", current: { formattedValue: popNum.toLocaleString(), description: `Population as of latest census` } };
@@ -881,7 +891,8 @@ export async function enrichSettlementPopulation(result: any, marker: any, origi
               if (revRes.ok) {
                   const revData = await revRes.json();
                   const revType = (revData.type || revData.category || revData.addresstype || '').toLowerCase();
-                  const isSettlement = ['city', 'town', 'village', 'hamlet'].includes(revType);
+                  const isAdministrative = revData.category === 'boundary' || revType === 'administrative' || ['district', 'county', 'state', 'province', 'region', 'country', 'state_district'].includes(revType) || ['district', 'county', 'state', 'province', 'region', 'country', 'state_district'].includes(revData.addresstype || '');
+                  const isSettlement = !isAdministrative && ['city', 'town', 'village', 'hamlet', 'municipality'].includes(revType);
                   const cleanRevName = (revData.name || '').toLowerCase().replace(/,\s*[a-z\s]+$/i, '').trim();
                   const cleanResultName = result.name.toLowerCase().replace(/,\s*[a-z\s]+$/i, '').trim();
                   
@@ -899,7 +910,7 @@ export async function enrichSettlementPopulation(result: any, marker: any, origi
           }
       }
 
-      // 4. Wikidata P1082
+      // 4. Wikidata P1082 (with strict entity description disambiguation)
       if (!popFound) {
           attemptedSources.push("Wikidata P1082");
           try {
@@ -907,20 +918,27 @@ export async function enrichSettlementPopulation(result: any, marker: any, origi
              if (searchRes.ok) {
                 const searchData = await searchRes.json();
                 if (searchData.search && searchData.search.length > 0) {
-                    const entityId = searchData.search[0].id;
-                    result.wikidataId = entityId;
-                    
-                    const entityRes = await fetch(`https://www.wikidata.org/w/api.php?action=wbgetclaims&entity=${entityId}&property=P1082&format=json&origin=*`);
-                    if (entityRes.ok) {
-                        const entityData = await entityRes.json();
-                        const claims = entityData.claims;
-                        if (claims && claims.P1082 && claims.P1082.length > 0) {
-                            const popValue = claims.P1082[0].mainsnak?.datavalue?.value?.amount;
-                            if (popValue !== undefined) {
-                                const popNum = parseInt(popValue.replace('+', ''), 10);
-                                if (!isNaN(popNum)) {
-                                    result.population = { value: popNum, source: "Wikidata P1082", status: "available", current: { formattedValue: popNum.toLocaleString(), description: `Population as of latest census` } };
-                                    popFound = true;
+                    const validEntity = searchData.search.find((item: any) => {
+                        const desc = (item.description || '').toLowerCase();
+                        const isDistrictOrRegion = /\b(district|division|province|state|county|region|administrative|tehsil|taluka|department)\b/i.test(desc);
+                        return !isDistrictOrRegion;
+                    });
+                    if (validEntity) {
+                        const entityId = validEntity.id;
+                        result.wikidataId = entityId;
+                        
+                        const entityRes = await fetch(`https://www.wikidata.org/w/api.php?action=wbgetclaims&entity=${entityId}&property=P1082&format=json&origin=*`);
+                        if (entityRes.ok) {
+                            const entityData = await entityRes.json();
+                            const claims = entityData.claims;
+                            if (claims && claims.P1082 && claims.P1082.length > 0) {
+                                const popValue = claims.P1082[0].mainsnak?.datavalue?.value?.amount;
+                                if (popValue !== undefined) {
+                                    const popNum = parseInt(popValue.replace('+', ''), 10);
+                                    if (!isNaN(popNum) && popNum > 0) {
+                                        result.population = { value: popNum, source: "Wikidata P1082", status: "available", current: { formattedValue: popNum.toLocaleString(), description: `Population as of latest census` } };
+                                        popFound = true;
+                                    }
                                 }
                             }
                         }
@@ -945,12 +963,15 @@ export async function enrichSettlementPopulation(result: any, marker: any, origi
                      if (pageId !== "-1") {
                          const content = pages[pageId].revisions?.[0]?.slots?.main?.["*"];
                          if (content) {
-                             const popMatch = content.match(/population_total\s*=\s*([\d,]+)/i);
-                             if (popMatch && popMatch[1]) {
-                                 const popNum = parseInt(popMatch[1].replace(/,/g, ''), 10);
-                                 if (!isNaN(popNum)) {
-                                     result.population = { value: popNum, source: "Wikipedia Infobox", status: "available", current: { formattedValue: popNum.toLocaleString(), description: `Population as of latest census` } };
-                                     popFound = true;
+                             const isDistrictArticle = /subdivision_type\s*=\s*(?:District|Division|County|Province)/i.test(content) && !/settlement_type\s*=\s*(?:City|Town|Village)/i.test(content);
+                             if (!isDistrictArticle) {
+                                 const popMatch = content.match(/(?:population_total|population_urban|population_city)\s*=\s*([\d,]+)/i);
+                                 if (popMatch && popMatch[1]) {
+                                     const popNum = parseInt(popMatch[1].replace(/,/g, ''), 10);
+                                     if (!isNaN(popNum) && popNum > 0) {
+                                         result.population = { value: popNum, source: "Wikipedia Infobox", status: "available", current: { formattedValue: popNum.toLocaleString(), description: `Population as of latest census` } };
+                                         popFound = true;
+                                     }
                                  }
                              }
                          }
