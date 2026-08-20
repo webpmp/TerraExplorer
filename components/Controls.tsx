@@ -306,7 +306,7 @@ const Controls: React.FC<ControlsProps> = ({
       resetBtn: "text-[#8b5a2b] hover:text-[#3e2723] mr-2 p-1",
       glow: "hidden",
       error: "bg-[#f4ead5] border border-[#8b5a2b] text-[#8b0000] font-sans px-4 py-2 shadow-md",
-      copyright: "text-[#8b5a2b] font-sans",
+      copyright: "text-[#f4ead5]/70 font-sans",
       modal: "bg-[#f4ead5] border-2 border-[#8b5a2b] text-[#3e2723] font-sans shadow-[0_4px_20px_rgba(0,0,0,0.4)] rounded-sm"
     }
   };

@@ -5,6 +5,11 @@ import * as THREE from 'three';
 import { SkinType } from '../types';
 import { vector3ToLatLng, latLngToVector3 } from '../utils/globeCoordinates';
 import {
+  normalizeWheelDelta,
+  calculateOSMZoomStep,
+  OSM_WHEEL_STEP_THRESHOLD
+} from '../utils/cameraZoomUtils';
+import {
   osmTileService,
   OSMDetailLevel,
   OSM_DETAIL_THRESHOLD
@@ -91,6 +96,11 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
   // Transition & Session Identifier
   const transitionIdRef = useRef<number>(0);
   const lastGlobeGeoRef = useRef<{ lat: number; lng: number }>({ lat: 0, lng: 0 });
+
+  // Wheel Delta Accumulation and Step Cooldown for Discrete OSM Zoom Steps
+  const wheelDeltaAccumulatorRef = useRef<number>(0);
+  const lastWheelTimeRef = useRef<number>(0);
+  const lastStepTimeRef = useRef<number>(0);
 
   // Single authoritative OSM camera center and pan state refs
   const osmCameraCenterRef = useRef<{ lat: number; lng: number }>({ lat: 0, lng: 0 });
@@ -451,20 +461,88 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
     loadViewportTiles(committedCenter.lat, committedCenter.lng, dist, activeTileZoomRef.current, 'OSM_COMMITTED');
   }, [onCameraChange, onMarkerClick, loadViewportTiles]);
 
-  // Non-passive wheel handler attached directly to DOM container
+  // Authoritative non-passive wheel handler with capture to guarantee reception whenever OSM is active
   useEffect(() => {
-    const el = containerDivRef.current;
-    if (!el) return;
-
-    const onWheelNonPassive = (e: WheelEvent) => {
+    const onWheelAuthoritative = (e: WheelEvent) => {
+      // Only intercept when OSM map layer is active and visible
       if (opacityRef.current < 0.05 || !rootGroupRef.current) return;
+
       e.preventDefault();
       e.stopPropagation();
 
-      console.log(`[OSM Map] WHEEL delta=${e.deltaY}`);
+      const normalizedDelta = normalizeWheelDelta(e.deltaY, e.deltaMode);
+      const now = Date.now();
+      const rawDeltaY = e.deltaY;
+      const deltaMode = e.deltaMode;
       const currentDist = camera.position.length();
-      const zoomFactor = e.deltaY > 0 ? 1.05 : 0.95;
-      const newDist = Math.max(1.018, Math.min(8.0, currentDist * zoomFactor));
+      const currentZoom = activeTileZoomRef.current;
+
+      const accumulatorBefore = wheelDeltaAccumulatorRef.current;
+
+      // Reset accumulator if user paused scrolling for more than 250ms
+      if (now - lastWheelTimeRef.current > 250) {
+        wheelDeltaAccumulatorRef.current = 0;
+      }
+      lastWheelTimeRef.current = now;
+
+      // Check if this is a discrete physical mouse wheel notch:
+      // Line/page scroll modes OR a large single delta (|deltaY| >= 50 or |normalizedDelta| >= 50)
+      const isDiscreteWheel = deltaMode !== 0 || Math.abs(rawDeltaY) >= 50 || Math.abs(normalizedDelta) >= 50;
+
+      let stepTriggered = false;
+      let targetZoom = currentZoom;
+      let targetDistance = currentDist;
+      let exitsOSM = false;
+
+      if (isDiscreteWheel) {
+        // Enforce a small debounce cooldown (100ms) to prevent hardware accelerated flick bursts
+        if (now - lastStepTimeRef.current >= 100) {
+          stepTriggered = true;
+          lastStepTimeRef.current = now;
+          wheelDeltaAccumulatorRef.current = 0;
+
+          const direction = normalizedDelta < 0 ? 'in' : 'out';
+          const stepResult = calculateOSMZoomStep(currentZoom, direction);
+          targetZoom = stepResult.targetZoom;
+          targetDistance = stepResult.targetDistance;
+          exitsOSM = stepResult.exitsOSM;
+        }
+      } else {
+        // Continuous precision trackpad input: accumulate micro-deltas
+        wheelDeltaAccumulatorRef.current += normalizedDelta;
+
+        if (Math.abs(wheelDeltaAccumulatorRef.current) >= OSM_WHEEL_STEP_THRESHOLD && (now - lastStepTimeRef.current >= 100)) {
+          stepTriggered = true;
+          lastStepTimeRef.current = now;
+          const direction = wheelDeltaAccumulatorRef.current < 0 ? 'in' : 'out';
+          wheelDeltaAccumulatorRef.current = 0;
+
+          const stepResult = calculateOSMZoomStep(currentZoom, direction);
+          targetZoom = stepResult.targetZoom;
+          targetDistance = stepResult.targetDistance;
+          exitsOSM = stepResult.exitsOSM;
+        }
+      }
+
+      const accumulatorAfter = wheelDeltaAccumulatorRef.current;
+
+      // Diagnostic Logging
+      console.log('[OSM WHEEL]', {
+        rawDeltaY,
+        deltaMode,
+        normalizedDelta,
+        accumulatorBefore,
+        accumulatorAfter,
+        activeZoom: currentZoom,
+        cameraDistance: currentDist,
+        stepTriggered,
+        targetZoom,
+        targetDistance,
+      });
+
+      if (!stepTriggered) return;
+
+      console.log(`[OSM Map] WHEEL direction=${normalizedDelta < 0 ? 'in' : 'out'} currentZoom=${currentZoom} targetZoom=${targetZoom} targetDistance=${targetDistance.toFixed(4)} exitsOSM=${exitsOSM}`);
 
       let anchorLat: number;
       let anchorLng: number;
@@ -485,23 +563,41 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
       osmCameraCenterRef.current = { lat: anchorLat, lng: anchorLng };
       committedCenterRef.current = { lat: anchorLat, lng: anchorLng };
 
+      if (!exitsOSM && targetZoom !== currentZoom) {
+        // Immediately retain current tiles as fallback so screen never goes blank during transition
+        fallbackTilesMapRef.current = new Map(activeTilesMapRef.current);
+        setFallbackTilesList(Array.from(activeTilesMapRef.current.values()));
+        activeTilesMapRef.current.clear();
+
+        activeTileZoomRef.current = targetZoom;
+        pendingTileZoomRef.current = null;
+
+        transitionStateRef.current = {
+          fromZoom: currentZoom,
+          toZoom: targetZoom,
+          startedAt: now,
+          loadedCount: 0,
+          totalCount: 0
+        };
+
+        loadViewportTiles(anchorLat, anchorLng, targetDistance, targetZoom, 'OSM_WHEEL');
+      }
+
       if (onCameraChange) {
-        onCameraChange(anchorLat, anchorLng, newDist);
+        onCameraChange(anchorLat, anchorLng, targetDistance);
       } else {
-        camera.position.normalize().multiplyScalar(newDist);
+        camera.position.normalize().multiplyScalar(targetDistance);
         camera.lookAt(0, 0, 0);
         if (controls && (controls as any).update) {
           (controls as any).target.set(0, 0, 0);
           (controls as any).update();
         }
       }
-
-      loadViewportTiles(anchorLat, anchorLng, newDist, activeTileZoomRef.current, 'OSM_WHEEL');
     };
 
-    el.addEventListener('wheel', onWheelNonPassive, { passive: false });
+    window.addEventListener('wheel', onWheelAuthoritative, { passive: false, capture: true });
     return () => {
-      el.removeEventListener('wheel', onWheelNonPassive);
+      window.removeEventListener('wheel', onWheelAuthoritative, { capture: true });
     };
   }, [camera, controls, onCameraChange, loadViewportTiles, selectedMarkerCoordinates]);
 

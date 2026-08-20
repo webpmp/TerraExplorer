@@ -397,6 +397,13 @@ const App: React.FC = () => {
       controls.update();
     }
     
+    // Cancel any running manual zoom animation to avoid conflicting camera updates
+    if (zoomAnimRef.current) {
+      cancelAnimationFrame(zoomAnimRef.current);
+      zoomAnimRef.current = null;
+    }
+    targetZoomRef.current = null;
+
     if (cameraStateRef.current) {
       cameraStateRef.current.themeSuggestedDistance = distance;
       cameraStateRef.current.routeSuggestedDistance = distance;
