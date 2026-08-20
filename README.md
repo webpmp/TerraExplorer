@@ -2,6 +2,12 @@
   <img src="https://github.com/webpmp/webpmp.github.io/blob/master/terra-explorer-parchment.png" 
        alt="Terra Explorer Parchment Theme" 
        width="640" height="480">
+  <br><br>
+  <a href="assets/parchment-zoom.gif">
+    <img src="assets/parchment-zoom.gif" 
+         alt="Parchment Zoom Animation" 
+         width="320" height="240">
+  </a>
 </p>
 
 ## TerraExplorer
