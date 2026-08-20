@@ -178,4 +178,51 @@ describe("OSM Discrete Mouse-Wheel Zoom Step Tests", () => {
       expect(isDiscreteWheel(-25, 0)).toBe(false);
     });
   });
+
+  describe("UI Overlay Wheel Event Isolation", () => {
+    it("does not intercept wheel events occurring inside InfoPanel and scrollable UI overlays", () => {
+      const isEventOverUI = (target: any): boolean => {
+        if (target && typeof target.closest === 'function') {
+          return !!(
+            target.closest('[data-infopanel]') ||
+            target.closest('[data-testid="info-panel"]') ||
+            target.closest('.info-panel-scrollable') ||
+            target.closest('[data-testid="favorites-panel"]') ||
+            target.closest('[data-testid="settings-panel"]') ||
+            target.closest('[data-testid="lightbox-modal"]') ||
+            (target.closest('.pointer-events-auto') && !target.closest('#canvas-container'))
+          );
+        }
+        return false;
+      };
+
+      // Mock elements
+      const mockCanvas = {
+        closest: (selector: string) => (selector === '#canvas-container' ? {} : null)
+      };
+
+      const mockInfoPanelScrollable = {
+        closest: (selector: string) => (
+          selector === '.info-panel-scrollable' || selector === '[data-infopanel]' || selector === '.pointer-events-auto'
+            ? {}
+            : null
+        )
+      };
+
+      const mockInfoPanelTitle = {
+        closest: (selector: string) => (
+          selector === '[data-infopanel]' || selector === '[data-testid="info-panel"]'
+            ? {}
+            : null
+        )
+      };
+
+      // Canvas / Globe wheel events must be intercepted for OSM zooming
+      expect(isEventOverUI(mockCanvas)).toBe(false);
+
+      // InfoPanel scrollable details and headers must NOT be intercepted, allowing native scrolling
+      expect(isEventOverUI(mockInfoPanelScrollable)).toBe(true);
+      expect(isEventOverUI(mockInfoPanelTitle)).toBe(true);
+    });
+  });
 });

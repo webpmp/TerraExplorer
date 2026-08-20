@@ -1634,9 +1634,18 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           </div>
         );
       })()}
-      <div className="absolute top-[282px] right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-342px)] flex flex-col gap-3 animate-in slide-in-from-right-12 fade-in duration-500 pointer-events-none">
+      <div 
+        className="absolute top-[282px] right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-342px)] flex flex-col gap-3 animate-in slide-in-from-right-12 fade-in duration-500 pointer-events-none"
+        data-testid="info-panel"
+        data-infopanel="true"
+        onWheel={(e) => e.stopPropagation()}
+      >
         {/* Main Info Box */}
-        <div className={`${theme.container} flex flex-col shrink min-h-0 overflow-hidden pointer-events-auto`}>
+        <div 
+          className={`${theme.container} flex flex-col shrink min-h-0 overflow-hidden pointer-events-auto`}
+          data-infopanel="true"
+          onWheel={(e) => e.stopPropagation()}
+        >
           {/* Header */}
           <div className={`relative p-5 shrink-0 flex flex-col items-center ${skin === 'modern' ? 'border-b border-white/10' : ''} ${theme.header}`}>
             {/* 1. Close X button */}
@@ -1688,7 +1697,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                               Cancel
                           </button>
                           <button 
-                            type="submit"
+                            type="submit" 
                             disabled={!favoriteNameInput.trim()}
                             className={`px-3 py-1 text-xs font-bold uppercase transition-colors disabled:opacity-50 ${isRetro ? 'bg-current text-black hover:opacity-80' : 'bg-cyan-600 hover:bg-cyan-500 text-white rounded'}`}
                           >
@@ -1747,7 +1756,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
           
           {/* Scrollable Content */}
-          <div className={`flex-1 overflow-y-auto ${theme.panelBg} relative pointer-events-auto`}>
+          <div 
+            className={`flex-1 overflow-y-auto ${theme.panelBg} relative pointer-events-auto info-panel-scrollable`}
+            data-infopanel="true"
+            onWheel={(e) => e.stopPropagation()}
+          >
             {isError ? (
                <div className="p-6 flex flex-col items-center justify-center h-48 text-center space-y-3">
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center mb-1 ${isRetro ? 'bg-red-900/40 text-red-400' : 'bg-red-500/20 text-red-400'}`}>
@@ -1783,7 +1796,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         
         {/* My Notes Section */}
         {hasNotes ? (
-          <div className={`pointer-events-auto shrink-0 transition-all duration-300 ${theme.container} ${!isNotesExpanded ? 'hover:brightness-110 cursor-pointer' : ''}`}>
+          <div 
+            className={`pointer-events-auto shrink-0 transition-all duration-300 ${theme.container} ${!isNotesExpanded ? 'hover:brightness-110 cursor-pointer' : ''}`}
+            data-infopanel="true"
+            onWheel={(e) => e.stopPropagation()}
+          >
                <div 
                  className={`px-5 py-3 flex items-center justify-between cursor-pointer ${isNotesExpanded ? 'border-b ' + (isRetro ? 'border-green-400/50' : isParchment ? 'border-[#8b5a2b]/30' : 'border-white/10') : ''}`}
                  onClick={() => setIsNotesExpanded(!isNotesExpanded)}
@@ -1810,7 +1827,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                               className={`flex-1 px-3 py-2 outline-none text-sm transition-colors ${theme.notesInput}`}
                            />
                            <button 
-                              type="submit"
+                              type="submit" 
                               disabled={!newNote.trim()}
                               className={`p-2 transition-colors disabled:opacity-50 ${theme.actionBtn}`}
                            >
@@ -1819,7 +1836,10 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                        </form>
   
                        {/* Notes List */}
-                       <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
+                       <div 
+                         className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar"
+                         onWheel={(e) => e.stopPropagation()}
+                       >
                          {notes.map((note) => (
                              <div key={note.id} className={`p-3 group relative ${theme.noteCard}`}>
                                  {editingNoteId === note.id ? (

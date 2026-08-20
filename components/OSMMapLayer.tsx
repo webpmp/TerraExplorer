@@ -467,6 +467,33 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
       // Only intercept when OSM map layer is active and visible
       if (opacityRef.current < 0.05 || !rootGroupRef.current) return;
 
+      // Do NOT intercept if the pointer is over the InfoPanel or interactive UI overlays
+      const target = e.target as Element | null;
+      if (target && typeof target.closest === 'function') {
+        const isOverUI = target.closest('[data-infopanel]') ||
+                         target.closest('[data-testid="info-panel"]') ||
+                         target.closest('.info-panel-scrollable') ||
+                         target.closest('[data-testid="favorites-panel"]') ||
+                         target.closest('[data-testid="settings-panel"]') ||
+                         target.closest('[data-testid="lightbox-modal"]') ||
+                         (target.closest('.pointer-events-auto') && !target.closest('#canvas-container'));
+        if (isOverUI) return;
+      }
+
+      if (e.composedPath) {
+        const path = e.composedPath();
+        for (const item of path) {
+          if (item instanceof Element) {
+            if (item.hasAttribute('data-infopanel') || 
+                item.getAttribute('data-testid') === 'info-panel' ||
+                item.classList.contains('info-panel-scrollable') ||
+                (item.classList.contains('pointer-events-auto') && !item.closest('#canvas-container'))) {
+              return;
+            }
+          }
+        }
+      }
+
       e.preventDefault();
       e.stopPropagation();
 
