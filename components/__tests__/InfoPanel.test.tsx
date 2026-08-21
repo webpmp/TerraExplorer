@@ -1,5 +1,5 @@
 import { describe, test, it, expect } from 'vitest';
-import { normalizeDisplayText, cleanMetadataString, formatImageAttribution } from '../InfoPanel';
+import { normalizeDisplayText, cleanMetadataString, formatImageAttribution, normalizeGeoComparisonName, isRedundantWithTitle, formatGeographicContext } from '../InfoPanel';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import InfoPanel from '../InfoPanel';
@@ -908,8 +908,9 @@ describe('Lightbox Metadata Integration', () => {
       expect(html).toContain('Sibi</h2>');
       expect(html).not.toContain('Sby</h2>');
 
-      // 2. Subtitle must display Sibi, Pakistan
-      expect(html).toContain('Sibi, Pakistan');
+      // 2. Subtitle must display Pakistan without repeating Sibi
+      expect(html).toContain('Pakistan');
+      expect(html).not.toContain('Sibi, Pakistan');
 
       // 3. Coordinates must display 29.55° N, 67.88° E
       expect(html).toContain('29.55° N, 67.88° E');
@@ -958,7 +959,8 @@ describe('Lightbox Metadata Integration', () => {
       );
 
       expect(html).toContain('Quetta</h2>');
-      expect(html).toContain('Quetta, Pakistan');
+      expect(html).toContain('Pakistan');
+      expect(html).not.toContain('Quetta, Pakistan');
       expect(html).toContain('30.18° N, 66.97° E');
       expect(html).toContain('1,001,205');
       expect(html).toContain('Quetta is the provincial capital');
@@ -994,7 +996,8 @@ describe('Lightbox Metadata Integration', () => {
       );
 
       expect(html).toContain('Minab</h2>');
-      expect(html).toContain('Minab, Iran');
+      expect(html).toContain('Iran');
+      expect(html).not.toContain('Minab, Iran');
       expect(html).toContain('27.14° N, 57.08° E');
       expect(html).toContain('Minab is a city');
     });
@@ -1031,9 +1034,232 @@ describe('Lightbox Metadata Integration', () => {
       );
 
       expect(html).toContain('Paris</h2>');
-      expect(html).toContain('Paris, France');
+      expect(html).toContain('France');
+      expect(html).not.toContain('Paris, France');
       expect(html).toContain('48.86° N, 2.35° E');
       expect(html).toContain('2,161,000');
+    });
+  });
+
+  describe('Geographic Context Header Deduplication', () => {
+    it('normalizes names for comparison ignoring case, diacritics, and punctuation', () => {
+      expect(normalizeGeoComparisonName('Clovis')).toBe('clovis');
+      expect(normalizeGeoComparisonName('CLOVIS')).toBe('clovis');
+      expect(normalizeGeoComparisonName('St. Louis')).toBe('st louis');
+      expect(normalizeGeoComparisonName('Grindavík')).toBe('grindavik');
+      expect(normalizeGeoComparisonName('Washington, D.C.')).toBe('washington dc');
+    });
+
+    it('accurately detects redundant hierarchy components against displayed title', () => {
+      expect(isRedundantWithTitle('Clovis', 'Clovis')).toBe(true);
+      expect(isRedundantWithTitle('clovis', 'Clovis')).toBe(true);
+      expect(isRedundantWithTitle('CLOVIS', 'Clovis')).toBe(true);
+      expect(isRedundantWithTitle('Clovis', 'Clovis, NM')).toBe(true);
+      expect(isRedundantWithTitle('Clovis, NM', 'Clovis')).toBe(true);
+      expect(isRedundantWithTitle('City of Clovis', 'Clovis')).toBe(true);
+      expect(isRedundantWithTitle('Mount Fuji', 'Mt. Fuji')).toBe(true);
+      expect(isRedundantWithTitle('St. Louis', 'Saint Louis')).toBe(true);
+      
+      // Must NOT falsely match similar but distinct names
+      expect(isRedundantWithTitle('New Mexico', 'Mexico')).toBe(false);
+      expect(isRedundantWithTitle('Mexico', 'New Mexico')).toBe(false);
+      expect(isRedundantWithTitle('West Virginia', 'Virginia')).toBe(false);
+      expect(isRedundantWithTitle('San Francisco', 'Alcatraz Island')).toBe(false);
+      expect(isRedundantWithTitle('California', 'Death Valley')).toBe(false);
+    });
+
+    it('formats City context without repeating city name: Clovis -> "New Mexico, United States"', () => {
+      const clovisWithLocString = {
+        name: 'Clovis',
+        entityType: 'city',
+        type: 'City' as any,
+        state: 'New Mexico',
+        country: 'United States',
+        locationString: 'Clovis, United States',
+        coordinates: { lat: 34.41, lng: -103.21 },
+        description: 'Clovis is a city in New Mexico.'
+      };
+
+      const result = formatGeographicContext(clovisWithLocString, 'Clovis');
+      expect(result).toBe('New Mexico, United States');
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={clovisWithLocString}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+      expect(html).toContain('Clovis</h2>');
+      expect(html).toContain('CITY');
+      expect(html).toContain('New Mexico, United States');
+      expect(html).not.toContain('Clovis, United States');
+      expect(html).toContain('34.41° N, 103.21° W');
+    });
+
+    it('formats City context when locationString has full hierarchy: "Clovis, New Mexico, United States" -> "New Mexico, United States"', () => {
+      const clovisFull = {
+        name: 'Clovis',
+        entityType: 'city',
+        type: 'City' as any,
+        locationString: 'Clovis, New Mexico, United States',
+        coordinates: { lat: 34.41, lng: -103.21 },
+        description: 'Clovis is a city in New Mexico.'
+      };
+
+      const result = formatGeographicContext(clovisFull, 'Clovis');
+      expect(result).toBe('New Mexico, United States');
+    });
+
+    it('formats Landmark / POI preserving parent context: Alcatraz Island -> "San Francisco, California, United States"', () => {
+      const alcatraz = {
+        name: 'Alcatraz Island',
+        entityType: 'landmark',
+        type: 'Point of Interest' as any,
+        city: 'San Francisco',
+        state: 'California',
+        country: 'United States',
+        locationString: 'Alcatraz Island, San Francisco, California, United States',
+        coordinates: { lat: 37.8267, lng: -122.4233 },
+        description: 'Historic island in San Francisco Bay.'
+      };
+
+      const result = formatGeographicContext(alcatraz, 'Alcatraz Island');
+      expect(result).toBe('San Francisco, California, United States');
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={alcatraz}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+      expect(html).toContain('Alcatraz Island</h2>');
+      expect(html).toContain('San Francisco, California, United States');
+    });
+
+    it('formats Geographic Feature preserving parent context: Death Valley -> "California, United States"', () => {
+      const deathValley = {
+        name: 'Death Valley',
+        entityType: 'geographic_feature',
+        type: 'Point of Interest' as any,
+        state: 'California',
+        country: 'United States',
+        locationString: 'Death Valley, California, United States',
+        coordinates: { lat: 36.5323, lng: -116.9325 },
+        description: 'Desert valley in Eastern California.'
+      };
+
+      const result = formatGeographicContext(deathValley, 'Death Valley');
+      expect(result).toBe('California, United States');
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={deathValley}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+      expect(html).toContain('Death Valley</h2>');
+      expect(html).toContain('California, United States');
+    });
+
+    it('formats POI whose title is not present in geographic context: Space Needle -> "Seattle, Washington, United States"', () => {
+      const spaceNeedle = {
+        name: 'Space Needle',
+        entityType: 'landmark',
+        type: 'Point of Interest' as any,
+        locationString: 'Seattle, Washington, United States',
+        coordinates: { lat: 47.6205, lng: -122.3493 },
+        description: 'Observation tower in Seattle, Washington.'
+      };
+
+      const result = formatGeographicContext(spaceNeedle, 'Space Needle');
+      expect(result).toBe('Seattle, Washington, United States');
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={spaceNeedle}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+      expect(html).toContain('Space Needle</h2>');
+      expect(html).toContain('Seattle, Washington, United States');
+    });
+
+    it('handles Country entity cleanly without repeating country name', () => {
+      const france = {
+        name: 'France',
+        entityType: 'country',
+        type: 'Country' as any,
+        country: 'France',
+        locationString: 'France',
+        coordinates: { lat: 46.2276, lng: 2.2137 },
+        description: 'France is a country in Western Europe.'
+      };
+
+      const result = formatGeographicContext(france, 'France');
+      expect(result).toBeNull();
+
+      const franceWithContinent = {
+        name: 'France',
+        entityType: 'country',
+        type: 'Country' as any,
+        country: 'France',
+        locationString: 'France, Europe',
+        coordinates: { lat: 46.2276, lng: 2.2137 },
+        description: 'France is a country in Western Europe.'
+      };
+      expect(formatGeographicContext(franceWithContinent, 'France')).toBe('Europe');
+    });
+
+    it('handles State entity cleanly without repeating state name', () => {
+      const california = {
+        name: 'California',
+        entityType: 'state',
+        type: 'State' as any,
+        state: 'California',
+        country: 'United States',
+        locationString: 'California, United States',
+        coordinates: { lat: 36.7783, lng: -119.4179 },
+        description: 'California is a state in the Western United States.'
+      };
+
+      const result = formatGeographicContext(california, 'California');
+      expect(result).toBe('United States');
+    });
+
+    it('handles trivial variations in titles such as state suffix (e.g. "Clovis, NM")', () => {
+      const clovisVariant = {
+        name: 'Clovis, NM',
+        entityType: 'city',
+        type: 'City' as any,
+        state: 'New Mexico',
+        country: 'United States',
+        locationString: 'Clovis, United States',
+        coordinates: { lat: 34.41, lng: -103.21 },
+        description: 'Clovis is a city in New Mexico.'
+      };
+
+      const result = formatGeographicContext(clovisVariant, 'Clovis, NM');
+      expect(result).toBe('New Mexico, United States');
     });
   });
 });

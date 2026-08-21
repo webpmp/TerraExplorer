@@ -69,6 +69,150 @@ export const normalizeDisplayText = (value: any): string => {
   return str.replace(/^#{1,6}\s+/gm, '').trim();
 };
 
+/**
+ * Normalizes a geographic or entity name for comparison:
+ * - strips diacritics / accents
+ * - converts to lowercase
+ * - strips periods, apostrophes, quotes
+ * - normalizes whitespace and punctuation
+ */
+export const normalizeGeoComparisonName = (str: unknown): string => {
+  if (str === null || str === undefined) return '';
+  const s = String(str).trim();
+  if (!s) return '';
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/['’`.]/g, '')
+    .replace(/[^\w\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+/**
+ * Checks whether a candidate geographic hierarchy component is redundant with the displayed title
+ * (or canonical entity name).
+ */
+export const isRedundantWithTitle = (
+  component: string,
+  displayedTitle: string,
+  canonicalName?: string
+): boolean => {
+  const normComp = normalizeGeoComparisonName(component);
+  if (!normComp) return true;
+
+  const titlesToCheck = [displayedTitle, canonicalName].filter(Boolean) as string[];
+
+  const standardizePrefixes = (text: string) =>
+    text
+      .replace(/^mt\s+/, 'mount ')
+      .replace(/^st\s+/, 'saint ')
+      .replace(/^(city|town|village|municipality|state|province)\s+of\s+/, '')
+      .trim();
+
+  const stdComp = standardizePrefixes(normComp);
+
+  for (const rawTitle of titlesToCheck) {
+    const normTitle = normalizeGeoComparisonName(rawTitle);
+    if (!normTitle) continue;
+
+    // 1. Direct exact normalized match (e.g. "Clovis" vs "clovis", "CLOVIS")
+    if (normComp === normTitle) return true;
+
+    // 2. Standardized prefix match (e.g. "Mt. Fuji" vs "Mount Fuji", "City of Clovis" vs "Clovis")
+    const stdTitle = standardizePrefixes(normTitle);
+    if (stdComp === stdTitle) return true;
+
+    // 3. Title has a state/country suffix or qualifier: e.g. "Clovis, NM", "Austin, Texas", "Vancouver, Canada", "Paris (France)"
+    const baseTitle = rawTitle.split(',')[0].replace(/\s*\(.*?\)\s*/g, '').trim();
+    const normBaseTitle = normalizeGeoComparisonName(baseTitle);
+    const stdBaseTitle = standardizePrefixes(normBaseTitle);
+    if (stdComp === stdBaseTitle && stdBaseTitle.length > 0) return true;
+
+    // 4. Component has a state/country suffix or qualifier: e.g. component is "Clovis, NM" and title is "Clovis"
+    const baseComp = component.split(',')[0].replace(/\s*\(.*?\)\s*/g, '').trim();
+    const normBaseComp = normalizeGeoComparisonName(baseComp);
+    const stdBaseComp = standardizePrefixes(normBaseComp);
+    if (stdBaseComp === stdTitle && stdBaseComp.length > 0) return true;
+  }
+
+  return false;
+};
+
+/**
+ * Intelligently derives the geographic context line for an entity, removing any components
+ * that repeat the displayed entity name while preserving useful surrounding hierarchy.
+ */
+export const formatGeographicContext = (
+  info: any,
+  displayedTitle: string
+): string | null => {
+  if (!info) return null;
+
+  const cleanVal = (v: any): string | undefined => {
+    const cleaned = cleanMetadataString(v);
+    if (!cleaned || isPlaceholderString(cleaned)) return undefined;
+    return cleaned;
+  };
+
+  const city = cleanVal(info.city || info.town || info.village || info.locality || info.context?.city || info.address?.city || info.address?.town || info.address?.village || info.waypoint?.city);
+  const county = cleanVal(info.county || info.context?.county || info.address?.county || info.waypoint?.county);
+  const state = cleanVal(info.state || info.region || info.province || info.adminArea || info.context?.state || info.context?.region || info.context?.province || info.address?.state || info.address?.region || info.address?.province || info.waypoint?.state || info.waypoint?.region);
+  const country = cleanVal(info.country || info.context?.country || info.address?.country || info.waypoint?.country);
+
+  let rawComponents: string[] = [];
+
+  const locString = cleanVal(info.locationString || info.waypoint?.locationString);
+
+  if (locString) {
+    // Split by comma
+    rawComponents = locString
+      .split(',')
+      .map((s: string) => s.trim())
+      .filter((s: string) => !!cleanVal(s));
+
+    // If state/country are available in structured data but missing from locationString components, enrich the hierarchy
+    if (state && !rawComponents.some(c => normalizeGeoComparisonName(c) === normalizeGeoComparisonName(state))) {
+      const countryIdx = country ? rawComponents.findIndex(c => normalizeGeoComparisonName(c) === normalizeGeoComparisonName(country)) : -1;
+      if (countryIdx !== -1) {
+        rawComponents.splice(countryIdx, 0, state);
+      } else {
+        rawComponents.push(state);
+      }
+    }
+
+    if (country && !rawComponents.some(c => normalizeGeoComparisonName(c) === normalizeGeoComparisonName(country))) {
+      rawComponents.push(country);
+    }
+  } else {
+    // Construct from structured hierarchy
+    const struct = [city, county, state, country].filter(Boolean) as string[];
+    rawComponents = struct;
+  }
+
+  // Filter out redundant components that repeat the displayed entity name or canonical title
+  const filteredComponents: string[] = [];
+  const seen = new Set<string>();
+
+  for (const comp of rawComponents) {
+    if (isRedundantWithTitle(comp, displayedTitle, info.name)) {
+      continue;
+    }
+    const norm = normalizeGeoComparisonName(comp);
+    if (!seen.has(norm)) {
+      seen.add(norm);
+      filteredComponents.push(comp);
+    }
+  }
+
+  if (filteredComponents.length === 0) {
+    return null;
+  }
+
+  return filteredComponents.join(', ');
+};
+
 interface InfoPanelProps {
   info: any; // Raw input (can be LocationInfo or waypoint wrapper)
   onClose: () => void;
@@ -560,24 +704,34 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     const queryOrRouteTitle = info.routeContext?.title || info.waypoint?.routeTitle;
     const locName = (info as any).displayName || info.name || '';
     let title = locName;
-    let subtitle = info.locationString || '';
 
-    if (isSingleLocation && queryOrRouteTitle && queryOrRouteTitle.toLowerCase() !== locName.toLowerCase()) {
+    const isRouteEventQuery = Boolean(
+      isSingleLocation &&
+      queryOrRouteTitle &&
+      !isRedundantWithTitle(locName, queryOrRouteTitle)
+    );
+
+    let subtitle: string | null = null;
+
+    if (isRouteEventQuery) {
       title = queryOrRouteTitle;
       subtitle = locName;
-    } else if (!subtitle && info.city && info.country && locName !== `${info.city}, ${info.country}`) {
-      subtitle = `${info.city}, ${info.country}`;
+    } else {
+      if (queryOrRouteTitle && !locName) {
+        title = queryOrRouteTitle;
+      }
+      subtitle = formatGeographicContext(info, title);
     }
 
     const altNamesList: string[] = [];
-    if (info.waypoint?.canonicalName && info.waypoint.canonicalName.toLowerCase() !== title.toLowerCase() && info.waypoint.canonicalName.toLowerCase() !== subtitle.toLowerCase()) {
+    if (info.waypoint?.canonicalName && info.waypoint.canonicalName.toLowerCase() !== title.toLowerCase() && (!subtitle || info.waypoint.canonicalName.toLowerCase() !== subtitle.toLowerCase())) {
       altNamesList.push(info.waypoint.canonicalName);
     }
     if (Array.isArray(info.waypoint?.alternateNames)) {
       info.waypoint.alternateNames.forEach((a: string) => {
         if (a && typeof a === 'string') {
           const trimmed = a.trim();
-          if (trimmed && trimmed.toLowerCase() !== title.toLowerCase() && trimmed.toLowerCase() !== subtitle.toLowerCase() && !altNamesList.includes(trimmed)) {
+          if (trimmed && trimmed.toLowerCase() !== title.toLowerCase() && (!subtitle || trimmed.toLowerCase() !== subtitle.toLowerCase()) && !altNamesList.includes(trimmed)) {
             altNamesList.push(trimmed);
           }
         }
