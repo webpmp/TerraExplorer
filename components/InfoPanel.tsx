@@ -213,6 +213,44 @@ export const formatGeographicContext = (
   return filteredComponents.join(', ');
 };
 
+export const getScrollFadeMaskStyle = (topFade: boolean, bottomFade: boolean): React.CSSProperties => {
+  if (topFade && bottomFade) {
+    return {
+      maskImage: 'linear-gradient(to bottom, transparent 0, black 16px, black calc(100% - 16px), transparent 100%)',
+      WebkitMaskImage: 'linear-gradient(to bottom, transparent 0, black 16px, black calc(100% - 16px), transparent 100%)',
+    };
+  }
+  if (topFade) {
+    return {
+      maskImage: 'linear-gradient(to bottom, transparent 0, black 16px, black 100%)',
+      WebkitMaskImage: 'linear-gradient(to bottom, transparent 0, black 16px, black 100%)',
+    };
+  }
+  if (bottomFade) {
+    return {
+      maskImage: 'linear-gradient(to bottom, black 0, black calc(100% - 16px), transparent 100%)',
+      WebkitMaskImage: 'linear-gradient(to bottom, black 0, black calc(100% - 16px), transparent 100%)',
+    };
+  }
+  return {
+    maskImage: 'none',
+    WebkitMaskImage: 'none',
+  };
+};
+
+export const calculateScrollFade = (scrollTop: number, scrollHeight: number, clientHeight: number): { top: boolean; bottom: boolean } => {
+  const canScroll = scrollHeight > clientHeight + 1;
+  if (!canScroll) {
+    return { top: false, bottom: false };
+  }
+  const isAtTop = scrollTop <= 2;
+  const isAtBottom = scrollTop + clientHeight >= scrollHeight - 2;
+  return {
+    top: !isAtTop,
+    bottom: !isAtBottom,
+  };
+};
+
 interface InfoPanelProps {
   info: any; // Raw input (can be LocationInfo or waypoint wrapper)
   onClose: () => void;
@@ -277,6 +315,47 @@ const isValidData = (val: string | null | undefined, isDescription: boolean = fa
   if (val === null || val === undefined) return false;
   if (isPlaceholderString(val)) return false;
   return true;
+};
+
+// Helper to determine authoritative, accurately-labeled population title (never "Modern", never duplicate "Population")
+export const getPopulationLabel = (popItem: any): string => {
+  if (!popItem) return "Current Estimate";
+  
+  if (popItem.label && typeof popItem.label === 'string') {
+    const trimmed = popItem.label.trim();
+    const lower = trimmed.toLowerCase();
+    if (!lower.includes('modern') && !lower.includes('population')) {
+      return trimmed;
+    }
+  }
+
+  const censusYear = popItem.censusYear || 
+    (typeof popItem.timeframe === 'string' && /census/i.test(popItem.timeframe) ? popItem.timeframe.match(/\b(\d{4})\b/)?.[1] : null) || 
+    (typeof popItem.source === 'string' && /census/i.test(popItem.source) ? popItem.source.match(/\b(\d{4})\b/)?.[1] : null) ||
+    (typeof popItem.label === 'string' && /census/i.test(popItem.label) ? popItem.label.match(/\b(\d{4})\b/)?.[1] : null);
+  
+  if (censusYear) {
+    return `${censusYear} Census`;
+  }
+
+  const year = popItem.year || 
+    (typeof popItem.timeframe === 'string' ? popItem.timeframe.match(/^\s*(\d{4})\s*$/)?.[1] : null) ||
+    (typeof popItem.label === 'string' && /\b(\d{4})\b/.test(popItem.label) ? popItem.label.match(/\b(\d{4})\b/)?.[1] : null);
+
+  if (year) {
+    const isCensus = (typeof popItem.source === 'string' && /census/i.test(popItem.source)) || 
+                     (typeof popItem.timeframe === 'string' && /census/i.test(popItem.timeframe));
+    return isCensus ? `${year} Census` : `${year} Estimate`;
+  }
+
+  if (popItem.timeframe && typeof popItem.timeframe === 'string') {
+    const tf = popItem.timeframe.trim();
+    if (!tf.toLowerCase().includes('population') && !tf.toLowerCase().includes('modern')) {
+      return tf;
+    }
+  }
+
+  return "Current Estimate";
 };
 
 // Helper to safely convert mixed array elements to plain strings (useful for Copy buttons)
@@ -368,12 +447,25 @@ export const SectionHeader: React.FC<{
   isParchment?: boolean;
   className?: string;
 }> = ({ title, icon, theme = {}, isRetro = false, isParchment = false, className = "" }) => {
+  const headerColorClass = isRetro 
+    ? 'text-current' 
+    : isParchment 
+      ? 'text-[#8b5a2b]' 
+      : 'text-cyan-300';
+
+  const ruleColorClass = isRetro
+    ? 'bg-current/25'
+    : isParchment
+      ? 'bg-[#8b5a2b]/25'
+      : 'bg-cyan-400/20';
+
   return (
-    <div className={`info-panel-section-header flex items-center gap-1.5 mb-1.5 ${theme.icon || ''} ${className}`}>
+    <div className={`info-panel-section-header flex items-center gap-2 mt-3 mb-[15px] ${theme.icon || ''} ${className}`}>
       {icon && <span className="shrink-0 opacity-80">{icon}</span>}
-      <h3 className={`font-bold uppercase tracking-wider leading-tight ${isRetro ? 'text-sm text-current' : isParchment ? 'text-xs text-[#8b5a2b]' : 'text-xs text-white/95'}`}>
+      <h3 className={`text-sm font-semibold uppercase tracking-[0.16em] leading-tight shrink-0 ${headerColorClass}`}>
         {title}
       </h3>
+      <div className={`flex-1 h-[1px] ${ruleColorClass}`} aria-hidden="true" />
     </div>
   );
 };
@@ -569,41 +661,108 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     const rawEntityType = (wp.entityType || rawInfo.entityType || rawInfo.type || '').toString().toLowerCase();
     const isSettlement = rawEntityType === 'city' || rawEntityType === 'town' || rawEntityType === 'village' || rawEntityType === 'municipality' || rawEntityType === 'settlement' || rawEntityType === 'country' || rawEntityType === 'state';
 
-    if (rawInfo.population && isSettlement && rawInfo.population.status !== 'lookup_failed') {
-        let currentText = "";
-        let historicalText = "";
-        let timeframe = "";
+    if (rawInfo.population && isSettlement && rawInfo.population.status !== 'lookup_failed' && rawInfo.population.status !== 'not_applicable') {
+        let currentItem: any = null;
+        let historicalItem: any = null;
         
         if (typeof rawInfo.population === "string" || typeof rawInfo.population === "number") {
-            currentText = String(rawInfo.population);
-        } else if (typeof rawInfo.population === "object") {
-            if (rawInfo.population.current) {
-                if (typeof rawInfo.population.current === "object") {
-                    currentText = rawInfo.population.current.formattedValue || rawInfo.population.current.value || String(rawInfo.population.current.value || "");
-                } else {
-                    currentText = String(rawInfo.population.current);
+            const rawStr = String(rawInfo.population).trim();
+            if (!isPlaceholderString(rawStr)) {
+                const num = typeof rawInfo.population === "number" ? rawInfo.population : parseInt(rawStr.replace(/,/g, ''), 10);
+                if (!isNaN(num) && num > 0) {
+                    currentItem = {
+                        value: num,
+                        formattedValue: typeof rawInfo.population === "number" ? num.toLocaleString() : rawStr,
+                        label: "Current Estimate"
+                    };
                 }
             }
-            if (rawInfo.population.historical) {
-                if (typeof rawInfo.population.historical === "object") {
-                    historicalText = rawInfo.population.historical.formattedValue || rawInfo.population.historical.value || String(rawInfo.population.historical.value || "");
-                    timeframe = rawInfo.population.historical.timeframe || "";
-                } else {
-                    historicalText = String(rawInfo.population.historical);
+        } else if (typeof rawInfo.population === "object" && rawInfo.population !== null) {
+            const pObj = rawInfo.population;
+            
+            // Current / recent population
+            if (pObj.current) {
+                if (typeof pObj.current === "object") {
+                    const c = pObj.current;
+                    const val = c.value !== undefined && c.value !== null ? Number(c.value) : (c.formattedValue ? parseInt(String(c.formattedValue).replace(/,/g, ''), 10) : null);
+                    const formatted = c.formattedValue || (val && !isNaN(val) ? val.toLocaleString() : String(c.value || ""));
+                    if (formatted && !isPlaceholderString(formatted) && val !== 0) {
+                        currentItem = {
+                            value: val,
+                            formattedValue: formatted,
+                            year: c.year || pObj.year || pObj.populationYear,
+                            censusYear: c.censusYear || pObj.censusYear,
+                            timeframe: c.timeframe || pObj.timeframe,
+                            label: c.label || pObj.label,
+                            source: c.source || pObj.source
+                        };
+                    }
+                } else if (typeof pObj.current === "string" || typeof pObj.current === "number") {
+                    const cStr = String(pObj.current).trim();
+                    if (!isPlaceholderString(cStr)) {
+                        const val = typeof pObj.current === "number" ? pObj.current : parseInt(cStr.replace(/,/g, ''), 10);
+                        if (!isNaN(val) && val > 0) {
+                            currentItem = {
+                                value: val,
+                                formattedValue: typeof pObj.current === "number" ? val.toLocaleString() : cStr,
+                                year: pObj.year || pObj.populationYear,
+                                censusYear: pObj.censusYear,
+                                timeframe: pObj.timeframe,
+                                label: pObj.label,
+                                source: pObj.source
+                            };
+                        }
+                    }
+                }
+            } else if (pObj.value !== undefined && pObj.value !== null && pObj.status !== 'lookup_failed' && pObj.status !== 'not_applicable') {
+                const val = Number(pObj.value);
+                if (!isNaN(val) && val > 0) {
+                    currentItem = {
+                        value: val,
+                        formattedValue: pObj.formattedValue || val.toLocaleString(),
+                        year: pObj.year || pObj.populationYear,
+                        censusYear: pObj.censusYear,
+                        timeframe: pObj.timeframe,
+                        label: pObj.label,
+                        source: pObj.source
+                    };
                 }
             }
-            if (!currentText && rawInfo.population.value && rawInfo.population.status !== 'lookup_failed') {
-                currentText = String(rawInfo.population.value);
+
+            // Historical population
+            if (pObj.historical) {
+                if (typeof pObj.historical === "object") {
+                    const h = pObj.historical;
+                    const val = h.value !== undefined && h.value !== null ? Number(h.value) : (h.formattedValue ? parseInt(String(h.formattedValue).replace(/,/g, ''), 10) : null);
+                    const formatted = h.formattedValue || (val && !isNaN(val) ? val.toLocaleString() : String(h.value || ""));
+                    if (formatted && !isPlaceholderString(formatted)) {
+                        historicalItem = {
+                            value: val,
+                            formattedValue: formatted,
+                            timeframe: isPlaceholderString(h.timeframe) ? "" : h.timeframe,
+                            year: h.year,
+                            label: h.label && !h.label.toLowerCase().includes('population') ? h.label : "Historical",
+                            source: h.source || pObj.source
+                        };
+                    }
+                } else if (typeof pObj.historical === "string" || typeof pObj.historical === "number") {
+                    const hStr = String(pObj.historical).trim();
+                    if (!isPlaceholderString(hStr)) {
+                        historicalItem = {
+                            formattedValue: typeof pObj.historical === "number" ? pObj.historical.toLocaleString() : hStr,
+                            timeframe: "",
+                            label: "Historical",
+                            source: pObj.source
+                        };
+                    }
+                }
             }
         }
         
-        if (isPlaceholderString(currentText)) currentText = "";
-        if (isPlaceholderString(historicalText)) historicalText = "";
-        
-        if (currentText || historicalText) {
+        if (currentItem || historicalItem) {
             population = {
-                current: currentText ? { formattedValue: currentText } : null,
-                historical: historicalText ? { formattedValue: historicalText, timeframe: isPlaceholderString(timeframe) ? "" : timeframe } : null
+                current: currentItem,
+                historical: historicalItem
             };
         }
     }
@@ -776,6 +935,45 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const [editNoteText, setEditNoteText] = useState("");
   
   const locationInitializedRef = useRef<string | null>(null);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollFade, setScrollFade] = useState({ top: false, bottom: false });
+
+  const updateScrollFade = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const fadeState = calculateScrollFade(el.scrollTop, el.scrollHeight, el.clientHeight);
+    setScrollFade(prev => {
+      if (prev.top === fadeState.top && prev.bottom === fadeState.bottom) return prev;
+      return fadeState;
+    });
+  }, []);
+
+  useEffect(() => {
+    updateScrollFade();
+  }, [info, newsState, activeTab, isError, isLoading, updateScrollFade]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    updateScrollFade();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => {
+        updateScrollFade();
+      });
+      ro.observe(el);
+      if (el.firstElementChild) {
+        ro.observe(el.firstElementChild);
+      }
+      return () => ro.disconnect();
+    }
+  }, [updateScrollFade]);
+
+  const maskStyle = useMemo(() => {
+    return getScrollFadeMaskStyle(scrollFade.top, scrollFade.bottom);
+  }, [scrollFade.top, scrollFade.bottom]);
 
   useEffect(() => {
     setImages([]);
@@ -1401,7 +1599,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
               theme={theme}
               isRetro={isRetro}
               isParchment={isParchment}
-              className="!mt-0 !mb-1.5"
             />
             <div className="space-y-3">
               {info.notable.map((rawN: any, i: number) => {
@@ -1449,14 +1646,16 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
          if (info.population) {
              txt += `Population\n`;
              if (info.population.historical && !isPlaceholderString(info.population.historical.formattedValue)) {
-                 txt += `Historical: ${info.population.historical.formattedValue}`;
+                 const histLabel = info.population.historical.label && !info.population.historical.label.toLowerCase().includes('population') ? info.population.historical.label : 'Historical';
+                 txt += `${histLabel}: ${info.population.historical.formattedValue}`;
                  if (info.population.historical.timeframe && !isPlaceholderString(info.population.historical.timeframe)) {
                      txt += ` (${info.population.historical.timeframe})`;
                  }
                  txt += `\n`;
              }
              if (info.population.current && !isPlaceholderString(info.population.current.formattedValue)) {
-                 txt += `Modern: ${info.population.current.formattedValue}\n`;
+                 const label = getPopulationLabel(info.population.current);
+                 txt += `${label}: ${info.population.current.formattedValue}\n`;
              }
              txt += `\n`;
          }
@@ -1477,7 +1676,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                      theme={theme} 
                      isRetro={isRetro} 
                      isParchment={isParchment} 
-                     className="!mt-0 !mb-1" 
                  />
                  <p className={semanticTitleStyle} style={{ textTransform: 'none' }}>
                    {formatClimateName(info.climate.name)}
@@ -1495,11 +1693,12 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                      theme={theme} 
                      isRetro={isRetro} 
                      isParchment={isParchment} 
-                     className="!mt-0 !mb-1" 
                  />
                  {info.population.historical && !isPlaceholderString(info.population.historical.formattedValue) && (
                    <div className="mb-1">
-                     <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Historical</span>
+                     <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">
+                       {info.population.historical.label && !info.population.historical.label.toLowerCase().includes('population') ? info.population.historical.label : "Historical"}
+                     </span>
                      <p className={`${semanticTitleStyle} font-mono`}>{info.population.historical.formattedValue}</p>
                      {info.population.historical.timeframe && !isPlaceholderString(info.population.historical.timeframe) && (
                        <p className={`${metaStyle} font-mono mt-0.5`}>{info.population.historical.timeframe}</p>
@@ -1508,7 +1707,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                  )}
                  {info.population.current && !isPlaceholderString(info.population.current.formattedValue) && (
                    <div>
-                     <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">Modern</span>
+                     <span className="block text-[10px] uppercase tracking-wider opacity-70 mb-0.5">
+                       {getPopulationLabel(info.population.current)}
+                     </span>
                      <p className={`${semanticTitleStyle} font-mono`}>{info.population.current.formattedValue}</p>
                    </div>
                  )}
@@ -1521,6 +1722,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
     liveNews: {
       copyText: () => {
+         if (newsState === 'idle') return '';
          const effectiveNews = newsList.length > 0 ? newsList : (info?.news || []);
          if (!info || effectiveNews.length === 0) return '';
          let txt = `News\n`;
@@ -1532,6 +1734,17 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       render: () => {
         const effectiveNews = newsList.length > 0 ? newsList : (info?.news || []);
         
+        if (newsState === 'idle') {
+          return (
+            <button 
+              onClick={handleLoadInitialNews} 
+              className={`w-full py-2.5 transition-colors ${theme.loadMoreBtn}`}
+            >
+              Load News
+            </button>
+          );
+        }
+
         return (
         <div className="space-y-3">
           <SectionHeader 
@@ -1539,17 +1752,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
               theme={theme} 
               isRetro={isRetro} 
               isParchment={isParchment} 
-              className="!mt-0 !mb-2" 
           />
-
-          {newsState === 'idle' && (
-            <button 
-              onClick={handleLoadInitialNews} 
-              className={`w-full py-2.5 transition-colors ${theme.loadMoreBtn}`}
-            >
-              Load News
-            </button>
-          )}
 
           {newsState === 'loading' && (
             <p className={`${bodyTextStyle} italic opacity-80`}>
@@ -1635,11 +1838,14 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       render: () => {
       if (!info.relatedEntities || info.relatedEntities.length === 0) return null;
       return (
-        <div className="space-y-4">
-            <div className={`flex items-center gap-2 mb-2 ${theme.icon} border-b ${isRetro ? 'border-current/30' : isParchment ? 'border-[#8b5a2b]/30' : 'border-white/10'} pb-2`}>
-                <MapPin size={20} />
-                <span className={`${isRetro ? 'text-base' : 'text-sm'} font-bold uppercase tracking-wider`}>Related Places</span>
-            </div>
+        <div className="space-y-3">
+            <SectionHeader 
+                title="Related Places" 
+                icon={<MapPin size={16} />}
+                theme={theme} 
+                isRetro={isRetro} 
+                isParchment={isParchment} 
+            />
             <div className="flex flex-wrap gap-2">
               {info.relatedEntities.map((place: any, i: number) => {
                  const text = normalizeDisplayText(place);
@@ -1911,7 +2117,10 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           
           {/* Scrollable Content */}
           <div 
+            ref={scrollRef}
+            onScroll={updateScrollFade}
             className={`flex-1 overflow-y-auto ${theme.panelBg} relative pointer-events-auto info-panel-scrollable`}
+            style={maskStyle}
             data-infopanel="true"
             onWheel={(e) => e.stopPropagation()}
           >

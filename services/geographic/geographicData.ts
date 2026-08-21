@@ -16,6 +16,7 @@ export interface DeterministicLocationEntry {
   lng: number;
   suggestedZoom?: number;
   population?: number;
+  populationYear?: number;
   climate?: {
     koppenCode: string;
     description: string;
@@ -124,6 +125,8 @@ export const DETERMINISTIC_LOCATION_DB: Record<string, DeterministicLocationEntr
   "vancouver, canada": { name: "Vancouver, Canada", type: LocationType.CITY, entityType: "city", lat: 49.2608724, lng: -123.113952, suggestedZoom: 8, population: 675218, context: { city: "Vancouver", state: "British Columbia", country: "Canada" } },
   "austin": { name: "Austin, Texas", type: LocationType.CITY, entityType: "city", lat: 30.2672, lng: -97.7431, suggestedZoom: 8, population: 974447, context: { city: "Austin", state: "Texas", country: "United States" } },
   "austin, texas": { name: "Austin, Texas", type: LocationType.CITY, entityType: "city", lat: 30.2672, lng: -97.7431, suggestedZoom: 8, population: 974447, context: { city: "Austin", state: "Texas", country: "United States" } },
+  "gainesville": { name: "Gainesville, Florida", type: LocationType.CITY, entityType: "city", lat: 29.6516, lng: -82.3248, suggestedZoom: 8, population: 141085, populationYear: 2020, climate: { koppenCode: "Cfa", description: "Humid subtropical climate" }, context: { city: "Gainesville", state: "Florida", country: "United States", county: "Alachua County" } },
+  "gainesville, florida": { name: "Gainesville, Florida", type: LocationType.CITY, entityType: "city", lat: 29.6516, lng: -82.3248, suggestedZoom: 8, population: 141085, populationYear: 2020, climate: { koppenCode: "Cfa", description: "Humid subtropical climate" }, context: { city: "Gainesville", state: "Florida", country: "United States", county: "Alachua County" } },
   "dallas": { name: "Dallas, Texas", type: LocationType.CITY, entityType: "city", lat: 32.7767, lng: -96.7970, suggestedZoom: 8, population: 1304379, context: { city: "Dallas", state: "Texas", country: "United States" } },
   "dallas, texas": { name: "Dallas, Texas", type: LocationType.CITY, entityType: "city", lat: 32.7767, lng: -96.7970, suggestedZoom: 8, population: 1304379, context: { city: "Dallas", state: "Texas", country: "United States" } },
   "houston": { name: "Houston, Texas", type: LocationType.CITY, entityType: "city", lat: 29.7604, lng: -95.3698, suggestedZoom: 8, population: 2304580, context: { city: "Houston", state: "Texas", country: "United States" } },

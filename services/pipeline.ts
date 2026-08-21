@@ -8,7 +8,7 @@ import { mergeCoordinates } from './coordinateAuthority';
 import { CanonicalGeographicEntity } from '../domain';
 import { classifyGeographicEntity } from './classifierService';
 import { getEstimatedClimate, getClimateDescription, isClimateConflicting } from './geographic/climateEstimator';
-import { reverseGeocode } from './geographic/geographicResolver';
+import { reverseGeocode, enrichSettlementPopulation, isPopulationBearingEntity } from './geographic/geographicResolver';
 import { isPlaceholderString } from '../components/InfoPanel';
 
 // --- PIPELINE TYPES ---
@@ -266,6 +266,29 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
       );
   }
 
+  // 2.5 STRUCTURED POPULATION RESOLUTION
+  if (coordinatesValid && canonicalEntity && isPopulationBearingEntity(canonicalEntity.entityType, canonicalEntity.canonicalName)) {
+      if (!(resolvedData as any).population || !(resolvedData as any).population.value) {
+          try {
+              await enrichSettlementPopulation(
+                  resolvedData,
+                  {
+                      name: canonicalEntity.canonicalName,
+                      lat: canonicalEntity.coordinates.lat,
+                      lng: canonicalEntity.coordinates.lng,
+                      state: (resolvedData as any).state,
+                      country: (resolvedData as any).country,
+                      city: (resolvedData as any).city,
+                      type: canonicalEntity.entityType
+                  },
+                  canonicalEntity.entityType
+              );
+          } catch (err) {
+              console.warn("Failed to enrich settlement population in pipeline:", err);
+          }
+      }
+  }
+
   // 3. METADATA RECOVERY (Short-circuit if description exists)
   const isPlaceholder = isGenericPlaceholderDescription(resolvedData?.description, canonicalEntity?.canonicalName);
   // 3. METADATA RECOVERY (Short-circuit only if substantive description exists)
@@ -363,28 +386,36 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
          }
      }
 
+     const authoritativePopulation = (resolvedData as any).population;
+
      // Merge deterministic/initial metadata with recovered metadata
      const finalMetadata: any = {
          description: resolvedData.description,
          climate: finalClimate,
-         population: (resolvedData as any).population,
+         population: authoritativePopulation,
          notable: (resolvedData as any).notable || [],
          news: resolvedData.news || [],
          contextNotes: (resolvedData as any).contextNotes || [],
          ...recoveredMetadata
      };
 
-     // Ensure authoritative climate is not overwritten by ...recoveredMetadata
+     // Ensure authoritative climate and population are never overwritten by ...recoveredMetadata
      finalMetadata.climate = finalClimate;
+     finalMetadata.population = authoritativePopulation;
 
      if (isPlaceholder && recoveredMetadata?.description) {
          finalMetadata.description = recoveredMetadata.description;
      }
 
-     // Remove population for non-settlements
+     // Validate population for settlements vs non-settlements
      const eTypeLower = (canonicalEntity.entityType || '').toLowerCase();
      const isSettlement = ['city', 'town', 'village', 'municipality', 'settlement', 'country', 'state'].includes(eTypeLower);
-     if (!isSettlement || (finalMetadata.population && typeof finalMetadata.population.value === 'number' && finalMetadata.population.value <= 0)) {
+     if (!isSettlement || 
+         !finalMetadata.population || 
+         finalMetadata.population.status === 'lookup_failed' || 
+         finalMetadata.population.status === 'not_applicable' || 
+         finalMetadata.population.source === 'ai' ||
+         (typeof finalMetadata.population.value === 'number' && finalMetadata.population.value <= 0)) {
          finalMetadata.population = undefined;
      }
 

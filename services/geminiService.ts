@@ -392,12 +392,25 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
 
     let resolvedData: any = null;
     let suggestedZoom = 5;
-
     if (deterministicRes) {
       resolvedData = {
         name: deterministicRes.name,
         type: deterministicRes.type,
         entityType: deterministicRes.entityType,
+        population: deterministicRes.population ? {
+          value: deterministicRes.population,
+          source: "Deterministic DB",
+          status: "available",
+          year: deterministicRes.populationYear,
+          label: deterministicRes.populationYear ? `${deterministicRes.populationYear} Census` : "Current Estimate",
+          current: {
+            value: deterministicRes.population,
+            formattedValue: deterministicRes.population.toLocaleString(),
+            year: deterministicRes.populationYear,
+            label: deterministicRes.populationYear ? `${deterministicRes.populationYear} Census` : "Current Estimate",
+            source: "Deterministic DB"
+          }
+        } : undefined,
         climate: (deterministicRes as any).climate,
         coordinates: { lat: deterministicRes.lat, lng: deterministicRes.lng, source: "deterministic" as CoordinateSource },
         coordinateSource: "deterministic" as CoordinateSource,
@@ -407,7 +420,7 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
         city: deterministicRes.context?.city || (deterministicRes as any).city,
         county: deterministicRes.context?.county,
         region: deterministicRes.context?.region,
-        description: `Information on ${deterministicRes.name}.`,
+        description: (deterministicRes as any).description,
         funFacts: [],
         notable: []
       };
@@ -863,16 +876,29 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
     name.includes('volcano') ||
     name.includes('peak');
 
-  // Normalize new population schema
+  // Normalize population schema (only preserve structured / authoritative population)
   if (data.population !== undefined && data.population !== null) {
     if (typeof data.population === 'object') {
       const pObj = data.population as any;
-      if (typeof pObj.value === 'number') {
+      if (typeof pObj.value === 'number' && pObj.value > 0 && pObj.source !== 'ai') {
+        const year = pObj.year || pObj.populationYear;
+        const censusYear = pObj.censusYear;
+        const label = pObj.label && !pObj.label.toLowerCase().includes('population') ? pObj.label : (censusYear ? `${censusYear} Census` : (year ? `${year} Estimate` : "Current Estimate"));
         data.population = {
           value: pObj.value,
           source: pObj.source || 'Wikidata P1082',
           status: pObj.status || 'available',
-          current: pObj.current || { formattedValue: pObj.value.toLocaleString() },
+          year,
+          censusYear,
+          label,
+          current: pObj.current || { 
+            value: pObj.value,
+            formattedValue: pObj.value.toLocaleString(),
+            year,
+            censusYear,
+            label,
+            source: pObj.source || 'Wikidata P1082'
+          },
           historical: pObj.historical
         } as any;
       } else if (pObj.value === null || pObj.status === 'not_applicable' || pObj.status === 'lookup_failed') {
@@ -882,18 +908,17 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
           status: pObj.status || 'not_applicable'
         } as any;
       } else {
-        console.warn(`[Normalization] Discarding invalid population value:`, data.population);
         data.population = null as any;
       }
-    } else if (typeof data.population === 'number') {
+    } else if (typeof data.population === 'number' && data.population > 0) {
       data.population = {
         value: data.population,
-        source: 'AI/Deterministic',
+        source: 'Deterministic DB',
         status: 'available',
-        current: { formattedValue: Number(data.population).toLocaleString() }
+        label: 'Current Population',
+        current: { formattedValue: Number(data.population).toLocaleString(), value: data.population, label: "Current Population" }
       } as any;
     } else {
-      console.warn(`[Normalization] Discarding invalid population value:`, data.population);
       data.population = null as any;
     }
   }
@@ -2686,12 +2711,9 @@ ${contextDetails}
     const rawEType = (canonicalIdentity?.entityType || '').toLowerCase();
     const isSettlement = ['city', 'town', 'village', 'municipality', 'settlement', 'country', 'state'].includes(rawEType);
 
-    if (data && data.population && typeof data.population === 'number' && data.population > 0 && isSettlement) {
-       metadata.population = { value: data.population, source: "ai", status: "available" };
-       validFields.push('population');
-    } else {
-       rejectedFields.push('population');
-    }
+    // AI-generated population estimates are strictly rejected to prevent hallucination;
+    // population must always originate from authoritative structured data pipelines.
+    rejectedFields.push('population');
     
     if (data && data.climate && !isBlank(data.climate)) {
        let cName = "";

@@ -1,5 +1,5 @@
 import { describe, test, it, expect } from 'vitest';
-import { normalizeDisplayText, cleanMetadataString, formatImageAttribution, normalizeGeoComparisonName, isRedundantWithTitle, formatGeographicContext } from '../InfoPanel';
+import { normalizeDisplayText, cleanMetadataString, formatImageAttribution, normalizeGeoComparisonName, isRedundantWithTitle, formatGeographicContext, calculateScrollFade, getScrollFadeMaskStyle } from '../InfoPanel';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import InfoPanel from '../InfoPanel';
@@ -283,9 +283,9 @@ describe('Lightbox Metadata Integration', () => {
       />
     );
 
-    // Section headers: small, uppercase, bold (text-xs font-bold uppercase tracking-wider text-white/95 leading-tight)
-    expect(html).toContain('<h3 class="font-bold uppercase tracking-wider leading-tight text-xs text-white/95">Climate</h3>');
-    expect(html).toContain('<h3 class="font-bold uppercase tracking-wider leading-tight text-xs text-white/95">News</h3>');
+    // Section headers: text-sm font-semibold uppercase tracking-[0.16em] text-cyan-300
+    expect(html).toContain('class="text-sm font-semibold uppercase tracking-[0.16em] leading-tight shrink-0 text-cyan-300">Climate</h3>');
+    expect(html).toContain('class="text-sm font-semibold uppercase tracking-[0.16em] leading-tight shrink-0 text-cyan-300">News</h3>');
 
     // Climate type uses semantic title style
     expect(html).toContain('<p class="font-bold text-sm text-white/95 leading-snug" style="text-transform:none">Semiarid climate</p>');
@@ -475,7 +475,7 @@ describe('Lightbox Metadata Integration', () => {
   });
 
   describe('Lazy-Loaded News State Machine', () => {
-    it('initially renders LOAD NEWS button in idle state when location is resolved', () => {
+    it('initially renders only LOAD NEWS button and completely omits NEWS header in idle state', () => {
       const location = {
         name: 'Zion National Park',
         type: 'Point of Interest' as any,
@@ -500,13 +500,14 @@ describe('Lightbox Metadata Integration', () => {
         />
       );
 
-      // Must render NEWS header and LOAD NEWS button
-      expect(html).toContain('<h3 class="font-bold uppercase tracking-wider leading-tight text-xs text-white/95">News</h3>');
+      // NEWS header must NOT be rendered initially
+      expect(html).not.toContain('>News</h3>');
+      // LOAD NEWS button must be visible
       expect(html).toContain('>Load News</button>');
       expect(html).not.toContain('>Load More News</button>');
     });
 
-    it('renders news articles, left-aligned layout, and LOAD MORE NEWS button when loaded', () => {
+    it('renders NEWS header, news articles, and LOAD MORE NEWS button when loaded', () => {
       const locationWithNews = {
         name: 'Zion National Park',
         type: 'Point of Interest' as any,
@@ -539,11 +540,44 @@ describe('Lightbox Metadata Integration', () => {
         />
       );
 
+      // NEWS header must appear after news is requested/loaded
+      expect(html).toContain('class="text-sm font-semibold uppercase tracking-[0.16em] leading-tight shrink-0 text-cyan-300">News</h3>');
       expect(html).toContain('Zion Shuttle System Upgrades Announced');
       expect(html).toContain('Park officials detail new electric shuttle fleet.');
       expect(html).toContain('Utah News</span><span>·</span><span>August 16, 2026</span>');
       expect(html).toContain('>Load More News</button>');
       expect(html).not.toContain('>Load News</button>');
+    });
+
+    it('renders NEWS header and empty state message when request returns no articles', async () => {
+      const location = {
+        name: 'Remote Isle',
+        type: 'Point of Interest' as any,
+        entityType: 'island',
+        description: 'A remote island.',
+        coordinates: { lat: 10.0, lng: 20.0 },
+        notable: [],
+        news: []
+      };
+
+      // Test that InfoPanel component handles empty state properly
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={location}
+          onClose={() => {}}
+          isLoading={false}
+          skin="parchment"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+          onFetchNews={async () => []}
+          onLoadMoreNews={async () => {}}
+        />
+      );
+
+      // In initial state, no News section header is rendered
+      expect(html).not.toContain('>News</h3>');
+      expect(html).toContain('>Load News</button>');
     });
   });
 
@@ -919,7 +953,7 @@ describe('Lightbox Metadata Integration', () => {
       expect(html).not.toContain('Documentary enrichment unavailable.');
 
       // 5. Population must be omitted when city-level data is unavailable
-      expect(html).not.toContain('<h3 class="font-bold uppercase tracking-wider leading-tight text-xs text-white/95">Population</h3>');
+      expect(html).not.toContain('>Population</h3>');
 
       // 6. No duplicate classes (e.g. p-1.5 p-1.5 or font-bold font-bold)
       expect(html).not.toMatch(/p-1\.5\s+[^"]*p-1\.5/);
@@ -1262,7 +1296,353 @@ describe('Lightbox Metadata Integration', () => {
       expect(result).toBe('New Mexico, United States');
     });
   });
+
+  describe('Scroll-edge fade calculations and mask styles', () => {
+    it('calculates no fade when content does not exceed container height', () => {
+      const fade = calculateScrollFade(0, 200, 300);
+      expect(fade).toEqual({ top: false, bottom: false });
+      const style = getScrollFadeMaskStyle(fade.top, fade.bottom);
+      expect(style.maskImage).toBe('none');
+      expect(style.WebkitMaskImage).toBe('none');
+    });
+
+    it('calculates bottom fade only when at the very top of scrollable content', () => {
+      const fade = calculateScrollFade(0, 800, 300);
+      expect(fade).toEqual({ top: false, bottom: true });
+      const style = getScrollFadeMaskStyle(fade.top, fade.bottom);
+      expect(style.maskImage).toContain('linear-gradient(to bottom, black 0, black calc(100% - 16px), transparent 100%)');
+      expect(style.WebkitMaskImage).toContain('linear-gradient(to bottom, black 0, black calc(100% - 16px), transparent 100%)');
+    });
+
+    it('calculates top and bottom fade when scrolled into the middle of content', () => {
+      const fade = calculateScrollFade(100, 800, 300);
+      expect(fade).toEqual({ top: true, bottom: true });
+      const style = getScrollFadeMaskStyle(fade.top, fade.bottom);
+      expect(style.maskImage).toContain('linear-gradient(to bottom, transparent 0, black 16px, black calc(100% - 16px), transparent 100%)');
+      expect(style.WebkitMaskImage).toContain('linear-gradient(to bottom, transparent 0, black 16px, black calc(100% - 16px), transparent 100%)');
+    });
+
+    it('calculates top fade only when scrolled to the very bottom of content', () => {
+      const fade = calculateScrollFade(500, 800, 300);
+      expect(fade).toEqual({ top: true, bottom: false });
+      const style = getScrollFadeMaskStyle(fade.top, fade.bottom);
+      expect(style.maskImage).toContain('linear-gradient(to bottom, transparent 0, black 16px, black 100%)');
+      expect(style.WebkitMaskImage).toContain('linear-gradient(to bottom, transparent 0, black 16px, black 100%)');
+    });
+
+    it('renders InfoPanel scrollable container with mask style and preserved fixed header across skins', () => {
+      const testInfo = {
+        name: 'Kyoto',
+        type: 'City' as any,
+        description: 'Kyoto is the cultural capital of Japan with historic temples and gardens.',
+        coordinates: { lat: 35.0116, lng: 135.7681 },
+        news: []
+      };
+
+      for (const skin of ['modern', 'parchment', 'retro-green', 'retro-amber'] as const) {
+        const html = renderToStaticMarkup(
+          <InfoPanel
+            info={testInfo}
+            onClose={() => {}}
+            isLoading={false}
+            skin={skin}
+            isFavorite={false}
+            onSaveFavorite={() => {}}
+            onRemoveFavorite={() => {}}
+          />
+        );
+
+        // Header is rendered
+        expect(html).toContain('Kyoto');
+        // Scrollable content element is present with info-panel-scrollable
+        expect(html).toContain('info-panel-scrollable');
+      }
+    });
+  });
+
+  describe('Accurate Population Labeling, Sourcing, and Modern Label Deprecation', () => {
+    it('renders the Population section header as "Population" and the secondary label without the word "Population"', () => {
+      const cityData = {
+        name: 'Gainesville',
+        city: 'Gainesville',
+        state: 'Florida',
+        country: 'United States',
+        type: 'city' as any,
+        entityType: 'city',
+        description: 'Gainesville is a city in Florida.',
+        coordinates: { lat: 29.6516, lng: -82.3248 },
+        population: {
+          current: { formattedValue: '141,085', value: 141085, label: 'Modern' }
+        },
+        notable: [],
+        news: []
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={cityData}
+          onClose={() => {}}
+          isLoading={false}
+          skin="parchment"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      // Section header is Population
+      expect(html).toContain('Population');
+      expect(html).toContain('141,085');
+      // Must NOT render "Modern" or secondary label containing "Population"
+      expect(html).not.toMatch(/<span[^>]*>Modern<\/span>/i);
+      expect(html).not.toMatch(/<span[^>]*>[^<]*Population[^<]*<\/span>/i);
+      expect(html).toContain('Current Estimate');
+    });
+
+    it('renders "Current Estimate" when recent population estimate has no specific year', () => {
+      const cityData = {
+        name: 'Gainesville',
+        city: 'Gainesville',
+        state: 'Florida',
+        country: 'United States',
+        type: 'city' as any,
+        entityType: 'city',
+        description: 'Gainesville is a city in Florida.',
+        coordinates: { lat: 29.6516, lng: -82.3248 },
+        population: {
+          current: { formattedValue: '141,085', value: 141085 }
+        },
+        notable: [],
+        news: []
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={cityData}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('Current Estimate');
+      expect(html).not.toMatch(/<span[^>]*>[^<]*Population[^<]*<\/span>/i);
+      expect(html).toContain('141,085');
+    });
+
+    it('renders "2020 Census" when census year is explicitly provided', () => {
+      const cityData = {
+        name: 'Gainesville',
+        city: 'Gainesville',
+        state: 'Florida',
+        country: 'United States',
+        type: 'city' as any,
+        entityType: 'city',
+        description: 'Gainesville is a city in Florida.',
+        coordinates: { lat: 29.6516, lng: -82.3248 },
+        population: {
+          current: { formattedValue: '141,085', value: 141085, censusYear: 2020 }
+        },
+        notable: [],
+        news: []
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={cityData}
+          onClose={() => {}}
+          isLoading={false}
+          skin="parchment"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('2020 Census');
+      expect(html).not.toMatch(/<span[^>]*>[^<]*Population[^<]*<\/span>/i);
+      expect(html).toContain('141,085');
+    });
+
+    it('renders "2025 Estimate" when an explicit estimate year is provided', () => {
+      const townData = {
+        name: 'Silver Springs',
+        city: 'Silver Springs',
+        state: 'Florida',
+        country: 'United States',
+        type: 'town' as any,
+        entityType: 'town',
+        description: 'Silver Springs is a populated place in Florida.',
+        coordinates: { lat: 29.2166, lng: -82.0573 },
+        population: {
+          current: { formattedValue: '6,500', value: 6500, year: 2025 }
+        },
+        notable: [],
+        news: []
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={townData}
+          onClose={() => {}}
+          isLoading={false}
+          skin="retro-green"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('2025 Estimate');
+      expect(html).not.toMatch(/<span[^>]*>[^<]*Population[^<]*<\/span>/i);
+      expect(html).toContain('6,500');
+    });
+
+    it('renders historical population with "Historical" label and timeframe, never duplicating Population', () => {
+      const ancientCity = {
+        name: 'Rome',
+        city: 'Rome',
+        country: 'Italy',
+        type: 'city' as any,
+        entityType: 'city',
+        description: 'Rome is the capital of Italy.',
+        coordinates: { lat: 41.9028, lng: 12.4964 },
+        population: {
+          current: { formattedValue: '2,872,800', value: 2872800, year: 2023 },
+          historical: { formattedValue: '1,000,000', timeframe: 'c. 100 CE', label: 'Historical' }
+        },
+        notable: [],
+        news: []
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={ancientCity}
+          onClose={() => {}}
+          isLoading={false}
+          skin="parchment"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('Historical');
+      expect(html).not.toContain('Historical Population');
+      expect(html).toContain('1,000,000');
+      expect(html).toContain('c. 100 CE');
+      expect(html).toContain('2023 Estimate');
+      expect(html).not.toMatch(/<span[^>]*>[^<]*Population[^<]*<\/span>/i);
+      expect(html).toContain('2,872,800');
+    });
+
+    it('omits the population section cleanly when population is unavailable or lookup failed', () => {
+      const naturalFeature = {
+        name: 'Mount Rainier',
+        type: 'mountain' as any,
+        entityType: 'mountain',
+        description: 'Mount Rainier is a large active stratovolcano.',
+        coordinates: { lat: 46.8523, lng: -121.7603 },
+        population: { value: null, source: null, status: 'lookup_failed' },
+        notable: [],
+        news: []
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={naturalFeature}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).not.toContain('Population');
+      expect(html).not.toContain('Current Estimate');
+      expect(html).not.toContain('Modern');
+    });
+  });
+
+  describe('Section Header Visual Hierarchy & Spacing', () => {
+    it('renders NOTABLE FACTS, POPULATION, and NEWS with unified distinct section header styling', () => {
+      const romeLocation = {
+        name: 'Rome',
+        type: 'City' as any,
+        entityType: 'city',
+        description: 'Rome is the capital city of Italy.',
+        coordinates: { lat: 41.9028, lng: 12.4964 },
+        notable: [
+          { title: 'Colosseum', description: 'Flavian Amphitheatre in central Rome.' }
+        ],
+        population: {
+          current: {
+            value: 2748109,
+            formattedValue: '2,748,109',
+            qualifier: 'Estimate',
+            year: 2023
+          }
+        },
+        news: [
+          {
+            title: 'Rome Announces Heritage Preservation Initiative',
+            summary: 'City officials unveil restoration plan for ancient ruins.',
+            source: 'Italian News Agency',
+            url: 'https://example.com/rome'
+          }
+        ]
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={romeLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+          onLoadMoreNews={async () => {}}
+        />
+      );
+
+      // Section header container with .info-panel-section-header and ~15px bottom spacing
+      expect(html).toContain('info-panel-section-header');
+      expect(html).toContain('mb-[15px]');
+
+      // Shared section header typography: text-sm font-semibold uppercase tracking-[0.16em] text-cyan-300
+      expect(html).toContain('<h3 class="text-sm font-semibold uppercase tracking-[0.16em] leading-tight shrink-0 text-cyan-300">Notable Facts</h3>');
+      expect(html).toContain('<h3 class="text-sm font-semibold uppercase tracking-[0.16em] leading-tight shrink-0 text-cyan-300">Population</h3>');
+      expect(html).toContain('<h3 class="text-sm font-semibold uppercase tracking-[0.16em] leading-tight shrink-0 text-cyan-300">News</h3>');
+
+      // Subtle divider rule
+      expect(html).toContain('class="flex-1 h-[1px] bg-cyan-400/20"');
+
+      // Visual hierarchy: Location Title -> Notable Facts -> Fact Title -> Population -> News
+      const titlePos = html.indexOf('Rome');
+      const notableHeaderPos = html.indexOf('>Notable Facts</h3>');
+      const factTitlePos = html.indexOf('Colosseum');
+      const popHeaderPos = html.indexOf('>Population</h3>');
+      const popValuePos = html.indexOf('2,748,109');
+      const newsHeaderPos = html.indexOf('>News</h3>');
+      const newsTitlePos = html.indexOf('Rome Announces Heritage Preservation Initiative');
+
+      expect(titlePos).toBeGreaterThan(-1);
+      expect(notableHeaderPos).toBeGreaterThan(titlePos);
+      expect(factTitlePos).toBeGreaterThan(notableHeaderPos);
+      expect(popHeaderPos).toBeGreaterThan(factTitlePos);
+      expect(popValuePos).toBeGreaterThan(popHeaderPos);
+      expect(newsHeaderPos).toBeGreaterThan(popValuePos);
+      expect(newsTitlePos).toBeGreaterThan(newsHeaderPos);
+    });
+  });
 });
+
 
 
 

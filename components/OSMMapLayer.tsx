@@ -45,6 +45,65 @@ interface OSMProjection {
   screenCenterY: number;
 }
 
+export interface OSMMarkerOffsetOptions {
+  pinSize?: number;
+  isSelected?: boolean;
+  labelBounds?: { left: number; top: number; right: number; bottom: number } | null;
+}
+
+export interface OSMMarkerOffset {
+  x: number;
+  y: number;
+}
+
+/**
+ * Calculates a generic visual screen-space offset for OSM map markers when zoomed in
+ * to prevent the marker pin from obscuring underlying OSM place/city/landmark text labels.
+ *
+ * Requirements:
+ * - Geographically anchored (lat/lng coordinates are never modified).
+ * - Only adjusts visual screen-space position (x, y in pixels).
+ * - Modest 6 to 10px offset when sufficiently zoomed in (zoom >= 12).
+ * - Label-aware if label geometry/bounds are available, with conservative vertical offset fallback.
+ * - Recalculated dynamically as zoom level or viewport changes.
+ */
+export function calculateOSMMarkerVisualOffset(
+  zoom: number,
+  options?: OSMMarkerOffsetOptions
+): OSMMarkerOffset {
+  // Label-aware placement if text/label geometry is detected or provided
+  if (options?.labelBounds) {
+    const lb = options.labelBounds;
+    const labelHeight = Math.max(12, lb.bottom - lb.top);
+    const verticalShift = Math.round(Math.min(10, Math.max(6, labelHeight / 2 + 3)));
+    return { x: 0, y: -verticalShift };
+  }
+
+  // Conservative vertical screen-space offset fallback
+  // At low zoom (< 12), no visual offset is needed
+  if (zoom < 12) {
+    return { x: 0, y: 0 };
+  }
+
+  // Zoom 12 (Close/City overview level): 6px conservative upward offset
+  if (zoom <= 12) {
+    return { x: 0, y: -6 };
+  }
+
+  // Zoom 14 (Street / district level): 8px offset
+  if (zoom <= 14) {
+    return { x: 0, y: -8 };
+  }
+
+  // Zoom 16 (Close street level): 8px offset
+  if (zoom <= 16) {
+    return { x: 0, y: -8 };
+  }
+
+  // Zoom 18 to 19 (Detail / maximum street level): 10px offset
+  return { x: 0, y: -10 };
+}
+
 export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
   skin,
   isInteracting,
@@ -1017,13 +1076,21 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                   marker.name ||
                   (showMarkerNumber ? `Waypoint ${marker.index + 1}` : 'Location');
 
+                // Compute screen-space visual offset to avoid obscuring underlying OSM labels
+                const visualOffset = calculateOSMMarkerVisualOffset(osmProjection.z, {
+                  pinSize,
+                  isSelected
+                });
+                const visualLeft = left + visualOffset.x;
+                const visualTop = top + visualOffset.y;
+
                 return (
                   <div
                     key={`osm-marker-container-${marker.id ?? idx}`}
                     style={{
                       position: 'absolute',
-                      left: `${left}px`,
-                      top: `${top}px`,
+                      left: `${visualLeft}px`,
+                      top: `${visualTop}px`,
                       pointerEvents: 'auto',
                       zIndex: isSelected || isHovered ? 35 : 20
                     }}

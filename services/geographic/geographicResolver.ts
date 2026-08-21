@@ -699,9 +699,9 @@ import { MapMarker } from '../../types';
 
 export function isPopulationBearingEntity(entityType?: string, entityName?: string): boolean {
   if (!entityType) return false;
-  const eligibleTypes = ['city', 'town', 'village', 'municipality', 'county', 'district', 'settlement', 'major_city'];
+  const eligibleTypes = ['city', 'town', 'village', 'municipality', 'county', 'district', 'settlement', 'major_city', 'historical_site', 'historic_site', 'ancient_city', 'archaeological_site'];
   
-  if (!eligibleTypes.includes(entityType)) return false;
+  if (!eligibleTypes.includes(entityType.toLowerCase())) return false;
   
   if (entityName) {
       const lowerName = entityName.toLowerCase();
@@ -828,180 +828,404 @@ export async function resolveGeographicMetadata(marker: MapMarker): Promise<MapM
 }
 
 export async function enrichSettlementPopulation(result: any, marker: any, originalType: string): Promise<void> {
-  const isEligible = isPopulationBearingEntity(result.type, result.name);
+  const entityName = result.name || marker?.name || "";
+  const cleanName = entityName.split(',')[0].trim();
+  const state = result.state || marker?.state || marker?.context?.state || "";
+  const country = result.country || marker?.country || marker?.context?.country || "";
+  const lat = marker?.lat !== undefined ? marker.lat : result.lat;
+  const lng = marker?.lng !== undefined ? marker.lng : result.lng;
+
+  const isEligible = isPopulationBearingEntity(result.type || result.entityType || originalType, cleanName) || Boolean(marker?.population?.historical);
   
   if (!isEligible) {
       delete (result as any).populationStatus;
       delete (result as any).populationSource;
       delete (result as any).populationData;
       result.population = { value: null, source: null, status: "not_applicable" };
-  } else {
-      let popFound = false;
-      const attemptedSources: string[] = [];
+      return;
+  }
 
-      // 1. Explicit marker population (e.g. from Overpass place tags)
-      if (marker && marker.population && typeof marker.population === 'number' && marker.population > 0) {
-          result.population = { value: marker.population, source: "Overpass OSM", status: "available", current: { formattedValue: marker.population.toLocaleString(), description: `Population as of latest census` } };
-          popFound = true;
+  let popFound = false;
+  const attemptedSources: string[] = [];
+
+  // 1. Explicit marker population (e.g. from Overpass place tags or historical records)
+  if (marker && marker.population) {
+      let popVal: number | null = null;
+      let popYear: number | undefined = undefined;
+      let isCensus = false;
+      let histItem: any = undefined;
+
+      if (typeof marker.population === 'number' && marker.population > 0) {
+          popVal = marker.population;
+      } else if (typeof marker.population === 'object' && marker.population !== null) {
+          if (typeof marker.population.value === 'number' && marker.population.value > 0) {
+              popVal = marker.population.value;
+              popYear = marker.population.year || marker.population.populationYear;
+              if (marker.population.censusYear || /census/i.test(marker.population.label || '')) isCensus = true;
+          } else if (marker.population.current && typeof marker.population.current.value === 'number' && marker.population.current.value > 0) {
+              popVal = marker.population.current.value;
+              popYear = marker.population.current.year;
+          }
+          if (marker.population.historical) {
+              histItem = marker.population.historical;
+          }
       }
 
-      // 2. Direct Overpass/Nominatim Place Lookup for the exact settlement
-      if (!popFound) {
-          attemptedSources.push("OSM Place Metadata");
-          try {
-              const query = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(result.name)}&format=jsonv2&extratags=1&limit=5`;
-              const res = await fetch(query);
-              if (res.ok) {
-                  const data = await res.json();
-                  if (Array.isArray(data)) {
-                      for (const place of data) {
-                          const pType = (place.type || '').toLowerCase();
-                          const pCategory = (place.category || '').toLowerCase();
-                          const pAddressType = (place.addresstype || '').toLowerCase();
-                          
-                          // STRICT SCOPING: Must be a populated settlement, NEVER an administrative container / district / province / state / county
-                          const isAdministrative = pCategory === 'boundary' || pType === 'administrative' || ['district', 'county', 'state', 'province', 'region', 'country', 'state_district'].includes(pType) || ['district', 'county', 'state', 'province', 'region', 'country', 'state_district'].includes(pAddressType);
-                          const isSettlement = ['city', 'town', 'village', 'municipality', 'hamlet'].includes(pType) || (pCategory === 'place' && !isAdministrative);
+      const tags = marker.tags || {};
+      const rawDate = tags['population:date'] || tags['census:date'] || tags.year || marker.populationYear;
+      if (rawDate) {
+          const yMatch = String(rawDate).match(/\b(\d{4})\b/);
+          if (yMatch) popYear = parseInt(yMatch[1], 10);
+          if (/census/i.test(String(rawDate)) || tags['census:date']) isCensus = true;
+      }
 
-                          const cleanPlaceName = (place.name || place.display_name?.split(',')[0] || '').toLowerCase().trim();
-                          const cleanResultName = result.name.toLowerCase().split(',')[0].trim();
+      if ((popVal !== null && popVal > 0) || histItem) {
+          const label = isCensus && popYear ? `${popYear} Census` : (popYear ? `${popYear} Estimate` : "Current Estimate");
+          result.population = { 
+              value: popVal, 
+              source: (marker.population as any)?.source || "Overpass OSM", 
+              status: "available", 
+              year: popYear,
+              censusYear: isCensus ? popYear : undefined,
+              label,
+              current: popVal ? { 
+                  value: popVal,
+                  formattedValue: popVal.toLocaleString(), 
+                  year: popYear,
+                  censusYear: isCensus ? popYear : undefined,
+                  label,
+                  source: (marker.population as any)?.source || "Overpass OSM"
+              } : undefined,
+              historical: histItem
+          };
+          popFound = true;
+      }
+  }
 
-                          if (!isAdministrative && isSettlement && cleanPlaceName === cleanResultName && place.extratags && place.extratags.population) {
-                              const popNum = parseInt(place.extratags.population, 10);
-                              if (!isNaN(popNum) && popNum > 0) {
-                                  result.population = { value: popNum, source: "OSM Place Metadata", status: "available", current: { formattedValue: popNum.toLocaleString(), description: `Population as of latest census` } };
-                                  popFound = true;
-                                  break;
+  // 2. Direct Overpass/Nominatim Place Lookup with context disambiguation
+  if (!popFound) {
+      attemptedSources.push("OSM Place Metadata");
+      try {
+          const contextQuery = [cleanName, state, country].filter(Boolean).join(', ');
+          const query = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(contextQuery || result.name)}&format=jsonv2&extratags=1&limit=5`;
+          const res = await fetch(query);
+          if (res.ok) {
+              const data = await res.json();
+              if (Array.isArray(data)) {
+                  for (const place of data) {
+                      const pType = (place.type || '').toLowerCase();
+                      const pCategory = (place.category || '').toLowerCase();
+                      const pAddressType = (place.addresstype || '').toLowerCase();
+                      
+                      // STRICT SCOPING: Must be a populated settlement, NEVER an administrative container / district / province / state / county
+                      const isAdministrative = pCategory === 'boundary' || pType === 'administrative' || ['district', 'county', 'state', 'province', 'region', 'country', 'state_district'].includes(pType) || ['district', 'county', 'state', 'province', 'region', 'country', 'state_district'].includes(pAddressType);
+                      const isSettlement = ['city', 'town', 'village', 'municipality', 'hamlet'].includes(pType) || (pCategory === 'place' && !isAdministrative);
+
+                      const cleanPlaceName = (place.name || place.display_name?.split(',')[0] || '').toLowerCase().trim();
+                      const cleanResultName = cleanName.toLowerCase();
+
+                      // State filter
+                      if (state) {
+                          const stateLower = state.toLowerCase();
+                          const placeDisplay = (place.display_name || '').toLowerCase();
+                          if (!placeDisplay.includes(stateLower)) {
+                              continue;
+                          }
+                      }
+
+                      // Distance check
+                      if (lat !== undefined && lng !== undefined && place.lat && place.lon) {
+                          const pLat = parseFloat(place.lat);
+                          const pLon = parseFloat(place.lon);
+                          if (!isNaN(pLat) && !isNaN(pLon)) {
+                              const distKm = Math.hypot((pLat - lat) * 111, (pLon - lng) * 111 * Math.cos(lat * Math.PI / 180));
+                              if (distKm > 200) {
+                                  continue;
                               }
+                          }
+                      }
+
+                      if (!isAdministrative && isSettlement && cleanPlaceName === cleanResultName && place.extratags && place.extratags.population) {
+                          const popNum = parseInt(place.extratags.population.replace(/,/g, ''), 10);
+                          if (!isNaN(popNum) && popNum > 0) {
+                              const rawDate = place.extratags['population:date'] || place.extratags['census:year'] || place.extratags['census:date'];
+                              let year: number | undefined;
+                              let isCensus = false;
+                              if (rawDate) {
+                                  const yMatch = String(rawDate).match(/\b(\d{4})\b/);
+                                  if (yMatch) year = parseInt(yMatch[1], 10);
+                                  if (/census/i.test(String(rawDate))) isCensus = true;
+                              }
+                              const label = isCensus && year ? `${year} Census` : (year ? `${year} Estimate` : "Current Estimate");
+                              result.population = { 
+                                  value: popNum, 
+                                  source: "OSM Place Metadata", 
+                                  status: "available", 
+                                  year,
+                                  censusYear: isCensus ? year : undefined,
+                                  label,
+                                  current: { 
+                                      value: popNum,
+                                      formattedValue: popNum.toLocaleString(), 
+                                      year,
+                                      censusYear: isCensus ? year : undefined,
+                                      label,
+                                      source: "OSM Place Metadata"
+                                  } 
+                              };
+                              popFound = true;
+                              break;
                           }
                       }
                   }
               }
-          } catch(e) {
-              // Handled gracefully
           }
+      } catch(e) {
+          // Handled gracefully
       }
+  }
 
-      // 3. Coordinate-based settlement lookup
-      if (!popFound) {
-          attemptedSources.push("Reverse Geocoding Settlement");
-          try {
-              // Use zoom=18 for exact settlement/place level, not zoom=10 (which is state/region level)
-              const revRes = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${marker.lat}&lon=${marker.lng}&format=jsonv2&zoom=18&extratags=1`);
-              if (revRes.ok) {
-                  const revData = await revRes.json();
-                  const revType = (revData.type || revData.category || revData.addresstype || '').toLowerCase();
-                  const isAdministrative = revData.category === 'boundary' || revType === 'administrative' || ['district', 'county', 'state', 'province', 'region', 'country', 'state_district'].includes(revType) || ['district', 'county', 'state', 'province', 'region', 'country', 'state_district'].includes(revData.addresstype || '');
-                  const isSettlement = !isAdministrative && ['city', 'town', 'village', 'hamlet', 'municipality'].includes(revType);
-                  const cleanRevName = (revData.name || '').toLowerCase().replace(/,\s*[a-z\s]+$/i, '').trim();
-                  const cleanResultName = result.name.toLowerCase().replace(/,\s*[a-z\s]+$/i, '').trim();
-                  
-                  // Only accept if reverse geocoded entity actually matches the settlement name and is a settlement
-                  if (isSettlement && cleanRevName === cleanResultName && revData.extratags && revData.extratags.population) {
-                      const popNum = parseInt(revData.extratags.population, 10);
-                      if (!isNaN(popNum) && popNum > 0) {
-                          result.population = { value: popNum, source: "Reverse Geocoding Settlement", status: "available", current: { formattedValue: popNum.toLocaleString(), description: `Population as of latest census` } };
-                          popFound = true;
+  // 3. Coordinate-based settlement lookup
+  if (!popFound && lat !== undefined && lng !== undefined) {
+      attemptedSources.push("Reverse Geocoding Settlement");
+      try {
+          // Use zoom=18 for exact settlement/place level, not zoom=10 (which is state/region level)
+          const revRes = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=jsonv2&zoom=18&extratags=1`);
+          if (revRes.ok) {
+              const revData = await revRes.json();
+              const revType = (revData.type || revData.category || revData.addresstype || '').toLowerCase();
+              const isAdministrative = revData.category === 'boundary' || revType === 'administrative' || ['district', 'county', 'state', 'province', 'region', 'country', 'state_district'].includes(revType) || ['district', 'county', 'state', 'province', 'region', 'country', 'state_district'].includes(revData.addresstype || '');
+              const isSettlement = !isAdministrative && ['city', 'town', 'village', 'hamlet', 'municipality'].includes(revType);
+              const cleanRevName = (revData.name || '').toLowerCase().replace(/,\s*[a-z\s]+$/i, '').trim();
+              const cleanResultName = cleanName.toLowerCase();
+              
+              // Only accept if reverse geocoded entity actually matches the settlement name and is a settlement
+              if (isSettlement && cleanRevName === cleanResultName && revData.extratags && revData.extratags.population) {
+                  const popNum = parseInt(revData.extratags.population.replace(/,/g, ''), 10);
+                  if (!isNaN(popNum) && popNum > 0) {
+                      const rawDate = revData.extratags['population:date'] || revData.extratags['census:year'] || revData.extratags['census:date'];
+                      let year: number | undefined;
+                      let isCensus = false;
+                      if (rawDate) {
+                          const yMatch = String(rawDate).match(/\b(\d{4})\b/);
+                          if (yMatch) year = parseInt(yMatch[1], 10);
+                          if (/census/i.test(String(rawDate))) isCensus = true;
                       }
+                      const label = isCensus && year ? `${year} Census` : (year ? `${year} Estimate` : "Current Estimate");
+                      result.population = { 
+                          value: popNum, 
+                          source: "Reverse Geocoding Settlement", 
+                          status: "available", 
+                          year,
+                          censusYear: isCensus ? year : undefined,
+                          label,
+                          current: { 
+                              value: popNum,
+                              formattedValue: popNum.toLocaleString(), 
+                              year,
+                              censusYear: isCensus ? year : undefined,
+                              label,
+                              source: "Reverse Geocoding Settlement"
+                          } 
+                      };
+                      popFound = true;
                   }
               }
-          } catch(e) {
-              // Handled gracefully
           }
+      } catch(e) {
+          // Handled gracefully
       }
+  }
 
-      // 4. Wikidata P1082 (with strict entity description disambiguation)
-      if (!popFound) {
-          attemptedSources.push("Wikidata P1082");
-          try {
-             const searchRes = await fetch(`https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(marker.name)}&language=en&format=json&origin=*`);
-             if (searchRes.ok) {
-                const searchData = await searchRes.json();
-                if (searchData.search && searchData.search.length > 0) {
-                    const validEntity = searchData.search.find((item: any) => {
-                        const desc = (item.description || '').toLowerCase();
-                        const isDistrictOrRegion = /\b(district|division|province|state|county|region|administrative|tehsil|taluka|department)\b/i.test(desc);
-                        return !isDistrictOrRegion;
-                    });
-                    if (validEntity) {
-                        const entityId = validEntity.id;
-                        result.wikidataId = entityId;
-                        
-                        const entityRes = await fetch(`https://www.wikidata.org/w/api.php?action=wbgetclaims&entity=${entityId}&property=P1082&format=json&origin=*`);
-                        if (entityRes.ok) {
-                            const entityData = await entityRes.json();
-                            const claims = entityData.claims;
-                            if (claims && claims.P1082 && claims.P1082.length > 0) {
-                                const popValue = claims.P1082[0].mainsnak?.datavalue?.value?.amount;
+  // 4. Wikidata P1082 (with strict entity description and administrative disambiguation)
+  if (!popFound) {
+      attemptedSources.push("Wikidata P1082");
+      try {
+         const searchQuery = [cleanName, state, country].filter(Boolean).join(' ');
+         const searchRes = await fetch(`https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(searchQuery || marker.name)}&language=en&format=json&origin=*`);
+         if (searchRes.ok) {
+            const searchData = await searchRes.json();
+            if (searchData.search && searchData.search.length > 0) {
+                const validEntity = searchData.search.find((item: any) => {
+                    const desc = (item.description || '').toLowerCase();
+                    const isDistrictOrRegion = /\b(district|division|province|state|county|region|administrative|tehsil|taluka|department|metropolitan area|metro area)\b/i.test(desc);
+                    if (isDistrictOrRegion) return false;
+                    
+                    if (state) {
+                        const stateLower = state.toLowerCase();
+                        if (desc.includes(stateLower) || (item.label && item.label.toLowerCase().includes(stateLower))) {
+                            return true;
+                        }
+                    }
+                    return true;
+                }) || searchData.search[0];
+
+                if (validEntity) {
+                    const entityId = validEntity.id;
+                    result.wikidataId = entityId;
+                    
+                    const entityRes = await fetch(`https://www.wikidata.org/w/api.php?action=wbgetclaims&entity=${entityId}&property=P1082&format=json&origin=*`);
+                    if (entityRes.ok) {
+                        const entityData = await entityRes.json();
+                        const claims = entityData.claims;
+                        if (claims && claims.P1082 && claims.P1082.length > 0) {
+                            let bestPopNum: number | null = null;
+                            let bestYear: number | undefined = undefined;
+                            let isCensus = false;
+
+                            for (const claim of claims.P1082) {
+                                const popValue = claim.mainsnak?.datavalue?.value?.amount;
                                 if (popValue !== undefined) {
                                     const popNum = parseInt(popValue.replace('+', ''), 10);
                                     if (!isNaN(popNum) && popNum > 0) {
-                                        result.population = { value: popNum, source: "Wikidata P1082", status: "available", current: { formattedValue: popNum.toLocaleString(), description: `Population as of latest census` } };
-                                        popFound = true;
+                                        let claimYear: number | undefined = undefined;
+                                        let claimIsCensus = false;
+
+                                        const timeQualifier = claim.qualifiers?.P585?.[0]?.datavalue?.value?.time;
+                                        if (timeQualifier) {
+                                            const yMatch = String(timeQualifier).match(/\b(\d{4})\b/);
+                                            if (yMatch) claimYear = parseInt(yMatch[1], 10);
+                                        }
+                                        const methodQualifier = claim.qualifiers?.P459?.[0]?.datavalue?.value?.id;
+                                        if (methodQualifier === 'Q39825' || claim.qualifiers?.P459?.[0]?.datavalue?.value?.['numeric-id'] === 39825) {
+                                            claimIsCensus = true;
+                                        }
+
+                                        if (bestPopNum === null || (claimYear && (!bestYear || claimYear > bestYear))) {
+                                            bestPopNum = popNum;
+                                            bestYear = claimYear;
+                                            isCensus = claimIsCensus;
+                                        }
                                     }
                                 }
+                            }
+
+                            if (bestPopNum !== null && bestPopNum > 0) {
+                                const label = isCensus && bestYear ? `${bestYear} Census` : (bestYear ? `${bestYear} Estimate` : "Current Estimate");
+                                result.population = { 
+                                    value: bestPopNum, 
+                                    source: "Wikidata P1082", 
+                                    status: "available", 
+                                    year: bestYear,
+                                    censusYear: isCensus ? bestYear : undefined,
+                                    label,
+                                    current: { 
+                                        value: bestPopNum,
+                                        formattedValue: bestPopNum.toLocaleString(), 
+                                        year: bestYear,
+                                        censusYear: isCensus ? bestYear : undefined,
+                                        label,
+                                        source: "Wikidata P1082"
+                                    } 
+                                };
+                                popFound = true;
                             }
                         }
                     }
                 }
-             }
-          } catch (e) {
-             // Handled gracefully
-          }
+            }
+         }
+      } catch (e) {
+         // Handled gracefully
       }
-      
-      // 5. Wikipedia infobox population field
-      if (!popFound) {
-          attemptedSources.push("Wikipedia Infobox");
-          try {
-             const wikiRes = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(marker.name)}&prop=revisions&rvprop=content&rvslots=main&format=json&origin=*&redirects=1`);
-             if (wikiRes.ok) {
-                 const wikiData = await wikiRes.json();
-                 const pages = wikiData.query?.pages;
-                 if (pages) {
-                     const pageId = Object.keys(pages)[0];
-                     if (pageId !== "-1") {
-                         const content = pages[pageId].revisions?.[0]?.slots?.main?.["*"];
-                         if (content) {
-                             const isDistrictArticle = /subdivision_type\s*=\s*(?:District|Division|County|Province)/i.test(content) && !/settlement_type\s*=\s*(?:City|Town|Village)/i.test(content);
-                             if (!isDistrictArticle) {
-                                 const popMatch = content.match(/(?:population_total|population_urban|population_city)\s*=\s*([\d,]+)/i);
-                                 if (popMatch && popMatch[1]) {
-                                     const popNum = parseInt(popMatch[1].replace(/,/g, ''), 10);
-                                     if (!isNaN(popNum) && popNum > 0) {
-                                         result.population = { value: popNum, source: "Wikipedia Infobox", status: "available", current: { formattedValue: popNum.toLocaleString(), description: `Population as of latest census` } };
-                                         popFound = true;
-                                     }
+  }
+  
+  // 5. Wikipedia infobox population field
+  if (!popFound) {
+      attemptedSources.push("Wikipedia Infobox");
+      try {
+         const wikiRes = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(cleanName)}&prop=revisions&rvprop=content&rvslots=main&format=json&origin=*&redirects=1`);
+         if (wikiRes.ok) {
+             const wikiData = await wikiRes.json();
+             const pages = wikiData.query?.pages;
+             if (pages) {
+                 const pageId = Object.keys(pages)[0];
+                 if (pageId !== "-1") {
+                     const content = pages[pageId].revisions?.[0]?.slots?.main?.["*"];
+                     if (content) {
+                         const isDistrictArticle = /subdivision_type\s*=\s*(?:District|Division|County|Province)/i.test(content) && !/settlement_type\s*=\s*(?:City|Town|Village)/i.test(content);
+                         if (!isDistrictArticle) {
+                             const popMatch = content.match(/(?:population_total|population_urban|population_city)\s*=\s*([\d,]+)/i);
+                             if (popMatch && popMatch[1]) {
+                                 const popNum = parseInt(popMatch[1].replace(/,/g, ''), 10);
+                                 if (!isNaN(popNum) && popNum > 0) {
+                                     const yearMatch = content.match(/(?:population_as_of|population_est_year|population_census_year|population_total_year|population_year)\s*=\s*(\d{4})/i);
+                                     const year = yearMatch ? parseInt(yearMatch[1], 10) : undefined;
+                                     const isCensus = /census/i.test(content.match(/population_as_of\s*=\s*([^|\n]+)/i)?.[1] || "");
+                                     const label = isCensus && year ? `${year} Census` : (year ? `${year} Estimate` : "Current Estimate");
+                                     result.population = { 
+                                         value: popNum, 
+                                         source: "Wikipedia Infobox", 
+                                         status: "available", 
+                                         year,
+                                         censusYear: isCensus ? year : undefined,
+                                         label,
+                                         current: { 
+                                             value: popNum,
+                                             formattedValue: popNum.toLocaleString(), 
+                                             year,
+                                             censusYear: isCensus ? year : undefined,
+                                             label,
+                                             source: "Wikipedia Infobox"
+                                         } 
+                                     };
+                                     popFound = true;
                                  }
                              }
                          }
                      }
                  }
              }
-          } catch (e) {
-             // Handled gracefully
-          }
+         }
+      } catch (e) {
+         // Handled gracefully
       }
+  }
 
-      // 6. Major City Dataset Fallback
-      if (!popFound) {
-          attemptedSources.push("Major City Dataset");
-          
-          const searchName = result.name.toLowerCase().split(',')[0].trim();
-          const dbEntry = DETERMINISTIC_LOCATION_DB[searchName];
-          
-          if (dbEntry && dbEntry.population) {
-              result.population = { value: dbEntry.population, source: "Deterministic DB", status: "available", current: { formattedValue: dbEntry.population.toLocaleString(), description: `Known major city dataset` } };
-              popFound = true;
-          }
-      }
+  // 6. Major City Dataset Fallback
+  if (!popFound) {
+      attemptedSources.push("Major City Dataset");
       
-      if (!popFound) {
+      const searchName = cleanName.toLowerCase();
+      const dbEntry = DETERMINISTIC_LOCATION_DB[searchName] || DETERMINISTIC_LOCATION_DB[entityName.toLowerCase()];
+      
+      if (dbEntry && dbEntry.population) {
+          const year = dbEntry.populationYear;
+          const label = year ? `${year} Census` : "Current Estimate";
+          result.population = { 
+              value: dbEntry.population, 
+              source: "Deterministic DB", 
+              status: "available", 
+              year,
+              label,
+              current: { 
+                  value: dbEntry.population,
+                  formattedValue: dbEntry.population.toLocaleString(), 
+                  year,
+                  label,
+                  source: "Deterministic DB"
+              } 
+          };
+          popFound = true;
+      }
+  }
+  
+  // Final validation of resolved population
+  if (popFound && result.population) {
+      const pVal = result.population.value;
+      const hasHistorical = Boolean(result.population.historical);
+      const isVillageOrHamlet = ['village', 'hamlet'].includes((result.type || result.entityType || originalType || '').toLowerCase());
+      if ((pVal === null || pVal === undefined) && !hasHistorical) {
+          result.population = { value: null, source: null, status: "lookup_failed" };
+      } else if (pVal !== null && pVal !== undefined && (typeof pVal !== 'number' || pVal <= 0 || (isVillageOrHamlet && pVal > 5000000))) {
+          console.warn(`[Population Validation] Rejecting implausible or invalid population value (${pVal}) for ${cleanName}`);
           result.population = { value: null, source: null, status: "lookup_failed" };
       }
-      
-      delete (result as any).populationStatus;
-      delete (result as any).populationSource;
-      delete (result as any).populationData;
+  } else {
+      result.population = { value: null, source: null, status: "lookup_failed" };
   }
+  
+  delete (result as any).populationStatus;
+  delete (result as any).populationSource;
+  delete (result as any).populationData;
 }
