@@ -11,6 +11,7 @@ import {
   Copy, Check, ChevronDown, ChevronUp, Plus, Trash2, Edit2, Save, StickyNote, ChevronLeft, ChevronRight,
   MapPin, Route as RouteIcon
 } from 'lucide-react';
+import StackedImageCarousel from './StackedImageCarousel';
 
 
 export interface GalleryImage {
@@ -923,7 +924,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [wikiImage, setWikiImage] = useState<string | null>(null);
-  const [expandedImage, setExpandedImage] = useState(false);
 
   const [showFavoriteDialog, setShowFavoriteDialog] = useState(false);
   const [favoriteNameInput, setFavoriteNameInput] = useState("");
@@ -1241,7 +1241,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       tabInactive: "text-green-400 border-2 border-transparent hover:border-green-400/50",
       listDot: "bg-green-400 rounded-none",
       closeBtn: "hover:bg-green-400 hover:text-black text-green-300 border border-green-400 rounded-none",
-      actionBtn: "hover:bg-green-400 hover:text-black text-green-300 border border-green-400 rounded-none",
+      actionBtn: "hover:bg-green-400 hover:text-black text-green-300 rounded-none",
       loadMoreBtn: "bg-green-900/30 border border-green-400 hover:bg-green-400 hover:text-black text-green-300 rounded-none text-sm tracking-widest uppercase font-bold font-retro",
       notesInput: "bg-black border border-green-400 text-green-300 placeholder-green-400/50 focus:bg-green-900/20 rounded-none font-retro",
       noteCard: "bg-black border border-green-400 rounded-none",
@@ -1263,7 +1263,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       tabInactive: "text-amber-400 border-2 border-transparent hover:border-amber-400/50",
       listDot: "bg-amber-400 rounded-none",
       closeBtn: "hover:bg-amber-400 hover:text-black text-amber-300 border border-amber-400 rounded-none",
-      actionBtn: "hover:bg-amber-400 hover:text-black text-amber-300 border border-amber-400 rounded-none",
+      actionBtn: "hover:bg-amber-400 hover:text-black text-amber-300 rounded-none",
       loadMoreBtn: "bg-amber-900/30 border border-amber-400 hover:bg-amber-400 hover:text-black text-amber-300 rounded-none text-sm tracking-widest uppercase font-bold font-retro",
       notesInput: "bg-black border border-amber-400 text-amber-300 placeholder-amber-400/50 focus:bg-amber-900/20 rounded-none font-retro",
       noteCard: "bg-black border border-amber-400 rounded-none",
@@ -1306,7 +1306,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const tabIconSize = isRetro ? 18 : 14;
 
   const sectionHeaderStyle = isRetro ? 'text-sm font-bold uppercase tracking-wider text-current leading-tight' : isParchment ? 'text-xs font-bold uppercase tracking-wider text-[#8b5a2b] leading-tight' : 'text-xs font-bold uppercase tracking-wider text-white/95 leading-tight';
-  const semanticTitleStyle = isRetro ? 'font-bold text-base text-current leading-snug' : isParchment ? 'font-bold text-sm text-[#8b5a2b] leading-snug' : 'font-bold text-sm text-white/95 leading-snug';
+  const semanticTitleStyle = isRetro ? 'font-bold text-xl text-current leading-snug' : isParchment ? 'font-bold text-sm text-[#8b5a2b] leading-snug' : 'font-bold text-sm text-white/95 leading-snug';
   const bodyTextStyle = `font-normal ${bodySize} ${theme.bodyText} opacity-90 leading-relaxed`;
   const metaStyle = isRetro ? (skin === 'retro-amber' ? 'text-xs text-amber-300/70 font-mono' : 'text-xs text-green-300/70 font-mono') : isParchment ? 'text-xs text-[#8b5a2b]/75 font-sans' : 'text-xs text-white/60 font-sans';
 
@@ -1510,70 +1510,49 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
     gallery: {
       render: () => {
-        const availableImages: GalleryImage[] = images.length > 0 
-          ? images 
-          : (Array.isArray(info.images) && info.images.length > 0 
-              ? info.images.map((im: any) => typeof im === 'string' ? { url: im } : im) 
-              : (info.primaryImage ? [typeof info.primaryImage === 'string' ? { url: info.primaryImage } : info.primaryImage] : []));
-        const hasImages = availableImages.length > 0 || !!wikiImage;
-        const currentImg = availableImages[currentImageIndex] || (wikiImage ? { url: wikiImage, caption: cleanMetadataString(info?.imageCaption) } : null);
-        const currentImgUrl = currentImg?.url || wikiImage;
-        
-        if (!hasImages || !currentImgUrl) return null;
+        const imageCandidates: GalleryImage[] = [];
+
+        if (images && images.length > 0) {
+          imageCandidates.push(...images);
+        }
+        if (Array.isArray(info.images) && info.images.length > 0) {
+          imageCandidates.push(
+            ...info.images.map((im: any) => (typeof im === 'string' ? { url: im } : im))
+          );
+        }
+        if (info.primaryImage) {
+          imageCandidates.push(
+            typeof info.primaryImage === 'string' ? { url: info.primaryImage } : info.primaryImage
+          );
+        }
+        if (info.image && typeof info.image === 'string') {
+          imageCandidates.push({
+            url: info.image,
+            caption: cleanMetadataString(info.imageCaption),
+            attribution: cleanMetadataString((info as any).imageAttribution),
+          });
+        }
+        if (wikiImage) {
+          imageCandidates.push({
+            url: wikiImage,
+            caption: cleanMetadataString(info.imageCaption),
+            attribution: cleanMetadataString((info as any).imageAttribution),
+          });
+        }
+
+        if (imageCandidates.length === 0) return null;
 
         return (
-          <div 
-            className={`p-0 overflow-hidden relative h-32 ${theme.card} group cursor-pointer select-none`}
-            onClick={() => setExpandedImage(true)}
-          >
-            <img 
-              src={currentImgUrl} 
-              alt={`${info.name} - ${currentImageIndex + 1}`} 
-              className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${isRetro ? 'grayscale contrast-125' : ''}`} 
-            />
-            
-            {/* Multi-image gallery controls */}
-            {availableImages.length > 1 && (
-              <>
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setCurrentImageIndex((prev) => (prev > 0 ? prev - 1 : availableImages.length - 1));
-                  }}
-                  className="absolute left-1.5 top-1/2 -translate-y-1/2 p-1 rounded-full bg-black/60 hover:bg-black/85 text-white/90 transition-all opacity-80 group-hover:opacity-100 shadow-md"
-                  title="Previous image"
-                >
-                  <ChevronLeft size={16} />
-                </button>
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setCurrentImageIndex((prev) => (prev < availableImages.length - 1 ? prev + 1 : 0));
-                  }}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded-full bg-black/60 hover:bg-black/85 text-white/90 transition-all opacity-80 group-hover:opacity-100 shadow-md"
-                  title="Next image"
-                >
-                  <ChevronRight size={16} />
-                </button>
-                <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-sm text-white/90 text-[10px] font-mono px-2 py-0.5 rounded-full border border-white/10 shadow-sm pointer-events-none">
-                  {currentImageIndex + 1} / {availableImages.length}
-                </div>
-              </>
-            )}
-
-            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-2 pt-4 flex items-end gap-2 pointer-events-none">
-               <ImageIcon size={14} className="text-white/80 shrink-0" />
-               {info.imageCaption && !isPlaceholderString(info.imageCaption) ? (
-                 <span className="text-white/90 text-xs truncate font-medium">
-                   {info.imageCaption}
-                 </span>
-               ) : (
-                 <span className="text-white/80 text-[11px] truncate font-medium">
-                   {info.name}
-                 </span>
-               )}
-            </div>
-          </div>
+          <StackedImageCarousel
+            images={imageCandidates}
+            locationName={info.name || 'Location'}
+            fallbackCaption={info.imageCaption}
+            fallbackAttribution={(info as any).imageAttribution}
+            skin={skin}
+            theme={theme}
+            initialIndex={currentImageIndex}
+            onIndexChange={setCurrentImageIndex}
+          />
         );
       }
     },
@@ -1886,114 +1865,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
   return (
     <>
-      {expandedImage && (images.length > 0 || wikiImage) && (() => {
-        const currentImg = images[currentImageIndex] || (wikiImage ? { url: wikiImage, caption: cleanMetadataString(info?.imageCaption), attribution: undefined } : null);
-        if (!currentImg?.url) return null;
-        
-        const currentCaption = cleanMetadataString(currentImg.caption);
-        const currentAttribution = formatImageAttribution(currentImg.attribution);
-
-        let captionClass = "text-white/90 text-sm md:text-base font-normal font-sans";
-        let attributionClass = "text-white/60 text-xs mt-1 font-sans";
-
-        if (skin === 'retro-green') {
-          captionClass = "text-green-300 font-retro text-sm md:text-base";
-          attributionClass = "text-green-400/70 text-xs mt-1 font-retro";
-        } else if (skin === 'retro-amber') {
-          captionClass = "text-amber-300 font-retro text-sm md:text-base";
-          attributionClass = "text-amber-400/70 text-xs mt-1 font-retro";
-        } else if (skin === 'parchment') {
-          captionClass = "text-amber-100/90 font-serif text-sm md:text-base";
-          attributionClass = "text-[#d2b48c]/75 text-xs mt-1 font-serif";
-        }
-
-        return (
-          <div 
-            className="fixed inset-0 z-[100] bg-black/95 flex flex-col items-center justify-center p-4 pointer-events-auto select-none" 
-            onClick={() => setExpandedImage(false)}
-            data-testid="lightbox-modal"
-          >
-              <div 
-                className="relative max-w-4xl w-full max-h-[90vh] flex flex-col items-center justify-center" 
-                onClick={(e) => e.stopPropagation()}
-              >
-                  {/* Close button */}
-                  <button 
-                    className="absolute -top-4 -right-4 p-2 bg-black text-white rounded-full hover:bg-white/20 shadow-lg z-20 transition-colors" 
-                    onClick={(e) => { e.stopPropagation(); setExpandedImage(false); }}
-                    title="Close image"
-                    aria-label="Close enlarged image"
-                    data-testid="lightbox-close"
-                  >
-                      <X size={24} />
-                  </button>
-
-                  <div className="relative max-w-full max-h-[75vh] flex items-center justify-center overflow-hidden rounded">
-                      <img 
-                        src={currentImg.url} 
-                        alt={currentCaption || `${info?.name} - ${currentImageIndex + 1}`} 
-                        className={`max-w-full max-h-[70vh] md:max-h-[75vh] object-contain rounded ${isRetro ? 'grayscale contrast-125' : ''}`} 
-                        data-testid="lightbox-image"
-                      />
-                      {images.length > 1 && (
-                        <>
-                          <button 
-                            className="absolute left-2 top-1/2 -translate-y-1/2 p-2.5 bg-black/70 hover:bg-black text-white rounded-full transition-colors shadow-lg z-10"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setCurrentImageIndex((prev) => (prev > 0 ? prev - 1 : images.length - 1));
-                            }}
-                            title="Previous image"
-                            aria-label="Previous image"
-                            data-testid="lightbox-prev"
-                          >
-                            <ChevronLeft size={24} />
-                          </button>
-                          <button 
-                            className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 bg-black/70 hover:bg-black text-white rounded-full transition-colors shadow-lg z-10"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setCurrentImageIndex((prev) => (prev < images.length - 1 ? prev + 1 : 0));
-                            }}
-                            title="Next image"
-                            aria-label="Next image"
-                            data-testid="lightbox-next"
-                          >
-                            <ChevronRight size={24} />
-                          </button>
-                        </>
-                      )}
-                  </div>
-
-                  {/* Image Counter */}
-                  {images.length > 1 && (
-                    <div className="mt-2 max-w-4xl w-full text-left px-1 text-white/50 text-xs font-mono" data-testid="lightbox-counter">
-                      {currentImageIndex + 1} of {images.length}
-                    </div>
-                  )}
-
-                  {/* Lightbox Footer with Editorial Caption and Attribution */}
-                  {(currentCaption || currentAttribution) && (
-                    <div 
-                      className="mt-3 max-w-4xl w-full text-left px-1"
-                      data-testid="lightbox-footer"
-                    >
-                      {currentCaption && (
-                        <div className={`leading-snug ${captionClass}`} data-testid="lightbox-caption">
-                          {currentCaption}
-                        </div>
-                      )}
-                      {currentAttribution && (
-                        <div className={`leading-normal ${attributionClass}`} data-testid="lightbox-attribution">
-                          {currentAttribution}
-                        </div>
-                      )}
-                    </div>
-                  )}
-              </div>
-          </div>
-        );
-      })()}
       <div 
         className="absolute top-[282px] right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-342px)] flex flex-col gap-3 animate-in slide-in-from-right-12 fade-in duration-500 pointer-events-none"
         data-testid="info-panel"
@@ -2079,12 +1950,12 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                    {displayCategory.toUpperCase()}
                  </span>
                  {displaySubtitle && (
-                   <div className={`mt-1 text-sm font-medium ${isRetro ? 'text-current opacity-90' : isParchment ? 'text-[#5a3e1b]' : 'text-slate-300'}`}>
+                   <div className={`mt-1 ${isParchment ? 'text-xl font-normal font-garamond text-[#8b5a2b]' : `${bodySize} font-medium ${isRetro ? 'text-current opacity-90' : 'text-slate-300'}`}`}>
                      {displaySubtitle}
                    </div>
                  )}
                  {displayAltNames && (
-                   <p className={`mt-0.5 text-xs ${isRetro ? 'text-current opacity-70' : isParchment ? 'text-[#5a3e1b]/80' : 'text-slate-400'}`}>
+                   <p className={`mt-0.5 text-xs ${isRetro ? 'text-current opacity-70' : isParchment ? 'text-[#8b5a2b]/80' : 'text-slate-400'}`}>
                      {displayAltNames}
                    </p>
                  )}

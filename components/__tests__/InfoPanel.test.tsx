@@ -140,6 +140,68 @@ describe('Lightbox Metadata Integration', () => {
     expect(html).not.toContain('text-[#3e2723] bg-[#d2b48c] border border-[#8b5a2b]');
   });
 
+  it('renders Parchment location subtitle with font-garamond and font-normal, and other themes with font-medium', () => {
+    const locationWithSubtitle = {
+      name: 'Cárdenas',
+      country: 'Mexico',
+      state: 'Tabasco',
+      type: 'City' as any,
+      description: 'City in Mexico.',
+      coordinates: { lat: 18.0, lng: -93.37 },
+      images: [],
+      news: []
+    };
+
+    const parchmentHtml = renderToStaticMarkup(
+      <InfoPanel
+        info={locationWithSubtitle}
+        onClose={() => {}}
+        isLoading={false}
+        isNewsFetching={false}
+        skin="parchment"
+        isFavorite={false}
+        onSaveFavorite={() => {}}
+        onRemoveFavorite={() => {}}
+        onLoadMoreNews={async () => {}}
+      />
+    );
+    expect(parchmentHtml).toContain('Tabasco, Mexico');
+    expect(parchmentHtml).toContain('mt-1 text-xl font-normal font-garamond text-[#8b5a2b]');
+    expect(parchmentHtml).not.toContain('mt-1 text-xl font-normal font-garamond text-[#5a3e1b]');
+
+    const modernHtml = renderToStaticMarkup(
+      <InfoPanel
+        info={locationWithSubtitle}
+        onClose={() => {}}
+        isLoading={false}
+        isNewsFetching={false}
+        skin="modern"
+        isFavorite={false}
+        onSaveFavorite={() => {}}
+        onRemoveFavorite={() => {}}
+        onLoadMoreNews={async () => {}}
+      />
+    );
+    expect(modernHtml).toContain('mt-1 text-sm font-medium text-slate-300');
+    expect(modernHtml).not.toContain('font-garamond text-slate-300');
+
+    const retroHtml = renderToStaticMarkup(
+      <InfoPanel
+        info={locationWithSubtitle}
+        onClose={() => {}}
+        isLoading={false}
+        isNewsFetching={false}
+        skin="retro-green"
+        isFavorite={false}
+        onSaveFavorite={() => {}}
+        onRemoveFavorite={() => {}}
+        onLoadMoreNews={async () => {}}
+      />
+    );
+    expect(retroHtml).toContain('mt-1 text-lg font-medium text-current opacity-90');
+    expect(retroHtml).not.toContain('font-garamond');
+  });
+
   it('renders canonical section order: Description -> Image -> Notable Facts -> Climate -> News', () => {
     const testLocation = {
       name: 'Zion National Park',
@@ -246,6 +308,62 @@ describe('Lightbox Metadata Integration', () => {
     expect(html).toContain('<p class="font-normal text-sm text-gray-100 opacity-90 leading-relaxed">Iconic hike through the narrow canyon along the Virgin River.</p>');
     // Description text is NOT bolded inside h4
     expect(html).not.toContain('<h4 class="font-bold text-sm text-white/95 leading-snug">Iconic hike');
+  });
+
+  it('renders notable fact titles larger than details text in retro skins', () => {
+    const tajMahal = {
+      name: 'Taj Mahal',
+      type: 'Monument' as any,
+      description: 'An ivory-white marble mausoleum on the right bank of the river Yamuna in Agra, India.',
+      coordinates: { lat: 27.1751, lng: 78.0421 },
+      notable: [
+        'Architectural Marvel: Famous for its symmetry and white marble dome.',
+        'Mourning for Mumtaz: Commissioned by Emperor Shah Jahan in memory of his favorite wife.',
+      ],
+    };
+
+    const greenHtml = renderToStaticMarkup(
+      <InfoPanel
+        info={tajMahal}
+        isLoading={false}
+        onClose={() => {}}
+        skin="retro-green"
+        isFavorite={false}
+        onToggleFavorite={() => {}}
+        onAddFavorite={() => {}}
+        onRemoveFavorite={() => {}}
+        onLoadMoreNews={async () => {}}
+      />
+    );
+
+    // Title has font-bold text-xl (larger than text-lg details text)
+    expect(greenHtml).toContain('<h4 class="font-bold text-xl text-current leading-snug">Architectural Marvel</h4>');
+    expect(greenHtml).toContain('<h4 class="font-bold text-xl text-current leading-snug">Mourning for Mumtaz</h4>');
+    expect(greenHtml).toContain('text-lg text-green-200');
+    // Favorite button has no border in retro-green
+    expect(greenHtml).toContain('class="p-2 transition-colors hover:bg-green-400 hover:text-black text-green-300 rounded-none" title="Save Location"');
+    expect(greenHtml).not.toContain('border border-green-400" title="Save Location"');
+
+    const amberHtml = renderToStaticMarkup(
+      <InfoPanel
+        info={tajMahal}
+        isLoading={false}
+        onClose={() => {}}
+        skin="retro-amber"
+        isFavorite={false}
+        onToggleFavorite={() => {}}
+        onAddFavorite={() => {}}
+        onRemoveFavorite={() => {}}
+        onLoadMoreNews={async () => {}}
+      />
+    );
+
+    expect(amberHtml).toContain('<h4 class="font-bold text-xl text-current leading-snug">Architectural Marvel</h4>');
+    expect(amberHtml).toContain('<h4 class="font-bold text-xl text-current leading-snug">Mourning for Mumtaz</h4>');
+    expect(amberHtml).toContain('text-lg text-amber-200');
+    // Favorite button has no border in retro-amber
+    expect(amberHtml).toContain('class="p-2 transition-colors hover:bg-amber-400 hover:text-black text-amber-300 rounded-none" title="Save Location"');
+    expect(amberHtml).not.toContain('border border-amber-400" title="Save Location"');
   });
 
   it('unifies typography: Section headers, semantic titles, body text, and bottom news metadata', () => {
