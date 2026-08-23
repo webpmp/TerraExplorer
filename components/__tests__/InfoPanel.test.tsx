@@ -1,5 +1,5 @@
 import { describe, test, it, expect } from 'vitest';
-import { normalizeDisplayText, cleanMetadataString, formatImageAttribution, normalizeGeoComparisonName, isRedundantWithTitle, formatGeographicContext, calculateScrollFade, getScrollFadeMaskStyle } from '../InfoPanel';
+import { normalizeDisplayText, cleanMetadataString, formatImageAttribution, normalizeGeoComparisonName, areGeoComponentsRedundant, isRedundantWithTitle, formatGeographicContext, normalizeHeaderGeographicHierarchy, calculateScrollFade, getScrollFadeMaskStyle } from '../InfoPanel';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import InfoPanel from '../InfoPanel';
@@ -1412,6 +1412,268 @@ describe('Lightbox Metadata Integration', () => {
 
       const result = formatGeographicContext(clovisVariant, 'Clovis, NM');
       expect(result).toBe('New Mexico, United States');
+    });
+
+    describe('areGeoComponentsRedundant helper', () => {
+      it('detects exact duplicates and case/punctuation variants', () => {
+        expect(areGeoComponentsRedundant('France', 'France').isRedundant).toBe(true);
+        expect(areGeoComponentsRedundant('United States', 'united states,').isRedundant).toBe(true);
+        expect(areGeoComponentsRedundant('Grindavík', 'grindavik').isRedundant).toBe(true);
+      });
+
+      it('detects abbreviation equivalence for states and countries', () => {
+        expect(areGeoComponentsRedundant('NM', 'New Mexico').isRedundant).toBe(true);
+        expect(areGeoComponentsRedundant('New Mexico', 'NM').isRedundant).toBe(true);
+        expect(areGeoComponentsRedundant('CA', 'California').isRedundant).toBe(true);
+        expect(areGeoComponentsRedundant('UK', 'United Kingdom').isRedundant).toBe(true);
+        expect(areGeoComponentsRedundant('USA', 'United States').isRedundant).toBe(true);
+      });
+
+      it('detects parenthetical variants without losing meaning', () => {
+        const res = areGeoComponentsRedundant('South Georgia (UK)', 'South Georgia');
+        expect(res.isRedundant).toBe(true);
+        expect(res.relation).toBe('parenthetical');
+        expect(res.preferred).toBe('South Georgia');
+      });
+
+      it('detects compound/conjunctive geographic hierarchies', () => {
+        const res = areGeoComponentsRedundant('South Georgia', 'South Georgia and the South Sandwich Islands');
+        expect(res.isRedundant).toBe(true);
+        expect(res.relation).toBe('compound_nested');
+        expect(res.preferred).toBe('South Georgia');
+
+        const res2 = areGeoComponentsRedundant('Trinidad', 'Trinidad and Tobago');
+        expect(res2.isRedundant).toBe(true);
+      });
+
+      it('does NOT falsely match distinct geographic entities', () => {
+        expect(areGeoComponentsRedundant('New Mexico', 'Mexico').isRedundant).toBe(false);
+        expect(areGeoComponentsRedundant('West Virginia', 'Virginia').isRedundant).toBe(false);
+        expect(areGeoComponentsRedundant('North Carolina', 'South Carolina').isRedundant).toBe(false);
+        expect(areGeoComponentsRedundant('San Francisco', 'Alcatraz Island').isRedundant).toBe(false);
+        expect(areGeoComponentsRedundant('California', 'Death Valley').isRedundant).toBe(false);
+      });
+    });
+
+    describe('normalizeHeaderGeographicHierarchy generic normalization engine', () => {
+      it('normalizes place + territory duplication: Grytviken, South Georgia -> Title: Grytviken, Subtitle: South Georgia', () => {
+        const grytviken = {
+          name: 'Grytviken, South Georgia',
+          entityType: 'historical_waypoint',
+          type: 'Historical Site' as any,
+          territory: 'South Georgia and the South Sandwich Islands',
+          locationString: 'South Georgia, South Georgia and the South Sandwich Islands',
+          coordinates: { lat: -54.28, lng: -36.51 },
+          description: 'Former whaling station on South Georgia.'
+        };
+
+        const result = normalizeHeaderGeographicHierarchy(grytviken);
+        expect(result.displayTitle).toBe('Grytviken');
+        expect(result.displaySubtitle).toBe('South Georgia');
+
+        const html = renderToStaticMarkup(
+          <InfoPanel
+            info={grytviken}
+            onClose={() => {}}
+            isLoading={false}
+            skin="modern"
+            isFavorite={false}
+            onSaveFavorite={() => {}}
+            onRemoveFavorite={() => {}}
+          />
+        );
+        expect(html).toContain('Grytviken</h2>');
+        expect(html).toContain('South Georgia</div>');
+        expect(html).not.toContain('Grytviken, South Georgia</h2>');
+        expect(html).not.toContain('South Georgia, South Georgia and the South Sandwich Islands');
+      });
+
+      it('normalizes place + country duplication: Paris, France -> Title: Paris, Subtitle: France', () => {
+        const paris = {
+          name: 'Paris, France',
+          entityType: 'city',
+          type: 'City' as any,
+          country: 'France',
+          locationString: 'France',
+          coordinates: { lat: 48.8566, lng: 2.3522 },
+          description: 'Capital of France.'
+        };
+
+        const result = normalizeHeaderGeographicHierarchy(paris);
+        expect(result.displayTitle).toBe('Paris');
+        expect(result.displaySubtitle).toBe('France');
+      });
+
+      it('normalizes place + region duplication: Cambridge, Massachusetts, United States -> Title: Cambridge, Subtitle: Massachusetts, United States', () => {
+        const cambridge = {
+          name: 'Cambridge, Massachusetts, United States',
+          entityType: 'city',
+          type: 'City' as any,
+          city: 'Cambridge',
+          state: 'Massachusetts',
+          country: 'United States',
+          locationString: 'Cambridge, Massachusetts, United States',
+          coordinates: { lat: 42.3736, lng: -71.1097 },
+          description: 'City in Massachusetts.'
+        };
+
+        const result = normalizeHeaderGeographicHierarchy(cambridge);
+        expect(result.displayTitle).toBe('Cambridge');
+        expect(result.displaySubtitle).toBe('Massachusetts, United States');
+      });
+
+      it('deduplicates repeated geographic components inside location hierarchy itself', () => {
+        const kyoto = {
+          name: 'Kyoto',
+          entityType: 'city',
+          type: 'City' as any,
+          state: 'Kyoto Prefecture',
+          country: 'Japan',
+          locationString: 'Kyoto, Kyoto Prefecture, Kansai, Japan, Japan',
+          coordinates: { lat: 35.0116, lng: 135.7681 },
+          description: 'Ancient capital of Japan.'
+        };
+
+        const result = normalizeHeaderGeographicHierarchy(kyoto);
+        expect(result.displayTitle).toBe('Kyoto');
+        expect(result.displaySubtitle).toBe('Kyoto Prefecture, Kansai, Japan');
+      });
+
+      it('preserves legitimate multi-word entity names containing geographic terms without truncating', () => {
+        const museum = {
+          name: 'South Georgia Museum',
+          entityType: 'museum',
+          type: 'Point of Interest' as any,
+          territory: 'South Georgia',
+          locationString: 'Grytviken, South Georgia',
+          coordinates: { lat: -54.28, lng: -36.51 },
+          description: 'Museum at Grytviken on South Georgia.'
+        };
+        const museumRes = normalizeHeaderGeographicHierarchy(museum);
+        expect(museumRes.displayTitle).toBe('South Georgia Museum');
+        expect(museumRes.displaySubtitle).toBe('Grytviken, South Georgia');
+
+        const mexicoCity = {
+          name: 'Mexico City',
+          entityType: 'city',
+          type: 'City' as any,
+          state: 'CDMX',
+          country: 'Mexico',
+          locationString: 'Mexico City, Mexico',
+          coordinates: { lat: 19.4326, lng: -99.1332 },
+          description: 'Capital of Mexico.'
+        };
+        const mexicoCityRes = normalizeHeaderGeographicHierarchy(mexicoCity);
+        expect(mexicoCityRes.displayTitle).toBe('Mexico City');
+        expect(mexicoCityRes.displaySubtitle).toBe('CDMX, Mexico');
+
+        const nyCity = {
+          name: 'New York City',
+          entityType: 'city',
+          type: 'City' as any,
+          state: 'New York',
+          country: 'United States',
+          locationString: 'New York City, New York, United States',
+          coordinates: { lat: 40.7128, lng: -74.0060 },
+          description: 'Most populous city in the US.'
+        };
+        const nyRes = normalizeHeaderGeographicHierarchy(nyCity);
+        expect(nyRes.displayTitle).toBe('New York City');
+        expect(nyRes.displaySubtitle).toBe('New York, United States');
+
+        const capitol = {
+          name: 'Georgia State Capitol',
+          entityType: 'landmark',
+          type: 'Point of Interest' as any,
+          city: 'Atlanta',
+          state: 'Georgia',
+          country: 'United States',
+          locationString: 'Atlanta, Georgia, United States',
+          coordinates: { lat: 33.7490, lng: -84.3880 },
+          description: 'State capitol of Georgia.'
+        };
+        const capitolRes = normalizeHeaderGeographicHierarchy(capitol);
+        expect(capitolRes.displayTitle).toBe('Georgia State Capitol');
+        expect(capitolRes.displaySubtitle).toBe('Atlanta, Georgia, United States');
+
+        const univ = {
+          name: 'Georgia Southern University',
+          entityType: 'landmark',
+          type: 'Point of Interest' as any,
+          city: 'Statesboro',
+          state: 'Georgia',
+          country: 'United States',
+          locationString: 'Statesboro, Georgia, United States',
+          coordinates: { lat: 32.4208, lng: -81.7865 },
+          description: 'Public university in Georgia.'
+        };
+        const univRes = normalizeHeaderGeographicHierarchy(univ);
+        expect(univRes.displayTitle).toBe('Georgia Southern University');
+        expect(univRes.displaySubtitle).toBe('Statesboro, Georgia, United States');
+      });
+
+      it('suppresses subtitle completely when location provides no additional context beyond title', () => {
+        const country = {
+          name: 'France',
+          entityType: 'country',
+          type: 'Country' as any,
+          country: 'France',
+          locationString: 'France',
+          coordinates: { lat: 46.2276, lng: 2.2137 },
+          description: 'European country.'
+        };
+        const res = normalizeHeaderGeographicHierarchy(country);
+        expect(res.displayTitle).toBe('France');
+        expect(res.displaySubtitle).toBeNull();
+
+        const html = renderToStaticMarkup(
+          <InfoPanel
+            info={country}
+            onClose={() => {}}
+            isLoading={false}
+            skin="modern"
+            isFavorite={false}
+            onSaveFavorite={() => {}}
+            onRemoveFavorite={() => {}}
+          />
+        );
+        expect(html).toContain('France</h2>');
+        expect(html).not.toContain('<div class="mt-1');
+      });
+
+      it('renders canonical header order: Title -> Subtitle -> Category Badge -> Coordinates', () => {
+        const testItem = {
+          name: 'Grytviken, South Georgia',
+          entityType: 'historical_waypoint',
+          type: 'Historical Site' as any,
+          territory: 'South Georgia',
+          locationString: 'South Georgia, South Georgia and the South Sandwich Islands',
+          coordinates: { lat: -54.28, lng: -36.51 },
+          description: 'Whaling station.'
+        };
+
+        const html = renderToStaticMarkup(
+          <InfoPanel
+            info={testItem}
+            onClose={() => {}}
+            isLoading={false}
+            skin="modern"
+            isFavorite={false}
+            onSaveFavorite={() => {}}
+            onRemoveFavorite={() => {}}
+          />
+        );
+
+        const titleIdx = html.indexOf('Grytviken</h2>');
+        const subtitleIdx = html.indexOf('South Georgia</div>');
+        const badgeIdx = html.indexOf('HISTORICAL SITE</span>');
+        const coordIdx = html.indexOf('54.28° S, 36.51° W</p>');
+
+        expect(titleIdx).toBeGreaterThan(-1);
+        expect(subtitleIdx).toBeGreaterThan(titleIdx);
+        expect(badgeIdx).toBeGreaterThan(subtitleIdx);
+        expect(coordIdx).toBeGreaterThan(badgeIdx);
+      });
     });
   });
 
