@@ -30,6 +30,7 @@ import { OSMMapLayer } from './OSMMapLayer';
 import { OSMTransitionFog } from './OSMTransitionFog';
 import { evaluateLabelPlacement, MarkerScreenTarget, ScreenRect } from '../utils/labelCollisionHelper';
 import { OSM_DETAIL_THRESHOLD } from '../services/geographic/osmTileService';
+import { getConnectingLineColor } from '../utils/routeLineColor';
 
 // Custom Shader for Retro Effect
 const RetroShader = {
@@ -358,20 +359,14 @@ const UniversalMarker: React.FC<{
 };
 
 const RouteLine: React.FC<{ 
-
   waypoints: Waypoint[], 
-
-  color: string,
-
-  isRetro: boolean,
-
+  skin: SkinType,
   markerPositions?: Map<string, THREE.Vector3>
-
-}> = ({ waypoints, color, isRetro, markerPositions }) => {
-  const dotPoints = useMemo(() => {
+}> = ({ waypoints, skin, markerPositions }) => {
+  const dotItems = useMemo(() => {
     if (waypoints.length < 2) return [];
     
-    const points: THREE.Vector3[] = [];
+    const items: Array<{ pos: THREE.Vector3; color: string }> = [];
     const radius = 1.015; // Updated to match new marker altitude
     const lineRadius = 1.018; 
     
@@ -401,22 +396,28 @@ const RouteLine: React.FC<{
                      
                      // Slerp approximation (lerp then normalize)
                      const v = new THREE.Vector3().copy(start).lerp(end, t).normalize().multiplyScalar(lineRadius);
-                     points.push(v);
+                     const { lat, lng } = vector3ToLatLng(v);
+                     const dotColor = getConnectingLineColor({
+                       theme: skin,
+                       mapLayer: 'globe',
+                       backgroundContext: { lat, lng }
+                     });
+                     items.push({ pos: v, color: dotColor });
                  }
              }
         }
     }
-    return points;
-  }, [waypoints, markerPositions]);
+    return items;
+  }, [waypoints, skin, markerPositions]);
 
-  if (dotPoints.length === 0) return null;
+  if (dotItems.length === 0) return null;
 
   return (
-    <Instances range={dotPoints.length}>
+    <Instances range={dotItems.length}>
       <sphereGeometry args={[0.002, 8, 8]} />
-      <meshBasicMaterial color={color} transparent opacity={0.6} />
-      {dotPoints.map((pos, i) => (
-        <Instance key={i} position={pos} />
+      <meshBasicMaterial transparent opacity={0.75} />
+      {dotItems.map((item, i) => (
+        <Instance key={i} position={item.pos} color={item.color} />
       ))}
     </Instances>
   );
@@ -1333,8 +1334,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
       {routeWaypoints && routeWaypoints.length > 0 && (
           <RouteLine 
             waypoints={routeWaypoints} 
-            color={waypointColor} 
-            isRetro={!isModern} 
+            skin={skin} 
             markerPositions={adjustedPositions}
           />
       )}

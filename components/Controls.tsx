@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Search, ZoomIn, ZoomOut, Loader2, Star, X, Lock, Unlock, Palette, Settings } from 'lucide-react';
 import { SkinType } from '../types';
 import { isCelestialBodySupported, detectCelestialBody } from '../services/celestialCapabilities';
+import { narrationService } from '../services/narrationService';
 
 interface ControlsProps {
   onZoomIn: () => void;
@@ -25,6 +26,8 @@ interface ControlsProps {
   scanningStatusText?: string | null;
   onCancelScan?: () => void;
   onToggleSettings?: () => void;
+  isOSMDisplayed?: boolean;
+  isOSMActive?: boolean;
 }
 
 // Custom Icon for Trace Route
@@ -155,8 +158,11 @@ const Controls: React.FC<ControlsProps> = ({
   isScanningArea = false,
   scanningStatusText = null,
   onCancelScan,
-  onToggleSettings
+  onToggleSettings,
+  isOSMDisplayed,
+  isOSMActive
 }) => {
+  const isOSM = isOSMDisplayed ?? isOSMActive ?? false;
   const [query, setQuery] = useState("");
   const [placeholder, setPlaceholder] = useState("Search location...");
   const [isFocused, setIsFocused] = useState(false);
@@ -225,14 +231,17 @@ const Controls: React.FC<ControlsProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    narrationService.prime();
     if (scanningStatusText) {
       if (onCancelScan) onCancelScan();
       return;
     }
     if (query.trim()) {
+      console.log(`[SearchNarration] SEARCH_SUBMITTED query="${query.trim()}"`);
       onSearch(query);
     } else if (placeholder !== "Search location..." && placeholder !== "SEARCH LOCATION...") {
       const cleanQuery = placeholder.replace(/\.\.\.$/, "");
+      console.log(`[SearchNarration] SEARCH_SUBMITTED query="${cleanQuery}"`);
       setQuery(cleanQuery);
       onSearch(cleanQuery);
     }
@@ -240,6 +249,7 @@ const Controls: React.FC<ControlsProps> = ({
   
   const handleTraceSubmit = (e: React.FormEvent) => {
       e.preventDefault();
+      narrationService.prime();
       if (traceText.trim()) {
           onTraceRoute(traceText);
           onToggleTraceModal(false);
@@ -249,8 +259,10 @@ const Controls: React.FC<ControlsProps> = ({
 
   const themes = {
     'modern': {
-      // Base button: neutral hover to avoid clashing with active states
-      btn: "bg-black/60 backdrop-blur-md border border-white/20 text-white hover:bg-white/10 rounded-full",
+      // Base button: neutral hover to avoid clashing with active states (darker hover when OSM is displayed for contrast against light map tiles)
+      btn: isOSM 
+        ? "bg-black/60 backdrop-blur-md border border-white/20 text-white modern-osm-hover rounded-full"
+        : "bg-black/60 backdrop-blur-md border border-white/20 text-white hover:bg-white/10 rounded-full",
       // Zoom Active (Cyan)
       btnActive: "bg-cyan-900/80 border-cyan-400 text-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.5)] hover:bg-cyan-800",
       // Favorite Active (Yellow/Gold for high contrast Star)
@@ -417,6 +429,9 @@ const Controls: React.FC<ControlsProps> = ({
         .orbiting-dot {
           stroke-dasharray: 20 980;
           animation: search-orbit 3s linear infinite;
+        }
+        .modern-osm-hover:hover {
+          background-color: rgba(0, 0, 0, 0.25);
         }
       `}</style>
 

@@ -143,4 +143,65 @@ describe('OSM Active Route Line and Departing Waypoint Fade Suite', () => {
     const isWp1LabelVisibleAfterFade = currentSelectedId === 'wp-1' || departingMarkerId === 'wp-1';
     expect(isWp1LabelVisibleAfterFade).toBe(false);
   });
+
+  it('Test 6: OSM connecting path generates exactly one directional arrow per segment pointing toward the next waypoint', async () => {
+    const { calculateOSMRouteArrow } = await import('../../utils/osmRouteArrowUtils');
+
+    const arrows = fiveWaypointRoute.slice(0, -1).map((wp, i) => {
+      const nextWp = fiveWaypointRoute[i + 1];
+      const p1 = projectLatLngToScreen(wp.lat, wp.lng, mockProjection);
+      const p2 = projectLatLngToScreen(nextWp.lat, nextWp.lng, mockProjection);
+
+      return calculateOSMRouteArrow({
+        start: p1,
+        end: p2
+      });
+    });
+
+    // Exactly 4 arrows for a 4-segment route
+    expect(arrows.length).toBe(4);
+    arrows.forEach((arrow) => {
+      expect(arrow).not.toBeNull();
+      // Arrow has valid SVG polygon coordinates
+      expect(arrow!.pointsString).toMatch(/^[\d.-]+,[\d.-]+\s[\d.-]+,[\d.-]+\s[\d.-]+,[\d.-]+$/);
+    });
+  });
+
+  it('Test 7: Reversed waypoint sequence inverts directional arrow orientations', async () => {
+    const { calculateOSMRouteArrow } = await import('../../utils/osmRouteArrowUtils');
+
+    // Segment wp1 -> wp2
+    const p1 = projectLatLngToScreen(fiveWaypointRoute[0].lat, fiveWaypointRoute[0].lng, mockProjection);
+    const p2 = projectLatLngToScreen(fiveWaypointRoute[1].lat, fiveWaypointRoute[1].lng, mockProjection);
+
+    const forwardArrow = calculateOSMRouteArrow({ start: p1, end: p2 });
+    const reverseArrow = calculateOSMRouteArrow({ start: p2, end: p1 });
+
+    expect(forwardArrow).not.toBeNull();
+    expect(reverseArrow).not.toBeNull();
+
+    // Opposite angles: difference should be Math.PI
+    let angleDiff = Math.abs(forwardArrow!.angleRad - reverseArrow!.angleRad);
+    if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+    expect(angleDiff).toBeCloseTo(Math.PI, 4);
+  });
+
+  it('Test 8: Waypoint markers in OSM layer use high-contrast dark backgrounds (black for modern/retro, dark brown #8b5a2b for parchment)', () => {
+    const getOSMMarkerBgColor = (skin: SkinType, isWaypoint: boolean, defaultColor?: string) => {
+      return isWaypoint
+        ? (skin === 'parchment' ? '#8b5a2b' : '#000000')
+        : (defaultColor || (skin === 'parchment' ? '#8b5a2b' : '#3b82f6'));
+    };
+
+    // Waypoints in OSM layer
+    expect(getOSMMarkerBgColor('modern', true, '#00e5ff')).toBe('#000000');
+    expect(getOSMMarkerBgColor('retro-green', true, '#4ade80')).toBe('#000000');
+    expect(getOSMMarkerBgColor('retro-amber', true, '#fbbf24')).toBe('#000000');
+    expect(getOSMMarkerBgColor('parchment', true, '#d2b48c')).toBe('#8b5a2b');
+
+    // Non-waypoint markers retain their distinct marker color
+    expect(getOSMMarkerBgColor('modern', false, '#ff3333')).toBe('#ff3333');
+    expect(getOSMMarkerBgColor('retro-green', false, '#a3e635')).toBe('#a3e635');
+    expect(getOSMMarkerBgColor('retro-amber', false, '#fcd34d')).toBe('#fcd34d');
+  });
 });

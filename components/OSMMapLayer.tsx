@@ -16,6 +16,8 @@ import {
   OSM_RASTER_ALTITUDE
 } from '../services/geographic/osmTileService';
 import { getOsmPalette } from '../utils/osmPalettes';
+import { getConnectingLineColor } from '../utils/routeLineColor';
+import { calculateOSMRouteArrow, estimateOSMLabelBounds } from '../utils/osmRouteArrowUtils';
 
 export interface OSMMapLayerProps {
   skin: SkinType;
@@ -1202,31 +1204,60 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                       return null;
                     }
 
-                    const routeColor = skin === 'parchment'
-                      ? '#8b5a2b'
-                      : skin === 'retro-amber'
-                        ? themePalette.highways
-                        : skin === 'retro-green'
-                          ? themePalette.highways
-                          : '#00e5ff';
+                    const routeColor = getConnectingLineColor({
+                      theme: skin,
+                      mapLayer: 'osm'
+                    });
 
-                    const haloColor = skin === 'parchment'
-                      ? 'rgba(244, 234, 213, 0.85)'
-                      : 'rgba(0, 0, 0, 0.75)';
+                    // Resolve destination waypoint metadata and label bounds for collision avoidance
+                    const matchingNextMarker = markers?.find(
+                      (m) =>
+                        (m.id && m.id === nextWp.id) ||
+                        (typeof m.lat === 'number' &&
+                          typeof m.lng === 'number' &&
+                          Math.abs(m.lat - nextWp.lat) < 0.0001 &&
+                          Math.abs(m.lng - nextWp.lng) < 0.0001)
+                    );
+                    const isNextSelected =
+                      selectedMarkerId === nextWp.id ||
+                      (matchingNextMarker && selectedMarkerId === matchingNextMarker.id);
+                    const nextPinSize = isNextSelected ? 22 : 16;
+                    const nextMarkerRadius = nextPinSize / 2;
+                    const nextVisualOffset = calculateOSMMarkerVisualOffset(osmProjection.z, {
+                      pinSize: nextPinSize,
+                      isSelected: isNextSelected
+                    });
+                    const nextMarkerCenter = {
+                      x: sx2 + nextVisualOffset.x,
+                      y: sy2 + nextVisualOffset.y
+                    };
+
+                    const nextDisplayName =
+                      (matchingNextMarker?.data as any)?.displayName ||
+                      matchingNextMarker?.data?.name ||
+                      matchingNextMarker?.name ||
+                      nextWp.name ||
+                      `Waypoint ${i + 2}`;
+
+                    const nextLabelBounds = estimateOSMLabelBounds(
+                      nextMarkerCenter,
+                      nextDisplayName,
+                      nextPinSize,
+                      'top'
+                    );
+
+                    const arrow = calculateOSMRouteArrow({
+                      start: { x: sx1, y: sy1 },
+                      end: { x: sx2, y: sy2 },
+                      startMarkerRadius: 8,
+                      destinationMarkerRadius: nextMarkerRadius,
+                      destinationMarkerCenter: nextMarkerCenter,
+                      destinationLabelBounds: nextLabelBounds
+                    });
 
                     return (
                       <g key={`osm-route-seg-${wp.id || i}-${nextWp.id || i + 1}`}>
-                        {/* Subtle contrast halo / backdrop */}
-                        <line
-                          x1={sx1}
-                          y1={sy1}
-                          x2={sx2}
-                          y2={sy2}
-                          stroke={haloColor}
-                          strokeWidth={5}
-                          strokeLinecap="round"
-                        />
-                        {/* Main dashed thematic route line */}
+                        {/* Main dashed thematic route line with no background casing */}
                         <line
                           x1={sx1}
                           y1={sy1}
@@ -1236,8 +1267,16 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                           strokeWidth={2.5}
                           strokeDasharray="6 4"
                           strokeLinecap="round"
-                          opacity={0.9}
+                          opacity={skin === 'modern' ? 0.95 : 0.9}
                         />
+                        {/* Subtle Directional Arrow pointing toward the next waypoint */}
+                        {arrow && (
+                          <polygon
+                            points={arrow.pointsString}
+                            fill={routeColor}
+                            opacity={skin === 'modern' ? 0.95 : 0.9}
+                          />
+                        )}
                       </g>
                     );
                   })}
@@ -1266,11 +1305,13 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                 const isSelected = selectedMarkerId === marker.id;
                 const isHovered = hoveredMarkerId === marker.id;
                 const isDeparting = departingMarkerId === marker.id;
-                const isWaypoint = marker.isWaypoint;
+                const isWaypoint = marker.isWaypoint || marker.type === 'waypoint';
                 const isMultiLocation = marker.isMultiLocation ?? false;
                 const showMarkerNumber = isWaypoint && isMultiLocation && marker.index !== undefined;
                 const pinSize = isSelected ? 22 : 16;
-                const color = marker.color || (skin === 'parchment' ? '#8b5a2b' : '#3b82f6');
+                const color = isWaypoint
+                  ? (skin === 'parchment' ? '#8b5a2b' : '#000000')
+                  : (marker.color || (skin === 'parchment' ? '#8b5a2b' : '#3b82f6'));
                 const outlineColor = skin === 'parchment' ? '#f4ead5' : (skin === 'retro-green' ? themePalette.highways : (skin === 'retro-amber' ? themePalette.highways : '#ffffff'));
 
                 const markerDisplayName =

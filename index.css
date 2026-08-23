@@ -13,3 +13,7 @@
   font-weight: bold;
   color: #8b5a2b;
 }
+
+.modern-osm-hover:hover {
+  background-color: rgba(0, 0, 0, 0.25);
+}

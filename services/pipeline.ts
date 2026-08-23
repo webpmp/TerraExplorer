@@ -545,12 +545,19 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
 
   if (locationResult.entity) {
       const e = locationResult.entity;
+      const rawDesc = e.metadata.description;
+      const descString = typeof rawDesc === 'string'
+          ? rawDesc
+          : (rawDesc && typeof rawDesc === 'object' && typeof (rawDesc as any).text === 'string'
+              ? (rawDesc as any).text
+              : (typeof (e.metadata as any)?.description === 'string' ? (e.metadata as any).description : ''));
+
       (locationResult as any).finalData = {
           name: e.subject.identity.canonicalName,
           entityType: e.subject.identity.entityType,
           type: e.subject.identity.entityType,
           coordinates: e.subject.primaryLocation.location.coordinates,
-          description: e.metadata.description,
+          description: descString,
           climate: e.metadata.climate,
           population: e.metadata.population,
           notable: e.metadata.notable,

@@ -13,12 +13,72 @@ export interface NarrationSpeakOptions {
   onError?: (error: unknown) => void;
 }
 
+/**
+ * Safely extracts textual narration description from a LocationInfo or Waypoint payload.
+ * Evaluates candidate string fields in order and guarantees a trimmed string or empty string.
+ * Never throws TypeError when fields contain structured objects, arrays, or undefined.
+ */
+export function getNarrationDescription(info: unknown): string {
+  if (!info || typeof info !== 'object') return '';
+
+  const loc = info as Record<string, unknown>;
+  const waypoint = loc.waypoint && typeof loc.waypoint === 'object' ? (loc.waypoint as Record<string, unknown>) : null;
+  const meta = loc.metadata && typeof loc.metadata === 'object' ? (loc.metadata as Record<string, unknown>) : null;
+
+  const candidates: unknown[] = [
+    loc.description,
+    meta?.description,
+    loc.significance,
+    waypoint?.description,
+    waypoint?.significance,
+    loc.summary
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string') {
+      const trimmed = candidate.trim();
+      if (trimmed.length > 0) {
+        return trimmed;
+      }
+    } else if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+      const textProp = (candidate as any).text ?? (candidate as any).description;
+      if (typeof textProp === 'string') {
+        const trimmed = textProp.trim();
+        if (trimmed.length > 0) {
+          return trimmed;
+        }
+      }
+    }
+  }
+
+  return '';
+}
+
+/**
+ * Safely extracts textual narration title from a LocationInfo or Waypoint payload.
+ * Never throws TypeError when name is undefined or non-string.
+ */
+export function getNarrationTitle(info: unknown): string {
+  if (!info || typeof info !== 'object') return '';
+
+  const loc = info as Record<string, unknown>;
+  if (typeof loc.name === 'string') {
+    return loc.name.trim();
+  }
+  if (typeof loc.title === 'string') {
+    return loc.title.trim();
+  }
+  return '';
+}
+
 export class NarrationService {
   private static instance: NarrationService | null = null;
   private currentUtterance: SpeechSynthesisUtterance | null = null;
+  private activeUtterances: Set<SpeechSynthesisUtterance> = new Set();
   private voices: SpeechSynthesisVoice[] = [];
   private voiceListeners: Set<(voices: SpeechSynthesisVoice[]) => void> = new Set();
   private isSpeakingInternal = false;
+  private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
 
   private constructor() {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -40,6 +100,21 @@ export class NarrationService {
 
   public isSupported(): boolean {
     return typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
+  }
+
+  /**
+   * Unlocks and primes Web Speech API synthesizer during user gesture event handlers.
+   */
+  public prime(): void {
+    if (!this.isSupported() || typeof window === 'undefined') return;
+    try {
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
+      this.refreshVoices();
+    } catch (err) {
+      // Ignore
+    }
   }
 
   private refreshVoices(): void {
@@ -159,15 +234,34 @@ export class NarrationService {
     const cleanDesc = this.cleanNarrationText(options.description);
 
     if (!cleanTitle || !cleanDesc || cleanDesc.trim().length < 3) {
-      console.log('[Narration] Description not ready or insufficient, waiting for enrichment');
+      console.log(`[SearchNarration] REJECTED: no narration text (cleanTitle="${cleanTitle}", cleanDescLength=${cleanDesc.trim().length})`);
       return;
     }
 
-    console.log(`[Narration] title available: "${cleanTitle}"`);
-    console.log(`[Narration] description available: "${cleanDesc.slice(0, 40)}..."`);
-    console.log('[Narration] speaking combined text');
+    console.log(`[SearchNarration] SPEAK_CALLED title="${cleanTitle}" descLength=${cleanDesc.length}`);
 
     this.speak(options);
+  }
+
+  private startKeepAlive(): void {
+    this.stopKeepAlive();
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    this.keepAliveTimer = setInterval(() => {
+      if (this.isSpeakingInternal && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+      } else {
+        this.stopKeepAlive();
+      }
+    }, 5000);
+  }
+
+  private stopKeepAlive(): void {
+    if (this.keepAliveTimer) {
+      clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = null;
+    }
   }
 
   /**
@@ -184,13 +278,20 @@ export class NarrationService {
 
     const script = this.buildNarrationScript(options.title, options.description);
     if (!script) {
-      console.log('[Narration] No narration script available to speak');
+      console.log('[SearchNarration] REJECTED: no narration script');
       return;
     }
 
     try {
+      // Unpause/resume synthesis if stalled
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
+
       const utterance = new SpeechSynthesisUtterance(script);
+      console.log(`[SearchNarration] UTTERANCE_CREATED textLength=${script.length}`);
       this.currentUtterance = utterance;
+      this.activeUtterances.add(utterance);
 
       // Configure speed (rate)
       const speed = typeof options.speed === 'number' && !isNaN(options.speed) ? options.speed : 0.9;
@@ -211,31 +312,43 @@ export class NarrationService {
 
       utterance.onstart = () => {
         this.isSpeakingInternal = true;
-        console.log(`[Narration] started text="${script.slice(0, 60)}..."`);
+        this.startKeepAlive();
+        console.log(`[SearchNarration] SPEECH_ONSTART text="${script.slice(0, 60)}..."`);
+        console.log('[narrationService] SPEECH_ONSTART');
         options.onStart?.();
       };
 
       utterance.onend = () => {
+        this.activeUtterances.delete(utterance);
         this.isSpeakingInternal = false;
         this.currentUtterance = null;
-        console.log('[Narration] completed');
+        this.stopKeepAlive();
+        console.log('[SearchNarration] SPEECH_ONEND');
         options.onEnd?.();
       };
 
       utterance.onerror = (event: SpeechSynthesisErrorEvent) => {
+        this.activeUtterances.delete(utterance);
         this.isSpeakingInternal = false;
         this.currentUtterance = null;
+        this.stopKeepAlive();
         // Ignore "canceled" error which fires normally on cancel()
         if (event.error !== 'canceled' && event.error !== 'interrupted') {
-          console.warn('[Narration] Speech synthesis error:', event.error);
+          console.warn(`[SearchNarration] SPEECH_ONERROR error="${event.error}"`);
           options.onError?.(event);
         }
       };
 
+      console.log(`[SearchNarration] SYNTHESIS_SPEAK_CALLED speaking=${window.speechSynthesis.speaking} pending=${window.speechSynthesis.pending} paused=${window.speechSynthesis.paused}`);
       window.speechSynthesis.speak(utterance);
+      // Ensure resume is dispatched after speak in Chromium
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
     } catch (err: unknown) {
       this.isSpeakingInternal = false;
       this.currentUtterance = null;
+      this.stopKeepAlive();
       console.warn('[Narration] Failed to execute speak:', err);
       options.onError?.(err);
     }
@@ -245,6 +358,7 @@ export class NarrationService {
    * Cleanly cancels any ongoing or queued speech.
    */
   public cancel(): void {
+    this.stopKeepAlive();
     if (this.isSupported()) {
       try {
         window.speechSynthesis.cancel();
@@ -252,6 +366,7 @@ export class NarrationService {
         // Ignore
       }
     }
+    this.activeUtterances.clear();
     this.currentUtterance = null;
     this.isSpeakingInternal = false;
   }
