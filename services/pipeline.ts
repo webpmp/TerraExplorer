@@ -10,6 +10,7 @@ import { classifyGeographicEntity } from './classifierService';
 import { getEstimatedClimate, getClimateDescription, isClimateConflicting } from './geographic/climateEstimator';
 import { reverseGeocode, enrichSettlementPopulation, isPopulationBearingEntity } from './geographic/geographicResolver';
 import { isPlaceholderString } from '../components/InfoPanel';
+import { validateEarthGeography } from './celestialCapabilities';
 
 // --- PIPELINE TYPES ---
 
@@ -481,6 +482,21 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
 
 export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLocationResult> => {
   const entityResult = IntentStage(request);
+
+  // 1. Celestial Body Validation Guard (Earth-only support across ALL intents)
+  const celestialValidation = validateEarthGeography({
+    query: request.rawQuery,
+    entity: entityResult.entity
+  });
+
+  if (!celestialValidation.isValid) {
+    console.warn(`[Pipeline] Celestial Body Validation failed: query="${request.rawQuery}" body="${celestialValidation.celestialBody}"`);
+    return {
+      mode: "location",
+      isValid: false,
+      error: "UNSUPPORTED_CELESTIAL_BODY"
+    };
+  }
   
   // 2. Routing Guard: If intent is route, bypass coordinate resolution
   if (entityResult.intentResult.intent === 'route' || entityResult.intentResult.intent === 'EXPLORATORY' as any) {
@@ -492,7 +508,8 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
       return {
          mode: "route",
          isValid: waypoints.length > 0,
-         waypoints
+         waypoints,
+         error: waypoints.length === 0 ? "UNSUPPORTED_CELESTIAL_BODY" : undefined
       };
   }
 

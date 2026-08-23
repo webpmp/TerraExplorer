@@ -1,5 +1,6 @@
 import { ResolvedEntity } from '../domain';
 import { isValidCoordinates } from '../types';
+import { validateEarthGeography } from './celestialCapabilities';
 
 export function isGenericPlaceholderDescription(description?: string | null, entityName?: string): boolean {
   if (!description || typeof description !== 'string') return true;
@@ -104,9 +105,26 @@ valid: ${coordinatesValid}`);
     failureReason = failureReason === 'none' ? "Invalid identity (missing canonicalName, entityType, or label, or status failed)" : `${failureReason}, Invalid identity`;
   }
 
+  // Level 2.5: Celestial Body Validation (Earth-Only support)
+  const celestialValidation = validateEarthGeography({
+    name: canonicalName || primaryLabel,
+    canonicalName,
+    description: typeof (entity.metadata as any)?.description === 'string' ? (entity.metadata as any).description : undefined,
+    modernLocation: (entity.subject?.primaryLocation as any)?.address?.country || primaryLabel
+  });
+
+  if (!celestialValidation.isValid) {
+    identityValid = false;
+    valid = false;
+    failureReason = failureReason === 'none' 
+      ? `Unsupported celestial body '${celestialValidation.celestialBody}'. TerraExplorer supports Earth only.`
+      : `${failureReason}, Unsupported celestial body '${celestialValidation.celestialBody}'`;
+  }
+
   console.log(`[GEOGRAPHIC_IDENTITY_VALIDATION]
 canonicalName: "${canonicalName || 'none'}"
 entityType: "${entityType || 'none'}"
+celestialBody: "${celestialValidation.celestialBody}"
 coordinateSource: "${coordinateSource || 'unknown'}"
 identityStatus: "${identityStatus || 'unverified'}"
 valid: ${identityValid}`);

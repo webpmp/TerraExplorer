@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, ZoomIn, ZoomOut, Loader2, Star, X, Lock, Unlock, Palette, Settings } from 'lucide-react';
 import { SkinType } from '../types';
+import { isCelestialBodySupported, detectCelestialBody } from '../services/celestialCapabilities';
 
 interface ControlsProps {
   onZoomIn: () => void;
@@ -37,7 +38,7 @@ const TraceRouteIcon = () => (
 
 // Significantly expanded data for suggestions
 const historicalEvents = [
-  "the moon landing", "the Battle of Hastings", "Woodstock", "the first Olympics",
+  "the Battle of Hastings", "Woodstock", "the first Olympics",
   "the signing of the Magna Carta", "the fall of the Berlin Wall", "the eruption of Vesuvius",
   "the Wright Brothers' flight", "the sinking of the Titanic", "the Boston Tea Party",
   "the Battle of Waterloo", "the discovery of penicillin", "the invention of the telephone",
@@ -107,28 +108,31 @@ const generateSuggestion = () => {
   // 20% chance for generic, 80% chance for specific creative prompts
   if (r < 0.2) return "Search location...";
   
+  let candidate = "Search location...";
   if (r < 0.35) {
     const evt = historicalEvents[Math.floor(Math.random() * historicalEvents.length)];
-    return `Where did ${evt} take place?`;
-  }
-  
-  if (r < 0.5) {
+    candidate = `Where did ${evt} take place?`;
+  } else if (r < 0.5) {
     const poi = pointsOfInterest[Math.floor(Math.random() * pointsOfInterest.length)];
-    return `Where is ${poi}?`;
-  }
-  
-  if (r < 0.65) {
+    candidate = `Where is ${poi}?`;
+  } else if (r < 0.65) {
     const ship = shipwrecks[Math.floor(Math.random() * shipwrecks.length)];
-    return `Where was ${ship} found?`;
-  }
-  
-  if (r < 0.8) {
+    candidate = `Where was ${ship} found?`;
+  } else if (r < 0.8) {
     const place = places[Math.floor(Math.random() * places.length)];
-    return `Find ${place}...`;
+    candidate = `Find ${place}...`;
+  } else {
+    const poi = pointsOfInterest[Math.floor(Math.random() * pointsOfInterest.length)];
+    candidate = `Show me ${poi}...`;
   }
-  
-  const poi = pointsOfInterest[Math.floor(Math.random() * pointsOfInterest.length)];
-  return `Show me ${poi}...`;
+
+  // Filter out any suggestion that does not resolve to a supported Earth celestial body
+  const body = detectCelestialBody({ query: candidate });
+  if (!isCelestialBodySupported(body)) {
+    return "Search location...";
+  }
+
+  return candidate;
 };
 
 const Controls: React.FC<ControlsProps> = ({ 

@@ -1,6 +1,7 @@
-import React from 'react';
-import { Settings as SettingsIcon, X, Server, Newspaper } from 'lucide-react';
-import { SkinType, UserSettings, AIProvider, NewsProvider } from '../types';
+import React, { useEffect, useState } from 'react';
+import { Settings as SettingsIcon, X, Server, Newspaper, Film, Volume2 } from 'lucide-react';
+import { SkinType, UserSettings, AIProvider, NewsProvider, DocumentaryDuration } from '../types';
+import { narrationService } from '../services/narrationService';
 
 interface SettingsPanelProps {
   settings: UserSettings;
@@ -13,12 +14,20 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
   const isParchment = skin === 'parchment';
   const isRetro = skin === 'retro-green' || skin === 'retro-amber';
 
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>(() => narrationService.getVoices());
   const [availableModels, setAvailableModels] = React.useState<string[]>([]);
   const [isDetectingModels, setIsDetectingModels] = React.useState(false);
   const [modelTestStatus, setModelTestStatus] = React.useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [modelTestMessage, setModelTestMessage] = React.useState('');
   const [newsTestStatus, setNewsTestStatus] = React.useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [newsTestMessage, setNewsTestMessage] = React.useState('');
+
+  useEffect(() => {
+    const unsubscribe = narrationService.onVoicesChanged((voices) => {
+      setAvailableVoices(voices);
+    });
+    return unsubscribe;
+  }, []);
 
   const handleDetectModels = async () => {
     if (!settings.lmStudioUrl) return;
@@ -376,6 +385,215 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                 </div>
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Documentary Mode Configuration */}
+        <div>
+          <div className={sectionTitleClasses}>
+            <Film size={16} />
+            <span>Documentary Mode</span>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className={labelClasses}>Documentary Mode</span>
+                <p className={`text-xs opacity-70 ${isRetro ? 'uppercase' : ''}`}>
+                  Cinematic camera descent upon location selection
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={!!settings.documentaryMode}
+                onClick={() =>
+                  onUpdateSettings({
+                    ...settings,
+                    documentaryMode: !settings.documentaryMode
+                  })
+                }
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  settings.documentaryMode
+                    ? isParchment
+                      ? 'bg-[#8b5a2b]'
+                      : isRetro
+                      ? skin === 'retro-amber'
+                        ? 'bg-[#ffb000]'
+                        : 'bg-[#33ff33]'
+                      : 'bg-cyan-500'
+                    : isParchment
+                    ? 'bg-[#d2b48c]'
+                    : isRetro
+                    ? 'bg-transparent border-current'
+                    : 'bg-white/20'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                    settings.documentaryMode ? 'translate-x-5' : 'translate-x-0'
+                  } ${isRetro ? (skin === 'retro-amber' ? 'bg-[#ffb000]' : 'bg-[#33ff33]') : ''}`}
+                />
+              </button>
+            </div>
+
+            <div>
+              <label className={labelClasses}>Transition Duration</label>
+              <div className="grid grid-cols-3 gap-2">
+                {(['short', 'cinematic', 'long'] as DocumentaryDuration[]).map((dur) => {
+                  const isSelected = (settings.documentaryDuration || 'cinematic') === dur;
+                  const labelMap: Record<DocumentaryDuration, string> = {
+                    short: 'Short (3.2s)',
+                    cinematic: 'Cinematic (5.5s)',
+                    long: 'Long (8.0s)'
+                  };
+                  return (
+                    <button
+                      key={dur}
+                      type="button"
+                      onClick={() =>
+                        onUpdateSettings({
+                          ...settings,
+                          documentaryDuration: dur
+                        })
+                      }
+                      className={`px-2 py-2 text-xs font-medium rounded-lg border transition-colors ${
+                        isSelected ? radioSelectedClasses : radioClasses
+                      } text-center justify-center`}
+                    >
+                      {labelMap[dur]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Narration Configuration */}
+        <div>
+          <div className={sectionTitleClasses}>
+            <Volume2 size={16} />
+            <span>Narration</span>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className={labelClasses}>Narration</span>
+                <p className={`text-xs opacity-70 ${isRetro ? 'uppercase' : ''}`}>
+                  Read location title and description via speech synthesis
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={!!settings.narrationEnabled}
+                onClick={() =>
+                  onUpdateSettings({
+                    ...settings,
+                    narrationEnabled: !settings.narrationEnabled
+                  })
+                }
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  settings.narrationEnabled
+                    ? isParchment
+                      ? 'bg-[#8b5a2b]'
+                      : isRetro
+                      ? skin === 'retro-amber'
+                        ? 'bg-[#ffb000]'
+                        : 'bg-[#33ff33]'
+                      : 'bg-cyan-500'
+                    : isParchment
+                    ? 'bg-[#d2b48c]'
+                    : isRetro
+                    ? 'bg-transparent border-current'
+                    : 'bg-white/20'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                    settings.narrationEnabled ? 'translate-x-5' : 'translate-x-0'
+                  } ${isRetro ? (skin === 'retro-amber' ? 'bg-[#ffb000]' : 'bg-[#33ff33]') : ''}`}
+                />
+              </button>
+            </div>
+
+            <div
+              className={`space-y-4 transition-opacity duration-200 ${
+                settings.narrationEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'
+              }`}
+            >
+              <div>
+                <label className={labelClasses}>Voice</label>
+                <select
+                  value={settings.narrationVoice || ''}
+                  onChange={(e) =>
+                    onUpdateSettings({
+                      ...settings,
+                      narrationVoice: e.target.value
+                    })
+                  }
+                  disabled={!settings.narrationEnabled}
+                  className={inputClasses}
+                >
+                  <option value="">System Default Voice</option>
+                  {availableVoices.map((v) => (
+                    <option key={v.voiceURI} value={v.voiceURI}>
+                      {v.name} ({v.lang})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className={labelClasses}>Speed</label>
+                  <span className="text-xs opacity-70">
+                    {(settings.narrationSpeed ?? 0.9).toFixed(1)}x
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="1.5"
+                  step="0.1"
+                  value={settings.narrationSpeed ?? 0.9}
+                  onChange={(e) =>
+                    onUpdateSettings({
+                      ...settings,
+                      narrationSpeed: parseFloat(e.target.value)
+                    })
+                  }
+                  disabled={!settings.narrationEnabled}
+                  className="w-full accent-cyan-400 cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className={labelClasses}>Volume</label>
+                  <span className="text-xs opacity-70">
+                    {Math.round((settings.narrationVolume ?? 1.0) * 100)}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={settings.narrationVolume ?? 1.0}
+                  onChange={(e) =>
+                    onUpdateSettings({
+                      ...settings,
+                      narrationVolume: parseFloat(e.target.value)
+                    })
+                  }
+                  disabled={!settings.narrationEnabled}
+                  className="w-full accent-cyan-400 cursor-pointer"
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>

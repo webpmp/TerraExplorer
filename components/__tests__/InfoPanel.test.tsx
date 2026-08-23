@@ -863,6 +863,59 @@ describe('Lightbox Metadata Integration', () => {
       expect(html).toContain('Waypoint 1 of 3');
     });
 
+    it('uses text-base for waypoint detail in retro-green and retro-amber and text-xs in modern and parchment', () => {
+      const multiLocationNav = {
+        current: 3,
+        total: 9,
+        onNext: () => {},
+        onPrev: () => {}
+      };
+
+      const greenHtml = renderToStaticMarkup(
+        <InfoPanel
+          info={sputnikLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="retro-green"
+          routeNav={multiLocationNav}
+        />
+      );
+      expect(greenHtml).toMatch(/class="[^"]*text-base[^"]*font-bold[^"]*uppercase[^"]*tracking-widest[^"]*"[^>]*>\s*Waypoint 3 of 9/);
+
+      const amberHtml = renderToStaticMarkup(
+        <InfoPanel
+          info={sputnikLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="retro-amber"
+          routeNav={multiLocationNav}
+        />
+      );
+      expect(amberHtml).toMatch(/class="[^"]*text-base[^"]*font-bold[^"]*uppercase[^"]*tracking-widest[^"]*"[^>]*>\s*Waypoint 3 of 9/);
+
+      const modernHtml = renderToStaticMarkup(
+        <InfoPanel
+          info={sputnikLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          routeNav={multiLocationNav}
+        />
+      );
+      expect(modernHtml).toMatch(/class="[^"]*text-xs[^"]*font-bold[^"]*uppercase[^"]*tracking-widest[^"]*"[^>]*>\s*Waypoint 3 of 9/);
+
+      const parchmentHtml = renderToStaticMarkup(
+        <InfoPanel
+          info={sputnikLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="parchment"
+          routeNav={multiLocationNav}
+        />
+      );
+      expect(parchmentHtml).toMatch(/class="[^"]*text-xs[^"]*font-bold[^"]*uppercase[^"]*tracking-widest[^"]*"[^>]*>\s*Waypoint 3 of 9/);
+    });
+
     it('removes the redundant title and short description block immediately below the header for single locations', () => {
       const html = renderToStaticMarkup(
         <InfoPanel
@@ -989,12 +1042,8 @@ describe('Lightbox Metadata Integration', () => {
 
     test('marker display name format for single location vs multi-location', () => {
       const formatDisplayName = (marker: any) => {
-        const isWaypoint = marker.isWaypoint;
-        const isMultiLocation = marker.isMultiLocation ?? false;
-        const showMarkerNumber = isWaypoint && isMultiLocation && marker.index !== undefined;
         const markerDisplayName = marker.data?.name || marker.name || 'Location';
-
-        return showMarkerNumber ? `${marker.index + 1}. ${markerDisplayName}` : markerDisplayName;
+        return markerDisplayName;
       };
 
       // Single location - unnumbered
@@ -1005,16 +1054,15 @@ describe('Lightbox Metadata Integration', () => {
         data: { name: 'Site No. 1, Baikonur Cosmodrome' }
       };
       expect(formatDisplayName(single)).toBe('Site No. 1, Baikonur Cosmodrome');
-      expect(formatDisplayName(single)).not.toContain('1.');
 
-      // Multi location - numbered
+      // Multi location - clean label without duplicate sequence prefix
       const multiFirst = {
         isWaypoint: true,
         isMultiLocation: true,
         index: 0,
         data: { name: 'Chang\'an' }
       };
-      expect(formatDisplayName(multiFirst)).toBe('1. Chang\'an');
+      expect(formatDisplayName(multiFirst)).toBe('Chang\'an');
 
       const multiSecond = {
         isWaypoint: true,
@@ -1022,7 +1070,16 @@ describe('Lightbox Metadata Integration', () => {
         index: 1,
         data: { name: 'Dunhuang' }
       };
-      expect(formatDisplayName(multiSecond)).toBe('2. Dunhuang');
+      expect(formatDisplayName(multiSecond)).toBe('Dunhuang');
+
+      // Name with existing number preserved intact
+      const multiNumberedName = {
+        isWaypoint: true,
+        isMultiLocation: true,
+        index: 2,
+        data: { name: 'Fort William Henry 1' }
+      };
+      expect(formatDisplayName(multiNumberedName)).toBe('Fort William Henry 1');
     });
   });
 

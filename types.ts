@@ -283,6 +283,7 @@ export interface ResolverResult {
 
 export type AIProvider = 'gemini' | 'lmstudio';
 export type NewsProvider = 'gemini' | 'newsapi' | 'newsdata' | 'nyt';
+export type DocumentaryDuration = 'short' | 'cinematic' | 'long';
 
 export interface UserSettings {
   aiProvider: AIProvider;
@@ -292,6 +293,12 @@ export interface UserSettings {
   newsApiKey: string;
   nytApiKey: string;
   newsDataApiKey: string;
+  documentaryMode?: boolean;
+  documentaryDuration?: DocumentaryDuration;
+  narrationEnabled?: boolean;
+  narrationVoice?: string;
+  narrationSpeed?: number;
+  narrationVolume?: number;
 }
 
 export interface Route {

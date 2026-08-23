@@ -2,6 +2,7 @@ import { Waypoint, ProvenanceRecord, HistoricalIssue, Route } from '../types';
 import { generateContentWithRetry, modelName } from './geminiService';
 import { PIPELINE_DEBUG, logWaypointSnapshot, logFieldDiff, logHierarchy, logPipelineSummary, PipelineSummary } from '../utils/pipelineDebug';
 import { parseAndExtract } from '../utils/jsonParser';
+import { validateEarthGeography } from './celestialCapabilities';
 
 export const runRoutePipeline = async (text: string, isUrl: boolean, generateRawRoute: (text: string, isUrl: boolean) => Promise<{ waypoints: any[], title?: string, routeConfidence?: any, routeType?: string }>, intent?: string): Promise<Route> => {
   const pipelineId = Math.random().toString(16).substring(2, 8);
@@ -77,6 +78,20 @@ export const runRoutePipeline = async (text: string, isUrl: boolean, generateRaw
     // Reject exact name match with query
     if (w.name.toLowerCase() === text.toLowerCase()) {
       console.warn(`[Pipeline ${pipelineId}] Structural Validation failed for ${w.name}: Waypoint name exactly matches route name`);
+      return false;
+    }
+
+    // Celestial Body Validation: Enforce Earth-only support
+    const celestialValidation = validateEarthGeography({
+      name: w.name,
+      canonicalName: w.canonicalName,
+      historicalRegion: w.historicalRegion,
+      modernLocation: w.modernLocation,
+      description: w.description
+    });
+
+    if (!celestialValidation.isValid) {
+      console.warn(`[Pipeline ${pipelineId}] Celestial Body Validation failed for ${w.name}: Unsupported celestial body '${celestialValidation.celestialBody}'. TerraExplorer supports Earth only.`);
       return false;
     }
     

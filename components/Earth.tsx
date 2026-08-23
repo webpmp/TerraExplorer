@@ -814,9 +814,7 @@ const HoverOverlay: React.FC<{
                   ? 'bg-black text-amber-300 border-amber-400 font-mono'
                   : 'bg-black text-green-300 border-green-400 font-mono'}`}
           >
-            {isWaypoint && isMultiLocation && waypointIndex !== undefined 
-              ? `${waypointIndex + 1}. ${(activePin as any).displayName || activePin.name || 'Unknown Location'}` 
-              : ((activePin as any).displayName || activePin.name || 'Unknown Location')}
+            {(activePin as any).displayName || activePin.name || 'Unknown Location'}
           </div>
         </div>
       </Html>
@@ -850,6 +848,11 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
   
   // Marker Outline Colors
   const outlineColor = isParchment ? '#e8d5b5' : isModern ? '#ffffff' : isGreen ? '#4ade80' : '#fbbf24';
+
+  const activeWaypointId = (routeWaypoints && routeWaypoints.length > 0 && currentWaypointIndex !== undefined && currentWaypointIndex >= 0 && currentWaypointIndex < routeWaypoints.length)
+    ? (routeWaypoints[currentWaypointIndex]?.id || `${routeWaypoints[currentWaypointIndex]?.name}-${routeWaypoints[currentWaypointIndex]?.lat}-${routeWaypoints[currentWaypointIndex]?.lng}`)
+    : null;
+  const effectiveSelectedMarkerId = selectedMarkerId || activeWaypointId;
 
   // Memoize positions and declustering logic
   const { processedMarkers, adjustedPositions } = useMemo(() => {
@@ -1389,10 +1392,12 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
         isInteracting={isInteracting}
         onCameraChange={props.onCameraChange}
         markers={processedMarkers}
-        selectedMarkerId={selectedMarkerId}
+        selectedMarkerId={effectiveSelectedMarkerId}
         selectedMarkerCoordinates={props.selectedMarkerCoordinates}
         onMarkerClick={handleMarkerClick}
         onMapReady={setIsStreetMapReady}
+        routeWaypoints={routeWaypoints}
+        currentWaypointIndex={currentWaypointIndex}
       />
 
       {/* Atmospheric Fog Transition Layer (Three-Phase Transition, 1.85 -> 1.35) */}
@@ -1414,7 +1419,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
           size={marker.isAnchor ? 0.022 : marker.visualSize}
           hitSize={marker.hitSize}
           isRetro={!isModern}
-          isSelected={selectedMarkerId === marker.id}
+          isSelected={effectiveSelectedMarkerId === marker.id}
           isWaypoint={marker.isWaypoint}
           isMultiLocation={marker.isMultiLocation}
           waypointIndex={marker.index}
@@ -1525,7 +1530,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
       skin={props.skin} 
       onMarkerClick={props.onMarkerClick} 
       outlineColor={outlineColor}
-      selectedMarkerId={selectedMarkerId}
+      selectedMarkerId={effectiveSelectedMarkerId}
       hoveredMarkerId={hoveredMarkerId}
       setHoveredMarkerId={setHoveredMarkerId}
     />

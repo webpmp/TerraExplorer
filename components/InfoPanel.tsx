@@ -2146,7 +2146,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                     <ChevronLeft size={16} />
                 </button>
                 <div className="flex flex-col items-center">
-                   <span className={`text-xs font-bold uppercase tracking-widest ${theme.subtext}`}>
+                   <span className={`${isRetro ? 'text-base' : 'text-xs'} font-bold uppercase tracking-widest ${theme.subtext}`}>
                        Waypoint {routeNav.current} of {routeNav.total}
                    </span>
                 </div>

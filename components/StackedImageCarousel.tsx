@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, X, Image as ImageIcon } from 'lucide-react';
 import { SkinType } from '../types';
 import { GalleryImage, cleanMetadataString, formatImageAttribution, isPlaceholderString } from './InfoPanel';
+import { getImageFilter } from '../utils/osmPalettes';
 
 export interface StackedImageCarouselProps {
   images: GalleryImage[];
@@ -183,20 +184,10 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
     overlay2Class = "bg-[#8b5a2b]/15";
   }
 
-  // Theme color image filters for retro themes (monochrome green and amber phosphor tints instead of grayscale)
-  let activeImageFilter: string | undefined = undefined;
-  let layer1ImageFilter: string | undefined = undefined;
-  let layer2ImageFilter: string | undefined = undefined;
-
-  if (skin === 'retro-green') {
-    activeImageFilter = 'grayscale(100%) sepia(100%) hue-rotate(85deg) saturate(300%) contrast(1.25) brightness(0.95)';
-    layer1ImageFilter = 'grayscale(100%) sepia(100%) hue-rotate(85deg) saturate(260%) contrast(1.15) brightness(0.82)';
-    layer2ImageFilter = 'grayscale(100%) sepia(100%) hue-rotate(85deg) saturate(220%) contrast(1.05) brightness(0.70)';
-  } else if (skin === 'retro-amber') {
-    activeImageFilter = 'grayscale(100%) sepia(100%) hue-rotate(5deg) saturate(300%) contrast(1.25) brightness(0.95)';
-    layer1ImageFilter = 'grayscale(100%) sepia(100%) hue-rotate(5deg) saturate(260%) contrast(1.15) brightness(0.82)';
-    layer2ImageFilter = 'grayscale(100%) sepia(100%) hue-rotate(5deg) saturate(220%) contrast(1.05) brightness(0.70)';
-  }
+  // Theme color image filters for retro themes (restrained monochrome green and amber phosphor tints)
+  const activeImageFilter = getImageFilter(skin, 'active');
+  const layer1ImageFilter = getImageFilter(skin, 'pile1');
+  const layer2ImageFilter = getImageFilter(skin, 'pile2');
 
   // Lightbox typography per skin
   let captionClass = "text-white/90 text-sm md:text-base font-normal font-sans";

@@ -214,7 +214,7 @@ describe('StackedImageCarousel Component', () => {
           expect(html).toContain('border-green-400');
           expect(html).toContain('font-retro');
           expect(html).toContain('text-green-300');
-          expect(html).toContain('hue-rotate(85deg)');
+          expect(html).toContain('hue-rotate(88deg)');
         } else if (skin === 'retro-amber') {
           expect(html).toContain('border-amber-400');
           expect(html).toContain('font-retro');
@@ -239,7 +239,7 @@ describe('StackedImageCarousel Component', () => {
         />
       );
       expect(greenLightbox).toContain('data-testid="lightbox-image"');
-      expect(greenLightbox).toContain('hue-rotate(85deg)');
+      expect(greenLightbox).toContain('hue-rotate(88deg)');
       expect(greenLightbox).toContain('data-testid="lightbox-crt-scanlines"');
       expect(greenLightbox).toContain('data-testid="lightbox-close"');
       expect(greenLightbox).toContain('text-green-300');

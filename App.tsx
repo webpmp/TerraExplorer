@@ -23,16 +23,9 @@ import logoImageBlack from './assets/logo-terra-explorer-black.png';
 import logoImageGreen from './assets/logo-terra-explorer-green.png';
 import logoImageAmber from './assets/logo-terra-explorer-amber.png';
 import { calculateClampedZoomDelta, normalizeWheelDelta } from './utils/cameraZoomUtils';
-
-// Helper to convert Lat/Lng to 3D Cartesian coordinates (Local Space)
-const latLngToVector3 = (lat: number, lng: number, radius: number = 1) => {
-  const phi = (90 - lat) * (Math.PI / 180);
-  const theta = (lng + 180) * (Math.PI / 180);
-  const x = -(radius * Math.sin(phi) * Math.cos(theta));
-  const z = (radius * Math.sin(phi) * Math.sin(theta));
-  const y = (radius * Math.cos(phi));
-  return new THREE.Vector3(x, y, z);
-};
+import { documentaryController, DocumentaryDestination } from './services/documentaryController';
+import { narrationService } from './services/narrationService';
+import { latLngToVector3, vector3ToLatLng } from './utils/globeCoordinates';
 
 // Helper for distance measurement (Haversine formula in km)
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -93,9 +86,12 @@ const AuthoritativeCameraEnforcer: React.FC<{
   isSidebarOpen: boolean;
   cameraStateRef: React.MutableRefObject<any>;
   parchmentZoom: number;
-}> = ({ skin, cameraControlsRef, targetCameraPosRef, isSidebarOpen, cameraStateRef, parchmentZoom }) => {
+  isDocumentaryActive?: boolean;
+}> = ({ skin, cameraControlsRef, targetCameraPosRef, isSidebarOpen, cameraStateRef, parchmentZoom, isDocumentaryActive }) => {
   useFrame(() => {
     if (!cameraControlsRef.current) return;
+    if (isDocumentaryActive) return; // DocumentaryController has direct authoritative control over camera during transitions
+    
     const controls = cameraControlsRef.current;
     const camera = controls.object;
     
@@ -108,12 +104,10 @@ const AuthoritativeCameraEnforcer: React.FC<{
        const baseDistance = aspect <= 1.28985 ? 3.0 : (3.0 * 1.28985) / aspect;
        const effectiveParchmentZoom = Math.max(0.375, Math.min(50.0, parchmentZoom));
        authoritativeDistance = Math.max(1.018, Math.min(8.0, baseDistance / effectiveParchmentZoom));
+    } else if (cameraState.activeRoute) {
+       authoritativeDistance = cameraState.routeSuggestedDistance;
     } else {
-       if (cameraState.activeRoute) {
-          authoritativeDistance = cameraState.routeSuggestedDistance;
-       } else {
-          authoritativeDistance = cameraState.themeSuggestedDistance;
-       }
+       authoritativeDistance = cameraState.themeSuggestedDistance;
     }
     
     // Protect against NaN
@@ -246,6 +240,7 @@ const App: React.FC = () => {
   const [scanningStatusText, setScanningStatusText] = useState<string | null>(null);
   
   const activeMarkerRequestRef = useRef<number>(0);
+  const activeSelectionIdRef = useRef<string | null>(null);
   const processingMarkerRef = useRef<string | null>(null);
   const isManualControlActiveRef = useRef<boolean>(false);
 
@@ -266,10 +261,24 @@ const App: React.FC = () => {
      targetParchmentZoomRef.current = clampedTarget;
      const diff = clampedTarget - currentZoom;
      
+     const aspect = window.innerWidth / window.innerHeight;
+     const baseDistance = aspect <= 1.28985 ? 3.0 : (3.0 * 1.28985) / aspect;
+
      if (Math.abs(diff) < 0.001) {
         currentParchmentZoomRef.current = clampedTarget;
         setParchmentZoom(clampedTarget);
         parchmentZoomAnimRef.current = null;
+        const finalDist = Math.max(1.018, Math.min(8.0, baseDistance / clampedTarget));
+        if (cameraControlsRef.current) {
+           const cam = cameraControlsRef.current.object;
+           cam.position.normalize().multiplyScalar(finalDist);
+           cameraControlsRef.current.update();
+        }
+        currentCameraDistanceRef.current = finalDist;
+        if (cameraStateRef.current) {
+           cameraStateRef.current.themeSuggestedDistance = finalDist;
+           cameraStateRef.current.routeSuggestedDistance = finalDist;
+        }
         return;
      }
      
@@ -277,6 +286,18 @@ const App: React.FC = () => {
      const clampedNextZoom = Math.max(0.375, Math.min(50.0, nextZoom));
      currentParchmentZoomRef.current = clampedNextZoom;
      setParchmentZoom(clampedNextZoom);
+
+     const physicalDist = Math.max(1.018, Math.min(8.0, baseDistance / clampedNextZoom));
+     if (cameraControlsRef.current) {
+        const cam = cameraControlsRef.current.object;
+        cam.position.normalize().multiplyScalar(physicalDist);
+        cameraControlsRef.current.update();
+     }
+     currentCameraDistanceRef.current = physicalDist;
+     if (cameraStateRef.current) {
+        cameraStateRef.current.themeSuggestedDistance = physicalDist;
+        cameraStateRef.current.routeSuggestedDistance = physicalDist;
+     }
      
      parchmentZoomAnimRef.current = requestAnimationFrame(animateParchmentZoom);
   }, []);
@@ -311,14 +332,15 @@ const App: React.FC = () => {
       newsProvider: 'nyt',
       newsApiKey: '',
       nytApiKey: '',
-      newsDataApiKey: ''
+      newsDataApiKey: '',
+      documentaryMode: false,
+      documentaryDuration: 'cinematic',
+      narrationEnabled: false,
+      narrationVoice: '',
+      narrationSpeed: 0.9,
+      narrationVolume: 1.0
     };
   });
-
-  const handleUpdateSettings = useCallback((newSettings: UserSettings) => {
-    setUserSettings(newSettings);
-    localStorage.setItem('terraExplorerSettings', JSON.stringify(newSettings));
-  }, []);
 
   // Route State
   const [routeWaypoints, setRouteWaypoints] = useState<Waypoint[]>([]);
@@ -339,6 +361,8 @@ const App: React.FC = () => {
   const [isLocationVisible, setIsLocationVisible] = useState(true);
   const [isZoomLocked, setIsZoomLocked] = useState(false);
   const [lockedZoomDistance, setLockedZoomDistance] = useState<number | null>(null);
+  const [isDocumentaryActive, setIsDocumentaryActive] = useState(false);
+  const activeNarrationRef = useRef<{ id: string; spoken: boolean } | null>(null);
   
 
   const currentCameraDistanceRef = useRef(4.5);
@@ -356,7 +380,15 @@ const App: React.FC = () => {
     currentCameraDistanceRef.current = dist;
     cameraStateRef.current.themeSuggestedDistance = dist;
     cameraStateRef.current.routeSuggestedDistance = dist;
-  }, []);
+    if (skin === 'parchment') {
+      const aspect = window.innerWidth / window.innerHeight;
+      const baseDistance = aspect <= 1.28985 ? 3.0 : (3.0 * 1.28985) / aspect;
+      const syncZoom = Math.max(0.375, Math.min(50.0, baseDistance / Math.max(1.018, dist)));
+      currentParchmentZoomRef.current = syncZoom;
+      targetParchmentZoomRef.current = syncZoom;
+      setParchmentZoom(syncZoom);
+    }
+  }, [skin]);
 
   const previousGeoCenterRef = useRef<{ lat: number; lng: number }>({ lat: 0, lng: 0 });
 
@@ -465,30 +497,38 @@ const App: React.FC = () => {
   const handleSkinChange = useCallback((newSkin: SkinType) => {
      cameraStateRef.current.theme = newSkin;
      setSkin(newSkin);
-      setParchmentZoom(1.0); // Reset parchment zoom on theme change
-      currentParchmentZoomRef.current = 1.0;
-      targetParchmentZoomRef.current = 1.0;
-      if (parchmentZoomAnimRef.current) {
-         cancelAnimationFrame(parchmentZoomAnimRef.current);
-         parchmentZoomAnimRef.current = null;
-      }
 
-     // Reset standard zoom references as well
-     targetZoomRef.current = null;
+     // Preserve active camera distance across theme transitions
+     const currentDistance = cameraControlsRef.current?.getDistance() || currentCameraDistanceRef.current || 4.5;
+     currentCameraDistanceRef.current = currentDistance;
+     cameraStateRef.current.themeSuggestedDistance = currentDistance;
+     cameraStateRef.current.routeSuggestedDistance = currentDistance;
+
+     if (parchmentZoomAnimRef.current) {
+        cancelAnimationFrame(parchmentZoomAnimRef.current);
+        parchmentZoomAnimRef.current = null;
+     }
+
      if (zoomAnimRef.current) {
         cancelAnimationFrame(zoomAnimRef.current);
         zoomAnimRef.current = null;
      }
+     targetZoomRef.current = null;
 
      if (newSkin === 'parchment') {
         cameraStateRef.current.mode = 'theme';
+        const aspect = window.innerWidth / window.innerHeight;
+        const baseDistance = aspect <= 1.28985 ? 3.0 : (3.0 * 1.28985) / aspect;
+        const syncZoom = Math.max(0.375, Math.min(50.0, baseDistance / Math.max(1.018, currentDistance)));
+        currentParchmentZoomRef.current = syncZoom;
+        targetParchmentZoomRef.current = syncZoom;
+        setParchmentZoom(syncZoom);
      } else {
         cameraStateRef.current.mode = 'route';
         setIsZoomLocked(false);
         setLockedZoomDistance(null);
      }
      
-     // Compute target rotation synchronously
      reconcileCameraState();
   }, [reconcileCameraState]);
   
@@ -998,8 +1038,190 @@ const App: React.FC = () => {
 
   const handleVisibilityChange = useCallback((visible: boolean) => {
     setIsLocationVisible(visible);
-  }, []);  const loadWaypointData = useCallback(async (wp: Waypoint) => {
+  }, []);
+
+  const locationInfoRef = useRef<LocationInfo | null>(null);
+  locationInfoRef.current = locationInfo;
+  const userSettingsRef = useRef<UserSettings>(userSettings);
+  userSettingsRef.current = userSettings;
+
+  const handleUpdateSettings = useCallback((newSettings: UserSettings) => {
+    const prevNarration = userSettingsRef.current.narrationEnabled;
+    userSettingsRef.current = newSettings;
+    setUserSettings(newSettings);
+    localStorage.setItem('terraExplorerSettings', JSON.stringify(newSettings));
+
+    if (!newSettings.narrationEnabled) {
+      narrationService.cancel();
+      activeNarrationRef.current = null;
+      console.log('[Narration] cancelled: Narration disabled in settings');
+    } else if (!prevNarration && newSettings.narrationEnabled && locationInfoRef.current) {
+      maybeTriggerNarration(locationInfoRef.current);
+    }
+  }, []);
+
+  const [activeOSMCoordinates, setActiveOSMCoordinates] = useState<{ lat: number; lng: number } | null>(null);
+  const selectedMarkerCoordinatesRef = useRef<{ lat: number; lng: number } | null>(null);
+  selectedMarkerCoordinatesRef.current = selectedMarkerCoordinates;
+
+  const handleDocumentarySetDistance = useCallback((dist: number) => {
+    if (cameraControlsRef.current) {
+      const controls = cameraControlsRef.current;
+      const cam = controls.object;
+      const currentLen = cam.position.length();
+      if (currentLen > 0.001) {
+        cam.position.normalize().multiplyScalar(dist);
+        cam.lookAt(0, 0, 0);
+        if (controls.target) {
+          controls.target.set(0, 0, 0);
+        }
+        controls.update();
+      }
+    }
+    updateCameraDistance(dist);
+  }, [updateCameraDistance]);
+
+  const handleDocumentarySetCameraPosition = useCallback((lat: number, lng: number, dist: number) => {
+    if (cameraControlsRef.current && earthRef.current) {
+      earthRef.current.updateMatrixWorld(true);
+      const v = latLngToVector3(lat, lng, dist);
+      const worldPos = v.clone();
+      earthRef.current.localToWorld(worldPos);
+      const cam = cameraControlsRef.current.object;
+      cam.position.copy(worldPos);
+      cam.lookAt(0, 0, 0);
+      if (cameraControlsRef.current.target) {
+        cameraControlsRef.current.target.set(0, 0, 0);
+      }
+      cameraControlsRef.current.update();
+    } else if (cameraControlsRef.current) {
+      const cam = cameraControlsRef.current.object;
+      cam.position.normalize().multiplyScalar(dist);
+      cam.lookAt(0, 0, 0);
+      if (cameraControlsRef.current.target) {
+        cameraControlsRef.current.target.set(0, 0, 0);
+      }
+      cameraControlsRef.current.update();
+    }
+    updateCameraDistance(dist);
+  }, [updateCameraDistance]);
+
+  const maybeTriggerNarration = useCallback((info: LocationInfo | null) => {
+    const currentSettings = userSettingsRef.current;
+    if (!info || !currentSettings.narrationEnabled) return;
+    const title = info.name || '';
+    const desc = info.description || info.significance || (info.waypoint?.description) || '';
+    
+    // Strict check: must have title and a valid descriptive body (at least 3 characters)
+    if (!title || !desc || desc.trim().length < 3) return;
+
+    const id = (info as any).id || info.osmId || info.name;
+    // Reject stale narration payloads if user has moved to another selection
+    if (activeSelectionIdRef.current && id !== activeSelectionIdRef.current) {
+      console.log(`[Narration] cancelled: stale payload for id=${id} (active=${activeSelectionIdRef.current})`);
+      return;
+    }
+
+    if (activeNarrationRef.current && activeNarrationRef.current.id === id && activeNarrationRef.current.spoken) {
+      return;
+    }
+
+    activeNarrationRef.current = {
+      id,
+      spoken: true
+    };
+
+    console.log(`[Narration] selectionId=${id}`);
+    console.log(`[Narration] title available: "${title}"`);
+    console.log(`[Narration] description available: "${desc.slice(0, 40)}..."`);
+    console.log('[Narration] payload ready');
+    console.log('[Narration] speaking combined text');
+
+    narrationService.speakStructured({
+      title,
+      description: desc,
+      voiceURI: currentSettings.narrationVoice,
+      speed: currentSettings.narrationSpeed,
+      volume: currentSettings.narrationVolume
+    });
+  }, []);
+
+  const startDocumentaryFlow = useCallback((dest: DocumentaryDestination, fromDest?: DocumentaryDestination) => {
+    if (parchmentZoomAnimRef.current) {
+      cancelAnimationFrame(parchmentZoomAnimRef.current);
+      parchmentZoomAnimRef.current = null;
+    }
+    if (zoomAnimRef.current) {
+      cancelAnimationFrame(zoomAnimRef.current);
+      zoomAnimRef.current = null;
+    }
+
+    setIsDocumentaryActive(true);
+    setActiveOSMCoordinates(null);
+    activeNarrationRef.current = null;
+
+    const callbacks = {
+      getCameraDistance: () => {
+        return cameraControlsRef.current?.getDistance() || currentCameraDistanceRef.current || 4.5;
+      },
+      getCameraCoordinates: () => {
+        if (earthRef.current && cameraControlsRef.current) {
+          earthRef.current.updateMatrixWorld(true);
+          const cam = cameraControlsRef.current.object;
+          const localPos = cam.position.clone();
+          earthRef.current.worldToLocal(localPos);
+          const coords = vector3ToLatLng(localPos);
+          if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng)) {
+            return coords;
+          }
+          console.warn('[Documentary] getCameraCoordinates returned non-finite coordinates, using destination fallback', coords);
+        }
+        return { lat: dest.lat, lng: dest.lng };
+      },
+      setCameraDistance: handleDocumentarySetDistance,
+      setCameraPosition: handleDocumentarySetCameraPosition,
+      onAtmosphereEnter: () => {
+        setActiveOSMCoordinates({ lat: dest.lat, lng: dest.lng });
+      },
+      onOSMEnter: () => {
+        setActiveOSMCoordinates({ lat: dest.lat, lng: dest.lng });
+      },
+      onSettle: () => {
+        setIsDocumentaryActive(false);
+        setActiveOSMCoordinates({ lat: dest.lat, lng: dest.lng });
+        setInteractionState('PIN_SELECTED');
+        if (locationInfoRef.current) {
+          maybeTriggerNarration(locationInfoRef.current);
+        }
+      },
+      onReveal: () => {
+        setIsDocumentaryActive(false);
+      },
+      onCancel: () => {
+        setIsDocumentaryActive(false);
+        setActiveOSMCoordinates(selectedMarkerCoordinatesRef.current);
+      }
+    };
+
+    const currentAspect = worldDimensions.height > 0 ? worldDimensions.width / worldDimensions.height : 16 / 9;
+    const options = {
+      duration: userSettingsRef.current.documentaryDuration || 'cinematic',
+      skin,
+      aspect: currentAspect,
+      viewportWidth: worldDimensions.width > 0 ? worldDimensions.width : undefined,
+      viewportHeight: worldDimensions.height > 0 ? worldDimensions.height : undefined
+    };
+
+    if (fromDest && typeof fromDest.lat === 'number' && typeof fromDest.lng === 'number') {
+      documentaryController.startWaypointTransition(fromDest, dest, callbacks, options);
+    } else {
+      documentaryController.startSingleLocation(dest, callbacks, options);
+    }
+  }, [handleDocumentarySetDistance, handleDocumentarySetCameraPosition, maybeTriggerNarration, skin, worldDimensions]);
+
+  const loadWaypointData = useCallback(async (wp: Waypoint, fromWp?: Waypoint) => {
      const stableId = wp.id || `${wp.name}-${wp.lat}-${wp.lng}`;
+     activeSelectionIdRef.current = stableId;
      const enrichmentRequestId = ++activeMarkerRequestRef.current;
      
      console.log(`[InfoPanel] OPEN`);
@@ -1034,16 +1256,41 @@ const App: React.FC = () => {
      setSelectedMarkerCoordinates({ lat: wp.lat, lng: wp.lng });
      setIsFocused(true);
 
-     // Propose camera values to central state
-     if (earthRef.current && cameraControlsRef.current) {
-        const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 2.0; 
-        
-        cameraStateRef.current.routeSuggestedDistance = targetDist;
-        cameraStateRef.current.targetRotation = { lat: wp.lat, lng: wp.lng };
-        
-        requestAnimationFrame(() => {
-           reconcileCameraState();
-        });
+     if (userSettings.documentaryMode) {
+        startDocumentaryFlow(
+          {
+            id: stableId,
+            name: wp.name,
+            lat: wp.lat,
+            lng: wp.lng,
+            description: wp.description
+          },
+          fromWp ? {
+            id: fromWp.id,
+            name: fromWp.name,
+            lat: fromWp.lat,
+            lng: fromWp.lng,
+            description: fromWp.description
+          } : undefined
+        );
+     } else {
+        setIsDocumentaryActive(false);
+        // Propose camera values to central state for normal mode
+        if (earthRef.current && cameraControlsRef.current) {
+           const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 2.0; 
+           
+           cameraStateRef.current.routeSuggestedDistance = targetDist;
+           cameraStateRef.current.targetRotation = { lat: wp.lat, lng: wp.lng };
+           
+           requestAnimationFrame(() => {
+              reconcileCameraState();
+           });
+        }
+     }
+
+     const initialDesc = wp.description || wp.significance || "";
+     if (initialDesc && initialDesc.trim().length >= 3) {
+        maybeTriggerNarration(initialWaypointPayload);
      }
      
      console.log(`ENTITY_RESOLUTION_STARTED [req: ${enrichmentRequestId}] for ${wp.name}`);
@@ -1105,6 +1352,9 @@ const App: React.FC = () => {
      }
 
      setLocationInfo(data);
+     if (data.description && data.description.trim().length >= 3) {
+        maybeTriggerNarration(data);
+     }
      // InfoPanel mounting state ready
      setIsInfoPanelLoading(true);
 
@@ -1141,6 +1391,7 @@ const App: React.FC = () => {
                          } else if (mode === 'natural_feature') {
                              delete nextState.population;
                          }
+                         maybeTriggerNarration(nextState);
                          return nextState;
                      });
                  } else {
@@ -1164,11 +1415,12 @@ const App: React.FC = () => {
          setIsInfoPanelLoading(false);
          console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_COMPLETE');
      }
-  }, [isZoomLocked, lockedZoomDistance, reconcileCameraState]);  const selectEntity = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint) => {
+  }, [isZoomLocked, lockedZoomDistance, reconcileCameraState, userSettings.documentaryMode, startDocumentaryFlow, maybeTriggerNarration]);  const selectEntity = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint) => {
     const stableId = marker.id || `${marker.name}-${marker.lat}-${marker.lng}`;
+    activeSelectionIdRef.current = stableId;
     const targetKey = stableId;
     
-    if (processingMarkerRef.current === targetKey) {
+    if (processingMarkerRef.current === targetKey || (selectedMarkerId === stableId && interactionState === 'PIN_SELECTED')) {
         return;
     }
     
@@ -1230,13 +1482,13 @@ const App: React.FC = () => {
             state: ('state' in marker ? (marker as any).state : undefined),
             city: ('city' in marker ? (marker as any).city : undefined),
             population: ('population' in marker ? (marker as any).population : undefined),
-            description: "",
+            description: ('description' in marker && marker.description ? marker.description : ""),
             climate: getEstimatedClimate(marker.lat, marker.lng, ('state' in marker ? (marker as any).state : "") || ('region' in marker ? (marker as any).region : ""), ('country' in marker ? (marker as any).country : "") || "", ('type' in marker ? marker.type : undefined)),
             contextNotes: [],
             news: [],
             notable: [],
             relatedEntities: [],
-            sectionState: { description: "loading", news: "loading" }
+            sectionState: { description: ('description' in marker && marker.description) ? "complete" : "loading", news: "loading" }
         };
 
         setLocationInfo(initialPayload);
@@ -1244,11 +1496,26 @@ const App: React.FC = () => {
         setIsNewsFetching(false);
         console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_STARTED');
 
-        if (cameraControlsRef.current) {
-            const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.5;
-            cameraStateRef.current.routeSuggestedDistance = targetDist;
-            cameraStateRef.current.targetRotation = { lat: marker.lat, lng: marker.lng };
-            requestAnimationFrame(() => reconcileCameraState());
+        if (userSettings.documentaryMode) {
+            startDocumentaryFlow({
+               id: stableId,
+               name: marker.name,
+               lat: marker.lat,
+               lng: marker.lng,
+               description: initialPayload.description
+            });
+        } else {
+            setIsDocumentaryActive(false);
+            if (cameraControlsRef.current) {
+                const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.5;
+                cameraStateRef.current.routeSuggestedDistance = targetDist;
+                cameraStateRef.current.targetRotation = { lat: marker.lat, lng: marker.lng };
+                requestAnimationFrame(() => reconcileCameraState());
+            }
+        }
+
+        if (initialPayload.description) {
+            maybeTriggerNarration(initialPayload);
         }
 
         // 2. Resolve geographic metadata asynchronously
@@ -1307,7 +1574,7 @@ const App: React.FC = () => {
                     console.log(`[Enrichment] ${geoMarker.name} complete`);
                     setLocationInfo((prev: any) => {
                         if (!prev || enrichmentRequestId !== activeMarkerRequestRef.current) return prev;
-                        return mergeLocationInfo(prev, {
+                        const nextState = mergeLocationInfo(prev, {
                             description: data.description || prev.description,
                             notable: data.notable || prev.notable,
                             contextNotes: data.contextNotes || prev.contextNotes,
@@ -1315,6 +1582,8 @@ const App: React.FC = () => {
                             imageSearchTerm: data.imageSearchTerm || prev.imageSearchTerm,
                             sectionState: { ...prev.sectionState, description: "complete" }
                         });
+                        maybeTriggerNarration(nextState);
+                        return nextState;
                     });
                 } else {
                     setLocationInfo((prev: any) => (prev && enrichmentRequestId === activeMarkerRequestRef.current) ? { ...prev, sectionState: { ...prev.sectionState, description: "error" } } : prev);
@@ -1333,7 +1602,7 @@ const App: React.FC = () => {
     } finally {
         processingMarkerRef.current = null;
     }
-  }, [isZoomLocked, lockedZoomDistance, reconcileCameraState, loadWaypointData, activeRouteId, routeWaypoints]);
+  }, [isZoomLocked, lockedZoomDistance, reconcileCameraState, loadWaypointData, activeRouteId, routeWaypoints, userSettings.documentaryMode, startDocumentaryFlow, maybeTriggerNarration]);
   const handleMarkerClick = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint, point?: THREE.Vector3) => {
       selectEntity(marker);
   }, [selectEntity]);
@@ -1344,6 +1613,10 @@ const App: React.FC = () => {
   }, []);
 
   const startScan = useCallback((location: GeoCoordinates) => {
+     documentaryController.cancel('new_scan_started');
+     narrationService.cancel();
+     setIsDocumentaryActive(false);
+     activeNarrationRef.current = null;
      activeScanIdRef.current++;
      activeMarkerRequestRef.current++; // Invalidate previous async requests
      scanResolvedRef.current = false;
@@ -1682,11 +1955,12 @@ const App: React.FC = () => {
     const hasValidCoords = pipelineResult.isValid && (pipelineResult as any).finalData && !pipelineResult.error;
 
     if (hasValidCoords) {
-      const { lat, lng } = (pipelineResult as any).finalData!.coordinates;
+      const finalData = (pipelineResult as any).finalData!;
+      const { lat, lng } = finalData.coordinates;
       
       const searchMarker: MapMarker = {
         id: `search-${Date.now()}`,
-        name: (pipelineResult as any).finalData!.name,
+        name: finalData.name,
         lat: lat,
         lng: lng,
         populationClass: 'large'
@@ -1702,21 +1976,37 @@ const App: React.FC = () => {
 
       setMarkers([searchMarker]);
       console.log(`[Marker Lifecycle] DISCOVERY_RESULTS_SET count=1`);
+      activeSelectionIdRef.current = searchMarker.id;
       setSelectedMarkerId(searchMarker.id);
       setSelectedMarkerCoordinates({ lat, lng });
-      setLocationInfo((pipelineResult as any).finalData!);
+      setLocationInfo(finalData);
       setIsDiscoveryLoading(false);
       console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
 
-      const zoom = (pipelineResult as any).metadataResult?.coordinateResult?.suggestedZoom || 5;
-      const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : Math.max(1.3, 4.5 - ((zoom / 10) * (4.5 - 1.2)));
-      
-      cameraStateRef.current.routeSuggestedDistance = targetDist;
-      cameraStateRef.current.targetRotation = { lat, lng };
-      
-      requestAnimationFrame(() => {
-         reconcileCameraState();
-      });
+      if (userSettings.documentaryMode) {
+        startDocumentaryFlow({
+          id: searchMarker.id,
+          name: searchMarker.name,
+          lat,
+          lng,
+          description: finalData.description
+        });
+      } else {
+        setIsDocumentaryActive(false);
+        const zoom = (pipelineResult as any).metadataResult?.coordinateResult?.suggestedZoom || 5;
+        const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : Math.max(1.3, 4.5 - ((zoom / 10) * (4.5 - 1.2)));
+        
+        cameraStateRef.current.routeSuggestedDistance = targetDist;
+        cameraStateRef.current.targetRotation = { lat, lng };
+        
+        requestAnimationFrame(() => {
+           reconcileCameraState();
+        });
+      }
+
+      if (finalData.description) {
+        maybeTriggerNarration(finalData);
+      }
 
     } else {
       const errorData = (pipelineResult as any).metadataResult?.enrichedData;
@@ -1731,7 +2021,9 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
       let userError = "Unable to resolve location.";
       const errorCode = pipelineResult.error;
-      if (errorCode === "LOCATION_SYSTEM_UNAVAILABLE") {
+      if (errorCode === "UNSUPPORTED_CELESTIAL_BODY") {
+        userError = "TerraExplorer currently supports Earth geography only.";
+      } else if (errorCode === "LOCATION_SYSTEM_UNAVAILABLE") {
         userError = "Location system unavailable.";
       } else if (errorCode === "NOT_FOUND") {
         userError = "Could not find location.";
@@ -1785,17 +2077,21 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
   const handleNextWaypoint = () => {
       if (currentWaypointIndex < routeWaypoints.length - 1) {
+          const currentWp = routeWaypoints[currentWaypointIndex];
           const nextIdx = currentWaypointIndex + 1;
+          const nextWp = routeWaypoints[nextIdx];
           setCurrentWaypointIndex(nextIdx);
-          loadWaypointData(routeWaypoints[nextIdx]);
+          loadWaypointData(nextWp, currentWp);
       }
   };
 
   const handlePrevWaypoint = () => {
       if (currentWaypointIndex > 0) {
+          const currentWp = routeWaypoints[currentWaypointIndex];
           const prevIdx = currentWaypointIndex - 1;
+          const prevWp = routeWaypoints[prevIdx];
           setCurrentWaypointIndex(prevIdx);
-          loadWaypointData(routeWaypoints[prevIdx]);
+          loadWaypointData(prevWp, currentWp);
       }
   };
 
@@ -1833,6 +2129,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
   const BUTTON_ZOOM_FACTOR = 1.25;
 
   const handleZoomIn = useCallback(() => {
+    userModifiedZoomRef.current = true;
     if (skin === 'parchment') {
        targetParchmentZoomRef.current = Math.min(50.0, Math.max(1.0, targetParchmentZoomRef.current * BUTTON_ZOOM_FACTOR));
        if (!parchmentZoomAnimRef.current) {
@@ -1855,6 +2152,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
   }, [handleZoomIn]);
 
   const handleZoomOut = useCallback(() => {
+    userModifiedZoomRef.current = true;
     if (skin === 'parchment') {
        targetParchmentZoomRef.current = Math.max(1.0, targetParchmentZoomRef.current / BUTTON_ZOOM_FACTOR);
        if (!parchmentZoomAnimRef.current) {
@@ -1862,7 +2160,6 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
        }
        return;
     }
-    userModifiedZoomRef.current = true;
     if (!isZoomLocked && cameraControlsRef.current) {
       targetZoomRef.current = targetZoomRef.current ?? cameraControlsRef.current.getDistance();
       targetZoomRef.current = clampZoom(targetZoomRef.current * BUTTON_ZOOM_FACTOR);
@@ -1876,6 +2173,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (skin === 'parchment') {
+         userModifiedZoomRef.current = true;
          const normalizedDelta = normalizeWheelDelta(e.deltaY, e.deltaMode);
          const parchmentScale = targetParchmentZoomRef.current / 15 + 0.4;
          const parchmentStep = Math.max(-2.5, Math.min(2.5, normalizedDelta * 0.0018 * parchmentScale));
@@ -1924,6 +2222,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         const pinchRatio = currentPinchDistance / initialPinchDistance;
 
         if (skin === 'parchment') {
+          userModifiedZoomRef.current = true;
           targetParchmentZoomRef.current = Math.max(1.0, Math.min(50.0, initialParchmentZoom * pinchRatio));
           if (!parchmentZoomAnimRef.current) {
             parchmentZoomAnimRef.current = requestAnimationFrame(animateParchmentZoom);
@@ -1961,14 +2260,18 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
   const handleClosePanel = () => {
     console.log(`[InfoPanel] CLOSE reason = user_close`);
+    documentaryController.cancel('infopanel_closed');
+    narrationService.cancel();
+    setIsDocumentaryActive(false);
+    activeNarrationRef.current = null;
     activeMarkerRequestRef.current++;
-    setInteractionState(markers.length > 0 ? 'PINS_RENDERED' : 'GLOBE_IDLE');
+    setInteractionState(markers.length > 0 || routeWaypoints.length > 0 ? 'PINS_RENDERED' : 'GLOBE_IDLE');
     setLocationInfo(null);
     setSelectedMarkerId(null);
     setSelectedMarkerCoordinates(null);
     setIsNewsFetching(false);
     setIsFocused(false);
-    console.log(`[Marker Lifecycle] INFOPANEL_CLOSED markersPreserved=${markers.length}`);
+    console.log(`[Marker Lifecycle] INFOPANEL_CLOSED markersPreserved=${markers.length} routeWaypointsPreserved=${routeWaypoints.length}`);
   };
 
   const getCurrentFavorite = () => {
@@ -2171,20 +2474,8 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
   const shouldPauseSuggestions = isFocused && !isZoomedOut;
 
-  // Filter favorites for Earth component
+  // Filter favorites for Earth component based on user's explicit visibility toggles
   const earthFavorites = favorites.filter(f => visibleFavoriteIds.includes(f.id));
-  
-  // Logic to show/hide saved items based on panel state
-  // If panel is closed, we hide all saved items (favorites prop handling in Earth relies on showFavorites)
-  // And we must manually hide route markers if they are from a saved route
-  const showSavedItems = isFavoritesPanelOpen;
-  
-  // If activeRouteId is set, it means we are viewing a saved route. 
-  // If so, only show it if the favorites panel (favorites mode) is open.
-  // If activeRouteId is null, it's a transient trace route, so we keep showing it.
-  const displayRouteWaypoints = activeRouteId 
-      ? (showSavedItems ? routeWaypoints : []) 
-      : routeWaypoints;
 
   const isParchment = skin === 'parchment';
   
@@ -2241,10 +2532,10 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           boundary={locationInfo?.boundary}
           markers={markers}
           favorites={earthFavorites}
-          showFavorites={showSavedItems}
+          showFavorites={true}
           selectedMarkerId={selectedMarkerId}
-          selectedMarkerCoordinates={selectedMarkerCoordinates}
-          routeWaypoints={displayRouteWaypoints}
+          selectedMarkerCoordinates={userSettings.documentaryMode && isDocumentaryActive ? activeOSMCoordinates : selectedMarkerCoordinates}
+          routeWaypoints={routeWaypoints}
           currentWaypointIndex={currentWaypointIndex}
           scanningArea={scanningArea}
           onCameraChange={updateAuthoritativeCamera}
@@ -2277,6 +2568,10 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
             if (cameraStateRef.current) {
               cameraStateRef.current.targetRotation = null;
             }
+            documentaryController.cancel('user_drag');
+            narrationService.cancel();
+            setIsDocumentaryActive(false);
+            activeNarrationRef.current = null;
             if (!isManualControlActiveRef.current) {
               isManualControlActiveRef.current = true;
               console.log('[Camera] MANUAL_CONTROL_STARTED');
@@ -2307,6 +2602,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
            isSidebarOpen={!!locationInfo || routeWaypoints.length > 0 || isFavoritesPanelOpen}
            cameraStateRef={cameraStateRef}
            parchmentZoom={parchmentZoom}
+           isDocumentaryActive={isDocumentaryActive}
         />
 
 

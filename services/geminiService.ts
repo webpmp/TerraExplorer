@@ -17,6 +17,7 @@ import { parseAndExtract } from '../utils/jsonParser';
 import { enrichLocationInfo, mergeRichestFields } from './locationService';
 import { isGenericPlaceholderDescription, isEnglishText } from './entityValidation';
 import { isPlaceholderString } from '../components/InfoPanel';
+import { validateEarthGeography } from './celestialCapabilities';
 
 export const EnrichmentMetrics = {
     retry: 0,
@@ -377,6 +378,18 @@ export const normalizeLocationEntity = (entity: string | null | undefined | any)
 export const resolveLocationQuery = async (query: string, intent?: QueryIntent, rawQuery?: string): Promise<SearchResult | null> => {
   let normalizedQuery = query;
   try {
+    // Step 0: Celestial Body Validation Guard (Earth-only support)
+    const celestialValidation = validateEarthGeography({ query: rawQuery || query, name: query });
+    if (!celestialValidation.isValid) {
+      console.warn(`[resolveLocationQuery] Rejected non-Earth query: ${celestialValidation.error}`);
+      return {
+        locationInfo: null as any,
+        suggestedZoom: 5,
+        aiUsed: false,
+        error: "UNSUPPORTED_CELESTIAL_BODY"
+      };
+    }
+
     const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
     const settings = getUserSettings();
     const activeProvider = settings.aiProvider || 'gemini';
@@ -2340,7 +2353,7 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
       const entityStr = match[1].replace(/[?.,!]+$/, "").trim();
       const cleanedEntity = entityStr.replace(/^the\s+/i, "");
       
-      console.log(`Intent:\nHISTORICAL_EVENT\nRouting decision:\nMULTI_LOCATION_EXPLORATION\nCoordinate validation:\nBYPASSED (non-point intent)`);
+      console.log(`Intent:\nHISTORICAL_EVENT\nRouting decision:\nMULTI_LOCATION_EXPLORATION`);
       
       return {
         intent: 'HISTORICAL_EVENT',

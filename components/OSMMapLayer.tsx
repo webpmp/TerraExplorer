@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { SkinType } from '../types';
+import { SkinType, Waypoint } from '../types';
 import { vector3ToLatLng, latLngToVector3 } from '../utils/globeCoordinates';
 import {
   normalizeWheelDelta,
@@ -12,8 +12,10 @@ import {
 import {
   osmTileService,
   OSMDetailLevel,
-  OSM_DETAIL_THRESHOLD
+  OSM_DETAIL_THRESHOLD,
+  OSM_RASTER_ALTITUDE
 } from '../services/geographic/osmTileService';
+import { getOsmPalette } from '../utils/osmPalettes';
 
 export interface OSMMapLayerProps {
   skin: SkinType;
@@ -24,6 +26,8 @@ export interface OSMMapLayerProps {
   selectedMarkerCoordinates?: { lat: number; lng: number } | null;
   onMarkerClick?: (e: any, marker: any) => void;
   onMapReady?: (ready: boolean) => void;
+  routeWaypoints?: Waypoint[];
+  currentWaypointIndex?: number;
 }
 
 interface TileDisplay {
@@ -112,7 +116,9 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
   selectedMarkerId = null,
   selectedMarkerCoordinates = null,
   onMarkerClick,
-  onMapReady
+  onMapReady,
+  routeWaypoints = [],
+  currentWaypointIndex
 }) => {
   const { camera, controls } = useThree();
   const rootGroupRef = useRef<THREE.Group>(null);
@@ -128,6 +134,39 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
   const opacityRef = useRef<number>(0);
   const [osmProjection, setOsmProjection] = useState<OSMProjection | null>(null);
   const [hoveredMarkerId, setHoveredMarkerId] = useState<string | null>(null);
+
+  // Departing waypoint marker & label fade-out tracking
+  const [departingMarkerId, setDepartingMarkerId] = useState<string | null>(null);
+  const [isDepartingFading, setIsDepartingFading] = useState<boolean>(false);
+  const prevSelectedMarkerIdRef = useRef<string | null>(selectedMarkerId || null);
+
+  useEffect(() => {
+    if (
+      prevSelectedMarkerIdRef.current &&
+      selectedMarkerId &&
+      prevSelectedMarkerIdRef.current !== selectedMarkerId
+    ) {
+      const departingId = prevSelectedMarkerIdRef.current;
+      setDepartingMarkerId(departingId);
+      setIsDepartingFading(false);
+
+      const frameId = requestAnimationFrame(() => {
+        setIsDepartingFading(true);
+      });
+
+      const timer = setTimeout(() => {
+        setDepartingMarkerId(null);
+        setIsDepartingFading(false);
+      }, 380);
+
+      prevSelectedMarkerIdRef.current = selectedMarkerId;
+      return () => {
+        cancelAnimationFrame(frameId);
+        clearTimeout(timer);
+      };
+    }
+    prevSelectedMarkerIdRef.current = selectedMarkerId || null;
+  }, [selectedMarkerId]);
 
   // Active primary tiles and fallback tiles for smooth transitions
   const activeTilesMapRef = useRef<Map<string, TileDisplay>>(new Map());
@@ -182,7 +221,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
     }
     loadedTileKeysRef.current.add(key);
     const total = activeTilesMapRef.current.size;
-    if (total > 0 && !isMapReadyRef.current) {
+    if (total > 0) {
       let loadedCount = 0;
       activeTilesMapRef.current.forEach((t) => {
         if (loadedTileKeysRef.current.has(t.key)) loadedCount++;
@@ -190,52 +229,23 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
       // Declared ready when primary coverage (>= 4 tiles or >= 40% of viewport tile set) is rendered
       const threshold = Math.min(4, Math.max(1, Math.ceil(total * 0.4)));
       if (loadedCount >= threshold) {
-        isMapReadyRef.current = true;
-        console.log('[OSM] Map ready', {
-          transitionId: transitionIdRef.current,
-          latitude: osmCameraCenterRef.current.lat,
-          longitude: osmCameraCenterRef.current.lng,
-          coverage: (loadedCount / total).toFixed(2)
-        });
-        onMapReady?.(true);
+        if (fallbackTilesMapRef.current.size > 0) {
+          fallbackTilesMapRef.current.clear();
+          setFallbackTilesList([]);
+        }
+        if (!isMapReadyRef.current) {
+          isMapReadyRef.current = true;
+          console.log('[OSM] Map ready', {
+            transitionId: transitionIdRef.current,
+            latitude: osmCameraCenterRef.current.lat,
+            longitude: osmCameraCenterRef.current.lng,
+            coverage: (loadedCount / total).toFixed(2)
+          });
+          onMapReady?.(true);
+        }
       }
     }
   }, [onMapReady]);
-
-  // Track window resize events
-  useEffect(() => {
-    const handleResize = () => {
-      const w = window.innerWidth;
-      const h = window.innerHeight;
-      setViewportSize({ width: w, height: h });
-      console.log(`[OSM Map] OVERLAY_RESIZE width=${w} height=${h} reason=viewport`);
-    };
-
-    window.addEventListener('resize', handleResize);
-    console.log(`[OSM Map] RENDER_SOURCE=RASTER_TILES provider=carto_osm skin=${skin}`);
-    console.log(`[OSM Map] OVERLAY_SIZE width=${window.innerWidth} height=${window.innerHeight}`);
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-    };
-  }, [skin]);
-
-  // Synchronize authoritative center when a marker is selected
-  useEffect(() => {
-    if (selectedMarkerCoordinates) {
-      hasUserPannedSinceSelectionRef.current = false;
-      const targetLat = selectedMarkerCoordinates.lat;
-      const targetLng = selectedMarkerCoordinates.lng;
-      osmCameraCenterRef.current = { lat: targetLat, lng: targetLng };
-      committedCenterRef.current = { lat: targetLat, lng: targetLng };
-
-      if (opacityRef.current > 0.01 && rootGroupRef.current) {
-        const localCamPos = rootGroupRef.current.worldToLocal(camera.position.clone());
-        const dist = localCamPos.length();
-        loadViewportTiles(targetLat, targetLng, dist, activeTileZoomRef.current, 'MARKER_SELECTION');
-      }
-    }
-  }, [selectedMarkerCoordinates, selectedMarkerId, camera]);
 
   const loadViewportTiles = useCallback((lat: number, lng: number, distance: number, targetZoom?: number, source: string = 'CAMERA', explicitTransitionId?: number) => {
     let z = targetZoom ?? activeTileZoomRef.current;
@@ -281,7 +291,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
         if (y < 0 || y >= n) continue;
 
         const wrappedX = ((x % n) + n) % n;
-        const key = `osm:${z}:${wrappedX}:${y}`;
+        const key = `osm:${skin}:${z}:${wrappedX}:${y}`;
 
         const tileLeft = screenCenterX + (x - exactX) * TILE_PX;
         const tileTop = screenCenterY + (y - exactY) * TILE_PX;
@@ -346,6 +356,73 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
       transitionStateRef.current = null;
     }
   }, [skin, viewportSize]);
+
+  // Track window resize events
+  useEffect(() => {
+    const handleResize = () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      setViewportSize({ width: w, height: h });
+      console.log(`[OSM Map] OVERLAY_RESIZE width=${w} height=${h} reason=viewport`);
+    };
+
+    window.addEventListener('resize', handleResize);
+    console.log(`[OSM Map] OVERLAY_SIZE width=${window.innerWidth} height=${window.innerHeight}`);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
+  // Track theme/skin transitions and immediately reload tiles with new palette/URL
+  const prevSkinRef = useRef<SkinType>(skin);
+  useEffect(() => {
+    console.log(`[OSM Map] RENDER_SOURCE=RASTER_TILES provider=carto_osm skin=${skin}`);
+    if (prevSkinRef.current !== skin) {
+      const oldSkin = prevSkinRef.current;
+      prevSkinRef.current = skin;
+
+      if (opacityRef.current > 0.01 || activeTilesMapRef.current.size > 0) {
+        console.log(`[OSM Map] THEME_SWITCH from=${oldSkin} to=${skin}`);
+
+        // Retain existing tiles as fallback underneath so screen never goes blank or flickers during theme transition
+        fallbackTilesMapRef.current = new Map(activeTilesMapRef.current);
+        setFallbackTilesList(Array.from(activeTilesMapRef.current.values()));
+        activeTilesMapRef.current.clear();
+
+        let centerLat = committedCenterRef.current.lat;
+        let centerLng = committedCenterRef.current.lng;
+        if (centerLat === 0 && centerLng === 0) {
+          centerLat = osmCameraCenterRef.current.lat || (selectedMarkerCoordinates?.lat ?? 0);
+          centerLng = osmCameraCenterRef.current.lng || (selectedMarkerCoordinates?.lng ?? 0);
+        }
+
+        const localCamPos = rootGroupRef.current ? rootGroupRef.current.worldToLocal(camera.position.clone()) : null;
+        const currentDist = localCamPos ? localCamPos.length() : 1.5;
+
+        loadViewportTiles(centerLat, centerLng, currentDist, activeTileZoomRef.current, 'THEME_CHANGE');
+      }
+    }
+  }, [skin, loadViewportTiles, camera, selectedMarkerCoordinates]);
+
+  // Synchronize authoritative center when a marker is selected
+  useEffect(() => {
+    if (selectedMarkerCoordinates) {
+      hasUserPannedSinceSelectionRef.current = false;
+      const targetLat = selectedMarkerCoordinates.lat;
+      const targetLng = selectedMarkerCoordinates.lng;
+      osmCameraCenterRef.current = { lat: targetLat, lng: targetLng };
+      committedCenterRef.current = { lat: targetLat, lng: targetLng };
+
+      if (opacityRef.current > 0.01 && rootGroupRef.current) {
+        const localCamPos = rootGroupRef.current.worldToLocal(camera.position.clone());
+        const dist = localCamPos.length();
+        if (dist <= 1.55) {
+          loadViewportTiles(targetLat, targetLng, dist, activeTileZoomRef.current, 'MARKER_SELECTION');
+        }
+      }
+    }
+  }, [selectedMarkerCoordinates, selectedMarkerId, camera, loadViewportTiles]);
 
   // Pointer event handlers for authoritative slippy map pan
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -923,21 +1000,12 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
   const isInteractive = opacity > 0.05;
 
   // Theme styling filter for the overlay (clean native rendering for standard and parchment skin)
+  const themePalette = useMemo(() => getOsmPalette(skin), [skin]);
   const themeStyle = useMemo<React.CSSProperties>(() => {
-    if (skin === 'retro-green') {
-      return {
-        filter: 'grayscale(100%) brightness(0.85) sepia(100%) hue-rotate(90deg) contrast(1.6)'
-      };
-    }
-    if (skin === 'retro-amber') {
-      return {
-        filter: 'grayscale(100%) brightness(0.88) sepia(100%) hue-rotate(5deg) contrast(1.5)'
-      };
-    }
     return {
-      filter: 'contrast(1.05)'
+      filter: themePalette.cssFilter
     };
-  }, [skin]);
+  }, [themePalette]);
 
   return (
     <group ref={rootGroupRef}>
@@ -956,6 +1024,45 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
             touchAction: 'none'
           }}
         >
+          {/* CRT Phosphor SVG Filter Definitions */}
+          <svg style={{ position: 'absolute', width: 0, height: 0, pointerEvents: 'none' }} aria-hidden="true">
+            <defs>
+              <filter id="retro-green-osm-filter" colorInterpolationFilters="sRGB">
+                <feColorMatrix
+                  type="matrix"
+                  values="
+                    0.12  0.04 -0.18  0  0.02
+                    0.65  0.28 -0.75  0  0.09
+                    0.18  0.08 -0.22  0  0.03
+                    0.00  0.00  0.00  1  0.00
+                  "
+                />
+                <feComponentTransfer>
+                  <feFuncR type="gamma" amplitude="1.0" exponent="1.2" offset="0" />
+                  <feFuncG type="gamma" amplitude="1.05" exponent="1.1" offset="0.01" />
+                  <feFuncB type="gamma" amplitude="1.0" exponent="1.3" offset="0" />
+                </feComponentTransfer>
+              </filter>
+
+              <filter id="retro-amber-osm-filter" colorInterpolationFilters="sRGB">
+                <feColorMatrix
+                  type="matrix"
+                  values="
+                    0.80  0.32 -0.85  0  0.11
+                    0.50  0.22 -0.55  0  0.06
+                    0.08  0.04 -0.12  0  0.01
+                    0.00  0.00  0.00  1  0.00
+                  "
+                />
+                <feComponentTransfer>
+                  <feFuncR type="gamma" amplitude="1.08" exponent="1.1" offset="0.01" />
+                  <feFuncG type="gamma" amplitude="1.0" exponent="1.2" offset="0.01" />
+                  <feFuncB type="gamma" amplitude="0.8" exponent="1.5" offset="0" />
+                </feComponentTransfer>
+              </filter>
+            </defs>
+          </svg>
+
           <div
             ref={containerDivRef}
             onPointerDown={handlePointerDown}
@@ -1042,6 +1149,101 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                 pointerEvents: 'none'
               }}
             >
+              {/* OSM Active Route Connection Line Overlay */}
+              {osmProjection && routeWaypoints && routeWaypoints.length > 1 && (
+                <svg
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    pointerEvents: 'none',
+                    zIndex: 10,
+                    overflow: 'visible'
+                  }}
+                >
+                  {routeWaypoints.slice(0, -1).map((wp, i) => {
+                    const nextWp = routeWaypoints[i + 1];
+                    if (
+                      typeof wp.lat !== 'number' || typeof wp.lng !== 'number' ||
+                      typeof nextWp.lat !== 'number' || typeof nextWp.lng !== 'number'
+                    ) {
+                      return null;
+                    }
+
+                    const n = Math.pow(2, osmProjection.z);
+
+                    // Project wp1
+                    const x1 = ((wp.lng + 180) / 360) * n;
+                    const latRad1 = (Math.max(-85.0511, Math.min(85.0511, wp.lat)) * Math.PI) / 180;
+                    const y1 = ((1 - Math.log(Math.tan(latRad1) + 1 / Math.cos(latRad1)) / Math.PI) / 2) * n;
+                    const sx1 = osmProjection.screenCenterX + (x1 - osmProjection.exactX) * 256;
+                    const sy1 = osmProjection.screenCenterY + (y1 - osmProjection.exactY) * 256;
+
+                    // Project wp2 (handling antimeridian wrap if needed)
+                    let lng2 = nextWp.lng;
+                    if (lng2 - wp.lng > 180) lng2 -= 360;
+                    else if (lng2 - wp.lng < -180) lng2 += 360;
+
+                    const x2 = ((lng2 + 180) / 360) * n;
+                    const latRad2 = (Math.max(-85.0511, Math.min(85.0511, nextWp.lat)) * Math.PI) / 180;
+                    const y2 = ((1 - Math.log(Math.tan(latRad2) + 1 / Math.cos(latRad2)) / Math.PI) / 2) * n;
+                    const sx2 = osmProjection.screenCenterX + (x2 - osmProjection.exactX) * 256;
+                    const sy2 = osmProjection.screenCenterY + (y2 - osmProjection.exactY) * 256;
+
+                    // Check if both points are far off-screen
+                    if (
+                      (sx1 < -500 && sx2 < -500) ||
+                      (sx1 > viewportSize.width + 500 && sx2 > viewportSize.width + 500) ||
+                      (sy1 < -500 && sy2 < -500) ||
+                      (sy1 > viewportSize.height + 500 && sy2 > viewportSize.height + 500)
+                    ) {
+                      return null;
+                    }
+
+                    const routeColor = skin === 'parchment'
+                      ? '#8b5a2b'
+                      : skin === 'retro-amber'
+                        ? themePalette.highways
+                        : skin === 'retro-green'
+                          ? themePalette.highways
+                          : '#00e5ff';
+
+                    const haloColor = skin === 'parchment'
+                      ? 'rgba(244, 234, 213, 0.85)'
+                      : 'rgba(0, 0, 0, 0.75)';
+
+                    return (
+                      <g key={`osm-route-seg-${wp.id || i}-${nextWp.id || i + 1}`}>
+                        {/* Subtle contrast halo / backdrop */}
+                        <line
+                          x1={sx1}
+                          y1={sy1}
+                          x2={sx2}
+                          y2={sy2}
+                          stroke={haloColor}
+                          strokeWidth={5}
+                          strokeLinecap="round"
+                        />
+                        {/* Main dashed thematic route line */}
+                        <line
+                          x1={sx1}
+                          y1={sy1}
+                          x2={sx2}
+                          y2={sy2}
+                          stroke={routeColor}
+                          strokeWidth={2.5}
+                          strokeDasharray="6 4"
+                          strokeLinecap="round"
+                          opacity={0.9}
+                        />
+                      </g>
+                    );
+                  })}
+                </svg>
+              )}
+
               {osmProjection && markers && markers.map((marker, idx) => {
                 if (typeof marker.lat !== 'number' || typeof marker.lng !== 'number') return null;
 
@@ -1063,12 +1265,13 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
 
                 const isSelected = selectedMarkerId === marker.id;
                 const isHovered = hoveredMarkerId === marker.id;
+                const isDeparting = departingMarkerId === marker.id;
                 const isWaypoint = marker.isWaypoint;
                 const isMultiLocation = marker.isMultiLocation ?? false;
                 const showMarkerNumber = isWaypoint && isMultiLocation && marker.index !== undefined;
                 const pinSize = isSelected ? 22 : 16;
                 const color = marker.color || (skin === 'parchment' ? '#8b5a2b' : '#3b82f6');
-                const outlineColor = skin === 'parchment' ? '#f4ead5' : (skin === 'retro-green' ? '#4ade80' : (skin === 'retro-amber' ? '#fbbf24' : '#ffffff'));
+                const outlineColor = skin === 'parchment' ? '#f4ead5' : (skin === 'retro-green' ? themePalette.highways : (skin === 'retro-amber' ? themePalette.highways : '#ffffff'));
 
                 const markerDisplayName =
                   (marker.data as any)?.displayName ||
@@ -1083,6 +1286,8 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                 });
                 const visualLeft = left + visualOffset.x;
                 const visualTop = top + visualOffset.y;
+
+                const isLabelVisible = isSelected || isHovered || isDeparting;
 
                 return (
                   <div
@@ -1149,7 +1354,10 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                           justifyContent: 'center',
                           pointerEvents: 'none',
                           userSelect: 'none',
-                          transition: 'transform 0.15s ease-out, box-shadow 0.15s ease-out'
+                          opacity: isDeparting ? (isDepartingFading ? 0.7 : 1) : 1,
+                          transition: isDeparting
+                            ? 'opacity 350ms ease-out, transform 0.15s ease-out, box-shadow 0.15s ease-out'
+                            : 'transform 0.15s ease-out, box-shadow 0.15s ease-out'
                         }}
                       >
                         {showMarkerNumber && (
@@ -1168,8 +1376,8 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                       </div>
                     </div>
 
-                    {/* Co-located OSM Marker Label (Visible on Hover or Selection, strictly pointer-events: none) */}
-                    {(isSelected || isHovered) && (
+                    {/* Co-located OSM Marker Label (Visible on Hover, Selection, or Departing Fade, strictly pointer-events: none) */}
+                    {isLabelVisible && (
                       <div
                         style={{
                           position: 'absolute',
@@ -1178,9 +1386,13 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                           transform: 'translateX(-50%)',
                           pointerEvents: 'none',
                           userSelect: 'none',
-                          whiteSpace: 'nowrap'
+                          whiteSpace: 'nowrap',
+                          opacity: isDeparting ? (isDepartingFading ? 0 : 1) : 1,
+                          transition: isDeparting
+                            ? 'opacity 350ms ease-out'
+                            : 'all 150ms ease-out'
                         }}
-                        className={`px-2.5 py-1 rounded-md text-xs font-bold shadow-lg border backdrop-blur-md transition-all duration-150
+                        className={`px-2.5 py-1 rounded-md text-xs font-bold shadow-lg border backdrop-blur-md
                           ${skin === 'parchment'
                             ? 'bg-[#2a221b]/95 text-[#f4ead5] border-[#8b5a2b]/60'
                             : skin === 'retro-amber'
@@ -1190,9 +1402,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                                 : 'bg-black/80 text-white border-white/30'
                           }`}
                       >
-                        {showMarkerNumber
-                          ? `${marker.index + 1}. ${markerDisplayName}`
-                          : markerDisplayName}
+                        {markerDisplayName}
                       </div>
                     )}
                   </div>
