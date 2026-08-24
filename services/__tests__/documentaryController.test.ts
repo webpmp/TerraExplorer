@@ -101,13 +101,25 @@ describe('DocumentaryController Suite', () => {
       { duration: 'cinematic' }
     );
 
-    // Phase 1: Rotate
+    // Phase 1: Rotate (0 - 40% of 5500ms = 0 - 2200ms)
     vi.advanceTimersByTime(1000);
     expect(controller.getPhase()).toBe('rotating');
+    expect(setCameraPosition).toHaveBeenCalled();
+    const rotateCall = setCameraPosition.mock.calls[setCameraPosition.mock.calls.length - 1];
+    // Coordinate must be in transit between 10 and 40, not snapped to 40
+    expect(rotateCall[0]).toBeGreaterThan(10);
+    expect(rotateCall[0]).toBeLessThan(40);
+    expect(rotateCall[1]).toBeGreaterThan(10);
+    expect(rotateCall[1]).toBeLessThan(40);
+    expect(rotateCall[2]).toBeCloseTo(4.5, 1);
 
-    // Phase 2: Descend
-    vi.advanceTimersByTime(2500);
+    // Phase 2: Descend (40% - 100% of 5500ms = 2200ms - 5500ms)
+    vi.advanceTimersByTime(2500); // at t = 3500ms
     expect(controller.getPhase()).toBe('descending');
+    const descendCall = setCameraPosition.mock.calls[setCameraPosition.mock.calls.length - 1];
+    expect(descendCall[0]).toBeCloseTo(destCoords.lat, 1);
+    expect(descendCall[1]).toBeCloseTo(destCoords.lng, 1);
+    expect(descendCall[2]).toBeLessThan(4.5);
 
     vi.advanceTimersByTime(2500);
     expect(onSettle).toHaveBeenCalled();

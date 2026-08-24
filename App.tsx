@@ -60,13 +60,28 @@ const CameraAnimator: React.FC<{
           animStartTimeRef.current = Date.now();
         }
 
-        camera.position.lerp(targetPosRef.current, 0.08);
+        const target = targetPosRef.current;
+        const currentLen = camera.position.length();
+        const targetLen = target.length();
+
+        const currentDir = camera.position.clone().normalize();
+        const targetDir = target.clone().normalize();
+
+        const qCurrent = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), currentDir);
+        const qTarget = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), targetDir);
+
+        qCurrent.slerp(qTarget, 0.08);
+        const newDir = new THREE.Vector3(0, 0, 1).applyQuaternion(qCurrent).normalize();
+        const newDist = THREE.MathUtils.lerp(currentLen, targetLen, 0.08);
+
+        camera.position.copy(newDir.multiplyScalar(newDist));
         cameraControlsRef.current.update(); // Update controls to reflect new position
         
-        const dist = camera.position.distanceTo(targetPosRef.current);
-        const timedOut = Date.now() - animStartTimeRef.current > 1200;
+        const angle = currentDir.angleTo(targetDir);
+        const distDiff = Math.abs(currentLen - targetLen);
+        const timedOut = Date.now() - animStartTimeRef.current > 1500;
 
-        if (dist < 0.05 || timedOut) {
+        if ((angle < 0.02 && distDiff < 0.05) || timedOut) {
             targetPosRef.current = null;
             animStartTimeRef.current = 0;
             if (cameraStateRef.current) {

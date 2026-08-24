@@ -273,7 +273,7 @@ export class DocumentaryController {
 
     const isStartingFromOSM = startDistance < config.atmosphereStartDistance;
     this.currentPhase = isStartingFromOSM ? 'zooming_out' : 'rotating';
-    const originCoords = isStartingFromOSM && callbacks.getCameraCoordinates
+    const originCoords = callbacks.getCameraCoordinates
       ? callbacks.getCameraCoordinates()
       : { lat: destination.lat, lng: destination.lng };
 
