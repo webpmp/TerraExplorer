@@ -111,6 +111,9 @@ export class NarrationService {
   private voiceListeners: Set<(voices: SpeechSynthesisVoice[]) => void> = new Set();
   private isSpeakingInternal = false;
   private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  private defaultVolume = 1.0;
+  private defaultSpeed = 0.9;
+  private defaultVoiceURI = '';
 
   private constructor() {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -128,6 +131,45 @@ export class NarrationService {
       NarrationService.instance = new NarrationService();
     }
     return NarrationService.instance;
+  }
+
+  public setVolume(volume: number): void {
+    const v = typeof volume === 'number' && !isNaN(volume) ? Math.max(0.0, Math.min(1.0, volume)) : 1.0;
+    this.defaultVolume = v;
+    if (this.currentUtterance) {
+      this.currentUtterance.volume = v;
+    }
+  }
+
+  public getVolume(): number {
+    return this.defaultVolume;
+  }
+
+  public setSpeed(speed: number): void {
+    const s = typeof speed === 'number' && !isNaN(speed) ? Math.max(0.5, Math.min(2.0, speed)) : 0.9;
+    this.defaultSpeed = s;
+    if (this.currentUtterance) {
+      this.currentUtterance.rate = s;
+    }
+  }
+
+  public getSpeed(): number {
+    return this.defaultSpeed;
+  }
+
+  public setVoiceURI(voiceURI: string): void {
+    this.defaultVoiceURI = voiceURI || '';
+    if (this.currentUtterance && voiceURI) {
+      const voices = this.getVoices();
+      const matched = voices.find((v) => v.voiceURI === voiceURI || v.name === voiceURI);
+      if (matched) {
+        this.currentUtterance.voice = matched;
+      }
+    }
+  }
+
+  public getVoiceURI(): string {
+    return this.defaultVoiceURI;
   }
 
   public isSupported(): boolean {
@@ -327,17 +369,18 @@ export class NarrationService {
       this.activeUtterances.add(utterance);
 
       // Configure speed (rate)
-      const speed = typeof options.speed === 'number' && !isNaN(options.speed) ? options.speed : 0.9;
+      const speed = typeof options.speed === 'number' && !isNaN(options.speed) ? options.speed : this.defaultSpeed;
       utterance.rate = Math.max(0.5, Math.min(2.0, speed));
 
       // Configure volume
-      const volume = typeof options.volume === 'number' && !isNaN(options.volume) ? options.volume : 1.0;
+      const volume = typeof options.volume === 'number' && !isNaN(options.volume) ? options.volume : this.defaultVolume;
       utterance.volume = Math.max(0.0, Math.min(1.0, volume));
 
       // Resolve voice by voiceURI
-      if (options.voiceURI) {
+      const voiceURI = options.voiceURI || this.defaultVoiceURI;
+      if (voiceURI) {
         const voices = this.getVoices();
-        const matched = voices.find((v) => v.voiceURI === options.voiceURI || v.name === options.voiceURI);
+        const matched = voices.find((v) => v.voiceURI === voiceURI || v.name === voiceURI);
         if (matched) {
           utterance.voice = matched;
         }

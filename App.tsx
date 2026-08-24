@@ -1120,6 +1120,16 @@ const App: React.FC = () => {
     setUserSettings(newSettings);
     localStorage.setItem('terraExplorerSettings', JSON.stringify(newSettings));
 
+    if (typeof newSettings.narrationVolume === 'number') {
+      narrationService.setVolume(newSettings.narrationVolume);
+    }
+    if (typeof newSettings.narrationSpeed === 'number') {
+      narrationService.setSpeed(newSettings.narrationSpeed);
+    }
+    if (newSettings.narrationVoice !== undefined) {
+      narrationService.setVoiceURI(newSettings.narrationVoice);
+    }
+
     if (!newSettings.narrationEnabled) {
       narrationService.cancel();
       activeNarrationRef.current = null;

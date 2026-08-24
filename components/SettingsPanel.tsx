@@ -21,6 +21,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
   const [modelTestMessage, setModelTestMessage] = React.useState('');
   const [newsTestStatus, setNewsTestStatus] = React.useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [newsTestMessage, setNewsTestMessage] = React.useState('');
+  const [isVoiceTesting, setIsVoiceTesting] = React.useState(false);
+  const [voiceTestMessage, setVoiceTestMessage] = React.useState('');
 
   useEffect(() => {
     const unsubscribe = narrationService.onVoicesChanged((voices) => {
@@ -99,6 +101,37 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
       setNewsTestStatus('error');
       setNewsTestMessage(e.message || 'Connection failed');
     }
+  };
+
+  const handleTestVoice = () => {
+    if (!settings.narrationEnabled) return;
+    if (isVoiceTesting) {
+      narrationService.cancel();
+      setIsVoiceTesting(false);
+      setVoiceTestMessage('');
+      return;
+    }
+    setIsVoiceTesting(true);
+    setVoiceTestMessage('Playing sample...');
+    narrationService.speakStructured({
+      title: "TerraExplorer",
+      description: "Voice volume and narration preview at current settings.",
+      voiceURI: settings.narrationVoice,
+      speed: settings.narrationSpeed,
+      volume: settings.narrationVolume,
+      onStart: () => {
+        setIsVoiceTesting(true);
+        setVoiceTestMessage('Playing sample...');
+      },
+      onEnd: () => {
+        setIsVoiceTesting(false);
+        setVoiceTestMessage('');
+      },
+      onError: () => {
+        setIsVoiceTesting(false);
+        setVoiceTestMessage('');
+      }
+    });
   };
 
 
@@ -535,12 +568,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                 <label className={labelClasses}>Voice</label>
                 <select
                   value={settings.narrationVoice || ''}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const voice = e.target.value;
+                    narrationService.setVoiceURI(voice);
                     onUpdateSettings({
                       ...settings,
-                      narrationVoice: e.target.value
-                    })
-                  }
+                      narrationVoice: voice
+                    });
+                  }}
                   disabled={!settings.narrationEnabled}
                   className={inputClasses}
                 >
@@ -566,12 +601,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                   max="1.5"
                   step="0.1"
                   value={settings.narrationSpeed ?? 0.9}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const speed = parseFloat(e.target.value);
+                    narrationService.setSpeed(speed);
                     onUpdateSettings({
                       ...settings,
-                      narrationSpeed: parseFloat(e.target.value)
-                    })
-                  }
+                      narrationSpeed: speed
+                    });
+                  }}
                   disabled={!settings.narrationEnabled}
                   className={sliderClasses}
                 />
@@ -590,15 +627,38 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                   max="1"
                   step="0.05"
                   value={settings.narrationVolume ?? 1.0}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const volume = parseFloat(e.target.value);
+                    narrationService.setVolume(volume);
                     onUpdateSettings({
                       ...settings,
-                      narrationVolume: parseFloat(e.target.value)
-                    })
-                  }
+                      narrationVolume: volume
+                    });
+                  }}
                   disabled={!settings.narrationEnabled}
                   className={sliderClasses}
                 />
+              </div>
+
+              <div className="pt-2 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleTestVoice}
+                  disabled={!settings.narrationEnabled}
+                  className={`px-4 py-2 rounded-lg text-sm border font-medium transition-colors
+                    ${isParchment ? 'border-[#8b5a2b] bg-[#8b5a2b]/10 hover:bg-[#8b5a2b]/20 text-[#8b5a2b]' : ''}
+                    ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20' : ''}
+                    ${isRetro ? 'border-[#33ff33] rounded-none hover:bg-[#33ff33]/20 text-[#33ff33] disabled:opacity-50' : ''}
+                    ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
+                  `}
+                >
+                  {isVoiceTesting ? 'Stop Sample' : 'Test Voice'}
+                </button>
+                {voiceTestMessage && (
+                  <span className={`text-xs ${isParchment ? 'text-[#8b5a2b]' : isRetro ? 'text-current' : 'text-cyan-400'}`}>
+                    {voiceTestMessage}
+                  </span>
+                )}
               </div>
             </div>
           </div>

@@ -347,5 +347,23 @@ describe('Route Lifecycle, Waypoint Labels, and Narration Separation Suite', () 
         description: expect.stringContaining('Dallas is the fourth-largest city')
       }));
     });
+
+    it('sets and retrieves volume, speed, and voiceURI accurately on narrationService', () => {
+      narrationService.setVolume(0.4);
+      expect(narrationService.getVolume()).toBe(0.4);
+
+      // Clamps between 0.0 and 1.0
+      narrationService.setVolume(1.5);
+      expect(narrationService.getVolume()).toBe(1.0);
+
+      narrationService.setVolume(-0.2);
+      expect(narrationService.getVolume()).toBe(0.0);
+
+      narrationService.setSpeed(1.2);
+      expect(narrationService.getSpeed()).toBe(1.2);
+
+      narrationService.setVoiceURI('com.apple.speech.synthesis.voice.Alex');
+      expect(narrationService.getVoiceURI()).toBe('com.apple.speech.synthesis.voice.Alex');
+    });
   });
 });
