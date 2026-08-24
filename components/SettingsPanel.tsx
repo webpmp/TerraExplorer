@@ -183,6 +183,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
     ${skin === 'retro-amber' ? 'bg-[#ffb000]/20 border-[#ffb000]' : ''}
   `;
 
+  const sliderClasses = `
+    w-full cursor-pointer
+    ${skin === 'modern' ? 'accent-cyan-400' : ''}
+    ${skin === 'retro-green' ? 'accent-[#33ff33]' : ''}
+    ${skin === 'retro-amber' ? 'accent-[#ffb000]' : ''}
+    ${skin === 'parchment' ? 'accent-[#8b5a2b]' : ''}
+  `;
+
   const handleAiProviderChange = (provider: AIProvider) => {
     onUpdateSettings({ ...settings, aiProvider: provider });
   };
@@ -462,7 +470,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                     })
                   }
                   disabled={!settings.documentaryMode}
-                  className="w-full accent-cyan-400 cursor-pointer"
+                  className={sliderClasses}
                 />
               </div>
             </div>
@@ -565,7 +573,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                     })
                   }
                   disabled={!settings.narrationEnabled}
-                  className="w-full accent-cyan-400 cursor-pointer"
+                  className={sliderClasses}
                 />
               </div>
 
@@ -589,7 +597,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                     })
                   }
                   disabled={!settings.narrationEnabled}
-                  className="w-full accent-cyan-400 cursor-pointer"
+                  className={sliderClasses}
                 />
               </div>
             </div>
