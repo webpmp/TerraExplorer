@@ -4,6 +4,7 @@ import { fetchLiveNews } from './newsService';
 import { logWaypointSnapshot } from '../utils/pipelineDebug';
 import { isClimateConflicting } from './geographic/climateEstimator';
 import { isPlaceholderString } from '../components/InfoPanel';
+import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
 
 export const mergeLocationInfo = (prev: any, next: any): any => {
     if (!next || typeof next !== 'object') return prev;
@@ -88,6 +89,10 @@ export const mergeLocationInfo = (prev: any, next: any): any => {
         if (prevHasImages && !nextHasImages && prev.notable.length > 0) {
             merged.notable = prev.notable;
         }
+    }
+
+    if (merged.notable && Array.isArray(merged.notable)) {
+        merged.notable = deduplicateNotableFacts(merged.notable);
     }
 
     // 3. String length and quality fallback for descriptions/context (like mergeRichestFields)
@@ -219,7 +224,7 @@ export const enrichLocationInfo = async (resolvedData: any): Promise<any> => {
       newsPreview: JSON.stringify(resolvedData.news)?.substring(0, 100),
       descriptionPreview: resolvedData.description?.substring(0, 100),
       climatePreview: resolvedData.climate?.name || "none",
-      notableCount: resolvedData.notable?.summary ? 1 : 0
+      notableCount: Array.isArray(resolvedData.notable) ? resolvedData.notable.length : (resolvedData.notable?.summary ? 1 : 0)
     }));
 
     if (!resolvedData.news) {
@@ -237,7 +242,7 @@ export const enrichLocationInfo = async (resolvedData: any): Promise<any> => {
       newsPreview: JSON.stringify(resolvedData.news)?.substring(0, 100),
       descriptionPreview: resolvedData.description?.substring(0, 100),
       climatePreview: resolvedData.climate?.name || "none",
-      notableCount: resolvedData.notable?.summary ? 1 : 0
+      notableCount: Array.isArray(resolvedData.notable) ? resolvedData.notable.length : (resolvedData.notable?.summary ? 1 : 0)
     }));
     
     return resolvedData;

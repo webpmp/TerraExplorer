@@ -238,6 +238,11 @@ export function detectGeographicMismatch(
   return { mismatch: false };
 }
 
+function normalizeDiacritics(str: string): string {
+  if (!str) return '';
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
 export function validateImageCandidate(
   candidate: ImageCandidate,
   entity: {
@@ -248,6 +253,8 @@ export function validateImageCandidate(
     country?: string;
     coordinates?: { lat: number; lng: number };
     entityType?: string;
+    intent?: string;
+    historicalContext?: string;
     aliases?: string[];
   }
 ): ImageValidationResult {
@@ -255,8 +262,11 @@ export function validateImageCandidate(
   const title = candidate.title || '';
   const desc = candidate.description || candidate.caption || '';
   const fullText = `${title} ${desc}`.toLowerCase();
+  const normFullText = normalizeDiacritics(fullText);
   const entityLower = entityName.toLowerCase();
   const canonicalLower = (entity.canonicalName || '').toLowerCase();
+  const eType = (entity.entityType || '').toLowerCase();
+  const isHistoricalVessel = eType.includes('shipwreck') || eType.includes('vessel') || entity.intent === 'DISCOVERY_OBJECT_LOCATION';
 
   // 1. Check for flags
   if (isGenericFlagOrEmblem(title, desc, entityName)) {
@@ -269,7 +279,47 @@ export function validateImageCandidate(
     };
   }
 
-  // 2. Check for geographic mismatch
+  // 2. HARD SEMANTIC INCOMPATIBILITY FILTERING (Must precede acceptance & alias scoring)
+  if (isHistoricalVessel) {
+    const hasMaritimeToken = /\b(ship|vessel|caravel|carrack|flagship|fleet|sailing|sail|wreck|shipwreck|maritime|nautical|naval|columbus|1492|expedition|replica|mast|rigging|hull)\b/i.test(fullText);
+    const hasColumbusToken = /\b(columbus|1492|hispaniola|caribbean|flagship|first voyage)\b/i.test(fullText);
+    const isPerson = /\b(podcaster|journalist|television host|talk show|science communicator|american woman|actress|comedian|politician|writer|author|born \d{4}|biography)\b/i.test(fullText);
+    const isChurch = /\b(basilica|cathedral|church|parish|diocese|convent|monastery|sanctuary)\b/i.test(fullText);
+    const isVolcano = /\b(stratovolcano|volcano|caldera)\b/i.test(fullText);
+    const isModernPlace = /\b(municipality|city in|capital of|county seat|census-designated)\b/i.test(fullText);
+
+    if (isPerson && !hasMaritimeToken) {
+      console.log(`[IMAGE CANDIDATE]\nTitle: ${title || 'Untitled'}\nName Match: HIGH\nEntity Type Match: INCOMPATIBLE\nHistorical Context Match: NONE\nMaritime Context Match: NONE\nDecision: REJECT\nReason: Semantic entity-type mismatch`);
+      return {
+        score: 0,
+        decision: 'REJECT',
+        reason: 'Semantic entity-type mismatch',
+        candidate
+      };
+    }
+
+    if (isChurch && !hasMaritimeToken) {
+      console.log(`[IMAGE CANDIDATE]\nTitle: ${title || 'Untitled'}\nName Match: HIGH\nEntity Type Match: INCOMPATIBLE\nHistorical Context Match: NONE\nMaritime Context Match: NONE\nDecision: REJECT\nReason: Incompatible category (church/religious building) for historical vessel`);
+      return {
+        score: 0,
+        decision: 'REJECT',
+        reason: 'Incompatible category (church/religious building) for historical vessel',
+        candidate
+      };
+    }
+
+    if ((isVolcano || isModernPlace) && !hasMaritimeToken) {
+      console.log(`[IMAGE CANDIDATE]\nTitle: ${title || 'Untitled'}\nName Match: HIGH\nEntity Type Match: INCOMPATIBLE\nHistorical Context Match: NONE\nMaritime Context Match: NONE\nDecision: REJECT\nReason: Incompatible category for historical vessel`);
+      return {
+        score: 0,
+        decision: 'REJECT',
+        reason: 'Incompatible category for historical vessel',
+        candidate
+      };
+    }
+  }
+
+  // 3. Check for geographic mismatch
   const geoCheck = detectGeographicMismatch(candidate, entity);
   if (geoCheck.mismatch) {
     console.log(`[IMAGE CANDIDATE REJECTED]\nTitle: ${title || 'Untitled'}\nEntity: ${entityName}\nImage location: ${geoCheck.location || 'Unknown'}\nDecision: REJECT\nReason: Geographic mismatch`);
@@ -281,7 +331,7 @@ export function validateImageCandidate(
     };
   }
 
-  // 3. Compute relevance score
+  // 4. Compute relevance score
   let score = 0;
   const reasons: string[] = [];
 
@@ -296,21 +346,38 @@ export function validateImageCandidate(
     aliases.push('palace museum', 'gugong', '故宫', '紫禁城', 'imperial palace', 'beijing imperial palace');
   }
 
-  // Exact match on entity name or canonical alias
-  const matchedAlias = aliases.find(a => a && fullText.includes(a));
+  // Exact match on entity name or canonical alias (with diacritic insensitivity)
+  const matchedAlias = aliases.find(a => a && (fullText.includes(a) || normFullText.includes(normalizeDiacritics(a))));
   if (matchedAlias) {
     score += 55;
     reasons.push(`Exact entity/alias match ('${matchedAlias}')`);
   } else {
     // Check significant tokens
     const tokens = entityLower.split(/\s+/).filter(t => t.length > 2);
-    const tokenMatches = tokens.filter(t => fullText.includes(t));
+    const tokenMatches = tokens.filter(t => fullText.includes(t) || normFullText.includes(normalizeDiacritics(t)));
     if (tokenMatches.length > 0) {
       const matchRatio = tokenMatches.length / tokens.length;
       if (matchRatio >= 0.6) {
         score += Math.round(35 * matchRatio);
         reasons.push(`Token match (${tokenMatches.join(', ')})`);
       }
+    }
+  }
+
+  // Maritime / Historical vessel semantic bonus
+  if (isHistoricalVessel) {
+    const vesselMatch = /\b(ship|vessel|caravel|carrack|flagship|fleet|sailing|sail|wreck|shipwreck|maritime|nautical|naval|columbus|1492|expedition|replica|illustration|painting)\b/i.test(fullText);
+    const hasColumbus = /\b(columbus|1492|hispaniola|caribbean|flagship|first voyage)\b/i.test(fullText);
+    if (vesselMatch) {
+      score += 45;
+      reasons.push('Maritime/historical vessel context match');
+      console.log(`[IMAGE CANDIDATE]\nTitle: ${title || 'Untitled'}\nName Match: HIGH\nEntity Type Match: HIGH\nHistorical Context Match: ${hasColumbus ? 'HIGH' : 'MEDIUM'}\nMaritime Context Match: HIGH\nDecision: ACCEPT\nReason: Strong semantic match`);
+      return {
+        score,
+        decision: 'ACCEPT',
+        reason: 'Strong semantic match',
+        candidate
+      };
     }
   }
 
@@ -341,7 +408,7 @@ export function validateImageCandidate(
     }
   }
 
-  // Hard penalty if no alias/entity tokens matched at all (e.g. random image of Beijing or random Chinese art)
+  // Hard penalty if no alias/entity tokens matched at all
   if (!matchedAlias && score < 40) {
     score = Math.min(score, 25);
   }
@@ -374,40 +441,62 @@ export function buildEntityImageQueries(info: {
   state?: string;
   country?: string;
   entityType?: string;
+  intent?: string;
+  historicalContext?: string;
+  description?: string;
   imageSearchTerm?: string;
 }): string[] {
   const queries: string[] = [];
   const name = (info.canonicalName || info.name || '').trim();
   const city = (info.city || '').trim();
   const country = (info.country || '').trim();
+  const eType = (info.entityType || '').toLowerCase();
+  const isHistoricalVessel = eType.includes('shipwreck') || eType.includes('vessel') || info.intent === 'DISCOVERY_OBJECT_LOCATION';
 
   // If specific imageSearchTerm was provided (and doesn't look like a generic query), use it
   if (info.imageSearchTerm && info.imageSearchTerm !== info.name) {
     queries.push(info.imageSearchTerm);
   }
 
-  // 1. Landmark + City + Country (e.g. "Forbidden City Beijing China")
+  // 1. Historical vessel semantic expansions
+  if (isHistoricalVessel) {
+    const histContext = info.historicalContext || '';
+    if (histContext.includes('Columbus') || histContext.includes('1492') || name.toLowerCase().includes('santa maria')) {
+      queries.push(`${name} ship Christopher Columbus 1492`);
+      queries.push(`${name} ship`);
+      queries.push(`${name} shipwreck`);
+      queries.push(`${name} caravel`);
+    } else {
+      queries.push(`${name} ship`);
+      queries.push(`${name} shipwreck`);
+      queries.push(`${name} vessel`);
+    }
+  }
+
+  // 2. Landmark + City + Country (e.g. "Forbidden City Beijing China")
   if (city && country) {
     queries.push(`${name} ${city} ${country}`);
   }
 
-  // 2. Landmark + City (e.g. "Forbidden City Beijing")
+  // 3. Landmark + City (e.g. "Forbidden City Beijing")
   if (city) {
     queries.push(`${name} ${city}`);
   }
 
-  // 3. Known landmark-specific expansions
+  // 4. Known landmark-specific expansions
   if (name.toLowerCase() === 'forbidden city') {
     queries.push('Forbidden City Palace Museum Beijing');
   }
 
-  // 4. Landmark + Country (e.g. "Forbidden City China")
+  // 5. Landmark + Country (e.g. "Forbidden City China")
   if (country) {
     queries.push(`${name} ${country}`);
   }
 
-  // 5. Canonical entity name
-  queries.push(name);
+  // 6. Canonical entity name for modern/general places
+  if (!isHistoricalVessel) {
+    queries.push(name);
+  }
 
   // Return deduplicated list
   return Array.from(new Set(queries.filter(Boolean)));
@@ -432,6 +521,8 @@ export async function fetchAndValidateImages(info: LocationInfo): Promise<Galler
       country: info.country,
       coordinates: info.coordinates,
       entityType: info.entityType || (info as any).type,
+      intent: (info as any).intent,
+      historicalContext: (info as any).historicalContext,
       aliases: (info as any).alternateNames
     });
 
@@ -510,10 +601,12 @@ export async function fetchAndValidateImages(info: LocationInfo): Promise<Galler
 
   // 2. Fetch images from Wikipedia using entity-specific progressive queries
   const queries = buildEntityImageQueries(info);
+  const histContextStr = (info as any).historicalContext || ((info as any).intent === 'DISCOVERY_OBJECT_LOCATION' ? 'Christopher Columbus / 1492 / Santa María' : 'none');
+  const geoContextStr = [info.city, info.state, info.country].filter(Boolean).join(' / ') || ((info as any).intent === 'DISCOVERY_OBJECT_LOCATION' ? 'Haiti / Northern Hispaniola' : 'Unknown');
 
   for (let i = 0; i < queries.length; i++) {
     const query = queries[i];
-    console.log(`[IMAGE SEARCH]\nEntity: ${info.name}\nCanonical location: ${[info.city, info.state, info.country].filter(Boolean).join(', ')}\nCoordinates: ${info.coordinates?.lat}, ${info.coordinates?.lng}\nQuery: ${query}`);
+    console.log(`[IMAGE SEARCH]\nEntity: ${info.name}\nEntity Type: ${info.entityType || (info as any).type || 'unknown'}\nIntent: ${(info as any).intent || 'unknown'}\nHistorical Context: ${histContextStr}\nGeographic Context: ${geoContextStr}\nQuery: ${query}`);
 
     try {
       const endpoint = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrlimit=8&prop=pageimages|description|coordinates&format=json&pithumbsize=800&origin=*`;

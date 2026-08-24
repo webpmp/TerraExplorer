@@ -17,6 +17,7 @@ export interface DeterministicLocationEntry {
   suggestedZoom?: number;
   population?: number;
   populationYear?: number;
+  description?: string;
   climate?: {
     koppenCode: string;
     description: string;
@@ -41,6 +42,10 @@ export const DETERMINISTIC_LOCATION_DB: Record<string, DeterministicLocationEntr
   "boston, ma": { name: "Boston, Massachusetts", type: LocationType.CITY, entityType: "city", lat: 42.3601, lng: -71.0589, suggestedZoom: 8 },
   "boston ma": { name: "Boston, Massachusetts", type: LocationType.CITY, entityType: "city", lat: 42.3601, lng: -71.0589, suggestedZoom: 8 },
   "boston": { name: "Boston, Massachusetts", type: LocationType.CITY, entityType: "city", lat: 42.3601, lng: -71.0589, suggestedZoom: 8 },
+
+  "santa maria, california": { name: "Santa Maria, California", type: LocationType.CITY, entityType: "city", lat: 34.9530, lng: -120.4357, suggestedZoom: 8, description: "Santa Maria is a city in Santa Barbara County on the Central Coast of California, renowned for its wine industry and distinctive Santa Maria-style barbecue cuisine.", context: { country: "United States", state: "California", city: "Santa Maria" } },
+  "santa maria, ca": { name: "Santa Maria, California", type: LocationType.CITY, entityType: "city", lat: 34.9530, lng: -120.4357, suggestedZoom: 8, description: "Santa Maria is a city in Santa Barbara County on the Central Coast of California, renowned for its wine industry and distinctive Santa Maria-style barbecue cuisine.", context: { country: "United States", state: "California", city: "Santa Maria" } },
+  "santa maria, brazil": { name: "Santa Maria, Brazil", type: LocationType.CITY, entityType: "city", lat: -29.6842, lng: -53.8069, suggestedZoom: 8, description: "Santa Maria is a prominent university city in the central region of Rio Grande do Sul, southern Brazil, serving as an educational, medical, and agricultural hub.", context: { country: "Brazil", state: "Rio Grande do Sul", city: "Santa Maria" } },
 
   "amsterdam": { name: "Amsterdam, Netherlands", type: LocationType.CITY, entityType: "city", lat: 52.3676, lng: 4.9041, suggestedZoom: 8 },
   "amsterdam, netherlands": { name: "Amsterdam, Netherlands", type: LocationType.CITY, entityType: "city", lat: 52.3676, lng: 4.9041, suggestedZoom: 8 },

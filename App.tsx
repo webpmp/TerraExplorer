@@ -298,6 +298,12 @@ const App: React.FC = () => {
       try {
         const parsed = JSON.parse(saved);
         if (parsed.newsProvider === 'gemini') parsed.newsProvider = 'nyt';
+        if (typeof parsed.documentaryDuration === 'string') {
+          const map: Record<string, number> = { short: 3.2, cinematic: 5.5, long: 8.0 };
+          parsed.documentaryDuration = map[parsed.documentaryDuration] ?? 5.5;
+        } else if (typeof parsed.documentaryDuration !== 'number' || isNaN(parsed.documentaryDuration)) {
+          parsed.documentaryDuration = 5.5;
+        }
         return parsed;
       } catch (e) {
         // Ignore
@@ -312,7 +318,7 @@ const App: React.FC = () => {
       nytApiKey: '',
       newsDataApiKey: '',
       documentaryMode: false,
-      documentaryDuration: 'cinematic',
+      documentaryDuration: 5.5,
       narrationEnabled: false,
       narrationVoice: '',
       narrationSpeed: 0.9,
@@ -1226,7 +1232,7 @@ const App: React.FC = () => {
 
     const currentAspect = worldDimensions.height > 0 ? worldDimensions.width / worldDimensions.height : 16 / 9;
     const options = {
-      duration: userSettingsRef.current.documentaryDuration || 'cinematic',
+      duration: typeof userSettingsRef.current.documentaryDuration === 'number' ? userSettingsRef.current.documentaryDuration : 5.5,
       skin,
       aspect: currentAspect,
       viewportWidth: worldDimensions.width > 0 ? worldDimensions.width : undefined,
@@ -1990,7 +1996,15 @@ const App: React.FC = () => {
         name: finalData.name,
         lat: lat,
         lng: lng,
-        populationClass: 'large'
+        populationClass: 'large',
+        coordinateSource: finalData.coordinateSource,
+        isApproximate: finalData.isApproximate,
+        exactLocationKnown: finalData.exactLocationKnown,
+        confirmedWreckLocation: finalData.confirmedWreckLocation,
+        entityType: finalData.entityType,
+        intent: finalData.intent,
+        historicalContext: finalData.historicalContext,
+        canonicalName: finalData.canonicalName
       };
 
       console.log(`[SearchNarration] SEARCH_RESULT_CREATED name="${finalData.name}" markerId="${searchMarker.id}"`);
@@ -2059,6 +2073,8 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         userError = "Location system unavailable.";
       } else if (errorCode === "NOT_FOUND") {
         userError = "Could not find location.";
+      } else if (errorCode === "HISTORICAL_LOCATION_UNCONFIRMED") {
+        userError = "Exact historical location is unconfirmed.";
       } else if (errorCode === "NO_GEOGRAPHIC_DATA") {
         userError = "No results found for this query.";
       } else if (errorCode === "TEMP_FAILURE") {

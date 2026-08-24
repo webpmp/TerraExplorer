@@ -64,10 +64,20 @@ export interface DocumentaryStartOptions {
   cameraConfig?: DocumentaryCameraConfig;
 }
 
-export const DOCUMENTARY_DURATIONS: Record<DocumentaryDuration, number> = {
+export const DOCUMENTARY_DURATIONS: Record<string, number> = {
   short: 3200,
   cinematic: 5500,
   long: 8000
+};
+
+export const resolveDocumentaryDuration = (duration?: DocumentaryDuration): number => {
+  if (typeof duration === 'number' && !isNaN(duration)) {
+    return Math.max(2000, Math.min(10000, Math.round(duration * 1000)));
+  }
+  if (typeof duration === 'string') {
+    return DOCUMENTARY_DURATIONS[duration] ?? 5500;
+  }
+  return 5500;
 };
 
 // Target altitude for settled OSM view, cleanly below OSM_DETAIL_THRESHOLD (1.45)
@@ -279,13 +289,13 @@ export class DocumentaryController {
 
     console.log(`[Documentary] theme=${config.skin} single-location descent started id=${sequenceId} to="${destination.name}" startDist=${startDistance.toFixed(2)} targetDist=${targetDistance.toFixed(2)} maxAllowedDistance=${maxAllowedDistance.toFixed(2)}`);
 
-    const durationSetting = options?.duration || 'cinematic';
+    const durationSetting = options?.duration;
     const isReducedMotion =
       options?.reducedMotion ??
       (typeof window !== 'undefined' &&
         window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches);
 
-    const totalDurationMs = isReducedMotion ? 50 : (DOCUMENTARY_DURATIONS[durationSetting] || 5500);
+    const totalDurationMs = isReducedMotion ? 50 : resolveDocumentaryDuration(durationSetting);
 
     if (totalDurationMs <= 100) {
       if (callbacks.setCameraPosition) {
@@ -475,13 +485,13 @@ export class DocumentaryController {
 
     console.log(`[Documentary] theme=${config.skin} state=${this.currentPhase} category=${transitionCategory} waypoint transition started id=${sequenceId} from="${current.name}" to="${destination.name}" separation=${sepDeg.toFixed(1)}° framingDist=${framingDistance.toFixed(2)} startDist=${startDistance.toFixed(2)} maxAllowedDistance=${maxAllowedDistance.toFixed(2)}`);
 
-    const durationSetting = options?.duration || 'cinematic';
+    const durationSetting = options?.duration;
     const isReducedMotion =
       options?.reducedMotion ??
       (typeof window !== 'undefined' &&
         window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches);
 
-    const baseDuration = DOCUMENTARY_DURATIONS[durationSetting] || 5500;
+    const baseDuration = resolveDocumentaryDuration(durationSetting);
     let totalDurationMs: number;
 
     if (isReducedMotion) {

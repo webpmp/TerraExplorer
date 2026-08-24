@@ -11,6 +11,8 @@ import { getEstimatedClimate, getClimateDescription, isClimateConflicting } from
 import { reverseGeocode, enrichSettlementPopulation, isPopulationBearingEntity } from './geographic/geographicResolver';
 import { isPlaceholderString } from '../components/InfoPanel';
 import { validateEarthGeography } from './celestialCapabilities';
+import { getHistoricalEntityKnowledge, toCanonicalTitleCase } from './geographic/historicalCoordinateValidator';
+import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
 
 // --- PIPELINE TYPES ---
 
@@ -118,7 +120,7 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   console.log(`Intent: ${entityResult.intentResult.intent}`);
   console.log(`Initial Resolver Error: ${error || 'None'}`);
   
-  const allowedErrors = ["NO_GEOGRAPHIC_DATA", "LOCATION_SYSTEM_UNAVAILABLE", "UNABLE_TO_RESOLVE"];
+  const allowedErrors = ["NO_GEOGRAPHIC_DATA", "LOCATION_SYSTEM_UNAVAILABLE", "UNABLE_TO_RESOLVE", "TEMP_FAILURE", "HISTORICAL_LOCATION_UNCONFIRMED"];
   const nonGeographicIntents = ['EXPLORATORY', 'HISTORICAL_EVENT', 'BROAD_CULTURAL_QUERY'];
   const isGeographicIntent = !nonGeographicIntents.includes(entityResult.intentResult.intent);
 
@@ -178,15 +180,22 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
      const finalValid = isValidCoordinates(resolvedData.coordinates);
      coordinatesValid = finalValid;
      
-     finalSource = (resolvedData.coordinates as any)?.source || (resolvedData as any)?.coordinateSource || (recoveryUsed ? 'ai_recovery' : ((rawResolverResult as any)?.aiUsed ? 'ai_recovery' : 'deterministic'));
-     finalStatus = (resolvedData as any)?.identityStatus || (finalSource === 'ai_recovery' ? 'unverified' : 'verified');
+      finalSource = (resolvedData.coordinates as any)?.source || 
+                    (resolvedData as any)?.coordinateSource || 
+                    (recoveryUsed ? 'ai_recovery' : ((rawResolverResult as any)?.aiUsed ? 'ai' : 'deterministic'));
+      finalStatus = (resolvedData as any)?.identityStatus || 
+                    ((finalSource === 'ai' || finalSource === 'ai_recovery') ? 'unverified' : 'verified');
 
-     resolvedData.coordinates.source = finalSource;
-     (resolvedData as any).coordinateSource = finalSource;
-     (resolvedData as any).identityStatus = finalStatus;
-     
-     console.log(`[FINAL COORDINATE VALIDATION]\nCoordinates: ${JSON.stringify(resolvedData.coordinates)}\nSource: ${finalSource}\nValid: ${finalValid}`);
-     console.log(`COORDINATE_FINAL\nname: ${resolvedData.name || entityResult.entity}\nlat: ${resolvedData.coordinates.lat}\nlng: ${resolvedData.coordinates.lng}\nsource: ${finalSource}\nstatus: ${finalStatus}\nprovider: ${finalSource === 'geocoder' ? 'Nominatim' : (finalSource === 'deterministic' ? 'DeterministicDB' : 'ai_recovery')}`);
+      resolvedData.coordinates.source = finalSource;
+      (resolvedData as any).coordinateSource = finalSource;
+      (resolvedData as any).identityStatus = finalStatus;
+      
+      const providerLabel = finalSource === 'geocoder' 
+        ? 'Nominatim' 
+        : (finalSource === 'deterministic' ? 'DeterministicDB' : (finalSource === 'ai_recovery' ? 'ai_recovery' : 'lmstudio'));
+
+      console.log(`[FINAL COORDINATE VALIDATION]\nCoordinates: ${JSON.stringify(resolvedData.coordinates)}\nSource: ${finalSource}\nValid: ${finalValid}`);
+      console.log(`COORDINATE_FINAL\nname: ${resolvedData.name || entityResult.entity}\nlat: ${resolvedData.coordinates.lat}\nlng: ${resolvedData.coordinates.lng}\nsource: ${finalSource}\nstatus: ${finalStatus}\nprovider: ${providerLabel}`);
   }
 
   // 1. CANONICAL ENTITY LOCK
@@ -196,7 +205,15 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   let entityType: any;
 
   if (coordinatesValid && resolvedData && resolvedData.coordinates) {
-      const canonicalName = resolvedData.name || entityResult.entity;
+      const isHistoricalDiscovery = entityResult.intentResult.intent === 'DISCOVERY_OBJECT_LOCATION' || entityResult.intentResult.intent === 'HISTORICAL_EVENT';
+      const histKnowledge = isHistoricalDiscovery ? getHistoricalEntityKnowledge(entityResult.entity) : null;
+      // Preserve canonical entity identity without letting invented titles or secondary sites (e.g. La Navidad) displace it
+      const canonicalName = histKnowledge?.entity || ((isHistoricalDiscovery && entityResult.entity) ? toCanonicalTitleCase(entityResult.entity) : (resolvedData.name || entityResult.entity));
+
+      // Lock resolvedData.name to canonicalName for historical discovery queries
+      if (isHistoricalDiscovery || !resolvedData.name) {
+          resolvedData.name = canonicalName;
+      }
 
       // Populate administrative context if missing from deterministic coordinates
       if (!resolvedData.country || !resolvedData.state) {
@@ -215,6 +232,8 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
       
       const providerSignals = [
           ...((resolvedData as any).discoverySignals || []),
+          histKnowledge?.entityType,
+          isHistoricalDiscovery ? 'shipwreck_site' : undefined,
           resolvedData.entityType,
           resolvedData.type
       ].filter(Boolean);
@@ -230,7 +249,7 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
           providerSignals,
           {
               type: resolvedData.type,
-              entityType: resolvedData.entityType,
+              entityType: histKnowledge?.entityType || resolvedData.entityType,
               country: (resolvedData as any).country,
               state: (resolvedData as any).state,
               city: (resolvedData as any).city,
@@ -318,6 +337,10 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
            (resolvedData as any)._recoveredMetadata = metadataRecovery;
         } else {
            console.warn(`=== RECOVER METADATA WARN ===\nMetadata recovery returned empty.`);
+           const histKnowledge = getHistoricalEntityKnowledge(canonicalEntity.canonicalName);
+           if (histKnowledge && histKnowledge.historicalContext) {
+             resolvedData.description = histKnowledge.historicalContext;
+           }
         }
       } catch (err) {
         console.error("Failed to generate metadata for recovered coordinates:", err);
@@ -332,7 +355,7 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   if (resolvedData && resolvedData.coordinates && identity && canonicalEntity) {
      const providerName = finalSource === 'geocoder' 
        ? "Nominatim" 
-       : (finalSource === 'deterministic' ? "DeterministicDB" : "ai_recovery");
+       : (finalSource === 'deterministic' ? "DeterministicDB" : (finalSource === 'ai_recovery' ? "ai_recovery" : "lmstudio"));
 
      const primaryLocation = {
          label: canonicalEntity.canonicalName,
@@ -349,6 +372,8 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
          },
          coordinateSource: finalSource,
          identityStatus: finalStatus,
+         isApproximate: (resolvedData as any).isApproximate ?? (canonicalEntity as any).isApproximate ?? (finalSource === 'historical_approximate'),
+         exactLocationKnown: (resolvedData as any).exactLocationKnown ?? (canonicalEntity as any).exactLocationKnown ?? (finalSource !== 'historical_approximate'),
          provenance: {
              provider: providerName,
              timestamp: Date.now(),
@@ -389,20 +414,32 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
 
      const authoritativePopulation = (resolvedData as any).population;
 
-     // Merge deterministic/initial metadata with recovered metadata
-     const finalMetadata: any = {
-         description: resolvedData.description,
-         climate: finalClimate,
-         population: authoritativePopulation,
-         notable: (resolvedData as any).notable || [],
-         news: resolvedData.news || [],
-         contextNotes: (resolvedData as any).contextNotes || [],
-         ...recoveredMetadata
-     };
+      // Merge deterministic/initial metadata with recovered metadata
+      const initialNotable = Array.isArray((resolvedData as any).notable) ? (resolvedData as any).notable : [];
+      const recoveredNotable = Array.isArray(recoveredMetadata?.notable) ? recoveredMetadata.notable : [];
+      const mergedNotable = deduplicateNotableFacts([...initialNotable, ...recoveredNotable]);
 
-     // Ensure authoritative climate and population are never overwritten by ...recoveredMetadata
-     finalMetadata.climate = finalClimate;
-     finalMetadata.population = authoritativePopulation;
+      const histKnowledgeForMeta = getHistoricalEntityKnowledge(canonicalEntity.canonicalName) || getHistoricalEntityKnowledge(entityResult.entity);
+      const histContext = histKnowledgeForMeta?.historicalContext || (resolvedData as any).historicalContext || recoveredMetadata?.historicalContext;
+
+      const finalMetadata: any = {
+          description: resolvedData.description,
+          climate: finalClimate,
+          population: authoritativePopulation,
+          notable: mergedNotable,
+          news: resolvedData.news || [],
+          contextNotes: (resolvedData as any).contextNotes || [],
+          historicalContext: histContext,
+          intent: entityResult.intentResult.intent,
+          ...recoveredMetadata
+      };
+
+      // Ensure authoritative climate, population, notable facts, and historical context are preserved
+      finalMetadata.climate = finalClimate;
+      finalMetadata.population = authoritativePopulation;
+      finalMetadata.notable = mergedNotable;
+      if (histContext) finalMetadata.historicalContext = histContext;
+      finalMetadata.intent = entityResult.intentResult.intent;
 
      if (isPlaceholder && recoveredMetadata?.description) {
          finalMetadata.description = recoveredMetadata.description;
@@ -451,6 +488,9 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
          subject,
          finalMetadata
      );
+     (entity as any).isApproximate = (primaryLocation as any).isApproximate;
+     (entity as any).exactLocationKnown = (primaryLocation as any).exactLocationKnown;
+     (entity as any).coordinateSource = finalSource;
      
      if (recoveryUsed) {
          console.log(`=== RECOVERY MERGE RESULT ===`);
@@ -464,8 +504,12 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   }
 
   const isValid = validateResolvedEntity(entity);
-  if (!isValid && !error && !coordinatesValid) {
-     error = "NO_GEOGRAPHIC_DATA";
+  if (!isValid) {
+     if (error === "HISTORICAL_LOCATION_UNCONFIRMED") {
+        // Retain specific historical uncertainty error
+     } else if (!error && !coordinatesValid) {
+        error = "NO_GEOGRAPHIC_DATA";
+     }
   } else if (isValid) {
      error = undefined;
   }
@@ -507,9 +551,8 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
       waypoints.forEach(wp => console.log(`  - ${wp.name} (ID: ${wp.id}, parentId: ${wp.parentId})`));
       return {
          mode: "route",
-         isValid: waypoints.length > 0,
-         waypoints,
-         error: waypoints.length === 0 ? "UNSUPPORTED_CELESTIAL_BODY" : undefined
+         isValid: true,
+         waypoints: waypoints || []
       };
   }
 
@@ -554,9 +597,17 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
 
       (locationResult as any).finalData = {
           name: e.subject.identity.canonicalName,
+          canonicalName: e.subject.identity.canonicalName,
           entityType: e.subject.identity.entityType,
           type: e.subject.identity.entityType,
+          category: e.subject.identity.category || "place",
+          intent: entityResult.intentResult.intent,
+          historicalContext: (e.metadata as any)?.historicalContext || (e as any).historicalContext,
           coordinates: e.subject.primaryLocation.location.coordinates,
+          coordinateSource: (e as any).coordinateSource ?? (e.subject.primaryLocation as any).coordinateSource,
+          isApproximate: (e as any).isApproximate ?? (e.subject.primaryLocation as any).isApproximate,
+          exactLocationKnown: (e as any).exactLocationKnown ?? (e.subject.primaryLocation as any).exactLocationKnown,
+          confirmedWreckLocation: (e as any).confirmedWreckLocation ?? (e.subject.primaryLocation as any).confirmedWreckLocation,
           description: descString,
           climate: e.metadata.climate,
           population: e.metadata.population,

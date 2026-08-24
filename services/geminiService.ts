@@ -18,6 +18,8 @@ import { enrichLocationInfo, mergeRichestFields } from './locationService';
 import { isGenericPlaceholderDescription, isEnglishText } from './entityValidation';
 import { isPlaceholderString } from '../components/InfoPanel';
 import { validateEarthGeography } from './celestialCapabilities';
+import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
+import { validateHistoricalCoordinate, getHistoricalEntityKnowledge, toCanonicalTitleCase } from './geographic/historicalCoordinateValidator';
 
 export const EnrichmentMetrics = {
     retry: 0,
@@ -645,12 +647,65 @@ Return only JSON:
          if (lat === 997 && lng === 997) {
             console.log("[DEBUG] Failure reason code: NO_GEOGRAPHIC_DATA");
             console.log(`=== PARTIAL LOCATION DATA RETAINED ===\nEntity: ${targetSearchTerm}\nName: ${data.name || 'Unknown'}\nEntity Type: ${data.entityType || 'Unknown'}\nMissing Field: coordinates\n===============================`);
-            return { error: "NO_GEOGRAPHIC_DATA", locationInfo: data };
+            return { error: "NO_GEOGRAPHIC_DATA", locationInfo: data, aiUsed: true };
+         }
+
+         // Explicitly retain AI provenance
+         data.coordinateSource = "ai" as CoordinateSource;
+         data.identityStatus = "unverified" as GeographicIdentityStatus;
+         data.coordinates.source = "ai" as CoordinateSource;
+
+         // Historical Coordinate Geographic Consistency Guard
+         const isHistoricalQuery = 
+           isHistoricalDiscovery || 
+           intent === 'DISCOVERY_OBJECT_LOCATION' || 
+           intent === 'HISTORICAL_EVENT' ||
+           data.entityType === 'shipwreck' ||
+           data.entityType === 'historical_site' ||
+           data.entityType === 'archaeological_site';
+
+         if (isHistoricalQuery) {
+           const histValidation = await validateHistoricalCoordinate(
+             targetSearchTerm,
+             data.coordinates,
+             {
+               rawQuery: rawQuery || query,
+               intent,
+               entityType: data.entityType,
+               coordinateSource: 'ai',
+               expectedRegion: data.locationString
+             }
+           );
+
+           if (!histValidation.valid) {
+             console.warn(`[HISTORICAL COORDINATE REJECTED] ${targetSearchTerm} coordinates rejected (${histValidation.reason}). Expected region: ${histValidation.expectedRegion}`);
+             
+             // Check if we have a deterministic/trustworthy approximate historical location
+             const histKnowledge = getHistoricalEntityKnowledge(targetSearchTerm);
+             if (histKnowledge?.approximateCoordinates) {
+               console.log(`[HISTORICAL APPROXIMATE LOCATION APPLIED] ${targetSearchTerm} using deterministic approximate coordinates: ${JSON.stringify(histKnowledge.approximateCoordinates)}`);
+               data.coordinates = { ...histKnowledge.approximateCoordinates };
+               data.coordinateSource = 'historical_approximate' as CoordinateSource;
+               data.identityStatus = 'unverified' as GeographicIdentityStatus;
+               data.locationString = histKnowledge.expectedRegion;
+               data.isApproximate = true;
+               data.exactLocationKnown = histKnowledge.exactLocationKnown ?? false;
+               data.confirmedWreckLocation = histKnowledge.confirmedWreckLocation ?? false;
+               data.description = data.description || histKnowledge.historicalContext || histKnowledge.sourceRationale || "";
+             } else {
+               data.coordinates = undefined;
+               return {
+                 error: "HISTORICAL_LOCATION_UNCONFIRMED",
+                 locationInfo: data,
+                 aiUsed: true
+               };
+             }
+           }
          }
       } else {
          console.log("[DEBUG] Failure reason code: MISSING_COORDINATES");
          console.log(`=== PARTIAL LOCATION DATA RETAINED ===\nEntity: ${targetSearchTerm}\nName: ${data.name || 'Unknown'}\nEntity Type: ${data.entityType || 'Unknown'}\nMissing Field: coordinates\n===============================`);
-         return { error: "NO_GEOGRAPHIC_DATA", locationInfo: data };
+         return { error: "NO_GEOGRAPHIC_DATA", locationInfo: data, aiUsed: true };
       }
 
       resolvedData = data;
@@ -677,7 +732,8 @@ Final Coordinates: ${JSON.stringify(finalLocationInfo.coordinates)}
 
     return {
       locationInfo: finalLocationInfo,
-      suggestedZoom: suggestedZoom
+      suggestedZoom: suggestedZoom,
+      aiUsed: aiUsed
     };
 
   } catch (error: any) {
@@ -685,6 +741,30 @@ Final Coordinates: ${JSON.stringify(finalLocationInfo.coordinates)}
     console.log("[DEBUG] Failure reason code: EXCEPTION_THROWN", error?.message || error);
     if (error?.stack) console.log(error.stack);
     
+    // Check if we have deterministic historical entity knowledge before failing
+    const isHistorical = intent === 'DISCOVERY_OBJECT_LOCATION' || intent === 'HISTORICAL_EVENT';
+    if (isHistorical) {
+      const histKnowledge = getHistoricalEntityKnowledge(normalizedQuery || query);
+      if (histKnowledge?.approximateCoordinates) {
+        return {
+          locationInfo: {
+            name: normalizedQuery || query,
+            coordinates: { ...histKnowledge.approximateCoordinates },
+            coordinateSource: 'historical_approximate' as CoordinateSource,
+            identityStatus: 'unverified' as GeographicIdentityStatus,
+            locationString: histKnowledge.expectedRegion,
+            isApproximate: true,
+            exactLocationKnown: histKnowledge.exactLocationKnown ?? false,
+            confirmedWreckLocation: histKnowledge.confirmedWreckLocation ?? false,
+            description: histKnowledge.historicalContext || histKnowledge.sourceRationale || "",
+            notable: []
+          },
+          suggestedZoom: 6,
+          aiUsed: false
+        };
+      }
+    }
+
     // Distinguish temporary failure (network issues/timeout/blocked request)
     const errMsg = error?.message?.toLowerCase() || "";
     if (errMsg.includes("fetch") || errMsg.includes("network") || errMsg.includes("timeout") || errMsg.includes("quota") || errMsg.includes("limit") || errMsg.includes("exhaust")) {
@@ -820,6 +900,7 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
           }
           return null;
       }).filter(Boolean) as any;
+      data.notable = deduplicateNotableFacts(data.notable);
   }
   data.contextNotes = normalizeStringArray(data.contextNotes as any) as any;
 
@@ -2303,7 +2384,7 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
   
   // 1. Check for Route / Expansion patterns
   const routePatterns = [
-    /\b(?:follow|trace|journey|path|route|expansion|migration|trade network)\b/i,
+    /\b(?:follow|trace|journey|path|route|expansion|migration|trade network|voyage|travels?|sail(?:ed|ing)?)\b/i,
     /\bfrom\b.*?\bto\b/i
   ];
   for (const pattern of routePatterns) {
@@ -2327,11 +2408,13 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
   for (const pattern of discoveryPatterns) {
     const match = clean.match(pattern);
     if (match && match[1]) {
-      const entityStr = match[1].replace(/[?.,!]+$/, "").trim();
+      let entityStr = match[1].replace(/[?.,!]+$/, "").trim();
+      entityStr = entityStr.replace(/^(?:the\s+)?(?:wreck|wreckage|remains|ruins|site)\s+of\s+(?:the\s+)?/i, "");
       const cleanedEntity = entityStr.replace(/^the\s+/i, "");
+      const finalEntity = toCanonicalTitleCase(cleanedEntity || entityStr);
       return {
         intent: 'DISCOVERY_OBJECT_LOCATION',
-        entity: cleanedEntity || entityStr
+        entity: finalEntity
       };
     }
   }
@@ -2352,12 +2435,13 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
     if (match && match[1]) {
       const entityStr = match[1].replace(/[?.,!]+$/, "").trim();
       const cleanedEntity = entityStr.replace(/^the\s+/i, "");
+      const finalEntity = toCanonicalTitleCase(cleanedEntity || entityStr);
       
       console.log(`Intent:\nHISTORICAL_EVENT\nRouting decision:\nMULTI_LOCATION_EXPLORATION`);
       
       return {
         intent: 'HISTORICAL_EVENT',
-        entity: cleanedEntity || entityStr,
+        entity: finalEntity,
         resolutionMode: 'MULTI_LOCATION_EXPLORATION'
       };
     }
@@ -2474,43 +2558,25 @@ export const recoverCoordinatesFromAi = async (rawQuery: string, intent: string,
          }
       }
 
-      if (valid && intent === 'DISCOVERY_OBJECT_LOCATION') {
-          const revGeo = await reverseGeocode(parsedCoords.lat, parsedCoords.lng);
-          const locationDesc = revGeo?.displayName || (revGeo ? `${revGeo.country || ''} ${revGeo.state || revGeo.region || ''}`.trim() : null) || `coordinates (${parsedCoords.lat.toFixed(4)}, ${parsedCoords.lng.toFixed(4)})`;
-          
-          const validationPrompt = `Are the coordinates ${parsedCoords.lat.toFixed(4)}, ${parsedCoords.lng.toFixed(4)}${locationDesc ? ` (${locationDesc})` : ''} the historically correct documented discovery or recovery location for "${entity}"?
-          Answer with ONLY a JSON object: {"valid": true/false, "reason": "why"}`;
-          
-          const valRes = await generateContentWithRetry({
-              model: modelName,
-              contents: validationPrompt,
-              config: { responseMimeType: "application/json" }
-          }, 1);
-          
-          const valParsed = parseAndExtract(valRes.text);
-          let isHistoricallyValid = false;
-          let reason = "Validation failed to parse";
-          
-          if (valParsed.success && typeof (valParsed.value as any).valid === 'boolean') {
-              isHistoricallyValid = (valParsed.value as any).valid;
-              reason = (valParsed.value as any).reason || "No reason provided";
-          }
-          
-          console.log(`[RECOVERY LOCATION VALIDATION]`);
-          console.log(`entity: ${entity}`);
-          console.log(`coordinates: ${parsedCoords.lat}, ${parsedCoords.lng}`);
-          console.log(`reverseGeocode: ${revGeo?.displayName || 'Unknown'}`);
-          console.log(`country: ${revGeo?.country || 'Unknown'}`);
-          console.log(`region: ${revGeo?.state || revGeo?.region || 'Unknown'}`);
-          console.log(`historicalContext: ${intent}`);
-          console.log(`result: ${isHistoricallyValid ? 'PASS' : 'FAIL'} (${reason})`);
-          
-          if (!isHistoricallyValid) {
-              if (attempt < 2) {
-                  console.log("Retrying recovery with strict documented coordinates constraint...");
-                  return recoverCoordinatesFromAi(rawQuery, intent, entity, attempt + 1);
+      if (valid && (intent === 'DISCOVERY_OBJECT_LOCATION' || intent === 'HISTORICAL_EVENT')) {
+          const histValidation = await validateHistoricalCoordinate(
+            entity,
+            parsedCoords,
+            { rawQuery, intent, coordinateSource: 'ai_recovery' }
+          );
+
+          if (!histValidation.valid) {
+              console.warn(`[RECOVERY COORDINATE REJECTED] Candidate coordinate for "${entity}" rejected (${histValidation.reason}). Stopping LLM retries.`);
+              const histKnowledge = getHistoricalEntityKnowledge(entity);
+              if (histKnowledge?.approximateCoordinates) {
+                return {
+                  lat: histKnowledge.approximateCoordinates.lat,
+                  lng: histKnowledge.approximateCoordinates.lng,
+                  source: 'historical_approximate' as CoordinateSource,
+                  confidence: 'low'
+                };
               }
-              valid = false;
+              return null;
           }
       }
 
@@ -2869,6 +2935,7 @@ ${contextDetails}
            }
            return null;
        }).filter(Boolean) as any;
+       metadata.notable = deduplicateNotableFacts(metadata.notable);
        validFields.push('notable');
     } else {
        rejectedFields.push('notable');

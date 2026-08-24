@@ -1,6 +1,7 @@
 import { ResolvedEntity } from '../domain';
 import { isValidCoordinates } from '../types';
 import { validateEarthGeography } from './celestialCapabilities';
+import { getHistoricalEntityKnowledge } from './geographic/historicalCoordinateValidator';
 
 export function isGenericPlaceholderDescription(description?: string | null, entityName?: string): boolean {
   if (!description || typeof description !== 'string') return true;
@@ -121,6 +122,40 @@ valid: ${coordinatesValid}`);
       : `${failureReason}, Unsupported celestial body '${celestialValidation.celestialBody}'`;
   }
 
+  // Level 2.6: Historical Geographic Consistency Check
+  const address = entity.subject?.primaryLocation?.location?.address;
+  const canonicalCountry = (address?.country || (entity.subject?.primaryLocation as any)?.country || '').toLowerCase().trim();
+  const canonicalState = (address?.state || (entity.subject?.primaryLocation as any)?.state || '').toLowerCase().trim();
+  
+  if (canonicalName && coords) {
+    const histKnowledge = getHistoricalEntityKnowledge(canonicalName);
+    if (histKnowledge) {
+      if (histKnowledge.boundingBox) {
+        const { minLat, maxLat, minLng, maxLng } = histKnowledge.boundingBox;
+        if (coords.lat < minLat || coords.lat > maxLat || coords.lng < minLng || coords.lng > maxLng) {
+          identityValid = false;
+          valid = false;
+          failureReason = failureReason === 'none'
+            ? `Geographic mismatch: coordinate (${coords.lat}, ${coords.lng}) contradicts expected historical region '${histKnowledge.expectedRegion}'`
+            : `${failureReason}, Historical geographic mismatch`;
+        }
+      }
+      if (histKnowledge.forbiddenRegions) {
+        const fullRegionStr = `${canonicalCountry} ${canonicalState}`.toLowerCase();
+        for (const forbidden of histKnowledge.forbiddenRegions) {
+          if (fullRegionStr.includes(forbidden.toLowerCase())) {
+            identityValid = false;
+            valid = false;
+            failureReason = failureReason === 'none'
+              ? `Geographic mismatch: region '${forbidden}' contradicts historical entity '${canonicalName}'`
+              : `${failureReason}, Historical geographic mismatch`;
+            break;
+          }
+        }
+      }
+    }
+  }
+
   console.log(`[GEOGRAPHIC_IDENTITY_VALIDATION]
 canonicalName: "${canonicalName || 'none'}"
 entityType: "${entityType || 'none'}"
@@ -163,9 +198,6 @@ valid: ${identityValid}`);
   }
 
   // 3d: Geographic Contradiction Guardrail
-  const address = entity.subject?.primaryLocation?.location?.address;
-  const canonicalCountry = (address?.country || (entity.subject?.primaryLocation as any)?.country || '').toLowerCase().trim();
-  const canonicalState = (address?.state || (entity.subject?.primaryLocation as any)?.state || '').toLowerCase().trim();
   const descLower = descriptionText.toLowerCase();
 
   if (canonicalCountry && descLower.length > 0) {

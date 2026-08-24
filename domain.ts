@@ -89,6 +89,8 @@ export interface CanonicalGeographicEntity {
   readonly osmType?: string;
   readonly wikidataId?: string;
   readonly wikipedia?: string;
+  readonly isApproximate?: boolean;
+  readonly exactLocationKnown?: boolean;
 }
 
 export interface Provenance {

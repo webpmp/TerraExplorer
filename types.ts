@@ -1,6 +1,6 @@
 import 'react';
 
-export type CoordinateSource = "deterministic" | "geocoder" | "ai_recovery";
+export type CoordinateSource = "deterministic" | "geocoder" | "ai" | "ai_recovery" | "historical_approximate";
 export type GeographicIdentityStatus = "verified" | "unverified" | "ambiguous" | "failed";
 
 export interface GeoCoordinates {
@@ -132,6 +132,10 @@ export interface LocationInfo {
   discoverySignals?: string[];
   relatedEntities?: any[];
   metadataMode?: 'historical_site' | 'modern_place' | 'natural_feature';
+  intent?: string;
+  historicalContext?: string;
+  canonicalName?: string;
+  category?: string;
   coordinates: GeoCoordinates;
   coordinateSource?: CoordinateSource;
   identityStatus?: GeographicIdentityStatus;
@@ -144,6 +148,9 @@ export interface LocationInfo {
   osmType?: string;
   wikidataId?: string;
   wikipedia?: string;
+  isApproximate?: boolean;
+  exactLocationKnown?: boolean;
+  confirmedWreckLocation?: boolean;
   boundary?: GeoCoordinates[];
   pipelineVersion?: number;
   status?: "loading" | "success" | "error";
@@ -173,6 +180,10 @@ export interface MapMarker {
   lng: number;
   populationClass: 'large' | 'medium' | 'small'; // Affects dot size
   type?: string;
+  entityType?: string;
+  intent?: string;
+  historicalContext?: string;
+  canonicalName?: string;
   coordinateSource?: CoordinateSource;
   identityStatus?: GeographicIdentityStatus;
   country?: string;
@@ -190,6 +201,8 @@ export interface MapMarker {
   wikidataId?: string;
   osmId?: string;
   osmType?: string;
+  isApproximate?: boolean;
+  exactLocationKnown?: boolean;
   wikipedia?: string;
   tags?: any;
   populationStatus?: string;
@@ -263,7 +276,7 @@ export interface Candidate {
 export interface SearchResult {
   locationInfo?: LocationInfo | Partial<LocationInfo>;
   suggestedZoom?: number;
-  error?: "NOT_FOUND" | "AMBIGUOUS" | "TEMP_FAILURE" | "NO_GEOGRAPHIC_DATA" | "UNABLE_TO_RESOLVE" | "LOCATION_SYSTEM_UNAVAILABLE";
+  error?: "NOT_FOUND" | "AMBIGUOUS" | "TEMP_FAILURE" | "NO_GEOGRAPHIC_DATA" | "HISTORICAL_LOCATION_UNCONFIRMED" | "UNABLE_TO_RESOLVE" | "LOCATION_SYSTEM_UNAVAILABLE" | "UNSUPPORTED_CELESTIAL_BODY";
 }
 
 export interface ResolverResult {
@@ -283,7 +296,7 @@ export interface ResolverResult {
 
 export type AIProvider = 'gemini' | 'lmstudio';
 export type NewsProvider = 'gemini' | 'newsapi' | 'newsdata' | 'nyt';
-export type DocumentaryDuration = 'short' | 'cinematic' | 'long';
+export type DocumentaryDuration = number | 'short' | 'cinematic' | 'long';
 
 export interface UserSettings {
   aiProvider: AIProvider;
@@ -294,7 +307,7 @@ export interface UserSettings {
   nytApiKey: string;
   newsDataApiKey: string;
   documentaryMode?: boolean;
-  documentaryDuration?: DocumentaryDuration;
+  documentaryDuration?: number;
   narrationEnabled?: boolean;
   narrationVoice?: string;
   narrationSpeed?: number;

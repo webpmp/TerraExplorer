@@ -437,34 +437,33 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
               </button>
             </div>
 
-            <div>
-              <label className={labelClasses}>Transition Duration</label>
-              <div className="grid grid-cols-3 gap-2">
-                {(['short', 'cinematic', 'long'] as DocumentaryDuration[]).map((dur) => {
-                  const isSelected = (settings.documentaryDuration || 'cinematic') === dur;
-                  const labelMap: Record<DocumentaryDuration, string> = {
-                    short: 'Short (3.2s)',
-                    cinematic: 'Cinematic (5.5s)',
-                    long: 'Long (8.0s)'
-                  };
-                  return (
-                    <button
-                      key={dur}
-                      type="button"
-                      onClick={() =>
-                        onUpdateSettings({
-                          ...settings,
-                          documentaryDuration: dur
-                        })
-                      }
-                      className={`px-2 py-2 text-xs font-medium rounded-lg border transition-colors ${
-                        isSelected ? radioSelectedClasses : radioClasses
-                      } text-center justify-center`}
-                    >
-                      {labelMap[dur]}
-                    </button>
-                  );
-                })}
+            <div
+              className={`space-y-4 transition-opacity duration-200 ${
+                settings.documentaryMode ? 'opacity-100' : 'opacity-40 pointer-events-none'
+              }`}
+            >
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className={labelClasses}>Camera Transition Duration</label>
+                  <span className="text-xs opacity-70">
+                    {(typeof settings.documentaryDuration === 'number' ? settings.documentaryDuration : 5.5).toFixed(1)}s
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="2.0"
+                  max="10.0"
+                  step="0.1"
+                  value={typeof settings.documentaryDuration === 'number' ? settings.documentaryDuration : 5.5}
+                  onChange={(e) =>
+                    onUpdateSettings({
+                      ...settings,
+                      documentaryDuration: parseFloat(e.target.value)
+                    })
+                  }
+                  disabled={!settings.documentaryMode}
+                  className="w-full accent-cyan-400 cursor-pointer"
+                />
               </div>
             </div>
           </div>

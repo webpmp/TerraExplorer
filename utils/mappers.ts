@@ -1,5 +1,6 @@
 import { ResolvedEntity } from '../domain';
 import { LocationInfo } from '../types';
+import { deduplicateNotableFacts } from './notableFactsUtils';
 
 export interface DescriptionSection {
   heading: string;
@@ -179,7 +180,7 @@ export function normalizeInfoPanelData(entity: any, workflow: string = "unknown"
         }
 
         normalized = {
-            name: subject?.primaryLocation?.label || subject?.identity?.canonicalName,
+            name: subject?.identity?.canonicalName || subject?.primaryLocation?.label,
             canonicalName: subject?.identity?.canonicalName,
             coordinates: subject?.primaryLocation?.location?.coordinates,
             description,
@@ -199,11 +200,17 @@ export function normalizeInfoPanelData(entity: any, workflow: string = "unknown"
             status: metadata.status || entity.status || "success",
             errorMessage: metadata.errorMessage || entity.errorMessage,
             sectionState: metadata.sectionState || entity.sectionState,
+            isApproximate: entity.isApproximate ?? (entity.subject?.identity as any)?.isApproximate ?? (entity.subject?.primaryLocation as any)?.isApproximate,
+            exactLocationKnown: entity.exactLocationKnown ?? (entity.subject?.identity as any)?.exactLocationKnown ?? (entity.subject?.primaryLocation as any)?.exactLocationKnown,
+            coordinateSource: entity.coordinateSource ?? (entity.subject?.identity as any)?.coordinateSource ?? (entity.subject?.primaryLocation as any)?.coordinateSource,
+            historicalContext: (metadata as any).historicalContext || (entity as any).historicalContext,
+            intent: (metadata as any).intent || (entity as any).intent,
             // Fallback for remaining unstructured fields
             ...metadata
         };
         
         // Re-overwrite fields that were extracted above (to prevent ...metadata from overwriting them with raw objects)
+        normalized.name = subject?.identity?.canonicalName || normalized.name;
         normalized.description = description;
         normalized.descriptionSections = descriptionSections;
         normalized.population = population;
@@ -212,6 +219,9 @@ export function normalizeInfoPanelData(entity: any, workflow: string = "unknown"
         normalized.relatedEntities = relatedEntities;
         normalized.contextNotes = contextNotes;
         normalized.entities = entities;
+        if (Array.isArray(normalized.notable)) {
+            normalized.notable = deduplicateNotableFacts(normalized.notable);
+        }
 
     } else {
         // If it's already flattened, extract just in case it has structured objects injected directly
@@ -227,11 +237,16 @@ export function normalizeInfoPanelData(entity: any, workflow: string = "unknown"
         
         if (normalized.description) {
             normalized.description = removeLeadingEntityTitle(normalized.description, normalized.canonicalName || normalized.name);
+            normalized.description = stripMarkdownFormatting(normalized.description);
             normalized.descriptionSections = parseDescriptionSections(normalized.description);
         }
         
         if (Array.isArray(normalized.contextNotes)) {
             normalized.contextNotes = normalized.contextNotes.map((note: any) => typeof note === "string" ? note : note.text ?? JSON.stringify(note));
+        }
+
+        if (Array.isArray(normalized.notable)) {
+            normalized.notable = deduplicateNotableFacts(normalized.notable);
         }
     }
 

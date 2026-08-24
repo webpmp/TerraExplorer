@@ -67,7 +67,16 @@ export const normalizeDisplayText = (value: any): string => {
   
   if (!str) return '';
 
-  return str.replace(/^#{1,6}\s+/gm, '').trim();
+  return str
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*\*(.*?)\*\*\*/g, '$1')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/___(.*?)___/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/_(.*?)_/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .trim();
 };
 
 const US_STATE_ABBRS: Record<string, string> = {
@@ -249,7 +258,10 @@ export const normalizeHeaderGeographicHierarchy = (
   }
 
   const queryOrRouteTitle = info.routeContext?.title || info.waypoint?.routeTitle;
-  const rawTitle = cleanMetadataString(rawTitleOverride || (info as any).displayName || info.name || info.waypoint?.name || '') || '';
+  let rawTitle = cleanMetadataString(rawTitleOverride || (info as any).displayName || info.canonicalName || info.name || info.waypoint?.name || '') || '';
+  if (rawTitle && rawTitle === rawTitle.toLowerCase()) {
+    rawTitle = rawTitle.replace(/\b([a-z])/g, (_, l) => l.toUpperCase());
+  }
 
   const isRouteEventQuery = Boolean(
     isSingleLocation &&
@@ -681,49 +693,57 @@ export const SectionHeader: React.FC<{
   );
 };
 
-export const parseNotableFactItem = (n: any): { title: string; description: string; wikipediaUrl?: string } | null => {
-  if (!n) return null;
-  if (typeof n === 'string') {
-    const text = n.trim();
-    if (!text) return null;
-    const colonIdx = text.indexOf(':');
-    if (colonIdx !== -1 && colonIdx < 50) {
-      return { title: text.substring(0, colonIdx).trim(), description: text.substring(colonIdx + 1).trim() };
+import { parseNotableFactItem, deduplicateNotableFacts, normalizeFactComparisonKey } from '../utils/notableFactsUtils';
+export { parseNotableFactItem, deduplicateNotableFacts, normalizeFactComparisonKey };
+
+export const getCleanDescriptionLines = (info: any) => {
+    if (!info || !info.description) return [];
+    const descText = typeof info.description === 'string'
+      ? info.description
+      : (info.description?.text || (Array.isArray(info.description?.paragraphs) ? info.description.paragraphs.join('\n\n') : ''));
+    
+    if (isPlaceholderString(descText)) return [];
+
+    const lines = descText.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0 && !isPlaceholderString(l));
+    
+    if (lines.length > 0) {
+        const firstLineRaw = lines[0];
+        const firstLineClean = firstLineRaw.replace(/^#+\s*/, '').trim();
+        const firstLineLower = firstLineClean.toLowerCase();
+        const infoNameClean = (info.canonicalName || info.name || '').trim().toLowerCase();
+        
+        // Check if first line is a standalone title/detail heading
+        const isGenericHeader = firstLineLower === 'overview' || firstLineLower === 'description';
+        const isExactNameHeader = firstLineLower === infoNameClean;
+        
+        // Check if first line is a short standalone detail heading (e.g. "HMS Santa Maria", "RMS Titanic", "Mayflower")
+        const isHeadingShape = (firstLineRaw.startsWith('#') || (firstLineClean.split(' ').length <= 8 && firstLineClean.length < 80 && !firstLineClean.match(/[.!?]$/)));
+        
+        let isRedundantIntro = false;
+        if (lines.length > 1 && isHeadingShape) {
+            const nextLineClean = lines[1].replace(/^#+\s*/, '').trim();
+            const nextLineLower = nextLineClean.toLowerCase();
+            
+            // If the next line immediately repeats the first line's subject (e.g. "HMS Santa Maria is...", "RMS Titanic was...", "The Mayflower carried...")
+            const startsWithSubject = nextLineLower.startsWith(firstLineLower) || 
+                                      nextLineLower.replace(/^(the|a|an)\s+/, '').startsWith(firstLineLower.replace(/^(the|a|an)\s+/, ''));
+            
+            const containsSubjectEarly = (firstLineLower.length >= 4 && nextLineLower.substring(0, Math.min(nextLineLower.length, firstLineLower.length + 30)).includes(firstLineLower));
+            
+            const isVariantOfName = (firstLineLower.includes(infoNameClean) || (infoNameClean.length >= 4 && infoNameClean.includes(firstLineLower))) && 
+                                    (nextLineLower.includes(infoNameClean) || nextLineLower.includes(firstLineLower));
+
+            if (startsWithSubject || containsSubjectEarly || isVariantOfName) {
+                isRedundantIntro = true;
+            }
+        }
+
+        if (isGenericHeader || isExactNameHeader || isRedundantIntro) {
+            lines.shift();
+        }
     }
-    const dashIdx = text.indexOf(' — ') !== -1 ? text.indexOf(' — ') : (text.indexOf(' - ') !== -1 ? text.indexOf(' - ') : -1);
-    if (dashIdx !== -1 && dashIdx < 50) {
-      return { title: text.substring(0, dashIdx).trim(), description: text.substring(dashIdx + 3).trim() };
-    }
-    const match = text.match(/^([A-Z][A-Za-z0-9\s'-]{2,35}?)\s+(?:is|offers|features|was|has|provides|known for|designated|consists of|contains|serves as|stretches|lies|stands|showcases|serves|attracts)\b\s*(.*)$/i);
-    if (match && match[1]) {
-      const descPart = text.substring(match[1].length).trim();
-      return {
-        title: match[1].trim(),
-        description: descPart.charAt(0).toUpperCase() + descPart.slice(1)
-      };
-    }
-    if (text.length > 50) {
-      return { title: "Notable Feature", description: text };
-    }
-    return { title: text, description: "" };
-  }
-  if (typeof n === 'object' && n !== null) {
-    const title = (n.title || n.name || (n.text && !n.summary && !n.description ? n.text : "") || "").trim();
-    const description = (n.description || n.summary || n.significance || (n.text && n.text !== title ? n.text : "") || "").trim();
-    if (!title && description) {
-      return parseNotableFactItem(description);
-    }
-    if (title && !description && title.length > 50) {
-      return parseNotableFactItem(title);
-    }
-    if (!title && !description) return null;
-    return {
-      ...n,
-      title,
-      description
-    };
-  }
-  return null;
+    
+    return lines;
 };
 
 const InfoPanel: React.FC<InfoPanelProps> = ({ 
@@ -1025,7 +1045,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
     let notable: any[] = [];
     if (Array.isArray(rawInfo.notable)) {
-        notable = rawInfo.notable.map(parseNotableFactItem).filter(Boolean);
+        notable = deduplicateNotableFacts(rawInfo.notable.map(parseNotableFactItem).filter(Boolean));
     } else if (rawInfo.notable && typeof rawInfo.notable === 'object') {
         const parsed = parseNotableFactItem(rawInfo.notable);
         if (parsed) notable = [parsed];
@@ -1039,8 +1059,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     return {
       ...rawInfo,
       name,
+      canonicalName: rawInfo.canonicalName || (wp as any)?.canonicalName || name,
       type: wp.type || rawInfo.type || LocationType.POI,
       entityType: wp.entityType || rawInfo.entityType,
+      intent: rawInfo.intent || (wp as any)?.intent,
+      historicalContext: rawInfo.historicalContext || (wp as any)?.historicalContext,
       description: desc,
       population,
       climate,
@@ -1523,29 +1546,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     copyText?: () => string;
   }
 
-  const getCleanDescriptionLines = (info: any) => {
-      if (!info || !info.description) return [];
-      const descText = typeof info.description === 'string'
-        ? info.description
-        : (info.description?.text || (Array.isArray(info.description?.paragraphs) ? info.description.paragraphs.join('\n\n') : ''));
-      
-      if (isPlaceholderString(descText)) return [];
-
-      const lines = descText.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0 && !isPlaceholderString(l));
-      
-      if (lines.length > 0) {
-          const firstLineClean = lines[0].replace(/^#+\s*/, '').trim().toLowerCase();
-          const infoNameClean = (info.name || '').trim().toLowerCase();
-          
-          // Only shift if the first line is strictly a standalone title header matching name, 'overview', or 'description'
-          if (firstLineClean === infoNameClean || firstLineClean === 'overview' || firstLineClean === 'description') {
-              lines.shift();
-          }
-      }
-      
-      return lines;
-  };
-
   const SECTION_RENDERERS: Record<string, SectionRenderer> = {
     overview: {
       copyText: () => {
@@ -1729,8 +1729,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     notable: {
       copyText: () => {
         if (!info || !Array.isArray(info.notable) || info.notable.length === 0) return '';
+        const uniqueFacts = deduplicateNotableFacts(info.notable);
         let txt = `Notable Facts\n\n`;
-        txt += info.notable.map((n: any) => {
+        txt += uniqueFacts.map((n: any) => {
           const title = normalizeDisplayText(n.title || n.name || (typeof n === 'string' ? n : ''));
           const desc = normalizeDisplayText(n.description || n.summary || '');
           return `${title}${desc ? `\n${desc}` : ''}`;
@@ -1739,6 +1740,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       },
       render: () => {
         if (!Array.isArray(info.notable) || info.notable.length === 0) return null;
+        const uniqueFacts = deduplicateNotableFacts(info.notable);
+        if (uniqueFacts.length === 0) return null;
 
         return (
           <div className="space-y-2">
@@ -1749,7 +1752,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
               isParchment={isParchment}
             />
             <div className="space-y-3">
-              {info.notable.map((rawN: any, i: number) => {
+              {uniqueFacts.map((rawN: any, i: number) => {
                 const n = parseNotableFactItem(rawN) || rawN;
                 const title = normalizeDisplayText(n.title || n.name || (typeof n === 'string' ? n : ''));
                 const description = normalizeDisplayText(n.description || n.summary || (n.text && n.text !== title ? n.text : ''));
@@ -2133,7 +2136,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
               </div>
               <p className={`${subtextSize} font-mono ${theme.subtext}`}>
                 {isValidCoordinates(info.coordinates)
-                  ? `${info.coordinates.lat >= 0 ? info.coordinates.lat.toFixed(2) + '° N' : Math.abs(info.coordinates.lat).toFixed(2) + '° S'}, ${info.coordinates.lng >= 0 ? info.coordinates.lng.toFixed(2) + '° E' : Math.abs(info.coordinates.lng).toFixed(2) + '° W'}`
+                  ? `${info.coordinates.lat >= 0 ? info.coordinates.lat.toFixed(2) + '° N' : Math.abs(info.coordinates.lat).toFixed(2) + '° S'}, ${info.coordinates.lng >= 0 ? info.coordinates.lng.toFixed(2) + '° E' : Math.abs(info.coordinates.lng).toFixed(2) + '° W'}${info.isApproximate ? ' (Approximate)' : ''}`
                   : 'Coordinates unavailable'}
               </p>
             </div>

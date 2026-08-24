@@ -4,6 +4,7 @@ import { GeoCoordinates } from '../types';
 import { DETERMINISTIC_LOCATION_DB } from './geographic/geographicData';
 import { normalizeGeographicQuery } from './geographic/geographicNormalization';
 import { resolveAlias } from './geographic/geographicAliases';
+import { getHistoricalEntityKnowledge } from './geographic/historicalCoordinateValidator';
 
 export interface ClassificationResult {
     entityType: GeographicEntityType;
@@ -43,11 +44,23 @@ export const classifyGeographicEntityWithEvidence = async (
         }
     }
 
-    if (adminContext?.entityType && (adminContext.entityType === 'mountain' || adminContext.entityType === 'mountain_range' || adminContext.entityType === 'canyon' || adminContext.entityType === 'lake' || adminContext.entityType === 'river' || adminContext.entityType === 'infrastructure')) {
+    // 1.5. HISTORICAL KNOWLEDGE BASE HAS TOP HISTORICAL AUTHORITY
+    const histKnowledge = getHistoricalEntityKnowledge(cleanName) || getHistoricalEntityKnowledge(q);
+    if (histKnowledge?.entityType) {
+        const hType = (histKnowledge.entityType === 'shipwreck' ? 'shipwreck_site' : histKnowledge.entityType) as GeographicEntityType;
         return {
-            entityType: adminContext.entityType as GeographicEntityType,
+            entityType: hType,
             confidence: 'authoritative',
-            evidence: `Authoritative deterministic context: ${adminContext.entityType}`
+            evidence: `Authoritative historical knowledge base entry: ${histKnowledge.entity} (${hType})`
+        };
+    }
+
+    if (adminContext?.entityType && (adminContext.entityType === 'shipwreck' || adminContext.entityType === 'shipwreck_site' || adminContext.entityType === 'mountain' || adminContext.entityType === 'mountain_range' || adminContext.entityType === 'canyon' || adminContext.entityType === 'lake' || adminContext.entityType === 'river' || adminContext.entityType === 'infrastructure')) {
+        const eType = adminContext.entityType === 'shipwreck' ? 'shipwreck_site' : adminContext.entityType;
+        return {
+            entityType: eType as GeographicEntityType,
+            confidence: 'authoritative',
+            evidence: `Authoritative deterministic context: ${eType}`
         };
     }
 
@@ -240,6 +253,15 @@ export const classifyGeographicEntityWithEvidence = async (
     // 14. Generic natural / landmark provider signals
     if (signals.some(s => s.includes('landmark') || s.includes('tourism') || s.includes('natural') || s.includes('geology') || s === 'natural_feature' || s === 'landmark')) {
         return { entityType: 'natural_feature', confidence: 'authoritative', evidence: `Provider tag matched natural/landmark feature: ${signals.join(', ')}` };
+    }
+
+    // 14.5 Shipwreck & Discovery Site Signals
+    if (signals.some(s => s === 'shipwreck' || s === 'shipwreck_site' || s.includes('shipwreck') || s.includes('wreck')) || q.match(/\b(wreck|shipwreck|shipwreck_site)\b/i)) {
+        return { entityType: 'shipwreck_site', confidence: 'authoritative', evidence: `Provider tag or name matched shipwreck: ${signals.join(', ')}` };
+    }
+
+    if (signals.some(s => s === 'discovery_site' || s.includes('discovery_site')) || q.match(/\b(discovery site|discovery_site)\b/i)) {
+        return { entityType: 'discovery_site', confidence: 'authoritative', evidence: `Provider tag or name matched discovery site: ${signals.join(', ')}` };
     }
 
     // 15. Fallback for generic/unclassified POIs

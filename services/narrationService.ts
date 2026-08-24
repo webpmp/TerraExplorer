@@ -34,18 +34,50 @@ export function getNarrationDescription(info: unknown): string {
     loc.summary
   ];
 
+  function cleanText(text: string): string {
+    const rawClean = text
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/\*\*\*(.*?)\*\*\*/g, '$1')
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/\*(.*?)\*/g, '$1')
+      .replace(/___(.*?)___/g, '$1')
+      .replace(/__(.*?)__/g, '$1')
+      .replace(/_(.*?)_/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .trim();
+
+    const lines = rawClean.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length > 1) {
+      const firstLine = lines[0].replace(/^#+\s*/, '').trim();
+      const nextLine = lines[1].replace(/^#+\s*/, '').trim();
+      const firstLower = firstLine.toLowerCase();
+      const nextLower = nextLine.toLowerCase();
+
+      const isShortHeading = firstLine.split(' ').length <= 8 && firstLine.length < 80 && !firstLine.match(/[.!?]$/);
+      const isDuplicatedByNext = nextLower.startsWith(firstLower) || 
+        nextLower.replace(/^(the|a|an)\s+/, '').startsWith(firstLower.replace(/^(the|a|an)\s+/, '')) ||
+        (firstLower.length >= 4 && nextLower.substring(0, Math.min(nextLower.length, firstLower.length + 30)).includes(firstLower));
+
+      if (isShortHeading && isDuplicatedByNext) {
+        lines.shift();
+      }
+    }
+
+    return lines.join(' ').trim();
+  }
+
   for (const candidate of candidates) {
     if (typeof candidate === 'string') {
-      const trimmed = candidate.trim();
-      if (trimmed.length > 0) {
-        return trimmed;
+      const cleaned = cleanText(candidate);
+      if (cleaned.length > 0) {
+        return cleaned;
       }
     } else if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
       const textProp = (candidate as any).text ?? (candidate as any).description;
       if (typeof textProp === 'string') {
-        const trimmed = textProp.trim();
-        if (trimmed.length > 0) {
-          return trimmed;
+        const cleaned = cleanText(textProp);
+        if (cleaned.length > 0) {
+          return cleaned;
         }
       }
     }
@@ -212,11 +244,12 @@ export class NarrationService {
     if (!cleanTitle) return cleanDesc;
     if (!cleanDesc) return cleanTitle;
 
-    // Avoid duplicating title if description already begins with title
-    const normTitle = cleanTitle.toLowerCase();
-    const normDesc = cleanDesc.toLowerCase();
+    // Avoid duplicating title if description already begins with title or alias
+    const normTitle = cleanTitle.toLowerCase().replace(/^(the|a|an)\s+/, '');
+    const normDesc = cleanDesc.toLowerCase().replace(/^(the|a|an)\s+/, '');
 
-    if (normDesc.startsWith(normTitle)) {
+    if (normDesc.startsWith(normTitle) || 
+        (normTitle.length >= 4 && normDesc.substring(0, Math.min(normDesc.length, normTitle.length + 30)).includes(normTitle))) {
       return cleanDesc;
     }
 

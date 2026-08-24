@@ -3,6 +3,7 @@ import {
   DocumentaryController,
   DOCUMENTARY_TARGET_DISTANCE,
   DOCUMENTARY_DURATIONS,
+  resolveDocumentaryDuration,
   calculateGreatCircleDistance,
   calculateGreatCircleMidpoint,
   calculateFramingDistance,
@@ -226,5 +227,92 @@ describe('DocumentaryController Suite', () => {
     expect(controller.getPhase()).toBe('cancelled');
     expect(onCancel).toHaveBeenCalledWith('user_drag');
     expect(onSettle).not.toHaveBeenCalled();
+  });
+
+  it('7. resolveDocumentaryDuration accurately maps numeric slider values and handles clamps and presets', () => {
+    // Exact seconds mapping
+    expect(resolveDocumentaryDuration(2.0)).toBe(2000);
+    expect(resolveDocumentaryDuration(3.2)).toBe(3200);
+    expect(resolveDocumentaryDuration(4.0)).toBe(4000);
+    expect(resolveDocumentaryDuration(5.0)).toBe(5000);
+    expect(resolveDocumentaryDuration(5.4)).toBe(5400);
+    expect(resolveDocumentaryDuration(6.0)).toBe(6000);
+    expect(resolveDocumentaryDuration(8.0)).toBe(8000);
+    expect(resolveDocumentaryDuration(10.0)).toBe(10000);
+
+    // Clamping behavior: min 2.0s (2000ms), max 10.0s (10000ms)
+    expect(resolveDocumentaryDuration(0.5)).toBe(2000);
+    expect(resolveDocumentaryDuration(15.0)).toBe(10000);
+
+    // Legacy preset strings backwards compatibility
+    expect(resolveDocumentaryDuration('short')).toBe(3200);
+    expect(resolveDocumentaryDuration('cinematic')).toBe(5500);
+    expect(resolveDocumentaryDuration('long')).toBe(8000);
+
+    // Default fallback
+    expect(resolveDocumentaryDuration(undefined)).toBe(5500);
+    expect(resolveDocumentaryDuration(NaN as any)).toBe(5500);
+  });
+
+  it('8. Single-location transition precisely respects user-selected slider duration (e.g. 7.5s)', () => {
+    const onSettle = vi.fn();
+    const setCameraPosition = vi.fn();
+
+    controller.startSingleLocation(
+      { name: 'Rome', lat: 41.9028, lng: 12.4964 },
+      {
+        getCameraDistance: () => 4.5,
+        getCameraCoordinates: () => ({ lat: 40.7128, lng: -74.006 }), // New York
+        setCameraDistance: vi.fn(),
+        setCameraPosition,
+        onSettle
+      },
+      { duration: 7.5 } // 7500ms
+    );
+
+    expect(controller.isActive()).toBe(true);
+
+    // At t = 2000ms (within rotation phase: 0 - 3000ms of 7500ms)
+    vi.advanceTimersByTime(2000);
+    expect(controller.getPhase()).toBe('rotating');
+    expect(onSettle).not.toHaveBeenCalled();
+
+    // At t = 5000ms (within descent phase: 3000ms - 7500ms)
+    vi.advanceTimersByTime(3000);
+    expect(controller.getPhase()).toBe('descending');
+    expect(onSettle).not.toHaveBeenCalled();
+
+    // Reaching 7500ms total
+    vi.advanceTimersByTime(2600);
+    expect(onSettle).toHaveBeenCalledWith(expect.objectContaining({ name: 'Rome' }));
+    expect(controller.getPhase()).toBe('completed');
+  });
+
+  it('9. Waypoint transition precisely respects user-selected slider duration (e.g. 4.0s)', () => {
+    const wp1 = { name: 'London', lat: 51.5074, lng: -0.1278 };
+    const wp2 = { name: 'Paris', lat: 48.8566, lng: 2.3522 };
+    const onSettle = vi.fn();
+
+    controller.startWaypointTransition(
+      wp1,
+      wp2,
+      {
+        getCameraDistance: () => 1.30,
+        getCameraCoordinates: () => ({ lat: wp1.lat, lng: wp1.lng }),
+        setCameraDistance: vi.fn(),
+        setCameraPosition: vi.fn(),
+        onSettle
+      },
+      { duration: 4.0 } // 4000ms
+    );
+
+    // Advance 3000ms -> should not be settled yet
+    vi.advanceTimersByTime(3000);
+    expect(onSettle).not.toHaveBeenCalled();
+
+    // Advance remaining 1100ms -> total 4100ms -> settled
+    vi.advanceTimersByTime(1100);
+    expect(onSettle).toHaveBeenCalledWith(expect.objectContaining({ name: 'Paris' }));
+    expect(controller.getPhase()).toBe('completed');
   });
 });
