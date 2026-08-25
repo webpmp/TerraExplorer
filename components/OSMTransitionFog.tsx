@@ -4,6 +4,7 @@ import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { SkinType } from '../types';
 import { vector3ToLatLng } from '../utils/globeCoordinates';
+import { documentaryController } from '../services/documentaryController';
 
 export const MIN_TRANSITION_DURATION = 900;
 export const MAX_TRANSITION_WAIT = 8000;
@@ -753,11 +754,14 @@ export const OSMTransitionFog: React.FC<OSMTransitionFogProps> = ({ skin, isMapR
     }
 
     // 1. Reset / Cancel lifecycle when in Globe navigation mode:
-    // Distance > 1.85 (in space) OR (distance > 1.55 while user drags/rotates globe or changes sub-camera geography)
+    // Distance > 1.85 (in space) OR (distance > 1.55 while user manually interacts or changes sub-camera geography)
+    const isDocActive = documentaryController.isActive();
+    const isTransitionOwnedByDoc = isDocActive || (documentaryController.getCurrentDestination() !== null && dist <= 1.85);
     const dLat = Math.abs(currentGeo.lat - lastGlobeGeoRef.current.lat);
     const dLng = Math.abs(currentGeo.lng - lastGlobeGeoRef.current.lng);
-    const hasGlobeShifted = hasStartedRef.current && (dLat > 0.5 || (dLng > 0.5 && dLng < 359.5));
-    const isGlobeNavigating = dist > 1.85 || (dist > 1.55 && (isInteracting || hasGlobeShifted));
+    const hasGlobeShifted = !isTransitionOwnedByDoc && hasStartedRef.current && (dLat > 0.5 || (dLng > 0.5 && dLng < 359.5));
+    const isManualInteracting = isInteracting && !isDocActive;
+    const isGlobeNavigating = dist > 1.85 || (!isTransitionOwnedByDoc && dist > 1.55 && (isManualInteracting || hasGlobeShifted));
 
     if (isGlobeNavigating) {
       if (hasStartedRef.current) {

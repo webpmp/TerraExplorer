@@ -158,9 +158,76 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
     const isVisible = isRoute 
       ? activeRouteId === fav.id 
       : visibleFavoriteIds.includes(fav.id);
+    const isSelectedRoute = isRoute && isVisible;
+
+    const selectedRouteBgClass = skin === 'parchment'
+      ? 'bg-[#e8d5b5]'
+      : (skin === 'retro-green' ? 'bg-green-900/20' : (skin === 'retro-amber' ? 'bg-amber-900/20' : 'bg-white/10'));
+
+    const selectedRouteBgColor = skin === 'parchment'
+      ? '#e8d5b5'
+      : (skin === 'retro-green' ? 'rgba(20, 83, 45, 0.2)' : (skin === 'retro-amber' ? 'rgba(120, 53, 15, 0.2)' : 'rgba(255, 255, 255, 0.1)'));
+
+    const selectedBorderClass = skin === 'parchment'
+      ? 'border-[#5c3a21]'
+      : (skin === 'retro-green' ? 'border-green-400' : (skin === 'retro-amber' ? 'border-amber-400' : 'border-cyan-500/50'));
+
+    const selectedBorderColor = skin === 'parchment'
+      ? '#5c3a21'
+      : (skin === 'retro-green' ? '#4ade80' : (skin === 'retro-amber' ? '#fbbf24' : 'rgba(6, 182, 212, 0.5)'));
+
+    const selectedRouteStyle: React.CSSProperties = {
+      backgroundColor: selectedRouteBgColor,
+      borderTopWidth: '1px',
+      borderBottomWidth: '1px',
+      borderLeftWidth: '1px',
+      borderRightWidth: '0px',
+      borderTopStyle: 'solid',
+      borderBottomStyle: 'solid',
+      borderLeftStyle: 'solid',
+      borderRightStyle: 'none',
+      borderTopColor: selectedBorderColor,
+      borderBottomColor: selectedBorderColor,
+      borderLeftColor: selectedBorderColor,
+      borderRightColor: 'transparent',
+      borderTopRightRadius: '0px',
+      borderBottomRightRadius: '0px',
+      boxShadow: 'none',
+      outline: 'none'
+    };
+
+    const itemClasses = isSelectedRoute
+      ? `relative flex items-center gap-3 p-3 mb-2 ${theme.item} ${selectedBorderClass} border-r-0 rounded-r-none`
+      : `relative flex items-center gap-3 p-3 mb-2 ${theme.item} ${isVisible ? theme.itemActive : ''}`;
     
     return (
-      <div key={fav.id} className={`flex items-center gap-3 p-3 mb-2 ${theme.item} ${isVisible ? theme.itemActive : ''}`}>
+      <div 
+        key={fav.id} 
+        className={itemClasses}
+        style={isSelectedRoute ? selectedRouteStyle : undefined}
+      >
+        {isSelectedRoute && (
+          <svg
+            className="absolute top-0 -right-[8px] h-full w-[8px] pointer-events-none overflow-visible z-10"
+            viewBox="0 0 8 100"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            {/* Seamless background fill extending through the chevron tip */}
+            <polygon
+              points="-0.5,0 8,50 -0.5,100"
+              fill={selectedRouteBgColor}
+            />
+            {/* Solid 1px outer chevron border */}
+            <polyline
+              points="0,0 8,50 0,100"
+              fill="none"
+              stroke={selectedBorderColor}
+              strokeWidth="1"
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+        )}
         <div className={`shrink-0 ${theme.icon}`}>
            {isRoute ? <RouteIcon size={18} /> : <MapPin size={18} />}
         </div>

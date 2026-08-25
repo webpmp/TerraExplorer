@@ -827,7 +827,7 @@ describe('Lightbox Metadata Integration', () => {
       // Primary narrative about Sputnik exists
       expect(html).toContain('Sputnik 1 was launched by the Soviet Union on October 4, 1957');
       // Consolidated historical context exists
-      expect(html).toContain('Historical context');
+      expect(html).toMatch(/Historical [Cc]ontext/);
       expect(html).toContain('The facility was originally associated with Tyuratam');
 
       // Fragment headings must NOT be rendered as separate h3 elements

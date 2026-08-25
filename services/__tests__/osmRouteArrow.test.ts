@@ -275,17 +275,17 @@ describe('OSM Route Connecting Path Directional Arrow Suite', () => {
     expect((geom as any).color).toBeUndefined();
   });
 
-  it('Test 15: Arrow dimensions - confirms 12px length and 8px width sizing and corner generation', () => {
-    expect(ARROW_LENGTH).toBe(12);
-    expect(ARROW_WIDTH).toBe(8);
+  it('Test 15: Arrow dimensions - confirms 9px length and 6px width sizing and corner generation', () => {
+    expect(ARROW_LENGTH).toBe(9);
+    expect(ARROW_WIDTH).toBe(6);
 
     const corners = calculateArrowheadCorners({ x: 100, y: 100 }, 0, ARROW_LENGTH, ARROW_WIDTH);
-    expect(corners.baseCenter.x).toBe(100 - 12);
+    expect(corners.baseCenter.x).toBe(100 - 9);
     expect(corners.baseCenter.y).toBe(100);
-    expect(corners.leftCorner.x).toBe(100 - 12);
-    expect(corners.leftCorner.y).toBe(100 - 4);
-    expect(corners.rightCorner.x).toBe(100 - 12);
-    expect(corners.rightCorner.y).toBe(100 + 4);
+    expect(corners.leftCorner.x).toBe(100 - 9);
+    expect(corners.leftCorner.y).toBe(100 - 3);
+    expect(corners.rightCorner.x).toBe(100 - 9);
+    expect(corners.rightCorner.y).toBe(100 + 3);
   });
 
   it('Test 16: Full arrowhead polygon collision detection - wings / edges are checked against marker and label bounds', () => {

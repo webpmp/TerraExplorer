@@ -26,8 +26,19 @@ import { calculateClampedZoomDelta, normalizeWheelDelta } from './utils/cameraZo
 import { documentaryController, DocumentaryDestination } from './services/documentaryController';
 import { narrationService, getNarrationDescription, getNarrationTitle } from './services/narrationService';
 import { latLngToVector3, vector3ToLatLng } from './utils/globeCoordinates';
-import { OSM_DETAIL_THRESHOLD } from './services/geographic/osmTileService';
-import { getParchmentBaseDistance } from './utils/cameraConfig';
+import { OSM_DETAIL_THRESHOLD, osmTileService } from './services/geographic/osmTileService';
+import {
+  getParchmentBaseDistance,
+  calculateGreatCircleDistance,
+  calculateModerateFramingDistance,
+  isDestinationComfortablyVisible
+} from './utils/cameraConfig';
+import {
+  isMarkerInOSMViewport,
+  OSMViewportBounds,
+  evaluateCameraTransitionDecision,
+  logCameraDecision
+} from './utils/osmViewportUtils';
 
 // Helper for distance measurement (Haversine formula in km)
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -442,6 +453,122 @@ const App: React.FC = () => {
       setParchmentZoom(syncZoom);
     }
   }, [skin]);
+
+  const [osmViewportBounds, setOsmViewportBounds] = useState<OSMViewportBounds | null>(null);
+  const osmViewportBoundsRef = useRef<OSMViewportBounds | null>(null);
+
+  const handleOSMViewportBoundsChange = useCallback((bounds: OSMViewportBounds | null) => {
+    osmViewportBoundsRef.current = bounds;
+    setOsmViewportBounds(bounds);
+  }, []);
+
+  const panAnimRef = useRef<number | null>(null);
+
+  const smoothPanOSMCamera = useCallback((targetLat: number, targetLng: number, distance: number, durationMs = 450) => {
+    if (panAnimRef.current) {
+      cancelAnimationFrame(panAnimRef.current);
+      panAnimRef.current = null;
+    }
+    const startLat = previousGeoCenterRef.current.lat || targetLat;
+    let startLng = previousGeoCenterRef.current.lng || targetLng;
+    let dLng = targetLng - startLng;
+    if (dLng > 180) startLng += 360;
+    else if (dLng < -180) startLng -= 360;
+
+    const startTime = performance.now();
+
+    const step = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / durationMs);
+      const ease = progress < 0.5
+        ? 4 * progress * progress * progress
+        : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+      const curLat = startLat + (targetLat - startLat) * ease;
+      const curLng = startLng + (targetLng - startLng) * ease;
+
+      updateAuthoritativeCamera(curLat, curLng, distance);
+
+      if (progress < 1) {
+        panAnimRef.current = requestAnimationFrame(step);
+      } else {
+        panAnimRef.current = null;
+      }
+    };
+
+    panAnimRef.current = requestAnimationFrame(step);
+  }, [updateAuthoritativeCamera]);
+
+  const smoothWaypointTransitionOSMCamera = useCallback((
+    targetLat: number,
+    targetLng: number,
+    startDist: number,
+    targetDist: number = 1.30,
+    fromLat?: number,
+    fromLng?: number,
+    durationMs = 1200
+  ) => {
+    if (panAnimRef.current) {
+      cancelAnimationFrame(panAnimRef.current);
+      panAnimRef.current = null;
+    }
+    const startLat = typeof fromLat === 'number' ? fromLat : (previousGeoCenterRef.current.lat || targetLat);
+    const startLng = typeof fromLng === 'number' ? fromLng : (previousGeoCenterRef.current.lng || targetLng);
+
+    const angularDist = calculateGreatCircleDistance(startLat, startLng, targetLat, targetLng);
+    const maxFramingLimit = 2.65; // Sensible maximum zoom-out limit: safely above OSM_DETAIL_THRESHOLD (1.45)
+    const framingDist = Math.min(
+      maxFramingLimit,
+      Math.max(2.4, calculateModerateFramingDistance(angularDist, startDist, targetDist, maxFramingLimit))
+    );
+
+    const startTime = performance.now();
+
+    const step = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / durationMs);
+
+      let curLat: number;
+      let curLng: number;
+      let curDist: number;
+
+      if (progress < 0.35) {
+        // Phase 1: Zoom straight OUT from origin waypoint (coordinates locked to start)
+        const p1 = progress / 0.35;
+        const ease1 = p1 < 0.5 ? 2 * p1 * p1 : 1 - Math.pow(-2 * p1 + 2, 2) / 2;
+        curLat = startLat;
+        curLng = startLng;
+        curDist = startDist + (framingDist - startDist) * ease1;
+      } else if (progress < 0.67) {
+        // Phase 2: Rotate globe at constant overview altitude (OSM is inactive)
+        const p2 = (progress - 0.35) / 0.32;
+        const ease2 = p2 < 0.5 ? 2 * p2 * p2 : 1 - Math.pow(-2 * p2 + 2, 2) / 2;
+        const interp = interpolateCoordinates(startLat, startLng, targetLat, targetLng, ease2);
+        curLat = interp.lat;
+        curLng = interp.lng;
+        curDist = framingDist;
+      } else {
+        // Phase 3: Zoom straight IN to target waypoint (coordinates locked to destination)
+        const p3 = (progress - 0.67) / 0.33;
+        const ease3 = p3 < 0.5 ? 2 * p3 * p3 : 1 - Math.pow(-2 * p3 + 2, 2) / 2;
+        curLat = targetLat;
+        curLng = targetLng;
+        curDist = framingDist + (targetDist - framingDist) * ease3;
+      }
+
+      curDist = Math.max(1.018, Math.min(maxFramingLimit, curDist));
+
+      updateAuthoritativeCamera(curLat, curLng, curDist);
+
+      if (progress < 1) {
+        panAnimRef.current = requestAnimationFrame(step);
+      } else {
+        panAnimRef.current = null;
+      }
+    };
+
+    panAnimRef.current = requestAnimationFrame(step);
+  }, [updateAuthoritativeCamera]);
 
   const programmaticTransitionUntilRef = useRef<number>(0);
 
@@ -1246,7 +1373,9 @@ const App: React.FC = () => {
       skin,
       aspect: currentAspect,
       viewportWidth: worldDimensions.width > 0 ? worldDimensions.width : undefined,
-      viewportHeight: worldDimensions.height > 0 ? worldDimensions.height : undefined
+      viewportHeight: worldDimensions.height > 0 ? worldDimensions.height : undefined,
+      viewportBounds: osmViewportBoundsRef.current,
+      maxFramingDistance: 2.65
     };
 
     if (fromDest && typeof fromDest.lat === 'number' && typeof fromDest.lng === 'number') {
@@ -1296,36 +1425,104 @@ const App: React.FC = () => {
      setSelectedMarkerCoordinates({ lat: wp.lat, lng: wp.lng });
      setIsFocused(true);
 
-     if (userSettings.documentaryMode) {
-        startDocumentaryFlow(
-          {
-            id: stableId,
-            name: wp.name,
-            lat: wp.lat,
-            lng: wp.lng,
-            description: wp.description
-          },
-          fromWp ? {
-            id: fromWp.id,
-            name: fromWp.name,
-            lat: fromWp.lat,
-            lng: fromWp.lng,
-            description: fromWp.description
-          } : undefined
-        );
+     // Trigger destination OSM tile prefetching in the background before camera arrives
+     if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
+       osmTileService.prefetchViewportTiles(
+         wp.lat,
+         wp.lng,
+         14,
+         skin,
+         worldDimensions.width > 0 ? worldDimensions.width : (typeof window !== 'undefined' ? window.innerWidth : 1920),
+         worldDimensions.height > 0 ? worldDimensions.height : (typeof window !== 'undefined' ? window.innerHeight : 1080)
+       );
+     }
+
+     const currentDist = currentCameraDistanceRef.current || (cameraControlsRef.current?.object?.position?.length()) || 4.5;
+     const isDocActive = isDocumentaryActive || documentaryController.isActive();
+
+     // Viewport-aware visibility check using actual OSM geographic bounds
+     const bounds = osmViewportBoundsRef.current;
+     const isVisibleInOSMViewport = (typeof wp.lat === 'number' && typeof wp.lng === 'number') && (
+       bounds
+         ? isMarkerInOSMViewport(wp.lat, wp.lng, bounds)
+         : ((isOSMActive || currentDist <= 1.45) && isDestinationComfortablyVisible(
+             previousGeoCenterRef.current,
+             currentDist,
+             { lat: wp.lat, lng: wp.lng },
+             {
+               viewportWidth: worldDimensions.width > 0 ? worldDimensions.width : (typeof window !== 'undefined' ? window.innerWidth : 1920),
+               viewportHeight: worldDimensions.height > 0 ? worldDimensions.height : (typeof window !== 'undefined' ? window.innerHeight : 1080)
+             }
+           ))
+     );
+
+     if (isOSMActive || currentDist <= 1.45) {
+       if (isVisibleInOSMViewport) {
+         // Rule 1: Waypoint is inside current OSM viewport -> keep current zoom level, eased pan to waypoint. Do not zoom out, do not snap.
+         documentaryController.cancel('waypoint_visible_in_viewport');
+         setIsDocumentaryActive(false);
+         if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
+           smoothPanOSMCamera(wp.lat, wp.lng, currentDist);
+         }
+       } else {
+         // Rule 2 & 3: Waypoint is outside current OSM viewport -> calculate minimum camera adjustment (controlled zoom-out + eased pan), never full-earth globe view.
+         if (userSettings.documentaryMode) {
+           const originWp = fromWp || {
+             id: 'current-camera-pos',
+             name: 'Current Viewport',
+             lat: previousGeoCenterRef.current.lat,
+             lng: previousGeoCenterRef.current.lng,
+             description: ''
+           };
+           startDocumentaryFlow(
+             {
+               id: stableId,
+               name: wp.name,
+               lat: wp.lat,
+               lng: wp.lng,
+               description: wp.description
+             },
+             originWp
+           );
+         } else {
+           setIsDocumentaryActive(false);
+           if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
+             smoothWaypointTransitionOSMCamera(
+               wp.lat,
+               wp.lng,
+               currentDist,
+               1.30,
+               fromWp?.lat ?? previousGeoCenterRef.current.lat,
+               fromWp?.lng ?? previousGeoCenterRef.current.lng
+             );
+           }
+         }
+       }
      } else {
-        setIsDocumentaryActive(false);
-        // Propose camera values to central state for normal mode
-        if (earthRef.current && cameraControlsRef.current) {
-           const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 2.0; 
-           
-           cameraStateRef.current.routeSuggestedDistance = targetDist;
-           cameraStateRef.current.targetRotation = { lat: wp.lat, lng: wp.lng };
-           
-           requestAnimationFrame(() => {
-              reconcileCameraState();
-           });
-        }
+       // Globe / regional camera approaching OSM
+       if (userSettings.documentaryMode) {
+         startDocumentaryFlow(
+           {
+             id: stableId,
+             name: wp.name,
+             lat: wp.lat,
+             lng: wp.lng,
+             description: wp.description
+           },
+           fromWp ? {
+             id: fromWp.id,
+             name: fromWp.name,
+             lat: fromWp.lat,
+             lng: fromWp.lng,
+             description: fromWp.description
+           } : undefined
+         );
+       } else {
+         setIsDocumentaryActive(false);
+         if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
+           smoothPanOSMCamera(wp.lat, wp.lng, 1.30);
+         }
+       }
      }
 
      const initialDesc = wp.description || wp.significance || "";
@@ -1455,7 +1652,20 @@ const App: React.FC = () => {
          setIsInfoPanelLoading(false);
          console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_COMPLETE');
      }
-  }, [isZoomLocked, lockedZoomDistance, reconcileCameraState, userSettings.documentaryMode, startDocumentaryFlow, maybeTriggerNarration]);  const selectEntity = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint) => {
+  }, [
+    isZoomLocked,
+    lockedZoomDistance,
+    reconcileCameraState,
+    userSettings.documentaryMode,
+    startDocumentaryFlow,
+    maybeTriggerNarration,
+    isOSMActive,
+    smoothPanOSMCamera,
+    smoothWaypointTransitionOSMCamera,
+    worldDimensions
+  ]);
+
+  const selectEntity = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint) => {
     const stableId = marker.id || `${marker.name}-${marker.lat}-${marker.lng}`;
     activeSelectionIdRef.current = stableId;
     const targetKey = stableId;
@@ -1496,11 +1706,14 @@ const App: React.FC = () => {
         const isRoutePoint = 'context' in marker || 'routeTitle' in marker;
         if (isRoutePoint) {
             const wp = marker as Waypoint;
+            const currentWp = (currentWaypointIndex >= 0 && currentWaypointIndex < routeWaypoints.length)
+                ? routeWaypoints[currentWaypointIndex]
+                : undefined;
             const idx = routeWaypoints.findIndex(w => w.id === wp.id);
             if (idx !== -1) {
                 setCurrentWaypointIndex(idx);
             }
-            loadWaypointData(wp);
+            loadWaypointData(wp, currentWp);
             return;
         } else {
             if (!activeRouteId) {
@@ -1536,22 +1749,59 @@ const App: React.FC = () => {
         setIsNewsFetching(false);
         console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_STARTED');
 
-        if (userSettings.documentaryMode) {
-            startDocumentaryFlow({
-               id: stableId,
-               name: marker.name,
-               lat: marker.lat,
-               lng: marker.lng,
-               description: initialPayload.description
-            });
-        } else {
+        const currentDist = currentCameraDistanceRef.current || (cameraControlsRef.current?.object?.position?.length()) || 4.5;
+        const isDocActive = isDocumentaryActive || documentaryController.isActive();
+
+        const decision = evaluateCameraTransitionDecision({
+          currentDistance: currentDist,
+          isOSMActive,
+          isDocumentaryActive: isDocActive,
+          marker: { lat: marker.lat, lng: marker.lng, name: marker.name },
+          osmViewportBounds: osmViewportBoundsRef.current,
+          cameraCenter: previousGeoCenterRef.current,
+          targetDistance: 1.30,
+          osmRequired: true
+        });
+
+        logCameraDecision(decision);
+
+        switch (decision.transitionDecision) {
+          case 'NO_CAMERA_MOVEMENT':
             setIsDocumentaryActive(false);
-            if (cameraControlsRef.current) {
-                const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.5;
-                cameraStateRef.current.routeSuggestedDistance = targetDist;
-                cameraStateRef.current.targetRotation = { lat: marker.lat, lng: marker.lng };
-                requestAnimationFrame(() => reconcileCameraState());
+            break;
+
+          case 'PAN_CURRENT_OSM':
+            setIsDocumentaryActive(false);
+            if (typeof marker.lat === 'number' && typeof marker.lng === 'number') {
+              updateAuthoritativeCamera(marker.lat, marker.lng, currentDist);
             }
+            break;
+
+          case 'PRESERVE_CURRENT_OSM_ZOOM':
+            setIsDocumentaryActive(false);
+            if (typeof marker.lat === 'number' && typeof marker.lng === 'number') {
+              smoothPanOSMCamera(marker.lat, marker.lng, currentDist);
+            }
+            break;
+
+          case 'REDIRECT_CURRENT_TRANSITION':
+          case 'TRANSITION_TO_OSM':
+          case 'ZOOM_CURRENT_OSM':
+            if (userSettings.documentaryMode) {
+              startDocumentaryFlow({
+                id: stableId,
+                name: marker.name,
+                lat: marker.lat,
+                lng: marker.lng,
+                description: initialPayload.description
+              });
+            } else {
+              setIsDocumentaryActive(false);
+              if (typeof marker.lat === 'number' && typeof marker.lng === 'number') {
+                smoothPanOSMCamera(marker.lat, marker.lng, 1.30);
+              }
+            }
+            break;
         }
 
         if (initialPayload.description) {
@@ -1941,7 +2191,7 @@ const App: React.FC = () => {
     // 1. Intent routing & entity extraction
     const parsedQuery = routeIntentAndExtractEntity(cleanQuery);
 
-    if (parsedQuery.intent === 'EXPLORATORY' || parsedQuery.resolutionMode === 'MULTI_LOCATION_EXPLORATION') {
+    if (parsedQuery.intent === 'EXPLORATORY' || parsedQuery.intent === 'MULTI_LOCATION_DISCOVERY' || parsedQuery.resolutionMode === 'MULTI_LOCATION_EXPLORATION') {
         handleTraceRoute(cleanQuery);
         return;
     }
@@ -2581,6 +2831,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           currentWaypointIndex={currentWaypointIndex}
           scanningArea={scanningArea}
           onCameraChange={updateAuthoritativeCamera}
+          onOSMViewportBoundsChange={handleOSMViewportBoundsChange}
         />
         
         <VisibilityTracker 

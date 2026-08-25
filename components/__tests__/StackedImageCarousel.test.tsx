@@ -379,5 +379,81 @@ describe('StackedImageCarousel Component', () => {
       expect(retroAmberHtml).not.toContain('font-garamond');
     });
   });
+
+  describe('Lightbox Image Magnifier & Theme Styling', () => {
+    it('renders magnifier button and hidden enlarged lens by default when lightbox is open', () => {
+      const html = renderToStaticMarkup(
+        <StackedImageCarousel
+          images={multipleImages}
+          locationName="Matterhorn"
+          skin="modern"
+          initialLightboxOpen={true}
+        />
+      );
+
+      expect(html).toContain('data-testid="lightbox-magnifier-btn"');
+      expect(html).toContain('title="Enable magnifier"');
+      expect(html).toContain('aria-label="Enable magnifier"');
+      expect(html).toContain('aria-pressed="false"');
+      expect(html).toContain('lucide-zoom-in');
+      expect(html).not.toContain('Magnifier ON');
+      expect(html).not.toContain('Magnify');
+      expect(html).toContain('data-testid="lightbox-magnifier-lens"');
+      expect(html).toContain('w-[226px]');
+      expect(html).toContain('h-[226px]');
+      expect(html).toContain('display:none');
+      // Glass reflection is explicitly disabled
+      expect(html).toContain('class="glass-reflection" style="display:none"');
+    });
+
+    it('renders theme-specific magnifier controls across Modern (black border), Retro Green, Retro Amber, and Parchment', () => {
+      // Modern - black magnifier lens border
+      const modernHtml = renderToStaticMarkup(
+        <StackedImageCarousel
+          images={multipleImages}
+          locationName="Matterhorn"
+          skin="modern"
+          initialLightboxOpen={true}
+        />
+      );
+      expect(modernHtml).toContain('border-black');
+
+      // Retro Green - green phosphor border
+      const greenHtml = renderToStaticMarkup(
+        <StackedImageCarousel
+          images={multipleImages}
+          locationName="Matterhorn"
+          skin="retro-green"
+          initialLightboxOpen={true}
+        />
+      );
+      expect(greenHtml).toContain('border-green-400');
+      expect(greenHtml).toContain('font-retro');
+
+      // Retro Amber - amber phosphor border
+      const amberHtml = renderToStaticMarkup(
+        <StackedImageCarousel
+          images={multipleImages}
+          locationName="Matterhorn"
+          skin="retro-amber"
+          initialLightboxOpen={true}
+        />
+      );
+      expect(amberHtml).toContain('border-amber-400');
+      expect(amberHtml).toContain('font-retro');
+
+      // Parchment - warm leather/brass border
+      const parchmentHtml = renderToStaticMarkup(
+        <StackedImageCarousel
+          images={multipleImages}
+          locationName="Matterhorn"
+          skin="parchment"
+          initialLightboxOpen={true}
+        />
+      );
+      expect(parchmentHtml).toContain('border-[#8b5a2b]');
+      expect(parchmentHtml).toContain('font-serif');
+    });
+  });
 });
 

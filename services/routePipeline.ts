@@ -3,14 +3,15 @@ import { generateContentWithRetry, modelName } from './geminiService';
 import { PIPELINE_DEBUG, logWaypointSnapshot, logFieldDiff, logHierarchy, logPipelineSummary, PipelineSummary } from '../utils/pipelineDebug';
 import { parseAndExtract } from '../utils/jsonParser';
 import { validateEarthGeography } from './celestialCapabilities';
+import { isRouteSequential } from '../utils/routeSequenceUtils';
 
-export const runRoutePipeline = async (text: string, isUrl: boolean, generateRawRoute: (text: string, isUrl: boolean) => Promise<{ waypoints: any[], title?: string, routeConfidence?: any, routeType?: string }>, intent?: string): Promise<Route> => {
+export const runRoutePipeline = async (text: string, isUrl: boolean, generateRawRoute: (text: string, isUrl: boolean) => Promise<{ waypoints: any[], title?: string, routeConfidence?: any, routeType?: string, isSequential?: boolean }>, intent?: string): Promise<Route> => {
   const pipelineId = Math.random().toString(16).substring(2, 8);
   console.log(`[Pipeline ${pipelineId}] === STARTING 6-STAGE VALIDATION PIPELINE ===`);
 
   // Stage 1: Generate
   console.log(`[Pipeline ${pipelineId}] Stage 1: Generate (Calling AI)`);
-  const { waypoints: rawItems, title: rawTitle, routeConfidence: rawRouteConfidence, routeType: rawRouteType } = await generateRawRoute(text, isUrl);
+  const { waypoints: rawItems, title: rawTitle, routeConfidence: rawRouteConfidence, routeType: rawRouteType, isSequential: rawIsSequential } = await generateRawRoute(text, isUrl);
 
   // Stage 2: Normalize
   console.log(`[Pipeline ${pipelineId}] Stage 2: Normalize (Structural initialization)`);
@@ -35,6 +36,14 @@ export const runRoutePipeline = async (text: string, isUrl: boolean, generateRaw
       historicalPeriod: item.historicalPeriod,
       entities: Array.isArray(item.entities) ? item.entities : [],
       historicalConfidence: item.historicalConfidence,
+      date: item.date,
+      year: item.year,
+      timestamp: item.timestamp,
+      temporalRelation: item.temporalRelation,
+      relationship: item.relationship,
+      order: item.order,
+      isSequential: item.isSequential,
+      metadata: item.metadata,
       provenance: [{
         stage: 'normalization',
         source: 'deterministic',
@@ -54,6 +63,22 @@ export const runRoutePipeline = async (text: string, isUrl: boolean, generateRaw
 
   // Stage 3: Structural Validation
   console.log(`[Pipeline ${pipelineId}] Stage 3: Structural Validation`);
+
+  console.log(`[LOCATION DISCOVERY]\ncandidateCount=${rawItems.length}`);
+
+  for (const item of rawItems) {
+    const isSentinel = (typeof item.lat === 'number' && typeof item.lng === 'number') &&
+      ((Math.abs(item.lat - 12.345) < 0.01 && Math.abs(item.lng - 67.89) < 0.01) || (item.lat === 0 && item.lng === 0));
+    const isCoordValid = typeof item.lat === 'number' && typeof item.lng === 'number' && !isNaN(item.lat) && !isNaN(item.lng) && item.lat >= -90 && item.lat <= 90 && item.lng >= -180 && item.lng <= 180 && !isSentinel;
+    const isNameValid = item.name && item.name.toLowerCase() !== text.toLowerCase() && !/^(where was|where were|what are|filming locations|places used)\b/i.test(item.name);
+
+    if (isCoordValid && isNameValid) {
+      console.log(`[LOCATION CANDIDATE]\nname="${item.name}"\ncoordinates=${item.lat.toFixed(4)}, ${item.lng.toFixed(4)}\ncoordinateSource=verified_geographic\nvalidation=ACCEPT`);
+    } else {
+      console.log(`[LOCATION CANDIDATE]\nname="${item.name || 'Unknown'}"\ncoordinates=${typeof item.lat === 'number' ? item.lat.toFixed(4) : 'NaN'}, ${typeof item.lng === 'number' ? item.lng.toFixed(4) : 'NaN'}\ncoordinateSource=untrusted\nvalidation=REJECT reason=${!isCoordValid ? 'INVALID_COORDINATES' : 'INVALID_NAME'}`);
+    }
+  }
+
   normalizedItems = normalizedItems.filter(w => {
     // Clean empty alternateNames arrays
     if (w.alternateNames) {
@@ -63,10 +88,16 @@ export const runRoutePipeline = async (text: string, isUrl: boolean, generateRaw
         .filter((n, index, self) => self.indexOf(n) === index);
     }
     
-    const isValidCoords = w.lat !== 0 || w.lng !== 0;
+    const isValidCoords = typeof w.lat === 'number' && typeof w.lng === 'number' && !isNaN(w.lat) && !isNaN(w.lng) && (w.lat !== 0 || w.lng !== 0) && w.lat >= -90 && w.lat <= 90 && w.lng >= -180 && w.lng <= 180;
     if (!isValidCoords) {
       console.warn(`[Pipeline ${pipelineId}] Structural Validation failed for ${w.name}: Invalid coordinates`);
       return false; // Real failures (no coords) are filtered
+    }
+
+    // Reject sentinel / placeholder coordinates
+    if (Math.abs(w.lat - 12.345) < 0.01 && Math.abs(w.lng - 67.89) < 0.01) {
+      console.warn(`[Pipeline ${pipelineId}] Structural Validation failed for ${w.name}: Sentinel / invented coordinates rejected (12.345, 67.89)`);
+      return false;
     }
     
     // Reject NYC fallback
@@ -75,9 +106,9 @@ export const runRoutePipeline = async (text: string, isUrl: boolean, generateRaw
       return false;
     }
     
-    // Reject exact name match with query
-    if (w.name.toLowerCase() === text.toLowerCase()) {
-      console.warn(`[Pipeline ${pipelineId}] Structural Validation failed for ${w.name}: Waypoint name exactly matches route name`);
+    // Reject exact name match with query or query sentences
+    if (w.name.toLowerCase() === text.toLowerCase() || /^(where was|where were|what are|filming locations)\b/i.test(w.name)) {
+      console.warn(`[Pipeline ${pipelineId}] Structural Validation failed for ${w.name}: Waypoint name matches query sentence`);
       return false;
     }
 
@@ -493,5 +524,17 @@ export const runRoutePipeline = async (text: string, isUrl: boolean, generateRaw
   logPipelineSummary(summary);
 
   console.log(`[Pipeline ${pipelineId}] === PIPELINE COMPLETE ===`);
-  return { waypoints: cleanItems, title: rawTitle, routeConfidence: rawRouteConfidence, routeType: effectiveRouteType as any };
+  if (intent === 'MULTI_LOCATION_DISCOVERY') {
+    console.log(`[DISCOVERY RESULTS]\nquery="${text.toLowerCase()}"\nresultCount=${cleanItems.length}\nmode=MULTI_LOCATION`);
+  }
+  const isSequential = isRouteSequential(cleanItems, {
+    routeType: effectiveRouteType,
+    isSequential: rawIsSequential
+  });
+
+  cleanItems.forEach(wp => {
+    wp.isSequential = isSequential;
+  });
+
+  return { waypoints: cleanItems, title: rawTitle, routeConfidence: rawRouteConfidence, routeType: effectiveRouteType as any, isSequential };
 };

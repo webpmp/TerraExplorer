@@ -12,6 +12,14 @@ import {
   MapPin, Route as RouteIcon
 } from 'lucide-react';
 import StackedImageCarousel from './StackedImageCarousel';
+import { 
+  classifyContext, 
+  isPureGeographicLabel, 
+  sanitizeContextMarkdown, 
+  ContextCategory, 
+  CONTEXT_CATEGORY_HEADINGS 
+} from '../utils/contextClassification';
+export { classifyContext, isPureGeographicLabel, sanitizeContextMarkdown };
 
 
 export interface GalleryImage {
@@ -704,8 +712,43 @@ export const getCleanDescriptionLines = (info: any) => {
     
     if (isPlaceholderString(descText)) return [];
 
-    const lines = descText.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0 && !isPlaceholderString(l));
+    const sanitizedMarkdown = sanitizeContextMarkdown(descText);
+    const rawLines = sanitizedMarkdown.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0 && !isPlaceholderString(l));
     
+    // Process lines: remove fake context headings when followed by geographic labels,
+    // reclassify headings, and drop pure geographic standalone labels.
+    const lines: string[] = [];
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i];
+      const headingClean = line.replace(/^#{1,3}\s*/, '').trim();
+      const isContextHeading = /^(?:historical\s+context|historical\s+background|history|context|background|cultural\s+context|film\s*(?:&|and)\s*media|media\s+context|filming\s+location|scientific\s*(?:&|\/|and)\s*geographic\s*context)$/i.test(headingClean);
+
+      if (isContextHeading) {
+        const nextLine = rawLines[i + 1] || '';
+        if (isPureGeographicLabel(nextLine)) {
+          // Drop both the heading and the geographic label
+          if (nextLine && isPureGeographicLabel(nextLine)) {
+            i++;
+          }
+          continue;
+        }
+
+        const classification = classifyContext(nextLine);
+        if (classification.category && classification.isMeaningful) {
+          lines.push(`## ${classification.heading}`);
+        } else if (classification.isGeographicOnly) {
+          if (nextLine && isPureGeographicLabel(nextLine)) {
+            i++;
+          }
+          continue;
+        } else {
+          // Keep content as plain narrative without fake context heading
+        }
+      } else {
+        lines.push(line);
+      }
+    }
+
     if (lines.length > 0) {
         const firstLineRaw = lines[0];
         const firstLineClean = firstLineRaw.replace(/^#+\s*/, '').trim();
@@ -843,20 +886,60 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       }
     }
 
-    // Consolidated historical context (from background, region, context notes)
-    const contextList: string[] = [];
+    // Consolidated contextual narrative sections (Historical, Film & Media, Cultural, Scientific/Geographic)
+    // Only render categories when substantive, non-geographic information is present.
+    const contextCandidates: string[] = [];
     if ((rawInfo as any).historicalBackground && !isPlaceholderString((rawInfo as any).historicalBackground)) {
-      contextList.push((rawInfo as any).historicalBackground);
+      contextCandidates.push((rawInfo as any).historicalBackground);
     }
-    if (wp.historicalRegion && !isPlaceholderString(wp.historicalRegion) && !combinedDescParts.some(p => p.includes(wp.historicalRegion))) {
-      if (wp.historicalRegion.length > 20 || !rawInfo.country?.includes(wp.historicalRegion)) {
-        contextList.push(wp.historicalRegion);
+    if ((rawInfo as any).historicalContext && !isPlaceholderString((rawInfo as any).historicalContext)) {
+      contextCandidates.push((rawInfo as any).historicalContext);
+    }
+    if ((rawInfo as any).filmContext && !isPlaceholderString((rawInfo as any).filmContext)) {
+      contextCandidates.push((rawInfo as any).filmContext);
+    }
+    if ((rawInfo as any).mediaContext && !isPlaceholderString((rawInfo as any).mediaContext)) {
+      contextCandidates.push((rawInfo as any).mediaContext);
+    }
+    if ((rawInfo as any).culturalContext && !isPlaceholderString((rawInfo as any).culturalContext)) {
+      contextCandidates.push((rawInfo as any).culturalContext);
+    }
+    if ((rawInfo as any).scientificContext && !isPlaceholderString((rawInfo as any).scientificContext)) {
+      contextCandidates.push((rawInfo as any).scientificContext);
+    }
+
+    // Group candidates by semantic category
+    const categorizedContext: Partial<Record<ContextCategory, string[]>> = {};
+
+    for (const rawSnippet of contextCandidates) {
+      const snippet = normalizeDisplayText(String(rawSnippet)).trim();
+      if (!snippet || isPlaceholderString(snippet) || isPureGeographicLabel(snippet)) {
+        continue;
+      }
+      if (combinedDescParts.some(p => p.includes(snippet))) {
+        continue;
+      }
+
+      const res = classifyContext(snippet);
+      if (res.category && res.isMeaningful) {
+        if (!categorizedContext[res.category]) {
+          categorizedContext[res.category] = [];
+        }
+        if (!categorizedContext[res.category]!.includes(snippet)) {
+          categorizedContext[res.category]!.push(snippet);
+        }
       }
     }
 
-    if (contextList.length > 0) {
-      const mergedContext = contextList.join(' ');
-      combinedDescParts.push(`## Historical context\n\n${mergedContext}`);
+    // Append only active, categorized context sections with semantic headings
+    for (const [category, snippets] of Object.entries(categorizedContext) as [ContextCategory, string[]][]) {
+      if (snippets && snippets.length > 0) {
+        const heading = CONTEXT_CATEGORY_HEADINGS[category];
+        const mergedText = snippets.join(' ');
+        if (mergedText && !combinedDescParts.some(p => p.includes(mergedText))) {
+          combinedDescParts.push(`## ${heading}\n\n${mergedText}`);
+        }
+      }
     }
     
     let desc = combinedDescParts.join('\n\n');
@@ -1064,6 +1147,10 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       entityType: wp.entityType || rawInfo.entityType,
       intent: rawInfo.intent || (wp as any)?.intent,
       historicalContext: rawInfo.historicalContext || (wp as any)?.historicalContext,
+      historicalPeriod: (wp as any)?.historicalPeriod || (rawInfo as any)?.historicalPeriod,
+      routeTitle: (wp as any)?.routeTitle || (rawInfo as any)?.routeTitle || (rawInfo as any)?.routeContext?.title,
+      entities: (wp as any)?.entities || (rawInfo as any)?.entities,
+      highlights: (wp as any)?.highlights || (rawInfo as any)?.highlights,
       description: desc,
       population,
       climate,
@@ -1073,7 +1160,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       boundary: rawInfo.boundary,
       news,
       notable,
-      relatedEntities
+      relatedEntities,
+      waypoint: rawInfo.waypoint || undefined
     };
   }, [rawInfo, isSingleLocation, isMultiLocation]);
 
@@ -1393,7 +1481,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       }
     };
     fetchImages();
-  }, [info?.name, (info as any)?.canonicalName, info?.city, info?.country, info?.coordinates?.lat, info?.coordinates?.lng, info?.imageSearchTerm, info?.primaryImage, info?.images, info?.image, info?.imageCaption, (info as any)?.imageAttribution]);
+  }, [info?.name, (info as any)?.canonicalName, info?.city, info?.country, info?.coordinates?.lat, info?.coordinates?.lng, info?.imageSearchTerm, info?.primaryImage, info?.images, info?.image, info?.imageCaption, (info as any)?.imageAttribution, (info as any)?.routeTitle, (info as any)?.historicalPeriod, (info as any)?.significance, (info as any)?.entityType]);
 
   const themes = {
     'modern': {

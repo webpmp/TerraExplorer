@@ -252,6 +252,67 @@ export class OSMTileService {
   }
 
   /**
+   * Returns list of tile URLs for a given geographic center, zoom, and screen dimensions.
+   */
+  public getTileUrlsForViewport(
+    lat: number,
+    lng: number,
+    zoom: number = 14,
+    skin: string = 'modern',
+    viewportWidth: number = 1920,
+    viewportHeight: number = 1080
+  ): string[] {
+    const n = Math.pow(2, zoom);
+    const exactX = ((lng + 180) / 360) * n;
+    const latRad = (Math.max(-85.0511, Math.min(85.0511, lat)) * Math.PI) / 180;
+    const exactY = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n;
+
+    const TILE_PX = 256;
+    const tilesX = Math.ceil(viewportWidth / (2 * TILE_PX)) + 2;
+    const tilesY = Math.ceil(viewportHeight / (2 * TILE_PX)) + 2;
+
+    const urls: string[] = [];
+    for (let dx = -tilesX; dx <= tilesX; dx++) {
+      for (let dy = -tilesY; dy <= tilesY; dy++) {
+        const x = Math.floor(exactX) + dx;
+        const y = Math.floor(exactY) + dy;
+        if (y < 0 || y >= n) continue;
+        const wrappedX = ((x % n) + n) % n;
+        urls.push(this.getTileUrl(zoom, wrappedX, y, skin));
+      }
+    }
+    return urls;
+  }
+
+  /**
+   * Prefetch and warm the browser image cache for a destination viewport's tile set.
+   * Runs non-blocking in the background so tiles are cached before the camera arrives.
+   */
+  public prefetchViewportTiles(
+    lat: number,
+    lng: number,
+    zoom: number = 14,
+    skin: string = 'modern',
+    viewportWidth: number = 1920,
+    viewportHeight: number = 1080
+  ): Promise<void> {
+    if (typeof Image === 'undefined') {
+      return Promise.resolve();
+    }
+    const urls = this.getTileUrlsForViewport(lat, lng, zoom, skin, viewportWidth, viewportHeight);
+    return Promise.all(
+      urls.map((url) => {
+        return new Promise<void>((resolve) => {
+          const img = new Image();
+          img.onload = () => resolve();
+          img.onerror = () => resolve();
+          img.src = url;
+        });
+      })
+    ).then(() => undefined);
+  }
+
+  /**
    * Fetch and create Three.js Texture with LRU caching and concurrency limiter
    */
   public async fetchTileTexture(

@@ -15,9 +15,33 @@ import {
   OSM_DETAIL_THRESHOLD,
   OSM_RASTER_ALTITUDE
 } from '../services/geographic/osmTileService';
+import { documentaryController } from '../services/documentaryController';
 import { getOsmPalette } from '../utils/osmPalettes';
 import { getConnectingLineColor } from '../utils/routeLineColor';
-import { calculateOSMRouteArrow, estimateOSMLabelBounds } from '../utils/osmRouteArrowUtils';
+import {
+  calculateOSMRouteArrow,
+  estimateOSMLabelBounds,
+  ROUTE_LINE_DASH_ARRAY,
+  ROUTE_LINE_STROKE_WIDTH,
+  getRouteLineOpacity,
+  isRouteSequential
+} from '../utils/osmRouteArrowUtils';
+import {
+  calculateMarkerFontSize,
+  getThemeMarkerColors,
+  getMarkerBoxShadow,
+  getWaypointNumberStyle
+} from '../utils/markerStyleUtils';
+import {
+  calculateOSMViewportBounds,
+  filterMarkersByOSMViewport,
+  OSMViewportBounds
+} from '../utils/osmViewportUtils';
+import {
+  resolveMarkerCollisions,
+  MarkerLayoutInput,
+  MarkerLayoutOutput
+} from '../utils/markerCollisionHelper';
 
 export interface OSMMapLayerProps {
   skin: SkinType;
@@ -28,6 +52,7 @@ export interface OSMMapLayerProps {
   selectedMarkerCoordinates?: { lat: number; lng: number } | null;
   onMarkerClick?: (e: any, marker: any) => void;
   onMapReady?: (ready: boolean) => void;
+  onViewportBoundsChange?: (bounds: OSMViewportBounds | null) => void;
   routeWaypoints?: Waypoint[];
   currentWaypointIndex?: number;
 }
@@ -119,6 +144,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
   selectedMarkerCoordinates = null,
   onMarkerClick,
   onMapReady,
+  onViewportBoundsChange,
   routeWaypoints = [],
   currentWaypointIndex
 }) => {
@@ -135,12 +161,84 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
   const [opacity, setOpacity] = useState<number>(0);
   const opacityRef = useRef<number>(0);
   const [osmProjection, setOsmProjection] = useState<OSMProjection | null>(null);
+  const [osmViewportBounds, setOsmViewportBounds] = useState<OSMViewportBounds | null>(null);
   const [hoveredMarkerId, setHoveredMarkerId] = useState<string | null>(null);
+
+  // Memoize visible OSM markers strictly inside current geographic viewport bounds
+  const visibleMarkers = useMemo(() => {
+    if (!osmViewportBounds || !markers || markers.length === 0) return [];
+    return filterMarkersByOSMViewport(markers, osmViewportBounds);
+  }, [markers, osmViewportBounds]);
 
   // Departing waypoint marker & label fade-out tracking
   const [departingMarkerId, setDepartingMarkerId] = useState<string | null>(null);
   const [isDepartingFading, setIsDepartingFading] = useState<boolean>(false);
   const prevSelectedMarkerIdRef = useRef<string | null>(selectedMarkerId || null);
+
+  // Memoize resolved screen-space marker collision layout to prevent marker circles and labels from overlapping
+  const markerLayoutMap = useMemo(() => {
+    if (!osmProjection || !visibleMarkers || visibleMarkers.length === 0) {
+      return new Map<string, MarkerLayoutOutput>();
+    }
+
+    const n = Math.pow(2, osmProjection.z);
+    const layoutInputs: MarkerLayoutInput[] = visibleMarkers
+      .map((marker, idx) => {
+        if (typeof marker.lat !== 'number' || typeof marker.lng !== 'number') return null;
+
+        const markerX = ((marker.lng + 180) / 360) * n;
+        const latRad = (Math.max(-85.0511, Math.min(85.0511, marker.lat)) * Math.PI) / 180;
+        const markerY = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n;
+
+        let dx = markerX - osmProjection.exactX;
+        if (dx > n / 2) dx -= n;
+        else if (dx < -n / 2) dx += n;
+
+        const left = osmProjection.screenCenterX + dx * 256;
+        const top = osmProjection.screenCenterY + (markerY - osmProjection.exactY) * 256;
+
+        const isSelected = selectedMarkerId === marker.id;
+        const isHovered = hoveredMarkerId === marker.id;
+        const isDeparting = departingMarkerId === marker.id;
+        const isLabelVisible = isSelected || isHovered || isDeparting;
+        const isWaypoint = marker.isWaypoint || marker.type === 'waypoint';
+        const isMultiLocation = marker.isMultiLocation ?? false;
+        const showMarkerNumber = isWaypoint && isMultiLocation && marker.index !== undefined;
+
+        const markerDisplayName =
+          (marker.data as any)?.displayName ||
+          marker.data?.name ||
+          marker.name ||
+          (showMarkerNumber ? `Waypoint ${marker.index + 1}` : 'Location');
+
+        const pinSize = isSelected ? 22 : 16;
+        const visualOffset = calculateOSMMarkerVisualOffset(osmProjection.z, {
+          pinSize,
+          isSelected
+        });
+
+        return {
+          id: marker.id ?? `marker-${idx}`,
+          x: left + visualOffset.x,
+          y: top + visualOffset.y,
+          radius: pinSize / 2,
+          label: isLabelVisible
+            ? {
+                text: markerDisplayName,
+                isVisible: true
+              }
+            : undefined
+        };
+      })
+      .filter(Boolean) as MarkerLayoutInput[];
+
+    const resolved = resolveMarkerCollisions(layoutInputs, { minGap: 5 });
+    const map = new Map<string, MarkerLayoutOutput>();
+    for (const r of resolved) {
+      map.set(r.id, r);
+    }
+    return map;
+  }, [visibleMarkers, osmProjection, selectedMarkerId, hoveredMarkerId, departingMarkerId]);
 
   useEffect(() => {
     if (
@@ -333,6 +431,10 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
       screenCenterY
     });
 
+    const viewportBounds = calculateOSMViewportBounds(lat, lng, z, width, height, 0.04);
+    setOsmViewportBounds(viewportBounds);
+    onViewportBoundsChange?.(viewportBounds);
+
     const bounds = osmTileService.tileToBounds(z, centerTile.x, centerTile.y);
     console.log(
       `[OSM Map] VIEWPORT centerLat=${lat.toFixed(4)} centerLng=${lng.toFixed(4)} bounds=${bounds.minLat.toFixed(4)},${bounds.minLng.toFixed(4)}..${bounds.maxLat.toFixed(4)},${bounds.maxLng.toFixed(4)} cameraDistance=${distance.toFixed(4)}`
@@ -416,15 +518,34 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
       osmCameraCenterRef.current = { lat: targetLat, lng: targetLng };
       committedCenterRef.current = { lat: targetLat, lng: targetLng };
 
+      // Prefetch destination tiles into browser cache immediately
+      osmTileService.prefetchViewportTiles(
+        targetLat,
+        targetLng,
+        activeTileZoomRef.current,
+        skin,
+        viewportSize.width,
+        viewportSize.height
+      );
+
       if (opacityRef.current > 0.01 && rootGroupRef.current) {
         const localCamPos = rootGroupRef.current.worldToLocal(camera.position.clone());
         const dist = localCamPos.length();
         if (dist <= 1.55) {
-          loadViewportTiles(targetLat, targetLng, dist, activeTileZoomRef.current, 'MARKER_SELECTION');
+          const camGeo = vector3ToLatLng(localCamPos);
+          const dLat = Math.abs(camGeo.lat - targetLat);
+          let dLng = Math.abs(camGeo.lng - targetLng);
+          if (dLng > 180) dLng = 360 - dLng;
+
+          // If camera is already at or near destination, load viewport immediately;
+          // otherwise, let useFrame track the camera continuously as it moves.
+          if (dLat < 0.01 && dLng < 0.01) {
+            loadViewportTiles(targetLat, targetLng, dist, activeTileZoomRef.current, 'MARKER_SELECTION');
+          }
         }
       }
     }
-  }, [selectedMarkerCoordinates, selectedMarkerId, camera, loadViewportTiles]);
+  }, [selectedMarkerCoordinates, selectedMarkerId, camera, loadViewportTiles, skin, viewportSize]);
 
   // Pointer event handlers for authoritative slippy map pan
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -794,18 +915,45 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
     }
 
     // 2. Detect Globe Navigation Active / Transition Interrupted:
-    // If distance > 1.55 (outside OSM detail view) and either:
-    // - User is actively dragging / rotating the globe (isInteracting)
-    // - Camera shifted geographically across the globe (|dLat| > 0.5 or |dLng| > 0.5)
-    // - Camera ascended above 1.85 into space
+    const isDocActive = documentaryController.isActive();
+    const isTransitionOwnedByDoc = isDocActive || (documentaryController.getCurrentDestination() !== null && dist <= 1.85);
+
+    // Globe active detection:
+    // When a transition is owned by DocumentaryController:
+    // - Camera moving geographically along its descent path is EXPECTED and must NOT be flagged as hasGlobeShifted!
+    // - Distance variations during descent (e.g. 1.85 -> 1.70 -> 1.55 -> 1.30) are part of the descent.
+    // - Globe active is ONLY asserted if the camera actually ascends above 1.85 into space
+    //   OR if the user explicitly took manual control (isInteracting && !isDocActive).
     const dLat = Math.abs(currentGeo.lat - lastGlobeGeoRef.current.lat);
     const dLng = Math.abs(currentGeo.lng - lastGlobeGeoRef.current.lng);
-    const hasGlobeShifted = wasGateOpenRef.current && (dLat > 0.5 || (dLng > 0.5 && dLng < 359.5));
-    const isReturningToGlobe = dist > 1.85 || (dist > 1.55 && (isInteracting || hasGlobeShifted));
+    const hasGlobeShifted = !isTransitionOwnedByDoc && wasGateOpenRef.current && (dLat > 0.5 || (dLng > 0.5 && dLng < 359.5));
+    const isManualInteracting = isInteracting && !isDocActive;
+    const isReturningToGlobe = dist > 1.85 || (!isTransitionOwnedByDoc && dist > 1.55 && (isManualInteracting || hasGlobeShifted));
 
     if (isReturningToGlobe) {
       if (wasGateOpenRef.current) {
         wasGateOpenRef.current = false;
+
+        const docPhase = documentaryController.getPhase();
+        const currentCamState = dist > 3.2 ? 'GLOBE' : dist > 2.0 ? 'REGIONAL' : dist > 1.55 ? 'LOCAL' : dist > 1.45 ? 'OSM_TRANSITION' : 'OSM_ACTIVE';
+        const transitionOwner = isDocActive ? 'documentary' : 'osm_layer';
+
+        console.log(
+          `[Documentary Camera] CANCELLATION_REQUEST\n` +
+          `id=${transitionIdRef.current}\n` +
+          `reason=globe_active\n` +
+          `documentaryState=${docPhase}\n` +
+          `cameraState=${currentCamState}\n` +
+          `cameraDistance=${dist.toFixed(4)}\n` +
+          `targetDistance=1.3000\n` +
+          `globeActivePredicate=true\n` +
+          `osmActivePredicate=${isOSMDetailActive}\n` +
+          `transitionOwner=${transitionOwner}\n` +
+          `manualControlActive=${isManualInteracting}\n` +
+          `currentTransitionId=${transitionIdRef.current}\n` +
+          `triggeringSource=${isManualInteracting ? 'MANUAL_CONTROL' : (dist > 1.85 ? 'CAMERA_ALTITUDE' : 'GLOBE_SHIFT')}`
+        );
+
         console.log('[Transition] CANCEL', transitionIdRef.current, 'reason=globe_active');
         console.log('[Transition] GLOBE ACTIVE');
         console.log('[OSM] Returning to globe');
@@ -821,6 +969,9 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
       loadedTileKeysRef.current.clear();
       osmCameraCenterRef.current = { lat: 0, lng: 0 };
       committedCenterRef.current = { lat: 0, lng: 0 };
+      setOsmViewportBounds(null);
+      onViewportBoundsChange?.(null);
+      setOsmProjection(null);
       hasUserPannedSinceSelectionRef.current = false;
 
       if (settleTimerRef.current) {
@@ -949,10 +1100,18 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
       pendingTileZoomRef.current = null;
     }
 
-    // 4. Motion Sampling & Settle Debounce (when not manually dragging)
+    // 4. Motion Sampling & Synchronous Viewport Tracking (when not manually dragging)
     const moveDist = localCamPos.distanceTo(lastSampledPosRef.current);
-    if (moveDist > 0.002) {
+    if (moveDist > 0.001) {
       lastSampledPosRef.current.copy(localCamPos);
+
+      // When camera is in active OSM view (dist <= 1.55), update viewport tiles synchronously with camera motion
+      if (!isOSMPanningRef.current && dist <= 1.55 && opacityRef.current > 0.01) {
+        const { lat, lng } = currentGeo;
+        osmCameraCenterRef.current = { lat, lng };
+        committedCenterRef.current = { lat, lng };
+        loadViewportTiles(lat, lng, dist, activeTileZoomRef.current, 'CAMERA_MOVE');
+      }
 
       if (settleTimerRef.current) {
         clearTimeout(settleTimerRef.current);
@@ -981,7 +1140,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
         osmCameraCenterRef.current = { lat: targetLat, lng: targetLng };
         committedCenterRef.current = { lat: targetLat, lng: targetLng };
         loadViewportTiles(targetLat, targetLng, currentDist, activeTileZoomRef.current, 'CAMERA_SETTLE');
-      }, 350); // 350ms settle debounce
+      }, 100);
     }
   });
 
@@ -1152,7 +1311,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
               }}
             >
               {/* OSM Active Route Connection Line Overlay */}
-              {osmProjection && routeWaypoints && routeWaypoints.length > 1 && (
+              {osmProjection && routeWaypoints && routeWaypoints.length > 1 && isRouteSequential(routeWaypoints) && (
                 <svg
                   style={{
                     position: 'absolute',
@@ -1227,9 +1386,10 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                       pinSize: nextPinSize,
                       isSelected: isNextSelected
                     });
+                    const nextLayout = matchingNextMarker ? markerLayoutMap.get(matchingNextMarker.id ?? '') : null;
                     const nextMarkerCenter = {
-                      x: sx2 + nextVisualOffset.x,
-                      y: sy2 + nextVisualOffset.y
+                      x: nextLayout ? nextLayout.x : (sx2 + nextVisualOffset.x),
+                      y: nextLayout ? nextLayout.y : (sy2 + nextVisualOffset.y)
                     };
 
                     const nextDisplayName =
@@ -1264,17 +1424,17 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                           x2={sx2}
                           y2={sy2}
                           stroke={routeColor}
-                          strokeWidth={2.5}
-                          strokeDasharray="6 4"
+                          strokeWidth={ROUTE_LINE_STROKE_WIDTH}
+                          strokeDasharray={ROUTE_LINE_DASH_ARRAY}
                           strokeLinecap="round"
-                          opacity={skin === 'modern' ? 0.95 : 0.9}
+                          opacity={getRouteLineOpacity(skin)}
                         />
                         {/* Subtle Directional Arrow pointing toward the next waypoint */}
                         {arrow && (
                           <polygon
                             points={arrow.pointsString}
                             fill={routeColor}
-                            opacity={skin === 'modern' ? 0.95 : 0.9}
+                            opacity={getRouteLineOpacity(skin)}
                           />
                         )}
                       </g>
@@ -1283,7 +1443,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                 </svg>
               )}
 
-              {osmProjection && markers && markers.map((marker, idx) => {
+              {osmProjection && visibleMarkers && visibleMarkers.map((marker, idx) => {
                 if (typeof marker.lat !== 'number' || typeof marker.lng !== 'number') return null;
 
                 const n = Math.pow(2, osmProjection.z);
@@ -1291,16 +1451,12 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                 const latRad = (Math.max(-85.0511, Math.min(85.0511, marker.lat)) * Math.PI) / 180;
                 const markerY = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n;
 
-                const left = osmProjection.screenCenterX + (markerX - osmProjection.exactX) * 256;
-                const top = osmProjection.screenCenterY + (markerY - osmProjection.exactY) * 256;
+                let dx = markerX - osmProjection.exactX;
+                if (dx > n / 2) dx -= n;
+                else if (dx < -n / 2) dx += n;
 
-                // Viewport culling with margin
-                if (
-                  left < -150 || left > viewportSize.width + 150 ||
-                  top < -150 || top > viewportSize.height + 150
-                ) {
-                  return null;
-                }
+                const left = osmProjection.screenCenterX + dx * 256;
+                const top = osmProjection.screenCenterY + (markerY - osmProjection.exactY) * 256;
 
                 const isSelected = selectedMarkerId === marker.id;
                 const isHovered = hoveredMarkerId === marker.id;
@@ -1309,10 +1465,18 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                 const isMultiLocation = marker.isMultiLocation ?? false;
                 const showMarkerNumber = isWaypoint && isMultiLocation && marker.index !== undefined;
                 const pinSize = isSelected ? 22 : 16;
-                const color = isWaypoint
-                  ? (skin === 'parchment' ? '#8b5a2b' : '#000000')
-                  : (marker.color || (skin === 'parchment' ? '#8b5a2b' : '#3b82f6'));
-                const outlineColor = skin === 'parchment' ? '#f4ead5' : (skin === 'retro-green' ? themePalette.highways : (skin === 'retro-amber' ? themePalette.highways : '#ffffff'));
+                const isMultiDigit = showMarkerNumber && (marker.index + 1) >= 10;
+                
+                const markerColors = getThemeMarkerColors(skin, {
+                  isWaypoint,
+                  customColor: marker.color,
+                  highwayOutlineColor: themePalette.highways
+                });
+                const color = markerColors.fill;
+                const outlineColor = markerColors.outline;
+                const numberStyle = getWaypointNumberStyle(skin);
+                const numberFontSize = calculateMarkerFontSize(pinSize, isMultiDigit);
+                const boxShadow = getMarkerBoxShadow(skin, isSelected);
 
                 const markerDisplayName =
                   (marker.data as any)?.displayName ||
@@ -1325,8 +1489,10 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                   pinSize,
                   isSelected
                 });
-                const visualLeft = left + visualOffset.x;
-                const visualTop = top + visualOffset.y;
+                const markerKey = marker.id ?? `marker-${idx}`;
+                const layout = markerLayoutMap.get(markerKey);
+                const visualLeft = layout ? layout.x : (left + visualOffset.x);
+                const visualTop = layout ? layout.y : (top + visualOffset.y);
 
                 const isLabelVisible = isSelected || isHovered || isDeparting;
 
@@ -1387,9 +1553,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                           backgroundColor: color,
                           borderRadius: '50%',
                           border: `2px solid ${outlineColor}`,
-                          boxShadow: isSelected
-                            ? '0 0 0 3px rgba(255, 255, 255, 0.85), 0 2px 6px rgba(0, 0, 0, 0.5)'
-                            : '0 1px 4px rgba(0, 0, 0, 0.4)',
+                          boxShadow,
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
@@ -1404,10 +1568,11 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                         {showMarkerNumber && (
                           <span
                             style={{
-                              fontSize: isSelected ? '11px' : '9px',
-                              fontWeight: 'bold',
-                              color: '#ffffff',
-                              lineHeight: 1,
+                              fontSize: `${numberFontSize}px`,
+                              fontWeight: numberStyle.fontWeight,
+                              color: numberStyle.color,
+                              lineHeight: numberStyle.lineHeight,
+                              textShadow: numberStyle.textShadow,
                               pointerEvents: 'none'
                             }}
                           >
@@ -1422,9 +1587,11 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                       <div
                         style={{
                           position: 'absolute',
-                          bottom: `${pinSize / 2 + 8}px`,
-                          left: '0px',
-                          transform: 'translateX(-50%)',
+                          ...(layout?.label?.style || {
+                            bottom: `${pinSize / 2 + 8}px`,
+                            left: '0px',
+                            transform: 'translateX(-50%)'
+                          }),
                           pointerEvents: 'none',
                           userSelect: 'none',
                           whiteSpace: 'nowrap',

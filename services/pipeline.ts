@@ -13,6 +13,7 @@ import { isPlaceholderString } from '../components/InfoPanel';
 import { validateEarthGeography } from './celestialCapabilities';
 import { getHistoricalEntityKnowledge, toCanonicalTitleCase } from './geographic/historicalCoordinateValidator';
 import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
+import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck } from './geographic/entityIdentityValidator';
 
 // --- PIPELINE TYPES ---
 
@@ -121,8 +122,30 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   console.log(`Initial Resolver Error: ${error || 'None'}`);
   
   const allowedErrors = ["NO_GEOGRAPHIC_DATA", "LOCATION_SYSTEM_UNAVAILABLE", "UNABLE_TO_RESOLVE", "TEMP_FAILURE", "HISTORICAL_LOCATION_UNCONFIRMED"];
-  const nonGeographicIntents = ['EXPLORATORY', 'HISTORICAL_EVENT', 'BROAD_CULTURAL_QUERY'];
+  const nonGeographicIntents = ['EXPLORATORY', 'HISTORICAL_EVENT', 'BROAD_CULTURAL_QUERY', 'MULTI_LOCATION_DISCOVERY'];
   const isGeographicIntent = !nonGeographicIntents.includes(entityResult.intentResult.intent);
+
+  // Step 0: Validate entity identity of the initial resolver result
+  if (resolvedData && resolvedData.name) {
+    const initialIdentityCheck = validateEntityIdentity(entityResult.entity, resolvedData.name, {
+      rawQuery: entityResult.intentResult.normalized.request.rawQuery,
+      intent: entityResult.intentResult.intent
+    });
+    if (!initialIdentityCheck.matches) {
+      logCoordinateRecoveryIdentityCheck({
+        requestedEntity: entityResult.entity,
+        recoveredEntity: resolvedData.name,
+        entityIdentityMatch: false,
+        coordinateValidity: Boolean(resolvedData.coordinates),
+        recoveryAccepted: false,
+        rejectionReason: 'ENTITY_IDENTITY_MISMATCH'
+      });
+      console.warn(`[ENTITY IDENTITY MISMATCH] Resolver returned "${resolvedData.name}" which differs from requested "${entityResult.entity}". Discarding coordinates and reverting to requested entity.`);
+      resolvedData.name = entityResult.entity;
+      resolvedData.coordinates = undefined;
+      error = "NO_GEOGRAPHIC_DATA";
+    }
+  }
 
   let coordinatesValid = resolvedData?.coordinates && isValidCoordinates(normalizeCoordinates(resolvedData.coordinates) || normalizeCoordinates(resolvedData));
   
@@ -153,12 +176,17 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
       } as any : null;
       
       resolvedData.coordinates = mergeCoordinates(existing, incoming);
+      resolvedData.name = entityResult.entity;
       (resolvedData as any).coordinateSource = incoming.source;
       (resolvedData as any).identityStatus = (resolvedData as any).identityStatus || "unverified";
       error = undefined;
       recoveryUsed = true;
       recoveredValid = true;
       source = incoming.source;
+    } else {
+      resolvedData.name = entityResult.entity;
+      resolvedData.coordinates = undefined;
+      error = "NO_GEOGRAPHIC_DATA";
     }
     
     console.log(`[COORDINATE RECOVERY]\nRecovery success: ${recoveredValid ? 'Yes' : 'No'}\nRecovered coordinates: ${recoveryCoords ? JSON.stringify(recoveryCoords) : 'None'}\nSource: ${source}`);
@@ -207,13 +235,11 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   if (coordinatesValid && resolvedData && resolvedData.coordinates) {
       const isHistoricalDiscovery = entityResult.intentResult.intent === 'DISCOVERY_OBJECT_LOCATION' || entityResult.intentResult.intent === 'HISTORICAL_EVENT';
       const histKnowledge = isHistoricalDiscovery ? getHistoricalEntityKnowledge(entityResult.entity) : null;
-      // Preserve canonical entity identity without letting invented titles or secondary sites (e.g. La Navidad) displace it
-      const canonicalName = histKnowledge?.entity || ((isHistoricalDiscovery && entityResult.entity) ? toCanonicalTitleCase(entityResult.entity) : (resolvedData.name || entityResult.entity));
+      // Preserve canonical entity identity without letting invented titles or secondary sites displace it
+      const canonicalName = histKnowledge?.entity || ((isHistoricalDiscovery && entityResult.entity) ? toCanonicalTitleCase(entityResult.entity) : (entityResult.entity ? toCanonicalTitleCase(entityResult.entity) : (resolvedData.name || 'Unknown')));
 
-      // Lock resolvedData.name to canonicalName for historical discovery queries
-      if (isHistoricalDiscovery || !resolvedData.name) {
-          resolvedData.name = canonicalName;
-      }
+      // Lock resolvedData.name to canonicalName
+      resolvedData.name = canonicalName;
 
       // Populate administrative context if missing from deterministic coordinates
       if (!resolvedData.country || !resolvedData.state) {
@@ -542,10 +568,15 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
     };
   }
   
-  // 2. Routing Guard: If intent is route, bypass coordinate resolution
-  if (entityResult.intentResult.intent === 'route' || entityResult.intentResult.intent === 'EXPLORATORY' as any) {
+  // 2. Routing Guard: If intent is route / multi-location discovery, bypass coordinate resolution
+  if (
+    entityResult.intentResult.intent === 'route' || 
+    entityResult.intentResult.intent === 'EXPLORATORY' || 
+    entityResult.intentResult.intent === 'MULTI_LOCATION_DISCOVERY' ||
+    (entityResult as any).resolutionMode === 'MULTI_LOCATION_EXPLORATION'
+  ) {
      console.log(`[Pipeline] Routing Guard activated for intent: ${entityResult.intentResult.intent}`);
-      const route = await generateRoute(request.rawQuery, 'route');
+      const route = await generateRoute(request.rawQuery, entityResult.intentResult.intent);
       const waypoints = route.waypoints;
       console.log(`[Pipeline] WAYPOINTS AFTER GENERATEROUTE (Main guard):`);
       waypoints.forEach(wp => console.log(`  - ${wp.name} (ID: ${wp.id}, parentId: ${wp.parentId})`));
@@ -614,6 +645,13 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
           notable: e.metadata.notable,
           news: e.metadata.news,
           contextNotes: e.metadata.contextNotes
+      };
+  } else {
+      const displayName = entityResult.entity ? toCanonicalTitleCase(entityResult.entity) : (request.rawQuery || 'Unknown');
+      (locationResult as any).finalData = {
+          name: displayName,
+          canonicalName: displayName,
+          intent: entityResult.intentResult.intent
       };
   }
 

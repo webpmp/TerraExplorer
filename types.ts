@@ -35,7 +35,7 @@ export const isValidCoordinates = (coords: any): boolean => {
   return true;
 };
 
-export type QueryIntent = 'DIRECT' | 'NATURAL_LOCATION' | 'EXPLORATORY' | 'HISTORICAL_EVENT' | 'DISCOVERY_LOCATION' | 'DISCOVERY_OBJECT_LOCATION' | 'exploration' | 'specific_location' | 'historical_event' | 'route';
+export type QueryIntent = 'DIRECT' | 'NATURAL_LOCATION' | 'EXPLORATORY' | 'HISTORICAL_EVENT' | 'DISCOVERY_LOCATION' | 'DISCOVERY_OBJECT_LOCATION' | 'MULTI_LOCATION_DISCOVERY' | 'exploration' | 'specific_location' | 'historical_event' | 'route';
 
 export enum LocationType {
   CONTINENT = 'Continent',
@@ -322,6 +322,7 @@ export interface Route {
     level: 'high' | 'medium' | 'low';
     reasoning: string;
   };
+  isSequential?: boolean;
 }
 
 export interface Waypoint {
@@ -352,6 +353,13 @@ export interface Waypoint {
   };
   metadata?: any;
   provenance?: ProvenanceRecord[];
+  isSequential?: boolean;
+  date?: string;
+  year?: number | string;
+  timestamp?: string | number;
+  temporalRelation?: string;
+  relationship?: string;
+  order?: number;
 }
 
 export interface FavoriteLocation {

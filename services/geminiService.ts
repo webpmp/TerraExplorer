@@ -4,6 +4,7 @@ import { DETERMINISTIC_LOCATION_DB } from './geographic/geographicData';
 import { getEstimatedClimate, getClimateDescription, isClimateGeographicallyValid, isClimateConflicting } from './geographic/climateEstimator';
 import { providerRegistry } from './geographic/providers/providerRegistry';
 import { applySelection } from './geographic/selection';
+import { filterCandidatesByDisplayRelevance } from './geographic/geographicDisplayRelevance';
 import { applyQualityGate } from './geographic/qualityGate';
 import { applyCategoryBalance } from './geographic/categoryBalancer';
 import { computeImportanceScore } from './geographic/scoring';
@@ -629,6 +630,28 @@ Return only JSON:
 
       if (historicalCoords) {
          data.coordinates = historicalCoords;
+      }
+
+      if (data.name) {
+        const entityCheck = validateEntityIdentity(targetSearchTerm, data.name, { rawQuery: rawQuery || query, intent });
+        const coordsValid = Boolean(data.coordinates && isValidCoordinates(normalizeCoordinates(data.coordinates) || data.coordinates));
+        const recoveryAccepted = coordsValid && entityCheck.matches;
+
+        logCoordinateRecoveryIdentityCheck({
+          requestedEntity: targetSearchTerm,
+          recoveredEntity: data.name,
+          entityIdentityMatch: entityCheck.matches,
+          coordinateValidity: coordsValid,
+          recoveryAccepted,
+          rejectionReason: recoveryAccepted ? 'NONE' : (entityCheck.matches ? 'COORDINATE_INVALID' : entityCheck.rejectionReason)
+        });
+
+        if (!entityCheck.matches) {
+          console.warn(`[AI RESOLUTION REJECTED] AI substituted different entity "${data.name}" for requested "${targetSearchTerm}". Reverting to requested entity without fabricated coordinates.`);
+          data.name = targetSearchTerm;
+          data.coordinates = undefined;
+          return { error: "NO_GEOGRAPHIC_DATA", locationInfo: { name: targetSearchTerm }, aiUsed: true };
+        }
       }
       
       if (data.coordinates) {
@@ -2088,7 +2111,13 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
     // Apply category-separated ranking and quota slot allocation
     const selectedCandidates = applySelection(gatedCandidates, 6);
 
-    const finalMarkers: MapMarker[] = selectedCandidates.map(c => ({
+    // Apply strict local display relevance filter based on original scan coordinates (lat, lng)
+    const { accepted: displayRelevantCandidates } = filterCandidatesByDisplayRelevance(
+      selectedCandidates,
+      { lat, lng }
+    );
+
+    const finalMarkers: MapMarker[] = displayRelevantCandidates.map(c => ({
         id: c.id,
         name: c.displayName || c.name,
         displayName: c.displayName || c.name,
@@ -2108,13 +2137,13 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
       `Final results:\n` +
       (finalMarkers.length > 0 ? finalMarkers.map((m, i) => `  ${i + 1}. ${m.name} | ${m.type}`).join('\n') : '  None'));
 
-    if (selectedCandidates.length > 0) {
-        console.log(`[Discovery primary]\n  ${selectedCandidates[0].name}`);
+    if (displayRelevantCandidates.length > 0) {
+        console.log(`[Discovery primary]\n  ${displayRelevantCandidates[0].name}`);
     } else {
         console.log(`[Discovery] ${lat.toFixed(2)}, ${lng.toFixed(2)} → 0 candidates`);
     }
 
-    if (selectedCandidates.length === 0) {
+    if (displayRelevantCandidates.length === 0) {
         return {
             places: [],
             status: "NO_RESULTS",
@@ -2153,6 +2182,10 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
 
 export const generateRoute = async (text: string, intent?: string): Promise<Route> => {
   const isUrl = text.startsWith('http');
+  const queryMeta = routeIntentAndExtractEntity(text);
+  const effectiveIntent = intent || queryMeta.intent;
+  const isFilmingQuery = queryMeta.discoveryTarget === 'filming locations' ||
+    /\b(filmed|filming|shot|shooting|production locations?|locations? used|places used|places where)\b/i.test(text);
   
   const generateRawRoute = async (t: string, url: boolean): Promise<{ waypoints: any[], title?: string, routeConfidence?: any, routeType?: string }> => {
     const prompt = `
@@ -2160,7 +2193,7 @@ export const generateRoute = async (text: string, intent?: string): Promise<Rout
       ${url ? `URL: "${t}". Trace locations mentioned in the page content.` : `Text: "${t}"`}
 
       Instructions:
-      1. Identify a name for this route/expedition or event (e.g. "Battle of Midway", "The Silk Road"). If no specific name exists, create a short descriptive title.
+      1. Identify a name for this route/expedition or event (e.g. "Battle of Midway", "The Silk Road", "Game of Thrones Filming Locations"). If no specific name exists, create a short descriptive title.
       2. Extract every significant physical location (City, Country, Landmark) in narrative order.
       3. Identify the primary location where the event occurred.
       4. Classify every location by its relationship to the query using 'role': "primary", "related", "administrative", or "historical_context".
@@ -2175,24 +2208,33 @@ export const generateRoute = async (text: string, intent?: string): Promise<Rout
          - For Yuri Gagarin / Vostok 1 launch (April 12, 1961) -> The physical site is "Site No. 1 (Gagarin's Start), Baikonur Cosmodrome" (approx 45.92° N, 63.34° E in present-day Kazakhstan).
          - The queried event MUST remain the primary focus of the location's title, description, significance, and coordinates.
          - Other historical events at the same site (e.g., Yuri Gagarin's 1961 flight at Baikonur for a Sputnik query) may only appear as secondary context and must NEVER displace the queried event as the primary subject or milestone.
-      10. For historical routes, prioritize specific named stops, cities, ports, crossings, and settlements.
-      11. Historical routes must consist of specific, physical stops. NEVER use modern political borders, vast empires (like 'Persian Empire', 'Roman Empire'), continents (like 'Europe'), or generic regions as waypoints. The waypoints must be exact, point-like locations that were physically traversed.
-      12. Avoid generic containers such as: "Central Asia", "The Balkans", "Europe", "China". Convert these into contextual relationships or administrative parents.
-      13. Use HIGH PRECISION coordinates (at least 4 decimal places).
-      14. For each location, provide rich historical context:
+      10. REAL-WORLD GEOGRAPHIC LOCATIONS VS FICTIONAL LOCATIONS & FILMING DISCOVERY:
+          - When the query requests real-world locations associated with fictional media, including filming locations, shooting locations, production locations, or real places portraying fictional locations, return the real-world locations. Do not return fictional geographic entities unless the user explicitly asks for fictional locations from the story.
+          - When the user query asks about filming locations, shooting locations, production locations, real-world locations used to portray fictional locations, or where a movie/show/game was filmed (e.g. "where was Game of Thrones filmed?", "where was Harry Potter filmed?", "where was Lord of the Rings filmed?", "locations used in Breaking Bad"):
+            * The system MUST return the REAL-WORLD GEOGRAPHIC FILMING LOCATIONS on Earth (e.g. Dubrovnik in Croatia, Castle Ward in Northern Ireland, Vatnajökull in Iceland, Alnwick Castle in England, Matamata in New Zealand).
+            * It must NEVER return fictional locations, fictional realms, or fictional regions from the story (e.g. do NOT return Westeros, King's Landing, The Wall, Winterfell, Free Cities, Middle-earth, Hogwarts, Mordor, or Tatooine).
+            * Important distinction:
+              - Subject/location represented in the story: e.g. King's Landing, Winterfell, The Shire, Hogwarts. (Place in "context" and "description" fields).
+              - Real-world filming location: e.g. Dubrovnik (Croatia), Castle Ward (Northern Ireland), Matamata (New Zealand), Alnwick Castle (England). (Place in "name", "canonicalName", and "modernLocation" fields).
+          - A waypoint with no known real-world geographic coordinate must not be represented with lat: 0, lng: 0. Do not fabricate coordinates. Resolve the location or omit it. The 'lat' and 'lng' fields represent real-world geographic coordinates used by the map, not fictional coordinates.
+      11. For historical routes, prioritize specific named stops, cities, ports, crossings, and settlements.
+      12. Historical routes must consist of specific, physical stops. NEVER use modern political borders, vast empires (like 'Persian Empire', 'Roman Empire'), continents (like 'Europe'), or generic regions as waypoints. The waypoints must be exact, point-like locations that were physically traversed.
+      13. Avoid generic containers such as: "Central Asia", "The Balkans", "Europe", "China". Convert these into contextual relationships or administrative parents.
+      14. Use HIGH PRECISION coordinates (at least 4 decimal places).
+      15. For each location, provide rich historical context:
           - "context": A brief 10-word reason why it's on the route.
           - "description": A 2-4 sentence detailed narrative explaining why this location is included.
           - "significance": Why this specific location matters to the event.
           - "highlights": An array of 2-4 key historical facts or events here.
           - "historicalPeriod": The time period (e.g. "8th-11th century").
           - "entities": Relevant people, cultures, kingdoms, or groups.
-      15. Separate the location name into distinct fields:
+      16. Separate the location name into distinct fields:
           - "name": Clean display label. NEVER include translations, parenthetical notes, historical annotations, "(modern-day)", "(ancient city)", "(起点)", or explanatory suffixes.
           - "alternateNames": Array of strings for translations, historical labels, or annotations (e.g. ["起点", "Ancient Bactra"]).
           - "canonicalName": The strict historical name of the specific location (e.g. "Karakoram Pass").
           - "historicalRegion": The broader historical region (e.g. "Central Asia").
           - "modernLocation": The modern-day equivalent (e.g. "Xinjiang, China").
-      16. Historical accuracy rules:
+      17. Historical accuracy rules:
           - Do not claim a definitive origin for distributed networks, trade systems, migrations, or cultural movements unless historically undisputed.
           - For concepts like the Silk Road, use representative locations and explain uncertainty.
           - Prefer wording such as: "representative starting point", "key trade corridor", "important node", "historically significant location".
@@ -2200,15 +2242,33 @@ export const generateRoute = async (text: string, intent?: string): Promise<Rout
           - For distributed networks, do not evaluate confidence of the existence of the route. Evaluate confidence of the specific traversal. 
           - Example bad routeConfidence: "Silk Road was historically documented"
           - Example good routeConfidence: "The Silk Road existed as a network of routes. This sequence represents one historically plausible east-to-west traversal rather than a single fixed path."
-      17. Route Ordering:
+      18. Route Ordering:
           - Require every waypoint to include a "sequence" integer.
           - Sequence must begin at 1 and increment by 1 for the narrative path.
-      18. Route Type Classification:
+      19. Route Type Classification:
           - Classify the routeType as one of: "single_location", "regional_event", "multi_location_campaign", "fixed_path", "network", "conceptual", or "point".
           - If the query describes distributed networks like the Silk Road, Roman roads, Viking trade routes, classification: "network".
           - If the query resolves to a single geographic location or single-battlefield event (like "Battle of Waterloo", "Pearl Harbor", "Pompeii", "Charge of the Light Brigade"), classification: "single_location" with 1 waypoint.
           - If the query is about a war, conflict, revolution, or multi-theater event spanning multiple separate locations, classification: "regional_event" (requires 2 or more waypoints).
           - If the query is about an explicit journey or military campaign route, classification: "multi_location_campaign".
+      ${effectiveIntent === 'MULTI_LOCATION_DISCOVERY' || isFilmingQuery ? `
+      CRITICAL MULTI-LOCATION DISCOVERY & FILMING LOCATION INSTRUCTIONS:
+      - The user is asking to discover multiple real-world locations for a subject (e.g. filming locations, shooting locations, production locations, historical places, Apollo landing sites, major cities, famous landmarks).
+      - Return 3-6 distinct, verified real-world physical locations associated with the subject.
+      - REAL-WORLD GEOGRAPHIC LOCATIONS VS FICTIONAL LOCATIONS:
+        * When the query requests real-world locations associated with fictional media, including filming locations, shooting locations, production locations, or real places portraying fictional locations, you MUST return the REAL-WORLD physical geographic locations on Earth (e.g. Dubrovnik, Castle Ward, Vatnajökull, Alnwick Castle, Matamata/Hobbiton).
+        * Do NOT return fictional locations, fictional regions, or fictional realms from the story (e.g. do NOT return Westeros, King's Landing, The Wall, Winterfell, Middle-earth, Hogwarts, Mordor, or Tatooine) unless the user explicitly asks for fictional locations from the story (e.g. "Show me the major regions of Westeros").
+        * Important distinction: The fictional place represented in the story (e.g. "King's Landing", "Winterfell", "The Shire", "Hogwarts") must be described in the "context" or "description" field, while the "name" field MUST be the real-world place (e.g. "Dubrovnik", "Castle Ward", "Matamata").
+      - COORDINATE ACCURACY & NO PLACEHOLDERS:
+        * The "lat" and "lng" fields represent real-world geographic coordinates on Earth used by the interactive map.
+        * A waypoint with no known real-world geographic coordinate must NOT be represented with lat: 0, lng: 0. Do not fabricate coordinates. Resolve the location to accurate real-world coordinates or omit it.
+      - For each location:
+        - "name": Clean real name of the physical location (e.g. "Dubrovnik", "Castle Ward", "Girona", "San Juan de Gaztelugatxe", "Matamata"). NEVER use the query text (e.g. "Game of Thrones filmed") as a location name!
+        - "lat" / "lng": Exact real-world decimal coordinates of that location. NEVER invent placeholder coordinates or 0,0.
+        - "context": Short context phrase explaining what was filmed/portrayed here (e.g. "Filming location for King's Landing in Game of Thrones").
+        - "description": 2-3 sentences detailing why and how this real-world location was used for the queried subject or production.
+      - Classify routeType as "network" or "regional_event".
+      ` : ''}
       ${intent === 'HISTORICAL_EVENT' && /(war|conflict|revolution|campaign|invasion|battle)/i.test(t) && !/(route|timeline|progression|path)/i.test(t) ? `
       CRITICAL OVERRIDE: The user asked about a historical event/war but did NOT explicitly request a route. 
       If the event occurred at a single location/battlefield, you MUST classify this as routeType: "single_location" with 1 waypoint.
@@ -2224,6 +2284,7 @@ export const generateRoute = async (text: string, intent?: string): Promise<Rout
       {
         "title": "Name of Route or Event",
         "routeType": "single_location" | "regional_event" | "multi_location_campaign" | "fixed_path" | "network" | "conceptual" | "point",
+        "isSequential": boolean,
         "routeConfidence": {
           "level": "high" | "medium" | "low",
           "reasoning": "Explanation of certainty for the overall route..."
@@ -2360,7 +2421,7 @@ export const generateRoute = async (text: string, intent?: string): Promise<Rout
       console.log(`======================================\n`);
     }
 
-    return { waypoints: mappedItems, title, routeConfidence, routeType: data.routeType };
+    return { waypoints: mappedItems, title, routeConfidence, routeType: data.routeType, isSequential: data.isSequential };
   };
 
   try {
@@ -2376,13 +2437,107 @@ export const generateRoute = async (text: string, intent?: string): Promise<Rout
 export interface ExtractedQuery {
   intent: QueryIntent;
   entity: string;
+  subject?: string;
+  discoveryTarget?: string;
   resolutionMode?: 'SINGLE_POINT' | 'MULTI_LOCATION_EXPLORATION';
 }
 
 export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
   const clean = query.trim();
   
-  // 1. Check for Route / Expansion patterns
+  // 1. Check for Multi-Location Discovery patterns (Filming, multiple places, general multi-entity questions)
+  const multiLocationPatterns: { regex: RegExp; getDetails: (match: RegExpMatchArray) => { subject: string; target: string } }[] = [
+    // "Where was/were X filmed/shot/produced?" or "Where was the movie/series X filmed?"
+    {
+      regex: /^\s*where\s+(?:was|were)\s+(?:the\s+(?:movie|show|series|film|television\s+show|tv\s+show)\s+)?(.+?)\s+(?:filmed|shot|produced)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "filming locations" })
+    },
+    // "Places where X was filmed/shot"
+    {
+      regex: /^\s*(?:places|locations|sites)\s+where\s+(.+?)\s+(?:was|were)\s+(?:filmed|shot|produced)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "filming locations" })
+    },
+    // "What are the filming/shooting/production locations for/of/in X?"
+    {
+      regex: /^\s*what\s+(?:are|were)\s+(?:the\s+)?(?:filming|shooting|production)\s+locations\s+(?:for|of|in)\s+(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "filming locations" })
+    },
+    // "Filming/shooting/production locations for/of/in X"
+    {
+      regex: /^\s*(?:filming|shooting|production|real-world|real\s+life)\s+locations\s+(?:for|of|in|used\s+in|used\s+for)\s+(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "filming locations" })
+    },
+    // "Real-world locations / real places used to portray / used in X"
+    {
+      regex: /^\s*(?:real-world|real\s+world|real\s+life|real)\s+(?:locations|places)\s+(?:used\s+to\s+portray|used\s+in|used\s+for|in)\s+(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "filming locations" })
+    },
+    // "What places/locations/cities/sites were used for/in X?"
+    {
+      regex: /^\s*what\s+(?:places|locations|cities|sites)\s+(?:were|are)\s+used\s+(?:for|in)\s+(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "locations" })
+    },
+    // "What locations were used in/for X?"
+    {
+      regex: /^\s*what\s+locations\s+were\s+used\s+(?:in|for)\s+(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "locations" })
+    },
+    // "What cities were involved in / important in / part of X?"
+    {
+      regex: /^\s*what\s+cities\s+were\s+(?:involved\s+in|important\s+in|part\s+of)\s+(?:the\s+)?(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "important cities" })
+    },
+    // "What places did X visit / travel to / explore?"
+    {
+      regex: /^\s*what\s+places\s+did\s+(.+?)\s+(?:visit|travel\s+to|explore|touch)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "places visited" })
+    },
+    // "Where are the locations associated with X?"
+    {
+      regex: /^\s*where\s+are\s+the\s+locations\s+associated\s+with\s+(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "associated locations" })
+    },
+    // "Where did the major battles of X take place?"
+    {
+      regex: /^\s*where\s+did\s+(?:the\s+)?(?:(?:major|key|famous)\s+)?battles\s+of\s+(?:the\s+)?(.+?)\s+(?:take\s+place|happen|occur)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "major battles" })
+    },
+    // "Where did the Apollo missions land?"
+    {
+      regex: /^\s*where\s+did\s+(?:the\s+)?(.+?(?:missions|expeditions|landings|voyages))\s+(?:land|touch\s+down|reach)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "landing sites" })
+    },
+    // "What places were involved in X?"
+    {
+      regex: /^\s*what\s+places\s+were\s+involved\s+in\s+(?:the\s+)?(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "places involved" })
+    },
+    // "What are the world's most famous waterfalls / landmarks / volcanoes / etc.?"
+    {
+      regex: /^\s*what\s+(?:are|were)\s+(?:the\s+)?(?:(?:world's|earth's|most\s+famous|famous|top|major|greatest|best)\s+)*(waterfalls|volcanoes|mountains|canyons|monuments|landmarks|castles|ruins|deserts|islands|cities|places|sites|wonders)\b.*?\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: `famous ${m[1]}` })
+    }
+  ];
+
+  for (const item of multiLocationPatterns) {
+    const match = clean.match(item.regex);
+    if (match) {
+      const { subject, target } = item.getDetails(match);
+      const cleanedSubject = toCanonicalTitleCase(subject.replace(/^(?:the|a|an)\s+/i, '').replace(/[?.,!]+$/, '').trim());
+      
+      console.log(`[QUERY INTENT]\nquery="${clean.toLowerCase()}"\nintent=MULTI_LOCATION_DISCOVERY\nsubject="${cleanedSubject}"\ntarget="${target}"`);
+      
+      return {
+        intent: 'MULTI_LOCATION_DISCOVERY',
+        subject: cleanedSubject,
+        discoveryTarget: target,
+        entity: cleanedSubject,
+        resolutionMode: 'MULTI_LOCATION_EXPLORATION'
+      };
+    }
+  }
+
+  // 2. Check for Route / Expansion patterns
   const routePatterns = [
     /\b(?:follow|trace|journey|path|route|expansion|migration|trade network|voyage|travels?|sail(?:ed|ing)?)\b/i,
     /\bfrom\b.*?\bto\b/i
@@ -2397,7 +2552,7 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
     }
   }
 
-  // 2. Check for Discovery / Recovery patterns first
+  // 3. Check for Discovery / Recovery patterns first
   const discoveryPatterns = [
     /^\s*where\s+(?:was|were)\s+(?:the\s+)?(.+?)\s+(?:found|discovered|recovered|unearthed|excavated|located)\s*\??\s*$/i,
     /^\s*where\s+did\s+(?:they|researchers|archaeologists)?\s*(?:find|discover|recover|unearth|excavate)\s+(?:the\s+)?(.+?)\s*\??\s*$/i,
@@ -2419,7 +2574,7 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
     }
   }
 
-  // 2. Check for Historical Event patterns
+  // 4. Check for Historical Event patterns
   const historicalPatterns = [
     /^\s*where\s+did\s+(.+?)\s+take\s+place\s*\??\s*$/i,
     /^\s*where\s+did\s+(.+?)\s+happen\s*\??\s*$/i,
@@ -2447,7 +2602,7 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
     }
   }
 
-  // 3. Check for Exploratory / mixed knowledge patterns
+  // 5. Check for Exploratory / mixed knowledge patterns
   const exploratoryPatterns = [
     /\bnear\b/i,
     /\baround\b/i,
@@ -2470,7 +2625,7 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
     }
   }
 
-  // 4. Check for Natural language location queries
+  // 6. Check for Natural language location queries (Single Point)
   const nlPatterns = [
     /^\s*where\s+is\s+located\s+(.+)$/i,
     /^\s*where\s+is\s+(.+?)(?:\s+located|\s+found)?\s*\??\s*$/i,
@@ -2497,7 +2652,7 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
     }
   }
 
-  // 5. Fallback to Direct lookup
+  // 7. Fallback to Direct lookup
   return { intent: 'DIRECT', entity: clean };
 };
 
@@ -2506,19 +2661,41 @@ export const extractEntityFromQuery = (query: string): string => {
   return extracted.entity;
 };
 
-import { ResolvedCoordinates } from '../types';
+import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck } from './geographic/entityIdentityValidator';
 
 export const recoverCoordinatesFromAi = async (rawQuery: string, intent: string, entity: string, attempt: number = 1): Promise<ResolvedCoordinates | null> => {
-  let promptText = `Provide only the precise real-world decimal latitude and longitude coordinates for: "${entity}" (extracted from query: "${rawQuery}", intent: ${intent}).
-  Return a strictly valid JSON object exactly like this:
-  {
-    "lat": 12.345,
-    "lng": 67.890
+  if (intent === 'MULTI_LOCATION_DISCOVERY' || intent === 'EXPLORATORY' || intent === 'route') {
+    console.warn(`[Coordinate Recovery] Unsafe coordinate recovery blocked for multi-location intent "${intent}".`);
+    return null;
   }
-  Output ONLY the JSON object.`;
+
+  // Reject entity strings that are clearly query sentences rather than real location names
+  if (/\b(filmed|shot|locations?|places|where was|what are)\b/i.test(entity)) {
+    console.warn(`[Coordinate Recovery] Unsafe coordinate recovery blocked for query phrase "${entity}".`);
+    return null;
+  }
+
+  let promptText = `You are performing coordinate recovery for a strictly locked entity identity.
+Requested Entity: "${entity}" (extracted from query: "${rawQuery}", intent: ${intent}).
+
+CRITICAL INSTRUCTIONS:
+- The requested entity identity is FIXED to "${entity}".
+- Recover precise real-world decimal latitude and longitude coordinates for THIS specific entity only.
+- Do NOT substitute another entity, shipwreck, vessel, battle, landmark, or location.
+- If this specific entity cannot be confidently located, return lat: 997, lng: 997 (or null coordinates).
+
+Return a strictly valid JSON object:
+{
+  "requestedEntity": "${entity}",
+  "resolvedEntity": "${entity}",
+  "lat": 0.000,
+  "lng": 0.000,
+  "confidence": "high"
+}
+Output ONLY the JSON object.`;
 
   if (attempt > 1) {
-      promptText += `\n\nReturn the documented discovery coordinates. Do not return the origin of the name. Do not return a similarly named location.`;
+      promptText += `\n\nReturn the documented coordinates for "${entity}". Do not return a similarly named location or different entity.`;
   }
   
   try {
@@ -2534,10 +2711,23 @@ export const recoverCoordinatesFromAi = async (rawQuery: string, intent: string,
     const data = parsed.success ? parsed.value : null;
     let valid = false;
     
+    const resolvedEntityName = (data && ((data as any).resolvedEntity || (data as any).name || (data as any).entity)) || entity;
     let parsedCoords = normalizeCoordinates(data) || (data && normalizeCoordinates((data as any).coordinates));
     
     if (parsedCoords) {
       valid = isValidCoordinates(parsedCoords);
+      if (parsedCoords.lat === 997 || parsedCoords.lat === 998 || parsedCoords.lat === 999) {
+        valid = false;
+      }
+
+      // Reject prompt placeholder/sentinel coordinates
+      if (
+        (Math.abs(parsedCoords.lat - 12.345) < 0.01 && Math.abs(parsedCoords.lng - 67.89) < 0.01) ||
+        (parsedCoords.lat === 0 && parsedCoords.lng === 0)
+      ) {
+        console.warn(`[Coordinate Recovery] Rejected fabricated placeholder coordinates for ${entity}: ${parsedCoords.lat}, ${parsedCoords.lng}`);
+        valid = false;
+      }
       
       const lookupKey = entity.toLowerCase().trim();
       const knownEntity = DETERMINISTIC_LOCATION_DB[lookupKey];
@@ -2579,10 +2769,22 @@ export const recoverCoordinatesFromAi = async (rawQuery: string, intent: string,
               return null;
           }
       }
+    }
 
-      if (valid) {
-         return { ...parsedCoords, source: "ai_recovery" };
-      }
+    const identityCheck = validateEntityIdentity(entity, resolvedEntityName, { rawQuery, intent, coordinatesValid: valid });
+    const recoveryAccepted = valid && identityCheck.matches;
+
+    logCoordinateRecoveryIdentityCheck({
+      requestedEntity: entity,
+      recoveredEntity: resolvedEntityName,
+      entityIdentityMatch: identityCheck.matches,
+      coordinateValidity: valid,
+      recoveryAccepted,
+      rejectionReason: recoveryAccepted ? 'NONE' : (identityCheck.matches ? 'COORDINATE_INVALID' : identityCheck.rejectionReason)
+    });
+
+    if (recoveryAccepted && parsedCoords) {
+       return { ...parsedCoords, source: "ai_recovery" };
     }
     
     return null;

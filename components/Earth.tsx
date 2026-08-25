@@ -5,6 +5,7 @@ import { TextureLoader } from 'three';
 import { Decal, useTexture, Line, Text, Billboard, Instances, Instance, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { SkinType, GeoCoordinates, MapMarker, FavoriteLocation, Waypoint } from '../types';
+import { OSMViewportBounds } from '../utils/osmViewportUtils';
 
 interface EarthProps {
   onLocationClick: (lat: number, lng: number, point: THREE.Vector3) => void;
@@ -23,6 +24,7 @@ interface EarthProps {
   currentWaypointIndex?: number;
   scanningArea?: GeoCoordinates | null;
   onCameraChange?: (lat: number, lng: number, distance: number) => void;
+  onOSMViewportBoundsChange?: (bounds: OSMViewportBounds | null) => void;
 }
 
 import { latLngToVector3, vector3ToLatLng } from '../utils/globeCoordinates';
@@ -30,7 +32,16 @@ import { OSMMapLayer } from './OSMMapLayer';
 import { OSMTransitionFog } from './OSMTransitionFog';
 import { evaluateLabelPlacement, MarkerScreenTarget, ScreenRect } from '../utils/labelCollisionHelper';
 import { OSM_DETAIL_THRESHOLD } from '../services/geographic/osmTileService';
-import { getConnectingLineColor } from '../utils/routeLineColor';
+import { buildGlobeRouteGeometry, getRouteLineOpacity, isRouteSequential } from '../utils/osmRouteArrowUtils';
+import {
+  calculateMarkerFontSize,
+  calculateMarkerBorderWidth,
+  calculateGlobeMarkerZoomScale,
+  calculateGlobeMarkerDiameter,
+  getThemeMarkerColors,
+  getMarkerBoxShadow,
+  getWaypointNumberStyle
+} from '../utils/markerStyleUtils';
 
 // Custom Shader for Retro Effect
 const RetroShader = {
@@ -162,6 +173,7 @@ const UniversalMarker: React.FC<{
   const meshRef = useRef<THREE.Group>(null);
   const domHitRef = useRef<HTMLDivElement>(null);
   const domPinRef = useRef<HTMLDivElement>(null);
+  const domNumberRef = useRef<HTMLSpanElement>(null);
   const { camera, size: viewportSize } = useThree();
 
   const colorStr = typeof color === 'string' ? color : (color instanceof THREE.Color ? `#${color.getHexString()}` : '#ff0000');
@@ -180,19 +192,15 @@ const UniversalMarker: React.FC<{
         return;
       }
 
-      // 1. Zoom scale calculation (0.0 = zoomed out, 1.0 = zoomed in)
-      const zoomLevel = THREE.MathUtils.clamp((8.0 - distance) / (8.0 - 1.2), 0, 1);
-
-      // Subtle size scaling formula: size multiplier goes from 0.8 to 0.95
-      const sizeMultiplier = 0.8 + zoomLevel * 0.15;
-        
       let roleScale = 1;
       if (isWaypoint && waypointRole) {
-        if (waypointRole === 'primary') roleScale = 1.4;
+        if (waypointRole === 'primary') roleScale = 1.25;
         else if (waypointRole === 'administrative') roleScale = 0.8;
       }
-      
-      meshRef.current.scale.setScalar(sizeMultiplier * roleScale);
+
+      // 1. Zoom scale calculation: centralized zoom-aware scale factor
+      const zoomScale = calculateGlobeMarkerZoomScale(distance);
+      meshRef.current.scale.setScalar(zoomScale * roleScale);
 
       // 2. Fetch screen-space collision offset computed in parent's useFrame loop
       const displacement = scanOffsetsRef?.current?.[markerId] || new THREE.Vector3(0, 0, 0);
@@ -209,7 +217,7 @@ const UniversalMarker: React.FC<{
          meshRef.current.position.copy(position);
       }
 
-      // 3. Screen-space DOM overlay projection & size calculation for OSM map visibility
+      // 3. Screen-space DOM overlay projection & size calculation for 3D Globe visibility
       if (domHitRef.current && domPinRef.current) {
         const wp = new THREE.Vector3();
         meshRef.current.getWorldPosition(wp);
@@ -221,18 +229,9 @@ const UniversalMarker: React.FC<{
         } else {
           domHitRef.current.style.display = 'flex';
           
-          const markerVisualSize = size * sizeMultiplier * roleScale;
-          const centerScreen = wp.clone().project(camera);
-          const edgeWp = wp.clone().add(camera.up.clone().multiplyScalar(markerVisualSize));
-          const edgeScreen = edgeWp.project(camera);
-
-          const heightHalf = viewportSize.height / 2;
-          const centerY = -(centerScreen.y * heightHalf) + heightHalf;
-          const edgeY = -(edgeScreen.y * heightHalf) + heightHalf;
-          
-          const radius = Math.max(3.5, Math.abs(centerY - edgeY));
-          const diameter = radius * 2;
-          const strokeWidth = Math.max(1.5, radius * 0.22);
+          // Calculate dynamic zoom-aware marker diameter, border width, and font size
+          const diameter = calculateGlobeMarkerDiameter(distance, 26, roleScale);
+          const strokeWidth = calculateMarkerBorderWidth(diameter, skin);
 
           // Update visual marker size inside 40px hit area
           domPinRef.current.style.width = `${diameter}px`;
@@ -240,6 +239,13 @@ const UniversalMarker: React.FC<{
           domPinRef.current.style.minWidth = `${diameter}px`;
           domPinRef.current.style.minHeight = `${diameter}px`;
           domPinRef.current.style.borderWidth = `${strokeWidth}px`;
+
+          // Dynamically scale waypoint number font size proportionally with the marker diameter
+          if (domNumberRef.current) {
+            const isMultiDigit = waypointIndex !== undefined && (waypointIndex + 1) >= 10;
+            const dynamicFontSize = calculateMarkerFontSize(diameter, isMultiDigit);
+            domNumberRef.current.style.fontSize = `${dynamicFontSize}px`;
+          }
 
           // Selected Marker Pure Uniform Scale Pulse (animates scale only, zero color/shadow/opacity shift)
           if (isSelected) {
@@ -254,6 +260,11 @@ const UniversalMarker: React.FC<{
       }
     }
   });
+
+  const isMultiDigit = waypointIndex !== undefined && (waypointIndex + 1) >= 10;
+  const numberStyle = getWaypointNumberStyle(skin || 'modern');
+  const initialFontSize = calculateMarkerFontSize(26, isMultiDigit);
+  const boxShadow = getMarkerBoxShadow(skin || 'modern', isSelected);
 
   return (
     <group position={position} onClick={onClick} ref={meshRef}>
@@ -329,7 +340,7 @@ const UniversalMarker: React.FC<{
               backgroundColor: colorStr,
               borderColor: outlineStr,
               borderStyle: 'solid',
-              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.5)',
+              boxShadow,
               opacity: isWaypoint && waypointRole === 'administrative' ? 0.6 : 1.0,
               pointerEvents: 'none',
               transformOrigin: 'center center',
@@ -338,13 +349,14 @@ const UniversalMarker: React.FC<{
           >
             {isWaypoint && isMultiLocation && waypointIndex !== undefined && (
               <span 
+                ref={domNumberRef}
                 style={{
-                  fontSize: '10px',
-                  fontWeight: 'bold',
-                  color: isRetro ? 'black' : (skin === 'parchment' ? '#3e2723' : 'black'),
-                  lineHeight: 1,
+                  fontSize: `${initialFontSize}px`,
+                  fontWeight: numberStyle.fontWeight,
+                  color: numberStyle.color,
+                  lineHeight: numberStyle.lineHeight,
+                  textShadow: numberStyle.textShadow,
                   userSelect: 'none',
-                  textShadow: skin === 'parchment' ? '0 0 2px #f4ead5' : '0 0 2px white',
                   pointerEvents: 'none'
                 }}
               >
@@ -363,63 +375,27 @@ const RouteLine: React.FC<{
   skin: SkinType,
   markerPositions?: Map<string, THREE.Vector3>
 }> = ({ waypoints, skin, markerPositions }) => {
-  const dotItems = useMemo(() => {
-    if (waypoints.length < 2) return [];
-    
-    const items: Array<{ pos: THREE.Vector3; color: string }> = [];
-    const radius = 1.015; // Updated to match new marker altitude
-    const lineRadius = 1.018; 
-    
-    // Spacing between dots (smaller = more dots)
-    const spacing = 0.008; 
-    
-    // Distance to skip at start/end to avoid overlapping with marker
-    const markerClearance = 0.03; 
-
-    for (let i = 0; i < waypoints.length - 1; i++) {
-        const start = markerPositions?.get(waypoints[i].id) || latLngToVector3(waypoints[i].lat, waypoints[i].lng, radius);
-        const end = markerPositions?.get(waypoints[i+1].id) || latLngToVector3(waypoints[i+1].lat, waypoints[i+1].lng, radius);
-        
-        const angle = start.angleTo(end);
-        const arcLength = angle * lineRadius;
-
-        if (arcLength > markerClearance * 2) {
-             const usableLength = arcLength - (markerClearance * 2);
-             const count = Math.floor(usableLength / spacing);
-             
-             if (count > 0) {
-                 for (let j = 0; j <= count; j++) {
-                     // Calculate interpolation factor t based on physical distance along arc
-                     // t maps from [clearance] to [arcLength - clearance]
-                     const currentDist = markerClearance + (j / count) * usableLength;
-                     const t = currentDist / arcLength;
-                     
-                     // Slerp approximation (lerp then normalize)
-                     const v = new THREE.Vector3().copy(start).lerp(end, t).normalize().multiplyScalar(lineRadius);
-                     const { lat, lng } = vector3ToLatLng(v);
-                     const dotColor = getConnectingLineColor({
-                       theme: skin,
-                       mapLayer: 'globe',
-                       backgroundContext: { lat, lng }
-                     });
-                     items.push({ pos: v, color: dotColor });
-                 }
-             }
-        }
-    }
-    return items;
+  const geometry = useMemo(() => {
+    return buildGlobeRouteGeometry({
+      waypoints,
+      skin,
+      markerPositions,
+      lineRadius: 1.018
+    });
   }, [waypoints, skin, markerPositions]);
 
-  if (dotItems.length === 0) return null;
+  if (!geometry) return null;
 
   return (
-    <Instances range={dotItems.length}>
-      <sphereGeometry args={[0.002, 8, 8]} />
-      <meshBasicMaterial transparent opacity={0.75} />
-      {dotItems.map((item, i) => (
-        <Instance key={i} position={item.pos} color={item.color} />
-      ))}
-    </Instances>
+    <mesh geometry={geometry}>
+      <meshBasicMaterial 
+        vertexColors 
+        side={THREE.DoubleSide} 
+        transparent 
+        opacity={getRouteLineOpacity(skin)} 
+        depthWrite={false} 
+      />
+    </mesh>
   );
 };
 
@@ -842,13 +818,15 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
   const isGreen = skin === 'retro-green';
   const isAmber = skin === 'retro-amber';
 
-  // Marker Colors
-  const markerColor = isParchment ? '#8b5a2b' : isModern ? '#ff0000' : isGreen ? '#a3e635' : '#fcd34d';
-  const favoriteColor = isParchment ? '#8b0000' : isModern ? '#d946ef' : '#ffffff'; 
-  const waypointColor = isParchment ? '#d2b48c' : isModern ? '#00e5ff' : isGreen ? '#4ade80' : '#fbbf24'; 
-  
-  // Marker Outline Colors
-  const outlineColor = isParchment ? '#e8d5b5' : isModern ? '#ffffff' : isGreen ? '#4ade80' : '#fbbf24';
+  // Marker Colors using unified single source of truth
+  const waypointColorInfo = getThemeMarkerColors(skin, { isWaypoint: true });
+  const regularMarkerColorInfo = getThemeMarkerColors(skin, { isWaypoint: false });
+  const favoriteColorInfo = getThemeMarkerColors(skin, { isFavorite: true });
+
+  const markerColor = regularMarkerColorInfo.fill;
+  const favoriteColor = favoriteColorInfo.fill;
+  const waypointColor = waypointColorInfo.fill;
+  const outlineColor = waypointColorInfo.outline;
 
   const activeWaypointId = (routeWaypoints && routeWaypoints.length > 0 && currentWaypointIndex !== undefined && currentWaypointIndex >= 0 && currentWaypointIndex < routeWaypoints.length)
     ? (routeWaypoints[currentWaypointIndex]?.id || `${routeWaypoints[currentWaypointIndex]?.name}-${routeWaypoints[currentWaypointIndex]?.lat}-${routeWaypoints[currentWaypointIndex]?.lng}`)
@@ -860,7 +838,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     const allMarkers: any[] = [];
     
     // Constants for sizing and clustering
-    const WAYPOINT_SIZE = 0.012; 
+    const WAYPOINT_SIZE = 0.02; // Restored previous larger size for globe waypoint markers
     const MARKER_SIZE_LARGE = 0.012;
     const MARKER_SIZE_SMALL = 0.008;
     
@@ -1331,7 +1309,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     <>
     <group ref={groupRef}>
       {/* Route Lines */}
-      {routeWaypoints && routeWaypoints.length > 0 && (
+      {routeWaypoints && routeWaypoints.length > 1 && isRouteSequential(routeWaypoints) && (
           <RouteLine 
             waypoints={routeWaypoints} 
             skin={skin} 
@@ -1396,6 +1374,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
         selectedMarkerCoordinates={props.selectedMarkerCoordinates}
         onMarkerClick={handleMarkerClick}
         onMapReady={setIsStreetMapReady}
+        onViewportBoundsChange={props.onOSMViewportBoundsChange}
         routeWaypoints={routeWaypoints}
         currentWaypointIndex={currentWaypointIndex}
       />

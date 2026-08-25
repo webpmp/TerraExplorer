@@ -62,6 +62,8 @@ export interface DocumentaryStartOptions {
   viewportWidth?: number;
   viewportHeight?: number;
   cameraConfig?: DocumentaryCameraConfig;
+  viewportBounds?: any;
+  maxFramingDistance?: number;
 }
 
 export const DOCUMENTARY_DURATIONS: Record<string, number> = {
@@ -281,13 +283,35 @@ export class DocumentaryController {
     const targetDistance = Math.max(config.osmDistance, Math.min(maxAllowedDistance, options?.targetDistance || config.osmDistance));
     const globeAltitude = Math.min(maxAllowedDistance, config.globeOverviewDistance);
 
-    const isStartingFromOSM = startDistance < config.atmosphereStartDistance;
-    this.currentPhase = isStartingFromOSM ? 'zooming_out' : 'rotating';
     const originCoords = callbacks.getCameraCoordinates
       ? callbacks.getCameraCoordinates()
       : { lat: destination.lat, lng: destination.lng };
 
-    console.log(`[Documentary] theme=${config.skin} single-location descent started id=${sequenceId} to="${destination.name}" startDist=${startDistance.toFixed(2)} targetDist=${targetDistance.toFixed(2)} maxAllowedDistance=${maxAllowedDistance.toFixed(2)}`);
+    const angularDist = calculateGreatCircleDistance(originCoords.lat, originCoords.lng, destination.lat, destination.lng);
+    const sepDeg = (angularDist * 180) / Math.PI;
+
+    const isDistantDestination = sepDeg > 5.0;
+    const isStartingFromOSM = isDistantDestination && startDistance < config.atmosphereStartDistance;
+    const isLocalAtTarget = !isDistantDestination && startDistance <= targetDistance + 0.15;
+    const isDirectDescent = !isStartingFromOSM && !isLocalAtTarget && startDistance < globeAltitude - 0.2;
+
+    if (isStartingFromOSM) {
+      this.currentPhase = 'zooming_out';
+    } else if (isLocalAtTarget || isDirectDescent) {
+      this.currentPhase = 'descending';
+      if (startDistance <= config.atmosphereStartDistance) {
+        this.isAtmospherePassed = true;
+        callbacks.onAtmosphereEnter?.();
+      }
+      if (startDistance <= config.atmosphereEndDistance) {
+        this.isOSMPassed = true;
+        callbacks.onOSMEnter?.();
+      }
+    } else {
+      this.currentPhase = 'rotating';
+    }
+
+    console.log(`[Documentary] theme=${config.skin} mode=${isStartingFromOSM ? 'distant_osm_to_globe' : (isLocalAtTarget ? 'local_pan' : (isDirectDescent ? 'direct_descent' : 'globe_overview'))} single-location descent started id=${sequenceId} to="${destination.name}" sepDeg=${sepDeg.toFixed(1)}° startDist=${startDistance.toFixed(2)} targetDist=${targetDistance.toFixed(2)} maxAllowedDistance=${maxAllowedDistance.toFixed(2)}`);
 
     const durationSetting = options?.duration;
     const isReducedMotion =
@@ -345,6 +369,18 @@ export class DocumentaryController {
           curLng = destination.lng;
           curDist = globeAltitude + (targetDistance - globeAltitude) * easedP;
         }
+      } else if (isLocalAtTarget) {
+        const easedP = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+        const interp = interpolateCoordinates(originCoords.lat, originCoords.lng, destination.lat, destination.lng, easedP);
+        curLat = interp.lat;
+        curLng = interp.lng;
+        curDist = Math.min(startDistance, targetDistance);
+      } else if (isDirectDescent) {
+        const easedP = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+        const interp = interpolateCoordinates(originCoords.lat, originCoords.lng, destination.lat, destination.lng, easedP);
+        curLat = interp.lat;
+        curLng = interp.lng;
+        curDist = startDistance + (targetDistance - startDistance) * easedP;
       } else {
         if (progress < 0.4) {
           this.currentPhase = 'rotating';
@@ -404,6 +440,14 @@ export class DocumentaryController {
    * Phase 2: Zoom in toward destination waypoint to settled OSM view.
    * For nearby destinations, maintains local geographic scale without excess zoom-out.
    */
+  /**
+   * Starts a staged waypoint transition (OSM -> Globe -> OSM):
+   * - If comfortably visible in current viewport: smooth pan at current zoom level.
+   * - Otherwise:
+   *   Phase 1 (Zoom Out): Zoom straight OUT from origin waypoint until safely at overview altitude (no lateral movement).
+   *   Phase 2 (Globe Rotate): Reorient globe at constant overview altitude from origin to destination.
+   *   Phase 3 (Zoom In): Descend onto destination waypoint down into settled OSM view.
+   */
   public startWaypointTransition(
     current: DocumentaryDestination,
     destination: DocumentaryDestination,
@@ -427,61 +471,62 @@ export class DocumentaryController {
       : { lat: current.lat, lng: current.lng };
     const angularDist = calculateGreatCircleDistance(currentCameraCoords.lat, currentCameraCoords.lng, destination.lat, destination.lng);
     const sepDeg = (angularDist * 180) / Math.PI;
-    const midpoint = calculateGreatCircleMidpoint(current.lat, current.lng, destination.lat, destination.lng);
     const startDistance = Math.min(maxAllowedDistance, callbacks.getCameraDistance());
     const targetDistance = Math.max(config.osmDistance, Math.min(maxAllowedDistance, options?.targetDistance || config.osmDistance));
 
-    // Shared Viewport Visibility Evaluation
-    const isComfortablyVisible = isDestinationComfortablyVisible(
-      currentCameraCoords,
-      startDistance,
-      destination,
-      {
-        viewportWidth: options?.viewportWidth,
-        viewportHeight: options?.viewportHeight,
-        aspect: options?.aspect
-      }
-    );
+    // Viewport Visibility Evaluation
+    const isComfortablyVisible = options?.viewportBounds
+      ? (typeof destination.lat === 'number' && typeof destination.lng === 'number' && (destination.lat >= options.viewportBounds.bufferedMinLat && destination.lat <= options.viewportBounds.bufferedMaxLat) &&
+          (options.viewportBounds.crossesAntimeridian
+            ? (destination.lng >= options.viewportBounds.bufferedMinLng || destination.lng <= options.viewportBounds.bufferedMaxLng)
+            : (destination.lng >= options.viewportBounds.bufferedMinLng && destination.lng <= options.viewportBounds.bufferedMaxLng)))
+      : isDestinationComfortablyVisible(
+          currentCameraCoords,
+          startDistance,
+          destination,
+          {
+            viewportWidth: options?.viewportWidth,
+            viewportHeight: options?.viewportHeight,
+            aspect: options?.aspect,
+            viewportBounds: options?.viewportBounds
+          }
+        );
 
     let framingDistance: number;
     let transitionCategory: 'visible_pan' | 'nearby_offscreen' | 'distant_globe';
+    const maxWaypointFramingLimit = options?.maxFramingDistance ?? Math.min(2.65, maxAllowedDistance);
 
     if (isComfortablyVisible) {
-      // CASE 1: Destination is already comfortably visible in current viewport
-      // -> Preserve current geographic scale and smoothly center on destination
       transitionCategory = 'visible_pan';
       framingDistance = Math.max(startDistance, targetDistance);
       this.currentPhase = 'descending';
       console.log(`[Documentary] waypoint transition: destination is comfortably visible in viewport -> preserving zoom distance=${startDistance.toFixed(2)}`);
     } else if (sepDeg <= 30.0) {
-      // CASE 2: Destination is nearby but outside viewport
-      // -> Moderate zoom-out to establish geographic context before descending
       transitionCategory = 'nearby_offscreen';
       framingDistance = Math.min(
-        maxAllowedDistance,
+        maxWaypointFramingLimit,
         calculateModerateFramingDistance(angularDist, startDistance, targetDistance, maxAllowedDistance)
       );
       this.currentPhase = 'zooming_out';
       console.log(`[Documentary] waypoint transition: destination is nearby off-screen (sep=${sepDeg.toFixed(1)}°) -> moderate framing dist=${framingDistance.toFixed(2)}`);
     } else {
-      // CASE 3: Destination is far away
-      // -> Full globe-level documentary transition
       transitionCategory = 'distant_globe';
       framingDistance = Math.min(
-        maxAllowedDistance,
+        maxWaypointFramingLimit,
         config.calculateFramingDistance(angularDist, startDistance, targetDistance)
       );
       this.currentPhase = 'zooming_out';
-      console.log(`[Documentary] waypoint transition: destination is distant (sep=${sepDeg.toFixed(1)}°) -> globe transition dist=${framingDistance.toFixed(2)}`);
+      console.log(`[Documentary] waypoint transition: destination is distant (sep=${sepDeg.toFixed(1)}°) -> regional framing dist=${framingDistance.toFixed(2)}`);
     }
 
-    // If framing distance remains within OSM layer, immediately mark atmospheric & OSM status
     if (isComfortablyVisible || framingDistance <= config.atmosphereEndDistance) {
       this.isAtmospherePassed = true;
       this.isOSMPassed = true;
       callbacks.onAtmosphereEnter?.();
       callbacks.onOSMEnter?.();
     }
+
+    const wpId = destination.sequence ?? (typeof (destination as any).index === 'number' ? (destination as any).index + 1 : undefined) ?? destination.id ?? destination.name ?? 'destination';
 
     console.log(`[Documentary] theme=${config.skin} state=${this.currentPhase} category=${transitionCategory} waypoint transition started id=${sequenceId} from="${current.name}" to="${destination.name}" separation=${sepDeg.toFixed(1)}° framingDist=${framingDistance.toFixed(2)} startDist=${startDistance.toFixed(2)} maxAllowedDistance=${maxAllowedDistance.toFixed(2)}`);
 
@@ -508,11 +553,24 @@ export class DocumentaryController {
       } else {
         callbacks.setCameraDistance(targetDistance);
       }
+      console.log(`[Documentary] NEXT waypoint=${wpId} phase=COMPLETE distance=${targetDistance.toFixed(2)}`);
       this.finishSequence(sequenceId, destination, callbacks);
       return sequenceId;
     }
 
-    const startTime = safeNow();;
+    const startTime = safeNow();
+
+    let loggedZoomOutStart = false;
+    let loggedZoomOutComplete = false;
+    let loggedGlobeRotateStart = false;
+    let loggedGlobeRotateComplete = false;
+    let loggedZoomInStart = false;
+    let loggedComplete = false;
+
+    if (!isComfortablyVisible) {
+      console.log(`[Documentary] NEXT waypoint=${wpId} phase=ZOOM_OUT_START distance=${startDistance.toFixed(2)}`);
+      loggedZoomOutStart = true;
+    }
 
     const animate = (now: number) => {
       if (this.currentSequenceId !== sequenceId) {
@@ -526,29 +584,91 @@ export class DocumentaryController {
       let curLng: number;
       let curDist: number;
 
-      if (progress < 0.5) {
-        // Phase 1: Zoom out FIRST to framing altitude and midpoint
-        this.currentPhase = progress < 0.35 ? 'zooming_out' : 'framing';
-        const p1 = progress / 0.5;
-        const easedP1 = p1 < 0.5 ? 2 * p1 * p1 : 1 - Math.pow(-2 * p1 + 2, 2) / 2;
-
-        const interp = interpolateCoordinates(current.lat, current.lng, midpoint.lat, midpoint.lng, easedP1);
+      if (isComfortablyVisible) {
+        // Visible pan: smooth interpolation at constant scale
+        const easedP = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+        const interp = interpolateCoordinates(currentCameraCoords.lat, currentCameraCoords.lng, destination.lat, destination.lng, easedP);
         curLat = interp.lat;
         curLng = interp.lng;
-        curDist = startDistance + (framingDistance - startDistance) * easedP1;
+        curDist = startDistance + (targetDistance - startDistance) * easedP;
+      } else if (startDistance < framingDistance) {
+        // Staged 3-phase transition:
+        // Phase 1: Zoom straight OUT above origin waypoint (0% - 35%)
+        if (progress < 0.35) {
+          this.currentPhase = 'zooming_out';
+          const p1 = progress / 0.35;
+          const easedP1 = p1 < 0.5 ? 2 * p1 * p1 : 1 - Math.pow(-2 * p1 + 2, 2) / 2;
+
+          curLat = currentCameraCoords.lat;
+          curLng = currentCameraCoords.lng;
+          curDist = startDistance + (framingDistance - startDistance) * easedP1;
+        } else if (progress < 0.67) {
+          // Phase 2: Globe view - Rotate/reorient toward destination at constant overview altitude (35% - 67%)
+          if (!loggedZoomOutComplete) {
+            console.log(`[Documentary] NEXT waypoint=${wpId} phase=ZOOM_OUT_COMPLETE distance=${framingDistance.toFixed(2)}`);
+            loggedZoomOutComplete = true;
+          }
+          if (!loggedGlobeRotateStart) {
+            console.log(`[Documentary] NEXT waypoint=${wpId} phase=GLOBE_ROTATE_START distance=${framingDistance.toFixed(2)}`);
+            loggedGlobeRotateStart = true;
+          }
+
+          this.currentPhase = 'framing';
+          const p2 = (progress - 0.35) / 0.32;
+          const easedP2 = p2 < 0.5 ? 2 * p2 * p2 : 1 - Math.pow(-2 * p2 + 2, 2) / 2;
+
+          const interp = interpolateCoordinates(currentCameraCoords.lat, currentCameraCoords.lng, destination.lat, destination.lng, easedP2);
+          curLat = interp.lat;
+          curLng = interp.lng;
+          curDist = framingDistance;
+        } else {
+          // Phase 3: Zoom IN / descend onto destination waypoint (67% - 100%)
+          if (!loggedGlobeRotateComplete) {
+            console.log(`[Documentary] NEXT waypoint=${wpId} phase=GLOBE_ROTATE_COMPLETE distance=${framingDistance.toFixed(2)}`);
+            loggedGlobeRotateComplete = true;
+          }
+          if (!loggedZoomInStart) {
+            console.log(`[Documentary] NEXT waypoint=${wpId} phase=ZOOM_IN_START distance=${framingDistance.toFixed(2)}`);
+            loggedZoomInStart = true;
+          }
+
+          this.currentPhase = 'descending';
+          const p3 = (progress - 0.67) / 0.33;
+          const easedP3 = p3 < 0.5 ? 2 * p3 * p3 : 1 - Math.pow(-2 * p3 + 2, 2) / 2;
+
+          curLat = destination.lat;
+          curLng = destination.lng;
+          curDist = framingDistance + (targetDistance - framingDistance) * easedP3;
+        }
       } else {
-        // Phase 2: Zoom in from midpoint to destination waypoint
-        this.currentPhase = 'descending';
-        const p2 = (progress - 0.5) / 0.5;
-        const easedP2 = p2 < 0.5 ? 2 * p2 * p2 : 1 - Math.pow(-2 * p2 + 2, 2) / 2;
-
-        const interp = interpolateCoordinates(midpoint.lat, midpoint.lng, destination.lat, destination.lng, easedP2);
-        curLat = interp.lat;
-        curLng = interp.lng;
-        curDist = framingDistance + (targetDistance - framingDistance) * easedP2;
+        // Starting at or above framing distance: 2-stage (Rotate -> Descend)
+        if (progress < 0.45) {
+          this.currentPhase = progress < 0.25 ? 'zooming_out' : 'framing';
+          const p = progress / 0.45;
+          const easedP = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+          const interp = interpolateCoordinates(currentCameraCoords.lat, currentCameraCoords.lng, destination.lat, destination.lng, easedP);
+          curLat = interp.lat;
+          curLng = interp.lng;
+          curDist = startDistance;
+        } else {
+          if (!loggedGlobeRotateComplete) {
+            console.log(`[Documentary] NEXT waypoint=${wpId} phase=GLOBE_ROTATE_COMPLETE distance=${startDistance.toFixed(2)}`);
+            loggedGlobeRotateComplete = true;
+          }
+          if (!loggedZoomInStart) {
+            console.log(`[Documentary] NEXT waypoint=${wpId} phase=ZOOM_IN_START distance=${startDistance.toFixed(2)}`);
+            loggedZoomInStart = true;
+          }
+          this.currentPhase = 'descending';
+          const p = (progress - 0.45) / 0.55;
+          const easedP = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+          curLat = destination.lat;
+          curLng = destination.lng;
+          curDist = startDistance + (targetDistance - startDistance) * easedP;
+        }
       }
 
-      // Hard clamp: guarantee camera distance never exceeds maxAllowedDistance or drops below osmDistance on any frame
+      // Hard clamp
       curDist = Math.max(config.osmDistance, Math.min(maxAllowedDistance, curDist));
 
       if (callbacks.setCameraPosition) {
@@ -574,6 +694,10 @@ export class DocumentaryController {
         this.animFrameId = safeRequestAnimationFrame(animate);
       } else {
         this.animFrameId = null;
+        if (!loggedComplete) {
+          console.log(`[Documentary] NEXT waypoint=${wpId} phase=COMPLETE distance=${targetDistance.toFixed(2)}`);
+          loggedComplete = true;
+        }
         this.finishSequence(sequenceId, destination, callbacks);
       }
     };

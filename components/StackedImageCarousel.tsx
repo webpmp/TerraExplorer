@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronLeft, ChevronRight, X, Image as ImageIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Image as ImageIcon, ZoomIn } from 'lucide-react';
 import { SkinType } from '../types';
 import { GalleryImage, cleanMetadataString, formatImageAttribution, isPlaceholderString } from './InfoPanel';
 import { getImageFilter } from '../utils/osmPalettes';
@@ -64,6 +64,20 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
   const [animDirection, setAnimDirection] = useState<'next' | 'prev' | null>(null);
   const animTimeoutRef = useRef<number | null>(null);
 
+  // Lightbox Magnifier State
+  const [isMagnifierActive, setIsMagnifierActive] = useState(false);
+  const [isHoveringImage, setIsHoveringImage] = useState(false);
+  const imageContainerRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const lensRef = useRef<HTMLDivElement>(null);
+  const magnifiedImgRef = useRef<HTMLImageElement>(null);
+
+  // Reset magnifier mode on lightbox close or image navigation
+  useEffect(() => {
+    setIsMagnifierActive(false);
+    setIsHoveringImage(false);
+  }, [isLightboxOpen, currentIndex]);
+
   // Sync index if images change
   useEffect(() => {
     if (currentIndex >= images.length) {
@@ -80,6 +94,8 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
 
   const changeImage = useCallback((newIndex: number, direction: 'next' | 'prev') => {
     if (!isMulti) return;
+    setIsMagnifierActive(false);
+    setIsHoveringImage(false);
     setAnimDirection(direction);
     setCurrentIndex(newIndex);
     onIndexChange?.(newIndex);
@@ -105,6 +121,52 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
     const prevIdx = (currentIndex - 1 + totalImages) % totalImages;
     changeImage(prevIdx, 'prev');
   }, [isMulti, currentIndex, totalImages, changeImage]);
+
+  // Mouse move handler for magnifier lens inspection
+  const handleImageMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isMagnifierActive || !imageRef.current || !imageContainerRef.current || !lensRef.current || !magnifiedImgRef.current) {
+      return;
+    }
+
+    const imgRect = imageRef.current.getBoundingClientRect();
+    const containerRect = imageContainerRef.current.getBoundingClientRect();
+
+    const mouseX = e.clientX;
+    const mouseY = e.clientY;
+
+    // Check if mouse is strictly inside the rendered image bounds
+    if (
+      mouseX < imgRect.left ||
+      mouseX > imgRect.right ||
+      mouseY < imgRect.top ||
+      mouseY > imgRect.bottom
+    ) {
+      if (isHoveringImage) setIsHoveringImage(false);
+      return;
+    }
+
+    if (!isHoveringImage) setIsHoveringImage(true);
+
+    const relX = mouseX - imgRect.left;
+    const relY = mouseY - imgRect.top;
+
+    const lensRadius = 113; // 226px diameter inspection lens (~33% increase from 85px radius)
+    const zoomFactor = 2.75; // ~2.75x inspection magnification
+
+    const lensX = mouseX - containerRect.left - lensRadius;
+    const lensY = mouseY - containerRect.top - lensRadius;
+
+    lensRef.current.style.left = `${lensX}px`;
+    lensRef.current.style.top = `${lensY}px`;
+
+    const magnifiedLeft = -(relX * zoomFactor - lensRadius);
+    const magnifiedTop = -(relY * zoomFactor - lensRadius);
+
+    magnifiedImgRef.current.style.left = `${magnifiedLeft}px`;
+    magnifiedImgRef.current.style.top = `${magnifiedTop}px`;
+    magnifiedImgRef.current.style.width = `${imgRect.width * zoomFactor}px`;
+    magnifiedImgRef.current.style.height = `${imgRect.height * zoomFactor}px`;
+  };
 
   // Keyboard navigation when Lightbox is active
   useEffect(() => {
@@ -189,12 +251,15 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
   const layer1ImageFilter = getImageFilter(skin, 'pile1');
   const layer2ImageFilter = getImageFilter(skin, 'pile2');
 
-  // Lightbox typography per skin
+  // Lightbox typography & button styles per skin
   let captionClass = "text-white/90 text-sm md:text-base font-normal font-sans";
   let attributionClass = "text-white/60 text-xs mt-1 font-sans";
   let lightboxCloseBtnClass = "bg-black text-white hover:bg-white/20 border-white/20 rounded-full";
   let lightboxNavBtnClass = "bg-black/75 hover:bg-black text-white border-white/10 rounded-full";
   let lightboxCounterClass = "text-white/50 font-mono";
+  let lightboxMagnifierBtnClass = "bg-white/10 hover:bg-white/20 text-white/80 hover:text-white border-white/20 rounded-md";
+  let lightboxMagnifierActiveBtnClass = "bg-cyan-500 text-black border-cyan-400 font-bold rounded-md shadow-[0_0_12px_rgba(6,182,212,0.5)]";
+  let lightboxLensClass = "border-2 border-black bg-black shadow-[0_0_20px_rgba(0,0,0,0.8),0_0_0_1px_rgba(255,255,255,0.25)]";
 
   // Thumbnail caption styling per skin
   let thumbCaptionIconClass = "text-white/80 shrink-0";
@@ -210,6 +275,9 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
     lightboxCloseBtnClass = "bg-black text-green-300 hover:bg-green-400 hover:text-black border-green-400 rounded-none shadow-[0_0_10px_rgba(74,222,128,0.3)] font-retro";
     lightboxNavBtnClass = "bg-black/90 hover:bg-green-400 hover:text-black text-green-300 border-green-400 rounded-none shadow-[0_0_10px_rgba(74,222,128,0.25)]";
     lightboxCounterClass = "text-green-300/90 font-retro text-sm tracking-wider";
+    lightboxMagnifierBtnClass = "bg-black text-green-300/80 hover:bg-green-900/30 hover:text-green-300 border-green-400/50 rounded-none font-retro";
+    lightboxMagnifierActiveBtnClass = "bg-green-400 text-black border-green-400 font-bold rounded-none shadow-[0_0_10px_rgba(74,222,128,0.5)] font-retro";
+    lightboxLensClass = "border-2 border-green-400 bg-black shadow-[0_0_15px_rgba(74,222,128,0.5)]";
   } else if (skin === 'retro-amber') {
     captionClass = "text-amber-300 font-retro text-sm md:text-base";
     attributionClass = "text-amber-400/70 text-xs mt-1 font-retro";
@@ -219,6 +287,9 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
     lightboxCloseBtnClass = "bg-black text-amber-300 hover:bg-amber-400 hover:text-black border-amber-400 rounded-none shadow-[0_0_10px_rgba(251,191,36,0.3)] font-retro";
     lightboxNavBtnClass = "bg-black/90 hover:bg-amber-400 hover:text-black text-amber-300 border-amber-400 rounded-none shadow-[0_0_10px_rgba(251,191,36,0.25)]";
     lightboxCounterClass = "text-amber-300/90 font-retro text-sm tracking-wider";
+    lightboxMagnifierBtnClass = "bg-black text-amber-300/80 hover:bg-amber-900/30 hover:text-amber-300 border-amber-400/50 rounded-none font-retro";
+    lightboxMagnifierActiveBtnClass = "bg-amber-400 text-black border-amber-400 font-bold rounded-none shadow-[0_0_10px_rgba(251,191,36,0.5)] font-retro";
+    lightboxLensClass = "border-2 border-amber-400 bg-black shadow-[0_0_15px_rgba(251,191,36,0.5)]";
   } else if (skin === 'parchment') {
     captionClass = "text-amber-100/90 font-garamond font-normal text-sm";
     attributionClass = "text-[#d2b48c]/75 text-xs mt-1 font-serif";
@@ -228,6 +299,9 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
     lightboxCloseBtnClass = "bg-[#2c1d11] text-[#e8d5b5] hover:bg-[#8b5a2b] hover:text-[#f4ead5] border-[#8b5a2b] rounded-sm shadow-md font-serif";
     lightboxNavBtnClass = "bg-[#2c1d11]/85 hover:bg-[#8b5a2b] text-[#e8d5b5] hover:text-[#f4ead5] border-[#8b5a2b] rounded-sm shadow-md";
     lightboxCounterClass = "text-[#d2b48c]/80 font-serif";
+    lightboxMagnifierBtnClass = "bg-[#2c1d11]/85 text-[#e8d5b5] hover:bg-[#8b5a2b] hover:text-[#f4ead5] border-[#8b5a2b] rounded-sm shadow-md font-serif";
+    lightboxMagnifierActiveBtnClass = "bg-[#8b5a2b] text-[#f4ead5] border-[#5c3a21] font-bold rounded-sm shadow-md font-serif";
+    lightboxLensClass = "border-2 border-[#8b5a2b] bg-[#f4ead5] shadow-[0_4px_15px_rgba(0,0,0,0.5)]";
   }
 
   const lightboxModal = isLightboxOpen ? (
@@ -257,16 +331,48 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
         </button>
 
         <div 
+          ref={imageContainerRef}
           className="relative max-w-full max-h-[76vh] md:max-h-[80vh] flex items-center justify-center overflow-hidden rounded"
           onClick={(e) => e.stopPropagation()}
+          onMouseMove={handleImageMouseMove}
+          onMouseEnter={() => {
+            if (isMagnifierActive) setIsHoveringImage(true);
+          }}
+          onMouseLeave={() => setIsHoveringImage(false)}
+          style={{
+            cursor: isMagnifierActive ? 'zoom-in' : 'default'
+          }}
         >
           <img 
+            ref={imageRef}
             src={currentImg.url} 
             alt={activeCaption || `${locationName} - ${currentIndex + 1}`} 
-            className="max-w-[90vw] max-h-[74vh] md:max-h-[78vh] object-contain rounded shadow-2xl"
+            className="max-w-[90vw] max-h-[74vh] md:max-h-[78vh] object-contain rounded shadow-2xl select-none"
             style={activeImageFilter ? { filter: activeImageFilter } : undefined}
             data-testid="lightbox-image"
           />
+
+          {/* Magnifier Lens */}
+          <div
+            ref={lensRef}
+            className={`absolute w-[226px] h-[226px] rounded-full overflow-hidden pointer-events-none z-30 ${lightboxLensClass}`}
+            style={{
+              display: isHoveringImage && isMagnifierActive ? 'block' : 'none',
+              boxSizing: 'border-box'
+            }}
+            data-testid="lightbox-magnifier-lens"
+            aria-hidden="true"
+          >
+            <img
+              ref={magnifiedImgRef}
+              src={currentImg.url}
+              alt=""
+              className="absolute max-w-none max-h-none pointer-events-none select-none"
+              style={activeImageFilter ? { filter: activeImageFilter } : undefined}
+            />
+            {/* Explicitly disabled glass reflection */}
+            <div className="glass-reflection" style={{ display: 'none' }} />
+          </div>
 
           {/* CRT scanline overlay on lightbox image for retro themes */}
           {isRetro && (
@@ -304,15 +410,35 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
           )}
         </div>
 
-        {/* Lightbox Image Counter */}
-        {isMulti && (
-          <div 
-            className={`mt-2 w-0 min-w-full text-left px-1 ${lightboxCounterClass} text-xs`} 
-            data-testid="lightbox-counter"
+        {/* Row beneath image: Counter on left, Magnifier button on bottom-right */}
+        <div className="mt-2 w-0 min-w-full flex items-center justify-between px-1">
+          {isMulti ? (
+            <div 
+              className={`${lightboxCounterClass} text-xs`} 
+              data-testid="lightbox-counter"
+            >
+              {currentIndex + 1} of {totalImages}
+            </div>
+          ) : <div />}
+
+          {/* Magnifier Glass Toggle Button (Icon Only) */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsMagnifierActive(prev => !prev);
+            }}
+            className={`p-1.5 transition-colors shadow-sm pointer-events-auto border flex items-center justify-center ${
+              isMagnifierActive ? lightboxMagnifierActiveBtnClass : lightboxMagnifierBtnClass
+            }`}
+            title={isMagnifierActive ? "Disable magnifier" : "Enable magnifier"}
+            aria-label={isMagnifierActive ? "Disable magnifier" : "Enable magnifier"}
+            aria-pressed={isMagnifierActive}
+            data-testid="lightbox-magnifier-btn"
           >
-            {currentIndex + 1} of {totalImages}
-          </div>
-        )}
+            <ZoomIn size={16} />
+          </button>
+        </div>
 
         {/* Lightbox Footer with Editorial Caption and Attribution */}
         {(activeCaption || activeAttribution) && (
