@@ -150,17 +150,44 @@ describe('OSM Tile Service & Tile Spherical Mesh Tests', () => {
     expect(osmTileService.getNextAdjacentTileZoom(19, 1.02).reason).toBe('HYSTERESIS');
   });
 
-  it('provides identical high-contrast tile URLs for modern and parchment skins', () => {
-    const modernUrl = osmTileService.getTileUrl(14, 2048, 1360, 'modern');
-    const parchmentUrl = osmTileService.getTileUrl(14, 2048, 1360, 'parchment');
-    expect(modernUrl).toMatch(/^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/rastertiles\/voyager\/14\/2048\/1360\.png$/);
-    expect(parchmentUrl).toBe(modernUrl);
+  it('handles CARTO raster tile URLs with API key authentication, URL encoding, and missing key fallback', () => {
+    const originalEnv = { ...import.meta.env };
 
-    const retroGreenUrl = osmTileService.getTileUrl(14, 2048, 1360, 'retro-green');
-    expect(retroGreenUrl).toMatch(/^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/dark_all\/14\/2048\/1360\.png$/);
+    try {
+      // 1. With configured API key: VITE_CARTO_API_KEY = 'test_key_123'
+      (import.meta.env as any).VITE_CARTO_API_KEY = 'test_key_123';
+      const modernUrlWithKey = osmTileService.getTileUrl(14, 2048, 1360, 'modern');
+      const parchmentUrlWithKey = osmTileService.getTileUrl(14, 2048, 1360, 'parchment');
+      const retroGreenUrlWithKey = osmTileService.getTileUrl(14, 2048, 1360, 'retro-green');
 
-    const retroAmberUrl = osmTileService.getTileUrl(14, 2048, 1360, 'retro-amber');
-    expect(retroAmberUrl).toMatch(/^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/dark_all\/14\/2048\/1360\.png$/);
+      expect(modernUrlWithKey).toMatch(/^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/rastertiles\/voyager\/14\/2048\/1360\.png\?key=test_key_123$/);
+      expect(parchmentUrlWithKey).toBe(modernUrlWithKey);
+      expect(retroGreenUrlWithKey).toMatch(/^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/dark_all\/14\/2048\/1360\.png\?key=test_key_123$/);
+
+      // 2. Special characters are correctly URL encoded
+      (import.meta.env as any).VITE_CARTO_API_KEY = 'test key/with&special=chars?';
+      const encodedUrl = osmTileService.getTileUrl(14, 2048, 1360, 'modern');
+      expect(encodedUrl).toContain(`?key=${encodeURIComponent('test key/with&special=chars?')}`);
+
+      // 3. Missing / empty API key is handled gracefully without throwing
+      (import.meta.env as any).VITE_CARTO_API_KEY = '';
+      let urlWithoutKey = '';
+      expect(() => {
+        urlWithoutKey = osmTileService.getTileUrl(14, 2048, 1360, 'modern');
+      }).not.toThrow();
+      expect(urlWithoutKey).not.toContain('?key=');
+      expect(urlWithoutKey).toMatch(/^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/rastertiles\/voyager\/14\/2048\/1360\.png$/);
+
+      delete (import.meta.env as any).VITE_CARTO_API_KEY;
+      let urlUndef = '';
+      expect(() => {
+        urlUndef = osmTileService.getTileUrl(14, 2048, 1360, 'retro-green');
+      }).not.toThrow();
+      expect(urlUndef).not.toContain('?key=');
+      expect(urlUndef).toMatch(/^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/dark_all\/14\/2048\/1360\.png$/);
+    } finally {
+      (import.meta.env as any).VITE_CARTO_API_KEY = originalEnv.VITE_CARTO_API_KEY;
+    }
   });
 
   it('projects geographic marker coordinates to exact Web Mercator pixel positions and separates them naturally with zoom', () => {

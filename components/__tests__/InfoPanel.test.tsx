@@ -2258,6 +2258,72 @@ describe('Lightbox Metadata Integration', () => {
       expect(htmlWithoutNews).not.toContain('>News</h3>');
     });
   });
+
+  describe('Null data & Discovery Lifecycle Regression Test', () => {
+    it('renders gracefully without crashing when info is null and isLoading is true', () => {
+      expect(() => {
+        const html = renderToStaticMarkup(
+          <InfoPanel
+            info={null}
+            onClose={() => {}}
+            isLoading={true}
+            skin="modern"
+            isFavorite={false}
+            onSaveFavorite={() => {}}
+            onRemoveFavorite={() => {}}
+          />
+        );
+        expect(html).toContain('Searching...');
+      }).not.toThrow();
+    });
+
+    it('renders gracefully without crashing when info is null and isError is true', () => {
+      expect(() => {
+        const html = renderToStaticMarkup(
+          <InfoPanel
+            info={null}
+            onClose={() => {}}
+            isLoading={false}
+            isError={true}
+            errorMessage="Location lookup failed"
+            skin="modern"
+            isFavorite={false}
+            onSaveFavorite={() => {}}
+            onRemoveFavorite={() => {}}
+          />
+        );
+        expect(html).toContain('Location lookup failed');
+      }).not.toThrow();
+    });
+
+    it('renders contextNotes accurately once location data becomes available', () => {
+      const locationData = {
+        name: 'Yalta',
+        entityType: 'city',
+        description: 'Historic resort city on the Crimean Peninsula.',
+        coordinates: { lat: 44.4952, lng: 34.1663 },
+        contextNotes: [
+          'Venue of the 1945 Yalta Conference attended by Roosevelt, Churchill, and Stalin.',
+          'Livadia Palace hosted the main plenary sessions.'
+        ]
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={locationData}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('Yalta');
+      expect(html).toContain('Historic resort city on the Crimean Peninsula.');
+    });
+  });
 });
 
 

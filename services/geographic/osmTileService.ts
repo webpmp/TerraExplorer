@@ -245,10 +245,21 @@ export class OSMTileService {
    */
   public getTileUrl(z: number, x: number, y: number, skin: string): string {
     const subdomain = ['a', 'b', 'c', 'd'][(x + y) % 4];
+    const apiKey = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_CARTO_API_KEY : undefined;
+
+    let baseUrl: string;
     if (skin === 'retro-amber' || skin === 'retro-green') {
-      return `https://${subdomain}.basemaps.cartocdn.com/dark_all/${z}/${x}/${y}.png`;
+      baseUrl = `https://${subdomain}.basemaps.cartocdn.com/dark_all/${z}/${x}/${y}.png`;
+    } else {
+      baseUrl = `https://${subdomain}.basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`;
     }
-    return `https://${subdomain}.basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`;
+
+    if (!apiKey) {
+      console.warn('[OSM CARTO] Missing VITE_CARTO_API_KEY; authenticated raster tiles cannot be loaded.');
+      return baseUrl;
+    }
+
+    return `${baseUrl}?key=${encodeURIComponent(apiKey)}`;
   }
 
   /**
