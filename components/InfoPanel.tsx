@@ -487,6 +487,7 @@ interface InfoPanelProps {
   onClose: () => void;
   isLoading: boolean;
   isNewsFetching?: boolean;
+  showNews?: boolean;
   skin: SkinType;
   isFavorite: boolean;
   onSaveFavorite: (name: string) => void;
@@ -794,6 +795,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   onClose, 
   isLoading, 
   isNewsFetching, 
+  showNews = true,
   skin, 
   isFavorite, 
   onSaveFavorite, 
@@ -1279,7 +1281,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   }, [info?.name, rawInfo?.news]);
 
   const handleLoadInitialNews = async () => {
-    if (!info?.name) return;
+    if (!info?.name || showNews === false) return;
     setNewsState('loading');
     try {
       if (onFetchNews) {
@@ -1309,7 +1311,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   };
 
   const handleLoadMore = async () => {
-    if (!info?.name) return;
+    if (!info?.name || showNews === false) return;
     setIsMoreNewsLoading(true);
     try {
       if (onLoadMoreNews) {
@@ -1961,7 +1963,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
     liveNews: {
       copyText: () => {
-         if (newsState === 'idle') return '';
+         if (showNews === false || newsState === 'idle') return '';
          const effectiveNews = newsList.length > 0 ? newsList : (info?.news || []);
          if (!info || effectiveNews.length === 0) return '';
          let txt = `News\n`;
@@ -1971,6 +1973,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
          return txt.trim();
       },
       render: () => {
+        if (showNews === false) return null;
         const effectiveNews = newsList.length > 0 ? newsList : (info?.news || []);
         
         if (newsState === 'idle') {

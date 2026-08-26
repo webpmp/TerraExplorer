@@ -306,6 +306,7 @@ export interface UserSettings {
   newsApiKey: string;
   nytApiKey: string;
   newsDataApiKey: string;
+  showNews?: boolean;
   documentaryMode?: boolean;
   documentaryDuration?: number;
   narrationEnabled?: boolean;

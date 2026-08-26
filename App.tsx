@@ -309,6 +309,7 @@ const App: React.FC = () => {
       try {
         const parsed = JSON.parse(saved);
         if (parsed.newsProvider === 'gemini') parsed.newsProvider = 'nyt';
+        parsed.showNews = parsed.showNews !== undefined ? !!parsed.showNews : true;
         if (typeof parsed.documentaryDuration === 'string') {
           const map: Record<string, number> = { short: 3.2, cinematic: 5.5, long: 8.0 };
           parsed.documentaryDuration = map[parsed.documentaryDuration] ?? 5.5;
@@ -328,6 +329,7 @@ const App: React.FC = () => {
       newsApiKey: '',
       nytApiKey: '',
       newsDataApiKey: '',
+      showNews: true,
       documentaryMode: false,
       documentaryDuration: 5.5,
       narrationEnabled: false,
@@ -2719,7 +2721,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
   };
 
   const handleFetchNews = useCallback(async () => {
-    if (!locationInfo) return;
+    if (!locationInfo || userSettingsRef.current.showNews === false) return;
     setIsNewsFetching(true);
     try {
       const newsItems = await fetchAndValidateLocationNews(locationInfo.name, locationInfo);
@@ -2742,7 +2744,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
   }, [locationInfo]);
 
   const handleLoadMoreNews = useCallback(async () => {
-    if (!locationInfo) return;
+    if (!locationInfo || userSettingsRef.current.showNews === false) return;
     setIsNewsFetching(true);
     try {
       const currentTitles = (locationInfo.news || []).map((n: any) => n.title);
@@ -2993,6 +2995,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           info={locationInfo} 
           isLoading={isInfoPanelLoading}
           isNewsFetching={isNewsFetching}
+          showNews={userSettings.showNews ?? true}
           onClose={handleClosePanel} 
           skin={skin}
           isFavorite={isCurrentLocationFavorite}

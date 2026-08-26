@@ -47,7 +47,11 @@ export const getUserSettings = (): any => {
     try {
       const saved = localStorage.getItem('terraExplorerSettings');
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (parsed.showNews === undefined) {
+          parsed.showNews = true;
+        }
+        return parsed;
       }
     } catch (e) {
       // Ignore
@@ -56,7 +60,8 @@ export const getUserSettings = (): any => {
   return {
     aiProvider: 'gemini',
     lmStudioUrl: 'http://localhost:1234/v1',
-    lmStudioModel: 'local-model'
+    lmStudioModel: 'local-model',
+    showNews: true
   };
 };
 

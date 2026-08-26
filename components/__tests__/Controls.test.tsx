@@ -197,3 +197,47 @@ describe('Controls Modern Theme OSM Button Hover Contrast', () => {
   });
 });
 
+describe('Controls Footer Copyright and Attribution', () => {
+  const baseProps = {
+    onZoomIn: vi.fn(),
+    onZoomOut: vi.fn(),
+    onSearch: vi.fn(),
+    onTraceRoute: vi.fn(),
+    isSearching: false,
+    skin: 'modern' as SkinType,
+    showFavorites: false,
+    onToggleShowFavorites: vi.fn(),
+    paused: false,
+    isTraceModalOpen: false,
+    onToggleTraceModal: vi.fn(),
+    isZoomLocked: false,
+    onToggleZoomLock: vi.fn(),
+  };
+
+  test('renders dynamic copyright year, all rights reserved, and OpenStreetMap link', () => {
+    const currentYear = new Date().getFullYear().toString();
+    const html = renderToStaticMarkup(<Controls {...baseProps} />);
+
+    expect(html).toContain(`© ${currentYear} TerraExplorer by Chris Adkins • All Rights Reserved • Map data © `);
+    expect(html).toContain('href="https://www.openstreetmap.org/copyright"');
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer"');
+    expect(html).toContain('class="underline hover:opacity-80 pointer-events-auto"');
+    expect(html).toContain('OpenStreetMap contributors</a>');
+  });
+
+  test('verifies theme-aware copyright styling across all 4 themes', () => {
+    const modernHtml = renderToStaticMarkup(<Controls {...baseProps} skin="modern" />);
+    expect(modernHtml).toContain('text-gray-500 font-sans');
+
+    const parchmentHtml = renderToStaticMarkup(<Controls {...baseProps} skin="parchment" />);
+    expect(parchmentHtml).toContain('text-white/50 font-sans');
+
+    const greenHtml = renderToStaticMarkup(<Controls {...baseProps} skin="retro-green" />);
+    expect(greenHtml).toContain('text-green-400/60 font-retro uppercase tracking-widest');
+
+    const amberHtml = renderToStaticMarkup(<Controls {...baseProps} skin="retro-amber" />);
+    expect(amberHtml).toContain('text-amber-400/60 font-retro uppercase tracking-widest');
+  });
+});
+

@@ -277,7 +277,7 @@ const Controls: React.FC<ControlsProps> = ({
       statusRow: "bg-black/80 backdrop-blur-md border border-white/15 text-white/90 rounded-full shadow-lg",
       statusText: "text-gray-200 font-sans",
       statusDismiss: "text-white/40 hover:text-white transition-colors p-0.5 rounded-full",
-      copyright: "text-white/40 font-sans",
+      copyright: "text-gray-500 font-sans",
       modal: "bg-black/80 backdrop-blur-md border border-cyan-400/30 text-white rounded-xl shadow-2xl"
     },
     'retro-green': {
@@ -330,7 +330,7 @@ const Controls: React.FC<ControlsProps> = ({
       statusRow: "bg-[#f4ead5]/95 border border-[#8b5a2b]/40 text-[#5c3a21] font-sans shadow-sm rounded",
       statusText: "text-[#522B07] font-sans",
       statusDismiss: "text-[#8b5a2b]/70 hover:text-[#3e2723] transition-colors p-0.5",
-      copyright: "text-[#f4ead5]/70 font-sans",
+      copyright: "text-white/50 font-sans",
       modal: "bg-[#f4ead5] border-2 border-[#8b5a2b] text-[#3e2723] font-sans shadow-[0_4px_20px_rgba(0,0,0,0.4)] rounded-sm"
     }
   };
@@ -651,7 +651,7 @@ const Controls: React.FC<ControlsProps> = ({
       
       {/* Copyright & Map Attribution Text */}
       <div className={`text-[10px] md:text-xs text-center -mt-1 ${theme.copyright}`}>
-        TerraExplorer by Chris Adkins • Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" className="underline hover:opacity-80 pointer-events-auto">OpenStreetMap contributors</a>
+        © {new Date().getFullYear()} TerraExplorer by Chris Adkins • All Rights Reserved • Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" className="underline hover:opacity-80 pointer-events-auto">OpenStreetMap contributors</a>
       </div>
     </div>
   );

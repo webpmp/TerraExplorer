@@ -2078,6 +2078,137 @@ describe('Lightbox Metadata Integration', () => {
       expect(newsTitlePos).toBeGreaterThan(newsHeaderPos);
     });
   });
+
+  describe('Show News Setting - InfoPanel Conditional Rendering', () => {
+    const testLocationWithNews = {
+      name: 'Kyoto',
+      country: 'Japan',
+      type: 'City',
+      coordinates: { lat: 35.0116, lng: 135.7681 },
+      description: 'Historical capital of Japan known for numerous classical Buddhist temples.',
+      news: [
+        {
+          title: 'Kyoto Cultural Heritage Forum Opened',
+          summary: 'Experts gathered in Kyoto to discuss historical preservation.',
+          source: 'Japan Times',
+          url: 'https://japantimes.co.jp/kyoto-forum',
+          date: '2026-08-20'
+        }
+      ]
+    };
+
+    const testLocationWithoutInitialNews = {
+      name: 'Kyoto',
+      country: 'Japan',
+      type: 'City',
+      coordinates: { lat: 35.0116, lng: 135.7681 },
+      description: 'Historical capital of Japan known for numerous classical Buddhist temples.',
+      news: []
+    };
+
+    it('renders News section and articles when showNews is true', () => {
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={testLocationWithNews}
+          onClose={() => {}}
+          isLoading={false}
+          showNews={true}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('News');
+      expect(html).toContain('Kyoto Cultural Heritage Forum Opened');
+      expect(html).toContain('Japan Times');
+    });
+
+    it('renders Load News button when showNews is true and news list is empty', () => {
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={testLocationWithoutInitialNews}
+          onClose={() => {}}
+          isLoading={false}
+          showNews={true}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('Load News');
+    });
+
+    it('preserves existing News behavior when showNews prop is omitted (default true)', () => {
+      const htmlWithNews = renderToStaticMarkup(
+        <InfoPanel
+          info={testLocationWithNews}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(htmlWithNews).toContain('News');
+      expect(htmlWithNews).toContain('Kyoto Cultural Heritage Forum Opened');
+
+      const htmlWithoutNews = renderToStaticMarkup(
+        <InfoPanel
+          info={testLocationWithoutInitialNews}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(htmlWithoutNews).toContain('Load News');
+    });
+
+    it('completely suppresses News header, content, and Load News button when showNews is false', () => {
+      const htmlWithNews = renderToStaticMarkup(
+        <InfoPanel
+          info={testLocationWithNews}
+          onClose={() => {}}
+          isLoading={false}
+          showNews={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(htmlWithNews).not.toContain('Kyoto Cultural Heritage Forum Opened');
+      expect(htmlWithNews).not.toContain('Japan Times');
+      expect(htmlWithNews).not.toContain('Load News');
+      expect(htmlWithNews).not.toContain('>News</h3>');
+
+      const htmlWithoutNews = renderToStaticMarkup(
+        <InfoPanel
+          info={testLocationWithoutInitialNews}
+          onClose={() => {}}
+          isLoading={false}
+          showNews={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(htmlWithoutNews).not.toContain('Load News');
+      expect(htmlWithoutNews).not.toContain('>News</h3>');
+    });
+  });
 });
 
 
