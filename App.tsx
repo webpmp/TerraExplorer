@@ -3015,6 +3015,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
             onUpdateSettings={handleUpdateSettings}
             onClose={() => setIsSettingsOpen(false)}
             skin={skin}
+            onSkinChange={handleSkinChange}
           />
         )}      </div>
 

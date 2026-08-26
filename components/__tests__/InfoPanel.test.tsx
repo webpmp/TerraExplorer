@@ -202,41 +202,27 @@ describe('Lightbox Metadata Integration', () => {
     expect(retroHtml).not.toContain('font-garamond');
   });
 
-  it('renders canonical section order: Description -> Notable Facts -> Image -> Climate -> News', () => {
+  it('renders canonical section order: Description -> Image -> Notable Facts -> Climate -> News', () => {
     const testLocation = {
       name: 'Zion National Park',
-      type: 'Point of Interest' as any,
-      entityType: 'landmark',
+      type: 'National Park' as any,
+      entityType: 'national_park',
       description: 'Zion National Park is a prominent sanctuary in southwestern Utah.',
-      coordinates: { lat: 37.32, lng: -113.0 },
-      images: [
-        {
-          url: 'https://upload.wikimedia.org/zion.jpg',
-          caption: 'The Watchman and Virgin River'
-        }
-      ],
-      notable: [
-        {
-          title: 'The Narrows',
-          description: 'Iconic hike through the narrow canyon along the Virgin River.'
-        },
-        {
-          title: 'Angels Landing',
-          description: 'Challenging trail offering panoramic views from the summit.'
-        },
-        {
-          title: 'Wildlife',
-          description: 'The park supports more than 280 bird species and diverse plant communities.'
-        }
-      ],
+      coordinates: { lat: 37.2982, lng: -113.0263 },
+      image: 'https://upload.wikimedia.org/zion.jpg',
       climate: {
         name: 'Mediterranean climate',
         description: 'Hot, dry summers and cool, wet winters with significant temperature swings.'
       },
+      notable: [
+        {
+          title: 'The Narrows',
+          summary: 'The iconic gorge where hikers wade through the Virgin River.'
+        }
+      ],
       news: [
         {
-          title: 'Zion Shuttle System Expands',
-          source: 'National Park News',
+          title: 'Park shuttles transition to zero-emission electric fleet',
           summary: 'Increased transit frequency to reduce trailhead congestion.'
         }
       ]
@@ -258,17 +244,17 @@ describe('Lightbox Metadata Integration', () => {
 
     // Verify ordering in rendered HTML output
     const descPos = html.indexOf('Zion National Park is a prominent sanctuary');
+    const imagePos = html.indexOf('<img src="https://upload.wikimedia.org/zion.jpg"');
     const notableHeaderPos = html.indexOf('Notable Facts');
     const narrowsPos = html.indexOf('The Narrows');
-    const imagePos = html.indexOf('<img src="https://upload.wikimedia.org/zion.jpg"');
     const climateHeaderPos = html.indexOf('Climate');
     const newsHeaderPos = html.indexOf('News');
 
     expect(descPos).toBeGreaterThan(-1);
-    expect(notableHeaderPos).toBeGreaterThan(descPos);
+    expect(imagePos).toBeGreaterThan(descPos);
+    expect(notableHeaderPos).toBeGreaterThan(imagePos);
     expect(narrowsPos).toBeGreaterThan(notableHeaderPos);
-    expect(imagePos).toBeGreaterThan(narrowsPos);
-    expect(climateHeaderPos).toBeGreaterThan(imagePos);
+    expect(climateHeaderPos).toBeGreaterThan(narrowsPos);
     expect(newsHeaderPos).toBeGreaterThan(climateHeaderPos);
 
     // Verify exactly ONE "Notable Facts" header in rendered output
@@ -2322,6 +2308,47 @@ describe('Lightbox Metadata Integration', () => {
 
       expect(html).toContain('Yalta');
       expect(html).toContain('Historic resort city on the Crimean Peninsula.');
+    });
+  });
+
+  describe('Content Ordering: StackedImageCarousel above Notable Facts', () => {
+    it('renders StackedImageCarousel before the Notable Facts section in the DOM', () => {
+      const infoWithGalleryAndFacts = {
+        name: 'Paris',
+        entityType: 'city',
+        description: 'Capital of France known for its art, fashion, and culture.',
+        coordinates: { lat: 48.8566, lng: 2.3522 },
+        images: [
+          { url: 'https://example.com/paris1.jpg', caption: 'Eiffel Tower', attribution: 'Photo: Author' }
+        ],
+        notable: [
+          { title: 'Eiffel Tower', summary: 'Famous iron lattice tower on the Champ de Mars.' }
+        ]
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={infoWithGalleryAndFacts}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      const descriptionIndex = html.indexOf('Capital of France known for its art, fashion, and culture.');
+      const carouselIndex = html.indexOf('data-testid="stacked-image-carousel"');
+      const notableFactsIndex = html.indexOf('Notable Facts');
+
+      expect(descriptionIndex).toBeGreaterThan(-1);
+      expect(carouselIndex).toBeGreaterThan(-1);
+      expect(notableFactsIndex).toBeGreaterThan(-1);
+
+      // Order: Description -> StackedImageCarousel -> Notable Facts
+      expect(carouselIndex).toBeGreaterThan(descriptionIndex);
+      expect(notableFactsIndex).toBeGreaterThan(carouselIndex);
     });
   });
 });

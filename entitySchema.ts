@@ -47,8 +47,8 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
     ui: {
       sections: [
         { id: "overview", required: true },
-        { id: "notable", required: false },
         { id: "gallery", required: false },
+        { id: "notable", required: false },
         { id: "modernContext", required: false },
         { id: "liveNews", required: false },
         { id: "relatedPlaces", required: false }
@@ -64,8 +64,8 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
     ui: {
       sections: [
         { id: "overview", required: true },
-        { id: "notable", required: false },
         { id: "gallery", required: false },
+        { id: "notable", required: false },
         { id: "modernContext", required: false },
         { id: "liveNews", required: false },
         { id: "relatedPlaces", required: false }
@@ -81,8 +81,8 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
     ui: {
       sections: [
         { id: "overview", required: true },
-        { id: "notable", required: false },
         { id: "gallery", required: false },
+        { id: "notable", required: false },
         { id: "modernContext", required: false },
         { id: "liveNews", required: false },
         { id: "relatedPlaces", required: false }
@@ -98,8 +98,8 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
     ui: {
       sections: [
         { id: "overview", required: true },
-        { id: "notable", required: false },
         { id: "gallery", required: false },
+        { id: "notable", required: false },
         { id: "modernContext", required: true },
         { id: "liveNews", required: false },
         { id: "relatedPlaces", required: false }
@@ -115,8 +115,8 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
     ui: {
       sections: [
         { id: "overview", required: true },
-        { id: "notable", required: false },
         { id: "gallery", required: false },
+        { id: "notable", required: false },
         { id: "modernContext", required: true },
         { id: "liveNews", required: false },
         { id: "relatedPlaces", required: false }
@@ -137,8 +137,8 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
     ui: {
       sections: [
         { id: "overview", required: true },
-        { id: "notable", required: false },
         { id: "gallery", required: false },
+        { id: "notable", required: false },
         { id: "modernContext", required: true },
         { id: "liveNews", required: false },
         { id: "relatedPlaces", required: false }
@@ -159,8 +159,8 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
     ui: {
       sections: [
         { id: "overview", required: true },
-        { id: "notable", required: false },
         { id: "gallery", required: false },
+        { id: "notable", required: false },
         { id: "modernContext", required: true },
         { id: "liveNews", required: false },
         { id: "relatedPlaces", required: false }
@@ -181,8 +181,8 @@ export const ENTITY_SCHEMAS: Record<string, EntitySchema> = {
     ui: {
       sections: [
         { id: "overview", required: true },
-        { id: "notable", required: false },
         { id: "gallery", required: false },
+        { id: "notable", required: false },
         { id: "modernContext", required: true },
         { id: "liveNews", required: false },
         { id: "relatedPlaces", required: false }

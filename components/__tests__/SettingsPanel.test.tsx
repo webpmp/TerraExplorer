@@ -29,43 +29,59 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     skin: 'modern' as SkinType
   };
 
-  test('1. Renders 3 top-level tabs in the navigation bar', () => {
+  test('1. Renders 4 top-level tabs: GENERAL | PROVIDERS | APPEARANCE | AUDIO', () => {
     const html = renderToStaticMarkup(<SettingsPanel {...baseProps} />);
 
     // Tablist container
     expect(html).toContain('role="tablist"');
     expect(html).toContain('aria-label="Settings categories"');
 
-    // 3 Tab buttons
-    expect(html).toContain('id="settings-tab-ai"');
-    expect(html).toContain('AI PROVIDER');
-    expect(html).toContain('id="settings-tab-documentary"');
-    expect(html).toContain('DOC MODE');
-    expect(html).not.toContain('DOCUMENTARY MODE');
-    expect(html).toContain('id="settings-tab-news"');
-    expect(html).toContain('NEWS');
+    // 4 Tab buttons
+    expect(html).toContain('id="settings-tab-general"');
+    expect(html).toContain('GENERAL');
+    expect(html).toContain('id="settings-tab-providers"');
+    expect(html).toContain('PROVIDERS');
+    expect(html).toContain('id="settings-tab-appearance"');
+    expect(html).toContain('APPEARANCE');
+    expect(html).toContain('id="settings-tab-audio"');
+    expect(html).toContain('AUDIO');
 
-    // AI Provider is active by default
+    // General is active by default
     expect(html).toContain('aria-selected="true"');
-    expect(html).toContain('id="settings-tabpanel-ai"');
-    expect(html).toContain('aria-labelledby="settings-tab-ai"');
+    expect(html).toContain('id="settings-tabpanel-general"');
+    expect(html).toContain('aria-labelledby="settings-tab-general"');
   });
 
-  test('2. AI Provider tab displays LM Studio configuration correctly', () => {
-    const html = renderToStaticMarkup(<SettingsPanel {...baseProps} />);
+  test('2. PROVIDERS tab contains AI PROVIDER, MAP PROVIDER with CARTO API key setup, and NEWS PROVIDER sections', () => {
+    const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="providers" />);
 
-    // Dropdown with Local (LM Studio)
+    // Panel is active
+    expect(html).toContain('id="settings-tabpanel-providers"');
+
+    // 1. AI PROVIDER section
+    expect(html).toContain('AI PROVIDER');
     expect(html).toContain('Local (LM Studio)');
     expect(html).toContain('value="lmstudio"');
     expect(html).toContain('Gemini');
-
-    // LM Studio API URL input with existing setting preserved
     expect(html).toContain('value="http://localhost:1234/v1"');
     expect(html).toContain('Must include /v1 for OpenAI compatibility.');
-
-    // Action buttons
     expect(html).toContain('Detect');
     expect(html).toContain('Test Connection');
+
+    // 2. MAP PROVIDER section
+    expect(html).toContain('MAP PROVIDER');
+    expect(html).toContain('CARTO Basemaps (Raster)');
+    expect(html).not.toContain('CARTO RASTER BASEMAPS');
+    expect(html).toContain('CARTO API Key');
+    expect(html).toContain('href="https://carto.com/developers/basemap-styles/"');
+    expect(html).toContain('VITE_CARTO_API_KEY=');
+    expect(html).not.toContain('Restart the Vite development server');
+
+    // 3. NEWS PROVIDER section
+    expect(html).toContain('NEWS PROVIDER');
+    expect(html).toContain('SHOW NEWS');
+    expect(html).toContain('The New York Times');
+    expect(html).toContain('API KEY SETUP');
   });
 
   test('3. Tab navigation bar adapts styling for each theme', () => {
@@ -100,21 +116,34 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(html).not.toContain('max-h-[580px]');
   });
 
-  test('5. DOC MODE tab has single DOC MODE header row with film icon and toggle, and single Narration header/toggle row', () => {
-    const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="documentary" />);
+  test('5. GENERAL tab contains DOC MODE controls and duration slider', () => {
+    const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="general" />);
 
-    // Active tab panel is documentary
-    expect(html).toContain('id="settings-tabpanel-documentary"');
-
-    // Section 1: DOC MODE with film icon and toggle (no duplicate Documentary Mode header)
-    expect(html).not.toContain('Documentary Mode');
+    expect(html).toContain('id="settings-tabpanel-general"');
     expect(html).toContain('DOC MODE');
     expect(html).toContain('lucide-film');
     expect(html).toContain('Automatically guides the camera through a cinematic descent from the globe to the selected location.');
     expect(html).toContain('Camera Transition Duration');
     expect(html).toContain('10.0s');
+    expect(html).not.toContain('Narration');
+  });
 
-    // Section 2: NARRATION header with integrated toggle
+  test('6. APPEARANCE tab contains theme options: Modern, CRT Green, CRT Amber, Parchment', () => {
+    const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="appearance" />);
+
+    expect(html).toContain('id="settings-tabpanel-appearance"');
+    expect(html).toContain('Theme &amp; Appearance');
+    expect(html).toContain('Modern');
+    expect(html).toContain('CRT Green');
+    expect(html).toContain('CRT Amber');
+    expect(html).toContain('Parchment');
+    expect(html).toContain('Active');
+  });
+
+  test('7. AUDIO tab contains Narration controls, voice selection, speed, volume, and test voice', () => {
+    const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="audio" />);
+
+    expect(html).toContain('id="settings-tabpanel-audio"');
     expect(html).toContain('Narration');
     expect(html).toContain('lucide-volume-2');
     expect(html).toContain("Narrates the selected location&#x27;s title and description using speech synthesis.");
@@ -125,32 +154,15 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(html).toContain('Volume');
     expect(html).toContain('75%');
     expect(html).toContain('Test Voice');
+    expect(html).not.toContain('DOC MODE');
   });
 
-  test('6. News tab displays news services, SHOW NEWS toggle, and Test Connection button without API key inputs', () => {
-    const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="news" />);
-
-    expect(html).toContain('id="settings-tabpanel-news"');
-    expect(html).toContain('NEWS PROVIDER');
-    expect(html).toContain('SHOW NEWS');
-    expect(html).toContain('role="switch"');
-    expect(html).toContain('aria-checked="true"');
-    expect(html).toContain('The New York Times');
-    expect(html).toContain('Test Connection');
-
-    // Verify API key inputs are not rendered
-    expect(html).not.toContain('NYT API Key');
-    expect(html).not.toContain('NewsAPI.org Key');
-    expect(html).not.toContain('NewsData.io Key');
-    expect(html).not.toContain('type="password"');
-  });
-
-  test('7. News tab renders SHOW NEWS toggle in OFF state when showNews is false', () => {
+  test('8. PROVIDERS tab News section renders SHOW NEWS toggle in OFF state when showNews is false', () => {
     const html = renderToStaticMarkup(
       <SettingsPanel
         {...baseProps}
         settings={{ ...baseSettings, showNews: false }}
-        initialTab="news"
+        initialTab="providers"
       />
     );
 
@@ -158,7 +170,7 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(html).toContain('aria-checked="false"');
   });
 
-  test('8. News tab SHOW NEWS toggle renders correctly across all skins', () => {
+  test('9. PROVIDERS tab renders properly across all skins', () => {
     const skins: SkinType[] = ['modern', 'retro-green', 'retro-amber', 'parchment'];
 
     skins.forEach((skin) => {
@@ -166,17 +178,18 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
         <SettingsPanel
           {...baseProps}
           skin={skin}
-          initialTab="news"
+          initialTab="providers"
         />
       );
 
-      expect(html).toContain('SHOW NEWS');
-      expect(html).toContain('role="switch"');
+      expect(html).toContain('AI PROVIDER');
+      expect(html).toContain('MAP PROVIDER');
+      expect(html).toContain('NEWS PROVIDER');
     });
   });
 
-  test('9. News tab displays API KEY SETUP section, documentation links, and .env.local code snippet', () => {
-    const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="news" />);
+  test('10. PROVIDERS tab displays API KEY SETUP section, documentation links, and .env.local code snippet', () => {
+    const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="providers" />);
 
     // Header & Section
     expect(html).toContain('API KEY SETUP');
@@ -198,37 +211,19 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
 
     // .env.local instructions & code block
     expect(html).toContain('API KEYS');
-    expect(html).toContain('Create a .env.local file in the project root and add your API keys:');
-    expect(html).toContain('VITE_NYT_API_KEY=');
-    expect(html).toContain('VITE_NEWS_API_KEY=');
-    expect(html).toContain('VITE_NEWS_DATA_API_KEY=');
-    expect(html).toContain('GEMINI_API_KEY=');
+    expect(html).toContain('Add your keys to the project&#x27;s .env.local file:');
+    expect(html).toContain('VITE_NYT_API_KEY=&quot;YOUR_NYT_API_KEY&quot;');
+    expect(html).toContain('VITE_NEWS_API_KEY=&quot;YOUR_NEWS_API_KEY&quot;');
+    expect(html).toContain('VITE_NEWS_DATA_API_KEY=&quot;YOUR_NEWS_DATA_API_KEY&quot;');
+    expect(html).toContain('GEMINI_API_KEY=&quot;YOUR_GEMINI_API_KEY&quot;');
   });
 
-  test('10. News tab API KEY SETUP section renders properly across all four skins', () => {
-    const skins: SkinType[] = ['modern', 'retro-green', 'retro-amber', 'parchment'];
-
-    skins.forEach((skin) => {
-      const html = renderToStaticMarkup(
-        <SettingsPanel
-          {...baseProps}
-          skin={skin}
-          initialTab="news"
-        />
-      );
-
-      expect(html).toContain('API KEY SETUP');
-      expect(html).toContain('VITE_NYT_API_KEY=');
-      expect(html).toContain('GEMINI_API_KEY=');
-    });
-  });
-
-  test('11. News tab Service dropdown includes exact label "Gemini (Default AI Search)" with value="gemini"', () => {
+  test('11. PROVIDERS tab News Service dropdown includes exact label "Gemini (Default AI Search)" with value="gemini"', () => {
     const html = renderToStaticMarkup(
       <SettingsPanel
         {...baseProps}
-        settings={{ ...baseSettings, newsProvider: 'gemini' }}
-        initialTab="news"
+        settings={{ ...baseSettings, aiProvider: 'gemini', newsProvider: 'gemini' }}
+        initialTab="providers"
       />
     );
 
@@ -239,7 +234,7 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(html).toContain('Gemini (Default AI Search)');
     expect(html).toContain('value="gemini"');
 
-    // Test connection button is hidden for gemini
+    // Test connection button is hidden when both AI and News providers are set to Gemini
     expect(html).not.toContain('Test Connection');
 
     // API key inputs are never rendered
@@ -468,4 +463,48 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     consoleSpy.mockRestore();
     fetchSpy.mockRestore();
   });
+
+  test('19. Switching between Settings tabs renders appropriate tab panels while preserving underlying settings state', () => {
+    const customSettings: UserSettings = {
+      ...baseSettings,
+      aiProvider: 'gemini',
+      newsProvider: 'newsapi',
+      documentaryDuration: 7.5,
+      narrationSpeed: 1.2,
+      narrationVolume: 0.8
+    };
+
+    // Render GENERAL
+    const generalHtml = renderToStaticMarkup(
+      <SettingsPanel {...baseProps} settings={customSettings} initialTab="general" />
+    );
+    expect(generalHtml).toContain('id="settings-tabpanel-general"');
+    expect(generalHtml).toContain('7.5s');
+
+    // Render PROVIDERS
+    const providersHtml = renderToStaticMarkup(
+      <SettingsPanel {...baseProps} settings={customSettings} initialTab="providers" />
+    );
+    expect(providersHtml).toContain('id="settings-tabpanel-providers"');
+    expect(providersHtml).toContain('AI PROVIDER');
+    expect(providersHtml).toContain('MAP PROVIDER');
+    expect(providersHtml).toContain('NEWS PROVIDER');
+    expect(providersHtml).toContain('value="newsapi"');
+
+    // Render APPEARANCE
+    const appearanceHtml = renderToStaticMarkup(
+      <SettingsPanel {...baseProps} settings={customSettings} initialTab="appearance" />
+    );
+    expect(appearanceHtml).toContain('id="settings-tabpanel-appearance"');
+    expect(appearanceHtml).toContain('Theme &amp; Appearance');
+
+    // Render AUDIO
+    const audioHtml = renderToStaticMarkup(
+      <SettingsPanel {...baseProps} settings={customSettings} initialTab="audio" />
+    );
+    expect(audioHtml).toContain('id="settings-tabpanel-audio"');
+    expect(audioHtml).toContain('1.2x');
+    expect(audioHtml).toContain('80%');
+  });
 });
+
