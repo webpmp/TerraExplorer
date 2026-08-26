@@ -116,6 +116,25 @@ export const generateContentWithRetry = async (params: any, retries = 3): Promis
   }
 };
 
+export class LMStudioNoModelError extends Error {
+  readonly isLMStudioNoModelError = true;
+  constructor(message: string = "No model loaded. Please load a model in LM Studio.") {
+    super(message);
+    this.name = "LMStudioNoModelError";
+    Object.setPrototypeOf(this, LMStudioNoModelError.prototype);
+  }
+}
+
+export const isLMStudioNoModelError = (error: any): boolean => {
+  if (!error) return false;
+  return (
+    error instanceof LMStudioNoModelError ||
+    error.isLMStudioNoModelError === true ||
+    error.name === 'LMStudioNoModelError' ||
+    (typeof error.message === 'string' && error.message.includes("No model loaded. Please load a model in LM Studio."))
+  );
+};
+
 const generateLocalLMStudioContent = async (params: any, baseUrl: string, model: string = "local-model"): Promise<any> => {
   try {
     // Basic translation from Gemini format to OpenAI format
@@ -175,6 +194,9 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
 
     if (!response.ok) {
       const errorBody = await response.text();
+      if (errorBody.toLowerCase().includes("no models loaded") || errorBody.includes("No models loaded")) {
+        throw new LMStudioNoModelError();
+      }
       throw new Error(`LM Studio request failed\nStatus: ${response.status}\nBody: ${errorBody}`);
     }
 
@@ -346,7 +368,10 @@ export const normalizeLocationEntity = (entity: string | null | undefined | any)
       if (word.length <= 2 && stateMap[word.toLowerCase()]) {
         return word.toUpperCase();
       }
-      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+      const formatted = word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+      return formatted.replace(/([a-zA-Z])'([a-zA-Z]+)/g, (_, before, after) => {
+        return `${before}'${after.toLowerCase()}`;
+      });
     }).join(' ');
   };
 
@@ -792,6 +817,18 @@ Final Coordinates: ${JSON.stringify(finalLocationInfo.coordinates)}
           aiUsed: false
         };
       }
+    }
+
+    if (isLMStudioNoModelError(error)) {
+      return {
+        error: "LM_STUDIO_NO_MODEL",
+        locationInfo: {
+          name: normalizedQuery || query,
+          errorType: "LM_STUDIO_NO_MODEL",
+          errorMessage: "No model loaded. Please load a model in LM Studio.",
+          errorInstruction: "Load a model in LM Studio or select another provider in Settings."
+        }
+      };
     }
 
     // Distinguish temporary failure (network issues/timeout/blocked request)
@@ -1478,18 +1515,25 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
   } catch (error: any) {
     descriptionCache.delete(cacheKey); // Remove stale error from cache
     console.error("Error resolving feature info:", error);
+    const isNoModel = isLMStudioNoModelError(error);
     return sanitizeLocationInfo({
         name: name,
         type: LocationType.POI,
-        description: "",
+        description: isNoModel ? "No model loaded. Please load a model in LM Studio." : "",
         coordinates: { lat, lng },
         funFacts: [],
         notable: [],
         status: "error",
+        errorType: isNoModel ? "LM_STUDIO_NO_MODEL" : undefined,
         sectionState: { description: "failed" },
-        errorMessage: error.message?.includes('429') || error.message?.includes('Quota') 
-            ? "API Quota Exceeded. Please try again later."
-            : "Could not retrieve information at this time."
+        errorMessage: isNoModel
+            ? "No model loaded. Please load a model in LM Studio."
+            : (error.message?.includes('429') || error.message?.includes('Quota') 
+                ? "API Quota Exceeded. Please try again later."
+                : "Could not retrieve information at this time."),
+        errorInstruction: isNoModel
+            ? "Load a model in LM Studio or select another provider in Settings."
+            : undefined
     } as unknown as LocationInfo);
   }
   })();

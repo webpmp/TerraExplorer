@@ -716,12 +716,46 @@ export const getCleanDescriptionLines = (info: any) => {
     const sanitizedMarkdown = sanitizeContextMarkdown(descText);
     const rawLines = sanitizedMarkdown.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0 && !isPlaceholderString(l));
     
+    const isNotableHeading = (text: string) => {
+      const clean = text.replace(/^#{1,3}\s*/, '').replace(/[:*_\s]+$/, '').trim().toLowerCase();
+      return (
+        clean === 'notable facts' ||
+        clean === 'notable fact' ||
+        clean === 'notable' ||
+        clean === 'fun facts' ||
+        clean === 'fun fact' ||
+        clean === 'quick facts' ||
+        clean === 'quick fact' ||
+        clean === 'key facts' ||
+        clean === 'key fact' ||
+        clean === 'fast facts' ||
+        clean === 'interesting facts'
+      );
+    };
+
     // Process lines: remove fake context headings when followed by geographic labels,
-    // reclassify headings, and drop pure geographic standalone labels.
+    // reclassify headings, drop pure geographic standalone labels,
+    // and strip redundant notable facts / quick facts sections from description narrative.
     const lines: string[] = [];
+    let skippingNotableSection = false;
+
     for (let i = 0; i < rawLines.length; i++) {
       const line = rawLines[i];
       const headingClean = line.replace(/^#{1,3}\s*/, '').trim();
+
+      if (isNotableHeading(line)) {
+        skippingNotableSection = true;
+        continue;
+      }
+
+      if (line.startsWith('#')) {
+        skippingNotableSection = false;
+      }
+
+      if (skippingNotableSection) {
+        continue;
+      }
+
       const isContextHeading = /^(?:historical\s+context|historical\s+background|history|context|background|cultural\s+context|film\s*(?:&|and)\s*media|media\s+context|filming\s+location|scientific\s*(?:&|\/|and)\s*geographic\s*context)$/i.test(headingClean);
 
       if (isContextHeading) {
@@ -1719,7 +1753,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
                     const redundantHeadings = [
                       'significance', 'historical region', 'historical milestone', 
-                      'strategic location', 'cultural symbol', 'description', 'overview'
+                      'strategic location', 'cultural symbol', 'description', 'overview',
+                      'notable facts', 'notable fact', 'notable', 'fun facts', 'fun fact',
+                      'quick facts', 'quick fact', 'key facts', 'key fact', 'fast facts', 'interesting facts'
                     ];
 
                     lines.forEach((line: string, i: number) => {
@@ -2129,9 +2165,13 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       return txt.trim();
   }, [info, schema]);
 
-  if (!info) return null;
+  const isLMStudioNoModel = (info as any)?.errorType === 'LM_STUDIO_NO_MODEL' || 
+                            (rawInfo as any)?.errorType === 'LM_STUDIO_NO_MODEL' || 
+                            (info as any)?.errorMessage?.includes("No model loaded") ||
+                            (rawInfo as any)?.errorMessage?.includes("No model loaded") ||
+                            errorMessage?.includes("No model loaded");
 
-  const showContentSkeleton = isLoading && (!info?.description);
+  const showContentSkeleton = isLoading && (!info?.description) && !isLMStudioNoModel && !isError;
   const contextItems = info.contextNotes;
 
   return (
@@ -2268,12 +2308,25 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             data-infopanel="true"
             onWheel={(e) => e.stopPropagation()}
           >
-            {isError ? (
-               <div className="p-6 flex flex-col items-center justify-center h-48 text-center space-y-3">
+            {(isError || isLMStudioNoModel) ? (
+               <div className="p-6 flex flex-col items-center justify-center min-h-48 text-center space-y-3">
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center mb-1 ${isRetro ? 'bg-red-900/40 text-red-400' : 'bg-red-500/20 text-red-400'}`}>
                       <X size={20} />
                   </div>
-                  <p className={`font-medium ${theme.headerTitle}`}>{errorMessage || "Unable to retrieve location details"}</p>
+                  <p className={`font-medium ${theme.headerTitle}`}>
+                    {isLMStudioNoModel 
+                      ? "No model loaded. Please load a model in LM Studio." 
+                      : (errorMessage || (rawInfo as any)?.errorMessage || "Unable to retrieve location details")}
+                  </p>
+                  {isLMStudioNoModel ? (
+                    <p className={`text-xs ${theme.subtext} max-w-xs mt-1 leading-relaxed`}>
+                      Load a model in LM Studio or select another provider in Settings.
+                    </p>
+                  ) : ((rawInfo as any)?.errorInstruction ? (
+                    <p className={`text-xs ${theme.subtext} max-w-xs mt-1 leading-relaxed`}>
+                      {(rawInfo as any).errorInstruction}
+                    </p>
+                  ) : null)}
                   {onRetry && (
                      <button onClick={onRetry} className={`px-4 py-1.5 mt-2 text-xs uppercase tracking-wider font-bold rounded transition-colors bg-white/10 hover:bg-white/20 ${theme.bodyText}`}>
                         Retry

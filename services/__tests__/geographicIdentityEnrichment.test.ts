@@ -121,4 +121,34 @@ describe('Geographic Identity & Enrichment Boundary Regression Suite', () => {
     expect(capturedPrompt).toContain('The original user query "DALLAS TEXAS" is provided only for reference.');
     expect(capturedPrompt).toContain("Do not use information about similarly named cities, counties, regions, metropolitan areas");
   });
+
+  it('6. toCanonicalTitleCase and normalizeLocationEntity correctly preserve and normalize English possessives and contractions', () => {
+    // Correct casing preservation
+    expect(toCanonicalTitleCase("Queen Anne's Revenge")).toBe("Queen Anne's Revenge");
+    expect(toCanonicalTitleCase("King's Landing")).toBe("King's Landing");
+    expect(toCanonicalTitleCase("St. Mary's")).toBe("St. Mary's");
+    expect(toCanonicalTitleCase("Mary's Peak")).toBe("Mary's Peak");
+    expect(toCanonicalTitleCase("Blackbeard's Ship")).toBe("Blackbeard's Ship");
+
+    // Title-casing normalization from lowercase, all-caps, and corrupted possessive casings
+    expect(toCanonicalTitleCase("queen anne's revenge")).toBe("Queen Anne's Revenge");
+    expect(toCanonicalTitleCase("QUEEN ANNE'S REVENGE")).toBe("Queen Anne's Revenge");
+    expect(toCanonicalTitleCase("Queen Anne'S Revenge")).toBe("Queen Anne's Revenge");
+    expect(toCanonicalTitleCase("queen anne'S revenge")).toBe("Queen Anne's Revenge");
+    expect(toCanonicalTitleCase("KING'S LANDING")).toBe("King's Landing");
+    expect(toCanonicalTitleCase("King'S Landing")).toBe("King's Landing");
+    expect(toCanonicalTitleCase("st. mary's")).toBe("St. Mary's");
+    expect(toCanonicalTitleCase("mary's peak")).toBe("Mary's Peak");
+    expect(toCanonicalTitleCase("Mary'S Peak")).toBe("Mary's Peak");
+    expect(toCanonicalTitleCase("blackbeard's ship")).toBe("Blackbeard's Ship");
+    expect(toCanonicalTitleCase("Blackbeard'S Ship")).toBe("Blackbeard's Ship");
+
+    // normalizeLocationEntity test
+    expect(geminiService.normalizeLocationEntity("Queen Anne's Revenge")).toBe("Queen Anne's Revenge");
+    expect(geminiService.normalizeLocationEntity("Queen Anne'S Revenge")).toBe("Queen Anne's Revenge");
+    expect(geminiService.normalizeLocationEntity("queen anne's revenge")).toBe("Queen Anne's Revenge");
+    expect(geminiService.normalizeLocationEntity("Mary's Peak")).toBe("Mary's Peak");
+    expect(geminiService.normalizeLocationEntity("Mary'S Peak")).toBe("Mary's Peak");
+  });
 });
+

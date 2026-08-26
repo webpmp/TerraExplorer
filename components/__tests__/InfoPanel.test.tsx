@@ -202,7 +202,7 @@ describe('Lightbox Metadata Integration', () => {
     expect(retroHtml).not.toContain('font-garamond');
   });
 
-  it('renders canonical section order: Description -> Image -> Notable Facts -> Climate -> News', () => {
+  it('renders canonical section order: Description -> Notable Facts -> Image -> Climate -> News', () => {
     const testLocation = {
       name: 'Zion National Park',
       type: 'Point of Interest' as any,
@@ -258,18 +258,67 @@ describe('Lightbox Metadata Integration', () => {
 
     // Verify ordering in rendered HTML output
     const descPos = html.indexOf('Zion National Park is a prominent sanctuary');
-    const imagePos = html.indexOf('<img src="https://upload.wikimedia.org/zion.jpg"');
     const notableHeaderPos = html.indexOf('Notable Facts');
     const narrowsPos = html.indexOf('The Narrows');
+    const imagePos = html.indexOf('<img src="https://upload.wikimedia.org/zion.jpg"');
     const climateHeaderPos = html.indexOf('Climate');
     const newsHeaderPos = html.indexOf('News');
 
     expect(descPos).toBeGreaterThan(-1);
-    expect(imagePos).toBeGreaterThan(descPos);
-    expect(notableHeaderPos).toBeGreaterThan(imagePos);
+    expect(notableHeaderPos).toBeGreaterThan(descPos);
     expect(narrowsPos).toBeGreaterThan(notableHeaderPos);
-    expect(climateHeaderPos).toBeGreaterThan(narrowsPos);
+    expect(imagePos).toBeGreaterThan(narrowsPos);
+    expect(climateHeaderPos).toBeGreaterThan(imagePos);
     expect(newsHeaderPos).toBeGreaterThan(climateHeaderPos);
+
+    // Verify exactly ONE "Notable Facts" header in rendered output
+    const notableMatches = html.match(/Notable Facts/g);
+    expect(notableMatches).toHaveLength(1);
+  });
+
+  it('renders exactly one Notable Facts section when description markdown contains embedded notable facts', () => {
+    const testLocation = {
+      name: 'Eiffel Tower',
+      type: 'Monument' as any,
+      entityType: 'landmark',
+      description: 'The Eiffel Tower is a wrought-iron lattice tower on the Champ de Mars in Paris.\n\n## Notable Facts\n* Built in 1889 for the World\'s Fair.\n* Designed by Gustave Eiffel.\n* 330 meters tall.',
+      coordinates: { lat: 48.8584, lng: 2.2945 },
+      notable: [
+        {
+          title: 'Built in 1889',
+          description: 'Constructed as the centerpiece of the 1889 World\'s Fair.'
+        },
+        {
+          title: 'Gustave Eiffel',
+          description: 'Designed and engineered by the company of Gustave Eiffel.'
+        },
+        {
+          title: '330 Meters Tall',
+          description: 'Stands as the tallest structure in Paris.'
+        }
+      ]
+    };
+
+    const html = renderToStaticMarkup(
+      <InfoPanel
+        info={testLocation}
+        onClose={() => {}}
+        isLoading={false}
+        isNewsFetching={false}
+        skin="modern"
+        isFavorite={false}
+        onSaveFavorite={() => {}}
+        onRemoveFavorite={() => {}}
+        onLoadMoreNews={async () => {}}
+      />
+    );
+
+    const notableMatches = html.match(/Notable Facts/g);
+    expect(notableMatches).toHaveLength(1);
+    expect(html).toContain('The Eiffel Tower is a wrought-iron lattice tower');
+    expect(html).toContain('Built in 1889');
+    expect(html).toContain('Gustave Eiffel');
+    expect(html).toContain('330 Meters Tall');
   });
 
   it('renders notable facts with bold title and normal-weight description instead of full bold prose', () => {

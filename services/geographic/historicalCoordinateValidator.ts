@@ -401,13 +401,19 @@ export function toCanonicalTitleCase(str: string): string {
   const raw = str.trim();
 
   // Helper to title-case words without lowercasing already capitalized acronyms/Roman numerals (like II, III, DFW)
+  // Also preserves standard English possessive/contraction casing (e.g., Anne's, not Anne'S).
   const formatWord = (w: string) => {
     if (!w) return '';
     // If word is Roman numeral like II, III, IV or acronym, preserve
     if (/^(?:II|III|IV|VI|VII|VIII|IX|X|USA|UK|DFW)$/i.test(w)) {
       return w.toUpperCase();
     }
-    return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    // Handle words with apostrophes like Anne's or King's or O'Connor
+    const formatted = w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    // Correct possessives / contractions like Anne'S -> Anne's or King'S -> King's
+    return formatted.replace(/([a-zA-Z])'([a-zA-Z]+)/g, (_, before, after) => {
+      return `${before}'${after.toLowerCase()}`;
+    });
   };
 
   const titleCasePhrase = (phrase: string) => {
@@ -441,7 +447,6 @@ export function toCanonicalTitleCase(str: string): string {
     }
   }
 
-  return raw
-    .replace(/\b([a-z])/g, (_, l) => l.toUpperCase())
-    .trim();
+  return titleCasePhrase(raw);
 }
+

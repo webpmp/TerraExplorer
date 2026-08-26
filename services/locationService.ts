@@ -107,6 +107,17 @@ export const mergeLocationInfo = (prev: any, next: any): any => {
         }
     }
 
+    // 4. Error state synchronization
+    if (next.errorType) {
+        merged.errorType = next.errorType;
+        merged.errorMessage = next.errorMessage;
+        merged.errorInstruction = next.errorInstruction;
+    } else if (next.description && !isPlaceholderString(next.description)) {
+        delete merged.errorType;
+        delete merged.errorMessage;
+        delete merged.errorInstruction;
+    }
+
     return merged;
 };
 

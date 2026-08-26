@@ -203,8 +203,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
         setModelTestStatus('success');
         setModelTestMessage('Connection successful!');
       } else {
+        const errorText = await res.text();
         setModelTestStatus('error');
-        setModelTestMessage(`Error: ${res.statusText}`);
+        if (errorText.toLowerCase().includes('no models loaded') || errorText.includes('No models loaded')) {
+          setModelTestMessage('No model loaded. Please load a model in LM Studio.');
+        } else {
+          setModelTestMessage(`Error: ${res.statusText || res.status}`);
+        }
       }
     } catch (e: any) {
       setModelTestStatus('error');

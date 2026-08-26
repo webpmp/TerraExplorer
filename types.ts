@@ -154,7 +154,9 @@ export interface LocationInfo {
   boundary?: GeoCoordinates[];
   pipelineVersion?: number;
   status?: "loading" | "success" | "error";
+  errorType?: string;
   errorMessage?: string;
+  errorInstruction?: string;
   news: NewsItem[];
   routeContext?: {
     title: string;

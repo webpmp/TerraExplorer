@@ -11,7 +11,7 @@ import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import SettingsPanel from './components/SettingsPanel';
 import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint, GeoCoordinates, UserSettings, AIProvider, NewsProvider } from './types';
-import { getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, EnrichmentMetrics, cancelFeatureInfoRequests } from './services/geminiService';
+import { getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, EnrichmentMetrics, cancelFeatureInfoRequests, isLMStudioNoModelError } from './services/geminiService';
 import { getEstimatedClimate } from './services/geographic/climateEstimator';
 import { enrichLocationInfo, mergeLocationInfo, fetchAndValidateLocationNews } from './services/locationService';
 import { resolveGeographicMetadata } from './services/geographic/geographicResolver';
@@ -1243,10 +1243,28 @@ const App: React.FC = () => {
   }, []);
 
   const handleUpdateSettings = useCallback((newSettings: UserSettings) => {
+    const prevProvider = userSettingsRef.current.aiProvider;
     const prevNarration = userSettingsRef.current.narrationEnabled;
     userSettingsRef.current = newSettings;
     setUserSettings(newSettings);
     localStorage.setItem('terraExplorerSettings', JSON.stringify(newSettings));
+
+    if (prevProvider !== newSettings.aiProvider) {
+      if (searchError?.includes('No model loaded') || searchError?.includes('LM Studio')) {
+        setSearchError(null);
+      }
+      setLocationInfo((prev: any) => {
+        if (!prev) return prev;
+        if (prev.errorType === 'LM_STUDIO_NO_MODEL' || prev.errorMessage?.includes('No model loaded')) {
+          const updated = { ...prev };
+          delete updated.errorType;
+          delete updated.errorMessage;
+          delete updated.errorInstruction;
+          return updated;
+        }
+        return prev;
+      });
+    }
 
     if (typeof newSettings.narrationVolume === 'number') {
       narrationService.setVolume(newSettings.narrationVolume);
@@ -2333,6 +2351,8 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       const errorCode = pipelineResult.error;
       if (errorCode === "UNSUPPORTED_CELESTIAL_BODY") {
         userError = "TerraExplorer currently supports Earth geography only.";
+      } else if (errorCode === "LM_STUDIO_NO_MODEL") {
+        userError = "No model loaded. Please load a model in LM Studio. Load a model in LM Studio or select another provider in Settings.";
       } else if (errorCode === "LOCATION_SYSTEM_UNAVAILABLE") {
         userError = "Location system unavailable.";
       } else if (errorCode === "NOT_FOUND") {
