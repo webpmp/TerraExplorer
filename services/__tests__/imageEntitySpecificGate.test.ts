@@ -164,5 +164,59 @@ describe('Image Entity-Specific Gate & Qualification System', () => {
       const acceptedImages = candidates.filter(c => validateImageCandidate(c, elFaroEntity).decision === 'ACCEPT');
       expect(acceptedImages.length).toBe(0);
     });
+
+    it('9. Geographic Settlement: Dallas, Texas rejects Dallas Cowboys, Dallas County, DFW Airport, Bryce Dallas Howard', () => {
+      const dallasEntity = {
+        name: 'Dallas, Texas',
+        canonicalName: 'Dallas, Texas',
+        city: 'Dallas',
+        state: 'Texas',
+        country: 'United States',
+        coordinates: { lat: 32.7767, lng: -96.7970 },
+        entityType: 'settlement'
+      };
+
+      const candidates = [
+        {
+          url: 'https://upload.wikimedia.org/dallas_cowboys.jpg',
+          title: 'Dallas Cowboys',
+          description: 'The Dallas Cowboys are a professional American football team based in Dallas, Texas.'
+        },
+        {
+          url: 'https://upload.wikimedia.org/dallas_county.jpg',
+          title: 'Dallas County, Texas',
+          description: 'Dallas County is a county located in the U.S. state of Texas.'
+        },
+        {
+          url: 'https://upload.wikimedia.org/dfw_airport.jpg',
+          title: 'Dallas Fort Worth International Airport',
+          description: 'International airport serving the Dallas–Fort Worth metroplex in Texas.'
+        },
+        {
+          url: 'https://upload.wikimedia.org/bryce_dallas_howard.jpg',
+          title: 'Bryce Dallas Howard',
+          description: 'American actress and director.'
+        },
+        {
+          url: 'https://upload.wikimedia.org/dfw_metroplex.jpg',
+          title: 'Dallas–Fort Worth metroplex',
+          description: 'Metropolitan area in the U.S. state of Texas.'
+        }
+      ];
+
+      candidates.forEach(cand => {
+        const res = validateImageCandidate(cand, dallasEntity);
+        expect(res.decision).toBe('REJECT');
+      });
+
+      // Valid candidate representing the city itself
+      const validCandidate = {
+        url: 'https://upload.wikimedia.org/downtown_dallas_skyline.jpg',
+        title: 'Dallas, Texas',
+        description: 'Downtown Dallas skyline view in Texas, United States.'
+      };
+      const validRes = validateImageCandidate(validCandidate, dallasEntity);
+      expect(validRes.decision).toBe('ACCEPT');
+    });
   });
 });

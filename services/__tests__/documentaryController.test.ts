@@ -315,4 +315,127 @@ describe('DocumentaryController Suite', () => {
     expect(onSettle).toHaveBeenCalledWith(expect.objectContaining({ name: 'Paris' }));
     expect(controller.getPhase()).toBe('completed');
   });
+
+  it('10. Tulsa -> Dallas while at OSM floor (cameraDistance=1.30, sepDeg=3.4°) forces outbound zoom phase (distant_osm_to_globe) and does NOT select local_pan', () => {
+    const tulsaCoords = { lat: 36.1563, lng: -95.9928 }; // Tulsa, OK
+    const dallasCoords = { lat: 32.7767, lng: -96.7970 }; // Dallas, TX
+    let currentDist = 1.30; // At OSM floor
+
+    const setCameraPosition = vi.fn((lat: number, lng: number, dist: number) => {
+      currentDist = dist;
+    });
+    const onSettle = vi.fn();
+
+    const seqId = controller.startSingleLocation(
+      { name: 'Dallas, Texas', lat: dallasCoords.lat, lng: dallasCoords.lng },
+      {
+        getCameraDistance: () => currentDist,
+        getCameraCoordinates: () => tulsaCoords,
+        setCameraDistance: vi.fn(),
+        setCameraPosition,
+        onSettle
+      },
+      { duration: 5.5 }
+    );
+
+    expect(seqId).toBeGreaterThan(0);
+    expect(controller.isActive()).toBe(true);
+    // Must be in zooming_out phase, NOT descending/local_pan
+    expect(controller.getPhase()).toBe('zooming_out');
+
+    // Advance through zoom out phase (0 - 30% = 0 - 1650ms)
+    vi.advanceTimersByTime(1000);
+    expect(controller.getPhase()).toBe('zooming_out');
+    expect(currentDist).toBeGreaterThan(1.30);
+
+    // Advance to rotating phase (30% - 60% = 1650ms - 3300ms)
+    vi.advanceTimersByTime(1000);
+    expect(controller.getPhase()).toBe('rotating');
+    expect(currentDist).toBeGreaterThanOrEqual(4.0);
+
+    // Advance to descending phase (60% - 100%)
+    vi.advanceTimersByTime(1500);
+    expect(controller.getPhase()).toBe('descending');
+
+    // Finish
+    vi.advanceTimersByTime(2500);
+    expect(onSettle).toHaveBeenCalledWith(expect.objectContaining({ name: 'Dallas, Texas' }));
+    expect(controller.getPhase()).toBe('completed');
+  });
+
+  it('11. Same-destination search while already at target distance (sepDeg=0.0°) selects same_location_at_target / local_pan without zoom-out', () => {
+    const dallasCoords = { lat: 32.7767, lng: -96.7970 };
+    let currentDist = 1.30;
+
+    const setCameraPosition = vi.fn();
+    const onSettle = vi.fn();
+
+    controller.startSingleLocation(
+      { name: 'Dallas, Texas', lat: dallasCoords.lat, lng: dallasCoords.lng },
+      {
+        getCameraDistance: () => currentDist,
+        getCameraCoordinates: () => dallasCoords,
+        setCameraDistance: vi.fn(),
+        setCameraPosition,
+        onSettle
+      },
+      { duration: 5.5 }
+    );
+
+    // For same location at target distance, it should not zoom out to globe
+    expect(controller.getPhase()).toBe('descending');
+  });
+
+  it('12. Rapid destination changes (Tulsa -> Dallas -> San Diego) ensure only the latest transition controls the camera', () => {
+    const tulsaCoords = { lat: 36.1563, lng: -95.9928 };
+    const dallasCoords = { lat: 32.7767, lng: -96.7970 };
+    const sanDiegoCoords = { lat: 32.7157, lng: -117.1611 };
+
+    const tulsaSettle = vi.fn();
+    const dallasSettle = vi.fn();
+    const sanDiegoSettle = vi.fn();
+
+    // 1. Start Tulsa
+    controller.startSingleLocation(
+      { name: 'Tulsa', lat: tulsaCoords.lat, lng: tulsaCoords.lng },
+      {
+        getCameraDistance: () => 1.30,
+        getCameraCoordinates: () => tulsaCoords,
+        setCameraDistance: vi.fn(),
+        onSettle: tulsaSettle
+      }
+    );
+
+    // 2. Rapidly start Dallas
+    controller.startSingleLocation(
+      { name: 'Dallas, Texas', lat: dallasCoords.lat, lng: dallasCoords.lng },
+      {
+        getCameraDistance: () => 1.30,
+        getCameraCoordinates: () => tulsaCoords,
+        setCameraDistance: vi.fn(),
+        onSettle: dallasSettle
+      }
+    );
+
+    // 3. Rapidly start San Diego
+    const seq3 = controller.startSingleLocation(
+      { name: 'San Diego, California', lat: sanDiegoCoords.lat, lng: sanDiegoCoords.lng },
+      {
+        getCameraDistance: () => 1.30,
+        getCameraCoordinates: () => dallasCoords,
+        setCameraDistance: vi.fn(),
+        onSettle: sanDiegoSettle
+      }
+    );
+
+    expect(controller.getSequenceId()).toBe(seq3);
+    expect(controller.getCurrentDestination()?.name).toBe('San Diego, California');
+
+    // Run timers to completion
+    vi.advanceTimersByTime(10000);
+
+    expect(tulsaSettle).not.toHaveBeenCalled();
+    expect(dallasSettle).not.toHaveBeenCalled();
+    expect(sanDiegoSettle).toHaveBeenCalledWith(expect.objectContaining({ name: 'San Diego, California' }));
+  });
 });

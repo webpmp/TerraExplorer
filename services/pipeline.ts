@@ -235,11 +235,14 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   if (coordinatesValid && resolvedData && resolvedData.coordinates) {
       const isHistoricalDiscovery = entityResult.intentResult.intent === 'DISCOVERY_OBJECT_LOCATION' || entityResult.intentResult.intent === 'HISTORICAL_EVENT';
       const histKnowledge = isHistoricalDiscovery ? getHistoricalEntityKnowledge(entityResult.entity) : null;
-      // Preserve canonical entity identity without letting invented titles or secondary sites displace it
-      const canonicalName = histKnowledge?.entity || ((isHistoricalDiscovery && entityResult.entity) ? toCanonicalTitleCase(entityResult.entity) : (entityResult.entity ? toCanonicalTitleCase(entityResult.entity) : (resolvedData.name || 'Unknown')));
+      
+      const resolvedCanonical = resolvedData.canonicalName || (resolvedData.name && resolvedData.name !== 'Unknown' ? toCanonicalTitleCase(resolvedData.name) : null);
+      const queryCanonical = entityResult.entity ? toCanonicalTitleCase(entityResult.entity) : null;
+      const canonicalName = histKnowledge?.entity || resolvedCanonical || queryCanonical || (resolvedData.name || 'Unknown');
 
-      // Lock resolvedData.name to canonicalName
+      // Lock resolvedData.name and canonicalName
       resolvedData.name = canonicalName;
+      resolvedData.canonicalName = canonicalName;
 
       // Populate administrative context if missing from deterministic coordinates
       if (!resolvedData.country || !resolvedData.state) {
@@ -301,6 +304,7 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
           wikipedia: (resolvedData as any).wikipedia
       };
 
+      console.log(`[ENRICHMENT IDENTITY]\noriginalQuery="${entityResult.intentResult.normalized.request.rawQuery}"\nnormalizedQuery="${entityResult.intentResult.normalized.normalizedQuery}"\ncanonicalName="${canonicalEntity.canonicalName}"\nentityType="${canonicalEntity.entityType}"\nstate="${(resolvedData as any).state || 'none'}"\ncountry="${(resolvedData as any).country || 'none'}"\ncoordinates=${canonicalEntity.coordinates.lat.toFixed(4)},${canonicalEntity.coordinates.lng.toFixed(4)}\nidentityStatus="${canonicalEntity.identityStatus}"`);
       console.log(`[CANONICAL ENTITY]\nRequested entity: ${entityResult.intentResult.normalized.request.rawQuery}\nResolved name: ${canonicalEntity.canonicalName}\nCanonical name: ${canonicalEntity.canonicalName}\nEntity type: ${canonicalEntity.entityType}\nCoordinates: ${canonicalEntity.coordinates.lat}, ${canonicalEntity.coordinates.lng}\nCoordinate source: ${canonicalEntity.coordinateSource || canonicalEntity.coordinates.source}\nIdentity status: ${canonicalEntity.identityStatus}\nProvider classifications: ${providerSignals.join(',') || 'none'}\nFinal classification: ${canonicalEntity.entityType}\nClassification confidence: 1.0\nAdministrative context: ${JSON.stringify(adminContext)}`);
 
       identity = createIdentity(
@@ -347,7 +351,8 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
           city: (resolvedData as any).city,
           county: (resolvedData as any).county,
           region: (resolvedData as any).region,
-          climate: (resolvedData as any).climate
+          climate: (resolvedData as any).climate,
+          originalQuery: entityResult.intentResult.normalized.request.rawQuery
         });
         if (metadataRecovery) {
            console.log(`=== RECOVERY ENRICHMENT TRACE ===`);

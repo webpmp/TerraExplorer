@@ -1282,11 +1282,15 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
   const handleLoadInitialNews = async () => {
     if (!info?.name || showNews === false) return;
+    const infoStart = Date.now();
+    console.log(`[NEWS TRACE] InfoPanel request START location="${info.name}"`);
     setNewsState('loading');
     try {
       if (onFetchNews) {
         const res = await onFetchNews();
         const items = Array.isArray(res) ? res : (rawInfo?.news || []);
+        const infoElapsed = Date.now() - infoStart;
+        console.log(`[NEWS TRACE] InfoPanel received articles=${items?.length || 0} elapsed=${infoElapsed}ms`);
         if (items && items.length > 0) {
           setNewsList(items);
           setNewsState('loaded');
@@ -1296,6 +1300,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         }
       } else {
         const items = await fetchAndValidateLocationNews(info.name, info);
+        const infoElapsed = Date.now() - infoStart;
+        console.log(`[NEWS TRACE] InfoPanel received articles=${items?.length || 0} elapsed=${infoElapsed}ms`);
         if (items && items.length > 0) {
           setNewsList(items);
           setNewsState('loaded');
@@ -1304,7 +1310,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           setNewsState('empty');
         }
       }
-    } catch (err) {
+    } catch (err: any) {
+      const infoElapsed = Date.now() - infoStart;
+      console.error(`[NEWS TRACE] ERROR stage=InfoPanel elapsed=${infoElapsed}ms message="${err?.message}"`);
       console.error("Failed to load news:", err);
       setNewsState('error');
     }

@@ -589,6 +589,23 @@ export function isDifferentNamedEntity(
   const targetLower = targetEntityName.toLowerCase().trim();
   const allTargetAliases = [targetLower, ...aliases.map(a => a.toLowerCase().trim())].filter(Boolean);
 
+  // Non-settlement organization, facility, person, or administrative division check
+  // (e.g. "Dallas Cowboys", "Dallas County", "Dallas Fort Worth International Airport", "Bryce Dallas Howard")
+  const nonSettlementPatterns = [
+    /\b(?:cowboys|mavericks|stars|rangers|texans|astros|spurs|rockets|fc|united|club|team|franchise)\b/i,
+    /\b(?:county|parish|borough|metroplex|metropolitan area|combined statistical area)\b/i,
+    /\b(?:international airport|regional airport|airport|airfield|aerodrome|station|terminal|transit authority)\b/i,
+    /\b(?:independent school district|school district|isd|high school|university|college|hospital|medical center)\b/i,
+    /\b(?:police department|fire department|sheriff|department of)\b/i,
+    /\b(?:howard|actor|actress|director|singer|musician|politician|author|player|coach)\b/i
+  ];
+
+  for (const pattern of nonSettlementPatterns) {
+    if (pattern.test(titleClean) && !pattern.test(targetLower)) {
+      return true;
+    }
+  }
+
   // If title directly contains target entity name or any alias, it is not a different entity
   if (allTargetAliases.some(a => titleClean.toLowerCase().includes(a))) {
     return false;

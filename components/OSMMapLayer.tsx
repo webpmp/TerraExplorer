@@ -928,7 +928,38 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
     const dLng = Math.abs(currentGeo.lng - lastGlobeGeoRef.current.lng);
     const hasGlobeShifted = !isTransitionOwnedByDoc && wasGateOpenRef.current && (dLat > 0.5 || (dLng > 0.5 && dLng < 359.5));
     const isManualInteracting = isInteracting && !isDocActive;
-    const isReturningToGlobe = dist > 1.85 || (!isTransitionOwnedByDoc && dist > 1.55 && (isManualInteracting || hasGlobeShifted));
+    const isReturningToGlobe = !isTransitionOwnedByDoc && (dist > 1.85 || (dist > 1.55 && (isManualInteracting || hasGlobeShifted)));
+
+    if (dist > 1.85 && isTransitionOwnedByDoc) {
+      // Quietly close OSM gate and unload previous location tiles while documentary zooms out to globe
+      if (wasGateOpenRef.current) {
+        wasGateOpenRef.current = false;
+        if (isMapReadyRef.current) {
+          isMapReadyRef.current = false;
+          onMapReady?.(false);
+        }
+        loadedTileKeysRef.current.clear();
+        setOsmViewportBounds(null);
+        onViewportBoundsChange?.(null);
+        setOsmProjection(null);
+        if (settleTimerRef.current) {
+          clearTimeout(settleTimerRef.current);
+          settleTimerRef.current = null;
+        }
+        if (activeAbortRef.current) {
+          activeAbortRef.current.abort();
+          activeAbortRef.current = null;
+        }
+        if (activeTilesMapRef.current.size > 0) {
+          activeTilesMapRef.current.clear();
+          fallbackTilesMapRef.current.clear();
+          setActiveTilesList([]);
+          setFallbackTilesList([]);
+        }
+      }
+      lastGlobeGeoRef.current = currentGeo;
+      return;
+    }
 
     if (isReturningToGlobe) {
       if (wasGateOpenRef.current) {

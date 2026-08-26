@@ -197,6 +197,7 @@ export class DocumentaryController {
   private currentPhase: DocumentaryPhase = 'idle';
   private currentTransitionType: DocumentaryTransition = 'single-location';
   private currentDestination: DocumentaryDestination | null = null;
+  private previousDestination: DocumentaryDestination | null = null;
   private currentOrigin: DocumentaryDestination | null = null;
   private animFrameId: number | null = null;
   private activeCallbacks: DocumentaryAdapterCallbacks | null = null;
@@ -237,8 +238,41 @@ export class DocumentaryController {
     return this.currentDestination;
   }
 
+  public getPreviousDestination(): DocumentaryDestination | null {
+    return this.previousDestination;
+  }
+
   public getCurrentOrigin(): DocumentaryDestination | null {
     return this.currentOrigin;
+  }
+
+  /**
+   * Explicitly commits a new destination to the controller.
+   */
+  public commitDestination(destination: DocumentaryDestination): { sequenceId: number; previousDestination: DocumentaryDestination | null } {
+    const prev = this.currentDestination;
+    if (prev && (prev.lat !== destination.lat || prev.lng !== destination.lng || prev.name !== destination.name)) {
+      console.log(
+        `[DESTINATION HANDOFF]\n` +
+        `previous="${prev.name}"\n` +
+        `previousCoordinates=${prev.lat.toFixed(4)},${prev.lng.toFixed(4)}\n` +
+        `current="${destination.name}"\n` +
+        `currentCoordinates=${destination.lat.toFixed(4)},${destination.lng.toFixed(4)}`
+      );
+    }
+
+    const sequenceId = ++this.currentSequenceId;
+    this.previousDestination = prev;
+    this.currentDestination = destination;
+
+    console.log(
+      `[DESTINATION COMMITTED]\n` +
+      `name="${destination.name}"\n` +
+      `coordinates=${destination.lat.toFixed(4)},${destination.lng.toFixed(4)}\n` +
+      `transitionId=${sequenceId}`
+    );
+
+    return { sequenceId, previousDestination: prev };
   }
 
   /**
@@ -267,21 +301,48 @@ export class DocumentaryController {
     callbacks: DocumentaryAdapterCallbacks,
     options?: DocumentaryStartOptions
   ): number {
+    const prev = this.currentDestination || this.previousDestination;
     this.cancel('new_single_location_selected');
+
+    if (prev && (prev.lat !== destination.lat || prev.lng !== destination.lng || prev.name !== destination.name)) {
+      console.log(
+        `[DESTINATION HANDOFF]\n` +
+        `previous="${prev.name}"\n` +
+        `previousCoordinates=${prev.lat.toFixed(4)},${prev.lng.toFixed(4)}\n` +
+        `current="${destination.name}"\n` +
+        `currentCoordinates=${destination.lat.toFixed(4)},${destination.lng.toFixed(4)}`
+      );
+    }
 
     const sequenceId = ++this.currentSequenceId;
     this.currentTransitionType = 'single-location';
     this.currentOrigin = null;
+    this.previousDestination = prev;
     this.currentDestination = destination;
     this.activeCallbacks = callbacks;
     this.isAtmospherePassed = false;
     this.isOSMPassed = false;
+
+    console.log(
+      `[DESTINATION COMMITTED]\n` +
+      `name="${destination.name}"\n` +
+      `coordinates=${destination.lat.toFixed(4)},${destination.lng.toFixed(4)}\n` +
+      `transitionId=${sequenceId}`
+    );
 
     const config = options?.cameraConfig || getDocumentaryCameraConfig(options?.skin, options?.aspect);
     const maxAllowedDistance = config.maximumGlobeZoomOutDistance;
     const startDistance = Math.min(maxAllowedDistance, callbacks.getCameraDistance());
     const targetDistance = Math.max(config.osmDistance, Math.min(maxAllowedDistance, options?.targetDistance || config.osmDistance));
     const globeAltitude = Math.min(maxAllowedDistance, config.globeOverviewDistance);
+
+    console.log(
+      `[DOCUMENTARY START]\n` +
+      `name="${destination.name}"\n` +
+      `startDistance=${startDistance.toFixed(4)}\n` +
+      `targetDistance=${targetDistance.toFixed(4)}\n` +
+      `transitionId=${sequenceId}`
+    );
 
     const originCoords = callbacks.getCameraCoordinates
       ? callbacks.getCameraCoordinates()
@@ -290,10 +351,51 @@ export class DocumentaryController {
     const angularDist = calculateGreatCircleDistance(originCoords.lat, originCoords.lng, destination.lat, destination.lng);
     const sepDeg = (angularDist * 180) / Math.PI;
 
-    const isDistantDestination = sepDeg > 5.0;
-    const isStartingFromOSM = isDistantDestination && startDistance < config.atmosphereStartDistance;
-    const isLocalAtTarget = !isDistantDestination && startDistance <= targetDistance + 0.15;
-    const isDirectDescent = !isStartingFromOSM && !isLocalAtTarget && startDistance < globeAltitude - 0.2;
+    const atOSMFloor = startDistance < config.atmosphereStartDistance;
+    const isSameLocation = sepDeg < 0.05;
+
+    let isStartingFromOSM = false;
+    let isLocalAtTarget = false;
+    let isDirectDescent = false;
+    let transitionType: 'distant_osm_to_globe' | 'local_pan' | 'direct_descent' | 'globe_overview';
+    let decisionReason: string;
+
+    if (atOSMFloor && !isSameLocation) {
+      // Transitioning to a new destination while camera is at or near OSM floor:
+      // MUST zoom out first to avoid panning at OSM zoom floor across regional/distant coordinates
+      isStartingFromOSM = true;
+      transitionType = 'distant_osm_to_globe';
+      decisionReason = 'at_osm_floor_destination_change';
+    } else if (isSameLocation && startDistance <= targetDistance + 0.15) {
+      // Same location re-selected while already at target distance
+      isLocalAtTarget = true;
+      transitionType = 'local_pan';
+      decisionReason = 'same_location_at_target';
+    } else if (startDistance < globeAltitude - 0.2) {
+      isDirectDescent = true;
+      transitionType = 'direct_descent';
+      decisionReason = 'intermediate_altitude_descent';
+    } else {
+      transitionType = 'globe_overview';
+      decisionReason = 'high_altitude_globe_rotation_descent';
+    }
+
+    console.log(
+      `[DESTINATION TRANSITION DECISION]\n` +
+      `previous="${prev?.name || 'none'}"\n` +
+      `current="${destination.name}"\n` +
+      `sepDeg=${sepDeg.toFixed(1)}°\n` +
+      `cameraDistance=${startDistance.toFixed(4)}\n` +
+      `atOSMFloor=${atOSMFloor}\n` +
+      `transitionType=${transitionType}\n` +
+      `reason=${decisionReason}`
+    );
+
+    console.log(
+      `[DOCUMENTARY CAMERA OWNERSHIP]\n` +
+      `transitionId=${sequenceId}\n` +
+      `active=true`
+    );
 
     if (isStartingFromOSM) {
       this.currentPhase = 'zooming_out';
@@ -311,7 +413,7 @@ export class DocumentaryController {
       this.currentPhase = 'rotating';
     }
 
-    console.log(`[Documentary] theme=${config.skin} mode=${isStartingFromOSM ? 'distant_osm_to_globe' : (isLocalAtTarget ? 'local_pan' : (isDirectDescent ? 'direct_descent' : 'globe_overview'))} single-location descent started id=${sequenceId} to="${destination.name}" sepDeg=${sepDeg.toFixed(1)}° startDist=${startDistance.toFixed(2)} targetDist=${targetDistance.toFixed(2)} maxAllowedDistance=${maxAllowedDistance.toFixed(2)}`);
+    console.log(`[Documentary] theme=${config.skin} mode=${transitionType} single-location descent started id=${sequenceId} to="${destination.name}" sepDeg=${sepDeg.toFixed(1)}° startDist=${startDistance.toFixed(2)} targetDist=${targetDistance.toFixed(2)} maxAllowedDistance=${maxAllowedDistance.toFixed(2)}`);
 
     const durationSetting = options?.duration;
     const isReducedMotion =
@@ -335,6 +437,7 @@ export class DocumentaryController {
 
     const animate = (now: number) => {
       if (this.currentSequenceId !== sequenceId) {
+        console.log(`[DOCUMENTARY CAMERA OWNERSHIP]\ntransitionId=${sequenceId}\nactive=false`);
         return;
       }
 
@@ -722,6 +825,7 @@ export class DocumentaryController {
     callbacks.onReveal?.(destination);
 
     this.currentPhase = 'completed';
+    this.previousDestination = destination;
     callbacks.onComplete?.(destination);
   }
 
@@ -764,6 +868,10 @@ export class DocumentaryController {
     if (this.isActive()) {
       console.log(`[Documentary] sequence cancelled reason="${reason}"`);
       this.activeCallbacks?.onCancel?.(reason);
+    }
+
+    if (this.currentDestination) {
+      this.previousDestination = this.currentDestination;
     }
 
     this.currentPhase = 'cancelled';

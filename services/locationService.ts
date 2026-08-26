@@ -122,11 +122,19 @@ export const fetchAndValidateLocationNews = async (
     const nytKey = settings.nytApiKey || getEnv().VITE_NYT_API_KEY;
     const newsApiKey = settings.newsApiKey || getEnv().VITE_NEWS_API_KEY;
     const newsDataKey = settings.newsDataApiKey || getEnv().VITE_NEWS_DATA_API_KEY;
+    const geminiKey = (typeof process !== 'undefined' && process.env && (process.env.API_KEY || process.env.GEMINI_API_KEY)) || getEnv().GEMINI_API_KEY;
+    const hasGeminiKey = !!geminiKey && geminiKey !== 'dummy-key-for-ts-check';
+
+    if (settings.newsProvider === 'gemini' && !hasGeminiKey) {
+        console.error("Gemini API key is missing or not configured for Gemini News Provider");
+        throw new Error("Gemini API key is not configured");
+    }
 
     const apiKeyPresent = !!(
         (settings.newsProvider === 'nyt' && nytKey) ||
         (settings.newsProvider === 'newsapi' && newsApiKey) ||
-        (settings.newsProvider === 'newsdata' && newsDataKey)
+        (settings.newsProvider === 'newsdata' && newsDataKey) ||
+        (settings.newsProvider === 'gemini' && hasGeminiKey)
     );
     
     if (settings.newsProvider && !apiKeyPresent) {
@@ -137,48 +145,152 @@ export const fetchAndValidateLocationNews = async (
         return [];
     }
 
+    const locStart = Date.now();
     const query = locationName || (locationData?.waypoint && locationData.waypoint.canonicalName) || (locationData?.waypoint && locationData.waypoint.name) || locationData?.name || "Historical Location";
+    console.log(`[NEWS TRACE] locationService START query="${query}" locationName="${locationName}"`);
     try {
         const realNews = await fetchLiveNews(query);
-        const locName = (locationData?.name || locationName || "").toLowerCase().split(',')[0].trim();
-        const countryName = (locationData?.waypoint?.country || "").toLowerCase();
-        const regionName = (locationData?.waypoint?.region || locationData?.waypoint?.state || "").toLowerCase();
         
-        return realNews.filter(item => {
+        // Extract geographic metadata tokens for multi-tier evidence validation
+        const raw = (locationName || locationData?.name || "").trim();
+        const wp = locationData?.waypoint;
+
+        let cityCandidate = (wp?.canonicalName || wp?.name || locationData?.city || "").trim().toLowerCase();
+        let stateCandidate = (wp?.state || wp?.region || locationData?.state || locationData?.region || "").trim().toLowerCase();
+        let countryCandidate = (wp?.country || locationData?.country || "").trim().toLowerCase();
+
+        if (raw.includes(',')) {
+            const parts = raw.split(',').map(s => s.trim().toLowerCase());
+            if (!cityCandidate && parts[0]) cityCandidate = parts[0];
+            if (!stateCandidate && parts[1]) stateCandidate = parts[1];
+            if (!countryCandidate && parts[2]) countryCandidate = parts[2];
+        } else if (raw) {
+            const lowerRaw = raw.toLowerCase();
+            const stateRegex = /\b(alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming|tx|ca|ny|fl|il|pa|oh|ga|nc|mi)\b$/i;
+            const match = lowerRaw.match(stateRegex);
+            if (match && match.index && match.index > 0) {
+                const potentialCity = lowerRaw.substring(0, match.index).trim();
+                if (potentialCity) {
+                    if (!cityCandidate) cityCandidate = potentialCity;
+                    if (!stateCandidate) stateCandidate = match[0];
+                }
+            } else if (!cityCandidate) {
+                cityCandidate = lowerRaw;
+            }
+        }
+
+        const canonicalCity = cityCandidate || raw.toLowerCase();
+        const canonicalState = stateCandidate;
+        const canonicalCountry = countryCandidate;
+        const canonicalCounty = (locationData?.county || wp?.county || (canonicalCity ? `${canonicalCity} county` : "")).toLowerCase();
+        const rawQuery = raw.toLowerCase();
+
+        const rejectKeywords = [
+            "hotel", "shopping", "lifestyle", "travel deals", "best places to stay",
+            "cheap flights", "vacation rentals", "restaurants", "recipe", "ingredient",
+            "obituary", "itinerary", "product", "listing", "address", "shipping"
+        ];
+
+        const hasWord = (text: string, phrase: string): boolean => {
+            if (!phrase || !phrase.trim()) return false;
+            const escaped = phrase.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i');
+            return regex.test(text);
+        };
+
+        const metroAliases: Record<string, string[]> = {
+            "dallas": ["dallas-fort worth", "dfw", "north texas", "fort worth", "arlington", "frisco", "plano", "irving", "richardson", "denton"],
+            "new york": ["nyc", "manhattan", "brooklyn", "queens", "bronx", "staten island", "tri-state"],
+            "san francisco": ["bay area", "oakland", "san jose", "silicon valley"],
+            "los angeles": ["la", "socal", "hollywood", "long beach", "santa monica", "pasadena"],
+            "london": ["greater london", "westminster", "thames"],
+            "tokyo": ["kanto", "shibuya", "shinjuku", "ginza", "chiyoda"]
+        };
+
+        const filtered = realNews.filter(item => {
             const titleLower = (item.title || "").toLowerCase();
             const summaryLower = (item.summary || "").toLowerCase();
-            const fullText = titleLower + " " + summaryLower;
-            
-            const rejectKeywords = ["hotel", "shopping", "lifestyle", "travel deals", "best places to stay", "cheap flights", "vacation rentals", "restaurants", "recipe", "ingredient", "obituary", "itinerary", "product", "listing", "address", "shipping"];
+            const fullText = `${titleLower} ${summaryLower}`;
+
+            // 1. Spam rejection
             for (const kw of rejectKeywords) {
-                 if (fullText.includes(kw)) {
-                     console.log(`[NEWS VALIDATION] {\n  queryLocation: "${locName}",\n  articleTitle: "${item.title}",\n  accepted: false,\n  reason: "Spam keyword: ${kw}"\n}`);
-                     return false;
-                 }
+                if (fullText.includes(kw)) {
+                    console.log(`[NEWS VALIDATION]\nqueryLocation="${rawQuery}"\narticleTitle="${item.title}"\naccepted=false\nreason="Spam keyword: ${kw}"`);
+                    return false;
+                }
             }
-            
-            const hasLoc = locName && (titleLower.includes(locName) || summaryLower.includes(locName));
-            const hasRegion = regionName && (titleLower.includes(regionName) || summaryLower.includes(regionName));
-            const hasCountry = countryName && (titleLower.includes(countryName) || summaryLower.includes(countryName));
-            
+
             let accepted = false;
-            let reason = "Rejected: unrelated";
-            
-            if (hasLoc) {
+            let reason = "No sufficient geographic evidence";
+
+            // 2. Strong evidence: Direct city match in title
+            if (canonicalCity && hasWord(titleLower, canonicalCity)) {
                 accepted = true;
-                reason = "Exact location match";
-            } else if (hasRegion && hasCountry) {
-                accepted = true;
-                reason = "Region + country match";
-            } else if (hasCountry && !hasRegion) {
-                accepted = false;
-                reason = "Rejected: country-only match";
+                reason = `Direct location match: ${canonicalCity}`;
             }
-            
-            console.log(`[NEWS VALIDATION] {\n  "queryLocation": "${locName}",\n  "articleTitle": "${item.title}",\n  "accepted": ${accepted},\n  "reason": "${reason}"\n}`);
+            // Strong evidence: Raw query in title
+            else if (rawQuery && hasWord(titleLower, rawQuery)) {
+                accepted = true;
+                reason = `Direct query match: ${rawQuery}`;
+            }
+            // Strong evidence: Local entity / institution / sports team match
+            else if (canonicalCity && (() => {
+                const entityRegex = new RegExp(`(^|[^a-z0-9])${canonicalCity}\\s+([a-z]+)`, 'i');
+                const entityMatch = titleLower.match(entityRegex) || summaryLower.match(entityRegex);
+                if (entityMatch) {
+                    reason = `Local entity match: ${entityMatch[0].trim()}`;
+                    return true;
+                }
+                return false;
+            })()) {
+                accepted = true;
+            }
+            // Strong evidence: Direct city in summary
+            else if (canonicalCity && hasWord(summaryLower, canonicalCity)) {
+                accepted = true;
+                reason = `Location context match: ${canonicalCity}`;
+            }
+            // Strong evidence: County match
+            else if (canonicalCounty && (hasWord(titleLower, canonicalCounty) || hasWord(summaryLower, canonicalCounty))) {
+                accepted = true;
+                reason = `County match: ${canonicalCounty}`;
+            }
+            // Strong evidence: Regional metropolitan aliases
+            else if (canonicalCity && metroAliases[canonicalCity] && (() => {
+                for (const alias of metroAliases[canonicalCity]) {
+                    if (hasWord(titleLower, alias) || hasWord(summaryLower, alias)) {
+                        reason = `Regional geographic match: ${alias}`;
+                        return true;
+                    }
+                }
+                return false;
+            })()) {
+                accepted = true;
+            }
+            // Moderate evidence: City + State in text
+            else if (canonicalCity && canonicalState && hasWord(fullText, canonicalCity) && hasWord(fullText, canonicalState)) {
+                accepted = true;
+                reason = `City + State match: ${canonicalCity}, ${canonicalState}`;
+            }
+            // Weak evidence (Rejected): State-only or Country-only match without local geographic evidence
+            else if (canonicalState && hasWord(fullText, canonicalState)) {
+                accepted = false;
+                reason = "Rejected: state-only match without local geographic evidence";
+            } else if (canonicalCountry && hasWord(fullText, canonicalCountry)) {
+                accepted = false;
+                reason = "Rejected: country-only match without local geographic evidence";
+            }
+
+            console.log(`[NEWS VALIDATION]\nqueryLocation="${rawQuery}"\narticleTitle="${item.title}"\naccepted=${accepted}\nreason="${reason}"`);
             return accepted;
         });
-    } catch (err) {
+
+        const locElapsed = Date.now() - locStart;
+        console.log(`[NEWS TRACE] locationService COMPLETE articles=${filtered.length} elapsed=${locElapsed}ms`);
+        return filtered;
+    } catch (err: any) {
+        const locElapsed = Date.now() - locStart;
+        console.error(`[NEWS TRACE] ERROR stage=locationService elapsed=${locElapsed}ms message="${err?.message}"`);
         console.error("Failed to fetch real news:", err);
         return [];
     }

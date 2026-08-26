@@ -51,6 +51,16 @@ export function normalizeGeographicQuery(entity: string): string {
     const state = stateMap[spaceStateMatch[2]];
     return `${city}, ${state}`;
   }
+
+  // Handle "dallas texas" or "boston massachusetts" without comma
+  for (const [stAbbr, stName] of Object.entries(stateMap)) {
+    const regex = new RegExp(`^(.+?)\\s+${stName}$`, 'i');
+    const match = str.match(regex);
+    if (match) {
+      const city = match[1].trim();
+      return `${city}, ${stName}`;
+    }
+  }
   
   return str;
 }

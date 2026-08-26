@@ -61,6 +61,7 @@ export const getUserSettings = (): any => {
     aiProvider: 'gemini',
     lmStudioUrl: 'http://localhost:1234/v1',
     lmStudioModel: 'local-model',
+    newsProvider: 'gemini',
     showNews: true
   };
 };
@@ -69,7 +70,7 @@ export const getUserSettings = (): any => {
 export const generateContentWithRetry = async (params: any, retries = 3): Promise<any> => {
   const settings = getUserSettings();
   
-  if (settings.aiProvider === 'lmstudio') {
+  if (settings.aiProvider === 'lmstudio' && !params.config?.tools?.some((t: any) => t.googleSearch)) {
     return generateLocalLMStudioContent(params, settings.lmStudioUrl, settings.lmStudioModel);
   }
 
@@ -2802,22 +2803,26 @@ Output ONLY the JSON object.`;
 export const recoverLocationMetadata = async (
   entityName: string, 
   coordinates: GeoCoordinates,
-  canonicalIdentity?: Partial<CanonicalGeographicEntity> & { country?: string; state?: string; city?: string; region?: string; county?: string }
+  canonicalIdentity?: Partial<CanonicalGeographicEntity> & { country?: string; state?: string; city?: string; region?: string; county?: string; originalQuery?: string }
 ): Promise<Partial<EnrichmentResult> | null> => {
   try {
     const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
     
-    const entityTitle = canonicalIdentity?.canonicalName || entityName;
-    const adminArea = canonicalIdentity?.city || canonicalIdentity?.county || canonicalIdentity?.state || canonicalIdentity?.region || "Unknown area";
+    const entityTitle = canonicalIdentity?.canonicalName || normalizeLocationEntity(entityName) || entityName;
+    const adminArea = canonicalIdentity?.state || canonicalIdentity?.region || canonicalIdentity?.city || canonicalIdentity?.county || "Unknown area";
     const countryName = canonicalIdentity?.country || "Unknown country";
-    const entityTypeStr = canonicalIdentity?.entityType || "natural_feature";
+    const entityTypeStr = canonicalIdentity?.entityType || "settlement";
+    const originalQuery = canonicalIdentity?.originalQuery;
+
+    console.log(`[LLM ENRICHMENT INPUT]\ncanonicalName="${entityTitle}"\nentityType="${entityTypeStr}"\nstate="${adminArea}"\ncountry="${countryName}"\ncoordinates=${coordinates.lat.toFixed(4)},${coordinates.lng.toFixed(4)}\nidentityStatus="${canonicalIdentity?.identityStatus || 'verified'}"`);
 
     const contextDetails = [
-      `Entity: ${entityTitle}`,
-      `Canonical coordinates: ${coordinates.lat}, ${coordinates.lng}`,
-      `Country: ${countryName}`,
-      `Administrative area: ${adminArea}`,
+      `Canonical entity: ${entityTitle}`,
       `Entity type: ${entityTypeStr}`,
+      `State/region: ${adminArea}`,
+      `Country: ${countryName}`,
+      `Latitude: ${coordinates.lat}`,
+      `Longitude: ${coordinates.lng}`,
       canonicalIdentity?.osmId ? `OSM ID: ${canonicalIdentity.osmId}` : null,
       canonicalIdentity?.osmType ? `OSM Type: ${canonicalIdentity.osmType}` : null,
       canonicalIdentity?.wikidataId ? `Wikidata ID: ${canonicalIdentity.wikidataId}` : null,
@@ -2825,8 +2830,37 @@ export const recoverLocationMetadata = async (
     ].filter(Boolean).join('\n');
 
     const basePrompt = `
-      Canonical geographic identity:
-${contextDetails}
+      You are enriching a VERIFIED geographic entity.
+
+      Do not independently resolve, reinterpret, substitute, or guess the geographic entity based on the original search query.
+
+      The geographic resolver has already identified the exact entity.
+
+      Canonical entity:
+      ${entityTitle}
+
+      Entity type:
+      ${entityTypeStr}
+
+      State/region:
+      ${adminArea}
+
+      Country:
+      ${countryName}
+
+      Latitude:
+      ${coordinates.lat}
+
+      Longitude:
+      ${coordinates.lng}
+
+      ${originalQuery ? `The original user query "${originalQuery}" is provided only for reference.` : ''}
+
+      You MUST generate information specifically about the verified canonical entity above.
+
+      Do not use information about similarly named cities, counties, regions, metropolitan areas, people, organizations, historical entities, or places in other states or countries.
+
+      All description, history, climate, context notes, and notable facts must specifically refer to the verified geographic entity.
 
       CRITICAL INSTRUCTIONS:
       1. You MUST describe THIS entity at THESE canonical coordinates (${coordinates.lat}, ${coordinates.lng}).
@@ -2865,18 +2899,19 @@ ${contextDetails}
     `;
 
     const retryPrompt = `
-      Canonical geographic identity:
-${contextDetails}
+      You are enriching a VERIFIED geographic entity:
+      ${contextDetails}
 
       CRITICAL RULES:
       1. You MUST output ONLY a single valid JSON object.
-      2. Describe ONLY ${entityTitle} in ${countryName} at coordinates ${coordinates.lat}, ${coordinates.lng}.
-      3. ALL text must be strictly in ENGLISH. Do NOT use French, Spanish, German, Italian, etc.
-      4. Do NOT use markdown fences (\`\`\`).
-      5. Do NOT output partial JSON or nested climate objects as root.
-      6. You MUST include ALL of the following top-level keys: "description", "population", "climate", "contextNotes", "notable".
-      7. "description" must be substantive paragraphs in English about the entity, not just climate notes.
-      8. "notable" MUST be an array of structured objects, each with "title" (short topic/feature name) and "description" (1-2 sentence explanation). Never return plain strings for notable.
+      2. Describe ONLY ${entityTitle} in ${countryName} (${adminArea}) at coordinates ${coordinates.lat}, ${coordinates.lng}.
+      3. Do not confuse with other entities sharing a similar name.
+      4. ALL text must be strictly in ENGLISH. Do NOT use French, Spanish, German, Italian, etc.
+      5. Do NOT use markdown fences (\`\`\`).
+      6. Do NOT output partial JSON or nested climate objects as root.
+      7. You MUST include ALL of the following top-level keys: "description", "population", "climate", "contextNotes", "notable".
+      8. "description" must be substantive paragraphs in English about the entity, not just climate notes.
+      9. "notable" MUST be an array of structured objects, each with "title" (short topic/feature name) and "description" (1-2 sentence explanation). Never return plain strings for notable.
     `;
 
     const fetchAndParse = async (isRetry: boolean) => {

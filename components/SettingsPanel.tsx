@@ -19,6 +19,132 @@ const TABS: { id: SettingsTab; label: string }[] = [
   { id: 'news', label: 'NEWS' }
 ];
 
+export interface NewsConnectionTestResult {
+  outcome: 'SUCCESS' | 'FAILED';
+  status?: number | string;
+  message: string;
+}
+
+export const testNewsConnectionService = async (
+  provider: NewsProvider,
+  apiKeys?: { nytApiKey?: string; newsApiKey?: string; newsDataApiKey?: string },
+  envGetter?: () => Record<string, string | undefined>
+): Promise<NewsConnectionTestResult> => {
+  const providerNames: Record<string, string> = {
+    nyt: 'New York Times',
+    newsapi: 'NewsAPI',
+    newsdata: 'NewsData',
+    gemini: 'Gemini'
+  };
+  const providerLabel = providerNames[provider] || provider;
+
+  const defaultGetEnv = () => typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env : (typeof process !== 'undefined' ? process.env : {});
+  const env = (envGetter || defaultGetEnv)();
+  const nytKey = apiKeys?.nytApiKey || env?.VITE_NYT_API_KEY || '';
+  const newsApiKey = apiKeys?.newsApiKey || env?.VITE_NEWS_API_KEY || '';
+  const newsDataKey = apiKeys?.newsDataApiKey || env?.VITE_NEWS_DATA_API_KEY || '';
+
+  let hasKey = false;
+  let url = '';
+  let host = '';
+
+    if (provider === 'nyt') {
+      hasKey = !!nytKey;
+      if (hasKey) {
+        url = `https://api.nytimes.com/svc/search/v2/articlesearch.json?q=test&api-key=${nytKey}`;
+        host = 'api.nytimes.com/svc/search/v2/articlesearch.json';
+      }
+    } else if (provider === 'newsapi') {
+      hasKey = !!newsApiKey;
+      if (hasKey) {
+        url = `https://newsapi.org/v2/everything?q=news&pageSize=10&apiKey=${newsApiKey}`;
+        host = 'newsapi.org/v2/everything';
+      }
+    } else if (provider === 'newsdata') {
+      hasKey = !!newsDataKey;
+      if (hasKey) {
+        url = `https://newsdata.io/api/1/news?apikey=${newsDataKey}&q=test&language=en`;
+        host = 'newsdata.io/api/1/news';
+      }
+    }
+
+  console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=START\nAPIKeyConfigured=${hasKey}\nAPIKeySource=environment`);
+
+  let testOutcome: 'SUCCESS' | 'FAILED' = 'FAILED';
+
+  try {
+    if (!hasKey) {
+      throw new Error(`API key not configured for ${providerLabel}`);
+    }
+
+    console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=REQUEST\nEndpoint=${host}`);
+
+    const res = await fetch(url);
+    if (res.ok) {
+      let usableArticlesCount = 0;
+      try {
+        const data = await res.json();
+
+        if (Array.isArray(data.articles)) {
+          // NewsAPI
+          usableArticlesCount = data.articles.length;
+        } else if (Array.isArray(data.results)) {
+          // NewsData
+          usableArticlesCount = data.results.length;
+        } else if (Array.isArray(data.response?.docs)) {
+          // NYT
+          usableArticlesCount = data.response.docs.length;
+        }
+      } catch {
+        // Ignore JSON parse errors
+      }
+
+      if (usableArticlesCount === 0) {
+        testOutcome = 'FAILED';
+        const errorMsg = `No usable articles returned by ${providerLabel}`;
+        console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=FAILED\nStatus=${res.status}\nResponseReceived=true\nArticlesReturned=0\nError=${errorMsg}`);
+        return {
+          outcome: 'FAILED',
+          status: res.status,
+          message: errorMsg
+        };
+      }
+
+      testOutcome = 'SUCCESS';
+      console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=SUCCESS\nStatus=${res.status}\nResponseReceived=true\nArticlesReturned=${usableArticlesCount}`);
+      return {
+        outcome: 'SUCCESS',
+        status: res.status,
+        message: 'API Key is valid!'
+      };
+    } else {
+      testOutcome = 'FAILED';
+      let safeError = res.statusText || 'Request failed';
+      if (res.status === 401) safeError = 'invalid/unauthorized API key';
+      else if (res.status === 403) safeError = 'access forbidden';
+      else if (res.status === 429) safeError = 'rate limited';
+
+      console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=FAILED\nStatus=${res.status}\nError=${safeError}`);
+      return {
+        outcome: 'FAILED',
+        status: res.status,
+        message: `Error: ${res.status} ${res.statusText}`
+      };
+    }
+  } catch (e: any) {
+    testOutcome = 'FAILED';
+    const safeError = e.message || 'Connection failed';
+    console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=FAILED\nStatus=UNKNOWN\nError=${safeError}`);
+    return {
+      outcome: 'FAILED',
+      status: 'UNKNOWN',
+      message: safeError
+    };
+  } finally {
+    console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=COMPLETE\nResult=${testOutcome}`);
+  }
+};
+
 const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSettings, onClose, skin, initialTab = 'ai' }) => {
   const isParchment = skin === 'parchment';
   const isRetro = skin === 'retro-green' || skin === 'retro-amber';
@@ -89,27 +215,17 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
   const handleTestNewsConnection = async () => {
     setNewsTestStatus('testing');
     setNewsTestMessage('Testing...');
-    try {
-      let url = '';
-      if (settings.newsProvider === 'newsapi') {
-        url = `https://newsapi.org/v2/everything?q=test&pageSize=1&apiKey=${settings.newsApiKey}`;
-      } else if (settings.newsProvider === 'newsdata') {
-        url = `https://newsdata.io/api/1/news?apikey=${settings.newsDataApiKey}&q=test&language=en`;
-      } else if (settings.newsProvider === 'nyt') {
-        url = `https://api.nytimes.com/svc/search/v2/articlesearch.json?q=test&api-key=${settings.nytApiKey}`;
-      }
-      
-      const res = await fetch(url);
-      if (res.ok) {
-        setNewsTestStatus('success');
-        setNewsTestMessage('API Key is valid!');
-      } else {
-        setNewsTestStatus('error');
-        setNewsTestMessage(`Error: ${res.status} ${res.statusText}`);
-      }
-    } catch (e: any) {
+    const result = await testNewsConnectionService(settings.newsProvider, {
+      nytApiKey: settings.nytApiKey,
+      newsApiKey: settings.newsApiKey,
+      newsDataApiKey: settings.newsDataApiKey
+    });
+    if (result.outcome === 'SUCCESS') {
+      setNewsTestStatus('success');
+      setNewsTestMessage(result.message);
+    } else {
       setNewsTestStatus('error');
-      setNewsTestMessage(e.message || 'Connection failed');
+      setNewsTestMessage(result.message);
     }
   };
 
@@ -700,45 +816,25 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
               </div>
 
               {settings.newsProvider !== 'gemini' && (
-                <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-                  <div>
-                    <label className={labelClasses}>
-                      {settings.newsProvider === 'nyt' ? 'NYT API Key' : settings.newsProvider === 'newsapi' ? 'NewsAPI.org Key' : 'NewsData.io Key'}
-                    </label>
-                    <input
-                      type="password"
-                      value={(settings.newsProvider === 'nyt' ? settings.nytApiKey : settings.newsProvider === 'newsapi' ? settings.newsApiKey : settings.newsDataApiKey) || ''}
-                      onChange={(e) => onUpdateSettings({ 
-                          ...settings, 
-                          ...(settings.newsProvider === 'nyt' ? { nytApiKey: e.target.value } : 
-                              settings.newsProvider === 'newsapi' ? { newsApiKey: e.target.value } : 
-                              { newsDataApiKey: e.target.value })
-                      })}
-                      className={inputClasses}
-                      placeholder={`Enter ${settings.newsProvider === 'nyt' ? 'NYT' : settings.newsProvider === 'newsapi' ? 'NewsAPI' : 'NewsData'} API Key`}
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={handleTestNewsConnection}
-                      disabled={newsTestStatus === 'testing' || !(settings.newsProvider === 'nyt' ? settings.nytApiKey : settings.newsProvider === 'newsapi' ? settings.newsApiKey : settings.newsDataApiKey)}
-                      className={`px-4 py-2 rounded-lg text-sm border font-medium transition-colors
-                        ${isParchment ? 'border-[#8b5a2b] bg-[#8b5a2b]/10 hover:bg-[#8b5a2b]/20 text-[#8b5a2b]' : ''}
-                        ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20' : ''}
-                        ${isRetro ? 'border-[#33ff33] rounded-none hover:bg-[#33ff33]/20 text-[#33ff33] disabled:opacity-50' : ''}
-                        ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
-                      `}
-                    >
-                      {newsTestStatus === 'testing' ? 'Testing...' : 'Test API Key'}
-                    </button>
-                    {newsTestStatus !== 'idle' && (
-                      <span className={`text-xs ${newsTestStatus === 'success' ? 'text-green-500' : 'text-red-500'}`}>
-                        {newsTestMessage}
-                      </span>
-                    )}
-                  </div>
+                <div className="pt-1 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleTestNewsConnection}
+                    disabled={newsTestStatus === 'testing'}
+                    className={`px-4 py-2 rounded-lg text-sm border font-medium transition-colors
+                      ${isParchment ? 'border-[#8b5a2b] bg-[#8b5a2b]/10 hover:bg-[#8b5a2b]/20 text-[#8b5a2b]' : ''}
+                      ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20' : ''}
+                      ${isRetro ? 'border-[#33ff33] rounded-none hover:bg-[#33ff33]/20 text-[#33ff33] disabled:opacity-50' : ''}
+                      ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
+                    `}
+                  >
+                    {newsTestStatus === 'testing' ? 'Testing...' : 'Test Connection'}
+                  </button>
+                  {newsTestStatus !== 'idle' && (
+                    <span className={`text-xs ${newsTestStatus === 'success' ? 'text-green-500' : 'text-red-500'}`}>
+                      {newsTestMessage}
+                    </span>
+                  )}
                 </div>
               )}
             </div>

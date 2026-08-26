@@ -380,11 +380,68 @@ export function getHistoricalEntityKnowledge(entityName: string): HistoricalEnti
   return HISTORICAL_KNOWLEDGE_BASE[normEntity] || HISTORICAL_KNOWLEDGE_BASE[entityName.toLowerCase().trim()];
 }
 
+const US_STATE_MAP: Record<string, string> = {
+  "al": "Alabama", "ak": "Alaska", "az": "Arizona", "ar": "Arkansas", "ca": "California",
+  "co": "Colorado", "ct": "Connecticut", "de": "Delaware", "fl": "Florida", "ga": "Georgia",
+  "hi": "Hawaii", "id": "Idaho", "il": "Illinois", "in": "Indiana", "ia": "Iowa",
+  "ks": "Kansas", "ky": "Kentucky", "la": "Louisiana", "me": "Maine", "md": "Maryland",
+  "ma": "Massachusetts", "mi": "Michigan", "mn": "Minnesota", "ms": "Mississippi", "mo": "Missouri",
+  "mt": "Montana", "ne": "Nebraska", "nv": "Nevada", "nh": "New Hampshire", "nj": "New Jersey",
+  "nm": "New Mexico", "ny": "New York", "nc": "North Carolina", "nd": "North Dakota", "oh": "Ohio",
+  "ok": "Oklahoma", "or": "Oregon", "pa": "Pennsylvania", "ri": "Rhode Island", "sc": "South Carolina",
+  "sd": "South Dakota", "tn": "Tennessee", "tx": "Texas", "ut": "Utah", "vt": "Vermont",
+  "va": "Virginia", "wa": "Washington", "wv": "West Virginia", "wi": "Wisconsin", "wy": "Wyoming"
+};
+
 export function toCanonicalTitleCase(str: string): string {
   if (!str) return '';
   const hist = getHistoricalEntityKnowledge(str);
   if (hist?.entity) return hist.entity;
-  return str
+
+  const raw = str.trim();
+
+  // Helper to title-case words without lowercasing already capitalized acronyms/Roman numerals (like II, III, DFW)
+  const formatWord = (w: string) => {
+    if (!w) return '';
+    // If word is Roman numeral like II, III, IV or acronym, preserve
+    if (/^(?:II|III|IV|VI|VII|VIII|IX|X|USA|UK|DFW)$/i.test(w)) {
+      return w.toUpperCase();
+    }
+    return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+  };
+
+  const titleCasePhrase = (phrase: string) => {
+    return phrase.split(/\s+/).map(formatWord).join(' ');
+  };
+
+  // Handle comma-separated city, state/country (e.g. "Dallas, Texas", "dallas, texas", "DALLAS, TX")
+  const commaMatch = raw.match(/^(.+?),\s*(.+)$/);
+  if (commaMatch) {
+    const city = titleCasePhrase(commaMatch[1].trim());
+    const stateCandidate = commaMatch[2].trim().toLowerCase();
+    const resolvedState = US_STATE_MAP[stateCandidate] || titleCasePhrase(commaMatch[2].trim());
+    return `${city}, ${resolvedState}`;
+  }
+
+  // Handle space-separated city and state abbreviation (e.g. "dallas tx", "DALLAS TX")
+  const spaceAbbrMatch = raw.match(/^(.+?)\s+([a-zA-Z]{2})$/);
+  if (spaceAbbrMatch && US_STATE_MAP[spaceAbbrMatch[2].toLowerCase()]) {
+    const city = titleCasePhrase(spaceAbbrMatch[1].trim());
+    const state = US_STATE_MAP[spaceAbbrMatch[2].toLowerCase()];
+    return `${city}, ${state}`;
+  }
+
+  // Handle space-separated city and full state name (e.g. "dallas texas", "DALLAS TEXAS", "Dallas Texas")
+  for (const [stAbbr, stName] of Object.entries(US_STATE_MAP)) {
+    const regex = new RegExp(`^(.+?)\\s+${stName}$`, 'i');
+    const match = raw.match(regex);
+    if (match) {
+      const city = titleCasePhrase(match[1].trim());
+      return `${city}, ${stName}`;
+    }
+  }
+
+  return raw
     .replace(/\b([a-z])/g, (_, l) => l.toUpperCase())
     .trim();
 }

@@ -3,6 +3,8 @@ import { generateContentWithRetry, modelName } from '../geminiService';
 import { parseAndExtract } from '../../utils/jsonParser';
 
 export const fetchGeminiGroundedNews = async (locationName: string): Promise<NewsItem[]> => {
+  const providerStart = Date.now();
+  console.log(`[NEWS TRACE] Gemini provider START location="${locationName}"`);
   const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
   const count = 3;
 
@@ -36,6 +38,8 @@ export const fetchGeminiGroundedNews = async (locationName: string): Promise<New
   `;
 
   try {
+    const apiStart = Date.now();
+    console.log(`[NEWS TRACE] Gemini API START`);
     const response = await generateContentWithRetry({
       model: modelName,
       contents: prompt,
@@ -44,6 +48,8 @@ export const fetchGeminiGroundedNews = async (locationName: string): Promise<New
         maxOutputTokens: 4000,
       }
     });
+    const apiElapsed = Date.now() - apiStart;
+    console.log(`[NEWS TRACE] Gemini API COMPLETE elapsed=${apiElapsed}ms`);
 
     const parsed = parseAndExtract(response.text);
     const data = parsed.success ? (parsed.value as any) : null;
@@ -54,6 +60,8 @@ export const fetchGeminiGroundedNews = async (locationName: string): Promise<New
     } else if (data && data.news && Array.isArray(data.news)) {
       items = data.news;
     }
+
+    console.log(`[NEWS TRACE] Gemini JSON PARSED articles=${items.length}`);
 
     const receivedCount = items.length;
     let rejectedCount = 0;
@@ -94,6 +102,9 @@ export const fetchGeminiGroundedNews = async (locationName: string): Promise<New
        return true;
     });
 
+    const providerElapsed = Date.now() - providerStart;
+    console.log(`[NEWS TRACE] Gemini provider COMPLETE articles=${filteredNews.length} elapsed=${providerElapsed}ms`);
+
     console.log(JSON.stringify({
       stage: "news-filter",
       received: receivedCount,
@@ -104,6 +115,8 @@ export const fetchGeminiGroundedNews = async (locationName: string): Promise<New
     return filteredNews;
 
   } catch (error: any) {
+    const providerElapsed = Date.now() - providerStart;
+    console.error(`[NEWS TRACE] ERROR stage=geminiNewsProvider elapsed=${providerElapsed}ms message="${error?.message}"`);
     const isQuota = error?.message?.includes('429') || error?.message?.includes('Quota') || (error?.error && error.error.code === 429);
     if (isQuota) {
         throw new Error("Gemini quota exceeded");

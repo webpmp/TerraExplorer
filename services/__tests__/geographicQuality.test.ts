@@ -10,7 +10,7 @@ describe('Geographic Quality Framework Tests', () => {
     expect(normalizeGeographicQuery("ROME")).toBe("rome");
     expect(normalizeGeographicQuery("plano, texas")).toBe("plano, texas");
     expect(normalizeGeographicQuery("plano tx")).toBe("plano, texas");
-    expect(normalizeGeographicQuery("boston massachusetts")).toBe("boston massachusetts");
+    expect(normalizeGeographicQuery("boston massachusetts")).toBe("boston, massachusetts");
   });
 
   test('Alias Resolution', () => {

@@ -308,7 +308,6 @@ const App: React.FC = () => {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed.newsProvider === 'gemini') parsed.newsProvider = 'nyt';
         parsed.showNews = parsed.showNews !== undefined ? !!parsed.showNews : true;
         if (typeof parsed.documentaryDuration === 'string') {
           const map: Record<string, number> = { short: 3.2, cinematic: 5.5, long: 8.0 };
@@ -325,7 +324,7 @@ const App: React.FC = () => {
       aiProvider: 'gemini',
       lmStudioUrl: 'http://localhost:1234/v1',
       lmStudioModel: 'local-model',
-      newsProvider: 'nyt',
+      newsProvider: 'gemini',
       newsApiKey: '',
       nytApiKey: '',
       newsDataApiKey: '',
@@ -2285,9 +2284,12 @@ const App: React.FC = () => {
       activeSelectionIdRef.current = searchMarker.id;
       console.log(`[SearchNarration] ACTIVE_SELECTION_SET id="${searchMarker.id}"`);
       setSelectedMarkerId(searchMarker.id);
-      setSelectedMarkerCoordinates({ lat, lng });
+      const newCoords = { lat, lng };
+      setSelectedMarkerCoordinates(newCoords);
+      selectedMarkerCoordinatesRef.current = newCoords;
       console.log(`[SearchNarration] LOCATION_INFO_SET id="${(finalData as any).id}" name="${finalData.name}"`);
       setLocationInfo(finalData);
+      locationInfoRef.current = finalData;
       setIsDiscoveryLoading(false);
       console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
 
@@ -2722,9 +2724,13 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
   const handleFetchNews = useCallback(async () => {
     if (!locationInfo || userSettingsRef.current.showNews === false) return;
+    const appStart = Date.now();
+    console.log(`[NEWS TRACE] App handleFetchNews START location="${locationInfo.name}"`);
     setIsNewsFetching(true);
     try {
       const newsItems = await fetchAndValidateLocationNews(locationInfo.name, locationInfo);
+      const appElapsed = Date.now() - appStart;
+      console.log(`[NEWS TRACE] App handleFetchNews COMPLETE articles=${newsItems.length} elapsed=${appElapsed}ms`);
       setLocationInfo(prev => {
          if (!prev) return null;
          return {
@@ -2734,7 +2740,9 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
          };
       });
       return newsItems;
-    } catch (err) {
+    } catch (err: any) {
+      const appElapsed = Date.now() - appStart;
+      console.error(`[NEWS TRACE] ERROR stage=App.handleFetchNews elapsed=${appElapsed}ms message="${err?.message}"`);
       console.error("Failed to fetch news:", err);
       setLocationInfo(prev => prev ? { ...prev, sectionState: { ...prev.sectionState, news: "error" } } : prev);
       throw err;

@@ -1,7 +1,7 @@
 import React from 'react';
 import { describe, test, it, expect, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import SettingsPanel from '../SettingsPanel';
+import SettingsPanel, { testNewsConnectionService } from '../SettingsPanel';
 import { SkinType, UserSettings } from '../../types';
 
 describe('SettingsPanel - Top-Level Tab Reorganization', () => {
@@ -127,7 +127,7 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(html).toContain('Test Voice');
   });
 
-  test('6. News tab displays news services, API key controls, and SHOW NEWS toggle', () => {
+  test('6. News tab displays news services, SHOW NEWS toggle, and Test Connection button without API key inputs', () => {
     const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="news" />);
 
     expect(html).toContain('id="settings-tabpanel-news"');
@@ -136,8 +136,13 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(html).toContain('role="switch"');
     expect(html).toContain('aria-checked="true"');
     expect(html).toContain('The New York Times');
-    expect(html).toContain('NYT API Key');
-    expect(html).toContain('Test API Key');
+    expect(html).toContain('Test Connection');
+
+    // Verify API key inputs are not rendered
+    expect(html).not.toContain('NYT API Key');
+    expect(html).not.toContain('NewsAPI.org Key');
+    expect(html).not.toContain('NewsData.io Key');
+    expect(html).not.toContain('type="password"');
   });
 
   test('7. News tab renders SHOW NEWS toggle in OFF state when showNews is false', () => {
@@ -217,6 +222,250 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
       expect(html).toContain('GEMINI_API_KEY=');
     });
   });
+
+  test('11. News tab Service dropdown includes exact label "Gemini (Default AI Search)" with value="gemini"', () => {
+    const html = renderToStaticMarkup(
+      <SettingsPanel
+        {...baseProps}
+        settings={{ ...baseSettings, newsProvider: 'gemini' }}
+        initialTab="news"
+      />
+    );
+
+    // Dropdown contains all four providers with exact option labels
+    expect(html).toContain('The New York Times');
+    expect(html).toContain('NewsAPI.org');
+    expect(html).toContain('NewsData.io');
+    expect(html).toContain('Gemini (Default AI Search)');
+    expect(html).toContain('value="gemini"');
+
+    // Test connection button is hidden for gemini
+    expect(html).not.toContain('Test Connection');
+
+    // API key inputs are never rendered
+    expect(html).not.toContain('NYT API Key');
+    expect(html).not.toContain('NewsAPI.org Key');
+    expect(html).not.toContain('NewsData.io Key');
+    expect(html).not.toContain('type="password"');
+  });
+
+  test('12. Test Connection produces expected diagnostic logs without leaking API keys on success', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({
+        response: {
+          docs: [{ headline: { main: 'Article 1' } }, { headline: { main: 'Article 2' } }]
+        }
+      })
+    } as any);
+
+    const secretKey = 'super-secret-nyt-key-999';
+    const result = await testNewsConnectionService('nyt', { nytApiKey: secretKey });
+
+    expect(result.outcome).toBe('SUCCESS');
+    expect(result.status).toBe(200);
+
+    const logs = consoleSpy.mock.calls.map(c => c[0]);
+
+    // START log with APIKeyConfigured and APIKeySource=environment
+    expect(logs.some(l => l.includes('[NEWS TEST CONNECTION]') && l.includes('Action=START') && l.includes('APIKeyConfigured=true') && l.includes('APIKeySource=environment'))).toBe(true);
+
+    // REQUEST log with Endpoint
+    expect(logs.some(l => l.includes('[NEWS TEST CONNECTION]') && l.includes('Action=REQUEST') && l.includes('api.nytimes.com'))).toBe(true);
+
+    // SUCCESS log with Status 200, ResponseReceived, and ArticlesReturned count
+    expect(logs.some(l => l.includes('[NEWS TEST CONNECTION]') && l.includes('Action=SUCCESS') && l.includes('Status=200') && l.includes('ResponseReceived=true') && l.includes('ArticlesReturned=2'))).toBe(true);
+
+    // COMPLETE log with Result=SUCCESS
+    expect(logs.some(l => l.includes('[NEWS TEST CONNECTION]') && l.includes('Action=COMPLETE') && l.includes('Result=SUCCESS'))).toBe(true);
+
+    // CRITICAL: Ensure secret API key is never logged anywhere in console output
+    for (const log of logs) {
+      expect(log).not.toContain(secretKey);
+    }
+
+    consoleSpy.mockRestore();
+    fetchSpy.mockRestore();
+  });
+
+  test('13. Test Connection produces expected diagnostic logs on failure without leaking API keys', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      json: async () => ({})
+    } as any);
+
+    const secretKey = 'invalid-secret-key-123';
+    const result = await testNewsConnectionService('newsapi', { newsApiKey: secretKey });
+
+    expect(result.outcome).toBe('FAILED');
+    expect(result.status).toBe(401);
+
+    const logs = consoleSpy.mock.calls.map(c => c[0]);
+
+    // START
+    expect(logs.some(l => l.includes('[NEWS TEST CONNECTION]') && l.includes('Provider=NewsAPI') && l.includes('Action=START') && l.includes('APIKeySource=environment'))).toBe(true);
+
+    // REQUEST
+    expect(logs.some(l => l.includes('[NEWS TEST CONNECTION]') && l.includes('Action=REQUEST'))).toBe(true);
+
+    // FAILED with safe error description
+    expect(logs.some(l => l.includes('[NEWS TEST CONNECTION]') && l.includes('Action=FAILED') && l.includes('Status=401') && l.includes('invalid/unauthorized API key'))).toBe(true);
+
+    // COMPLETE
+    expect(logs.some(l => l.includes('[NEWS TEST CONNECTION]') && l.includes('Action=COMPLETE') && l.includes('Result=FAILED'))).toBe(true);
+
+    // CRITICAL: Ensure secret key is not in logs
+    for (const log of logs) {
+      expect(log).not.toContain(secretKey);
+    }
+
+    consoleSpy.mockRestore();
+    fetchSpy.mockRestore();
+  });
+
+  test('14. Test Connection logs APIKeyConfigured=false when key is missing', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const result = await testNewsConnectionService('newsdata', undefined, () => ({}));
+
+    expect(result.outcome).toBe('FAILED');
+
+    const logs = consoleSpy.mock.calls.map(c => c[0]);
+
+    // START with APIKeyConfigured=false and APIKeySource=environment
+    expect(logs.some(l => l.includes('[NEWS TEST CONNECTION]') && l.includes('Provider=NewsData') && l.includes('Action=START') && l.includes('APIKeyConfigured=false') && l.includes('APIKeySource=environment'))).toBe(true);
+
+    // FAILED with missing key
+    expect(logs.some(l => l.includes('[NEWS TEST CONNECTION]') && l.includes('Action=FAILED') && l.includes('API key not configured'))).toBe(true);
+
+    // COMPLETE with Result=FAILED
+    expect(logs.some(l => l.includes('[NEWS TEST CONNECTION]') && l.includes('Action=COMPLETE') && l.includes('Result=FAILED'))).toBe(true);
+
+    consoleSpy.mockRestore();
+  });
+
+  test('15. NewsAPI, NYT, and NewsData all read from environment variables when settings keys are empty and report usable article counts', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ status: 'ok', articles: [{ title: 'NewsAPI Article 1' }, { title: 'NewsAPI Article 2' }, { title: 'NewsAPI Article 3' }] })
+      } as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ response: { docs: [{ headline: { main: 'NYT Article 1' } }] } })
+      } as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ status: 'success', results: [{ title: 'NewsData Article 1' }, { title: 'NewsData Article 2' }] })
+      } as any);
+
+    // Simulate empty settings passed from App.tsx after reload
+    const emptySettingsKeys = {
+      nytApiKey: '',
+      newsApiKey: '',
+      newsDataApiKey: ''
+    };
+
+    // Test NewsAPI with empty settings key
+    const newsApiResult = await testNewsConnectionService('newsapi', emptySettingsKeys);
+    expect(newsApiResult.outcome).toBe('SUCCESS');
+
+    // Test NYT with empty settings key
+    const nytResult = await testNewsConnectionService('nyt', emptySettingsKeys);
+    expect(nytResult.outcome).toBe('SUCCESS');
+
+    // Test NewsData with empty settings key
+    const newsDataResult = await testNewsConnectionService('newsdata', emptySettingsKeys);
+    expect(newsDataResult.outcome).toBe('SUCCESS');
+
+    const logs = consoleSpy.mock.calls.map(c => c[0]);
+    // Check START logs
+    expect(logs.some(l => l.includes('Provider=NewsAPI') && l.includes('Action=START') && l.includes('APIKeyConfigured=true') && l.includes('APIKeySource=environment'))).toBe(true);
+    expect(logs.some(l => l.includes('Provider=New York Times') && l.includes('Action=START') && l.includes('APIKeyConfigured=true') && l.includes('APIKeySource=environment'))).toBe(true);
+    expect(logs.some(l => l.includes('Provider=NewsData') && l.includes('Action=START') && l.includes('APIKeyConfigured=true') && l.includes('APIKeySource=environment'))).toBe(true);
+
+    // Check SUCCESS logs with ArticlesReturned
+    expect(logs.some(l => l.includes('Provider=NewsAPI') && l.includes('Action=SUCCESS') && l.includes('ArticlesReturned=3'))).toBe(true);
+    expect(logs.some(l => l.includes('Provider=New York Times') && l.includes('Action=SUCCESS') && l.includes('ArticlesReturned=1'))).toBe(true);
+    expect(logs.some(l => l.includes('Provider=NewsData') && l.includes('Action=SUCCESS') && l.includes('ArticlesReturned=2'))).toBe(true);
+
+    consoleSpy.mockRestore();
+    fetchSpy.mockRestore();
+  });
+
+  test('16. NewsAPI returns HTTP 200 with articles -> Result=SUCCESS', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({ status: 'ok', totalResults: 10, articles: new Array(10).fill({ title: 'Sample' }) })
+    } as any);
+
+    const result = await testNewsConnectionService('newsapi', { newsApiKey: 'valid-key' });
+    expect(result.outcome).toBe('SUCCESS');
+    expect(result.status).toBe(200);
+
+    const logs = consoleSpy.mock.calls.map(c => c[0]);
+    expect(logs.some(l => l.includes('Provider=NewsAPI') && l.includes('Action=SUCCESS') && l.includes('Status=200') && l.includes('ArticlesReturned=10'))).toBe(true);
+    expect(logs.some(l => l.includes('Provider=NewsAPI') && l.includes('Action=COMPLETE') && l.includes('Result=SUCCESS'))).toBe(true);
+
+    consoleSpy.mockRestore();
+    fetchSpy.mockRestore();
+  });
+
+  test('17. NewsAPI returns HTTP 200 with zero articles -> Result=FAILED', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({ status: 'ok', totalResults: 0, articles: [] })
+    } as any);
+
+    const result = await testNewsConnectionService('newsapi', { newsApiKey: 'valid-key' });
+    expect(result.outcome).toBe('FAILED');
+    expect(result.status).toBe(200);
+
+    const logs = consoleSpy.mock.calls.map(c => c[0]);
+    expect(logs.some(l => l.includes('Provider=NewsAPI') && l.includes('Action=FAILED') && l.includes('Status=200') && l.includes('ResponseReceived=true') && l.includes('ArticlesReturned=0') && l.includes('Error=No usable articles returned by NewsAPI'))).toBe(true);
+    expect(logs.some(l => l.includes('Provider=NewsAPI') && l.includes('Action=COMPLETE') && l.includes('Result=FAILED'))).toBe(true);
+
+    consoleSpy.mockRestore();
+    fetchSpy.mockRestore();
+  });
+
+  test('18. NewsAPI returns an HTTP/API error -> Result=FAILED', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      statusText: 'Too Many Requests',
+      json: async () => ({})
+    } as any);
+
+    const result = await testNewsConnectionService('newsapi', { newsApiKey: 'valid-key' });
+    expect(result.outcome).toBe('FAILED');
+    expect(result.status).toBe(429);
+
+    const logs = consoleSpy.mock.calls.map(c => c[0]);
+    expect(logs.some(l => l.includes('Provider=NewsAPI') && l.includes('Action=FAILED') && l.includes('Status=429') && l.includes('rate limited'))).toBe(true);
+    expect(logs.some(l => l.includes('Provider=NewsAPI') && l.includes('Action=COMPLETE') && l.includes('Result=FAILED'))).toBe(true);
+
+    consoleSpy.mockRestore();
+    fetchSpy.mockRestore();
+  });
 });
-
-

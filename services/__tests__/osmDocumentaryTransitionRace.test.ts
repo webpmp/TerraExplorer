@@ -124,8 +124,79 @@ describe('OSM Documentary Camera Transition & Globe Active Race Suite', () => {
     const dist = 2.5;
     const isDocActive = documentaryController.isActive();
     const isTransitionOwnedByDoc = isDocActive;
-    const isReturningToGlobe = dist > 1.85 || (!isTransitionOwnedByDoc && dist > 1.55);
+    const isReturningToGlobe = !isTransitionOwnedByDoc && (dist > 1.85 || dist > 1.55);
 
     expect(isReturningToGlobe).toBe(true);
+  });
+
+  it('5. Destination Handoff: Sydney Opera House -> Dallas, Texas cleanly transfers destination ownership and supersedes previous transition', () => {
+    const logs: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args) => {
+      logs.push(args.join(' '));
+    });
+
+    const sydneyDest = {
+      lat: -33.8568,
+      lng: 151.2153,
+      name: 'Sydney Opera House'
+    };
+
+    let camLat = -33.8568;
+    let camLng = 151.2153;
+    let camDist = 1.30;
+
+    // First search: Sydney
+    const seq1 = documentaryController.startSingleLocation(sydneyDest, {
+      getCameraCoordinates: () => ({ lat: camLat, lng: camLng }),
+      getCameraDistance: () => camDist,
+      setCameraCoordinates: (lat, lng) => { camLat = lat; camLng = lng; },
+      setCameraDistance: (dist) => { camDist = dist; }
+    });
+
+    expect(documentaryController.getCurrentDestination()?.name).toBe('Sydney Opera House');
+    expect(seq1).toBeGreaterThan(0);
+
+    // Second search: Dallas, Texas
+    const dallasDest = {
+      lat: 32.7767,
+      lng: -96.7970,
+      name: 'Dallas, Texas'
+    };
+
+    const seq2 = documentaryController.startSingleLocation(dallasDest, {
+      getCameraCoordinates: () => ({ lat: camLat, lng: camLng }),
+      getCameraDistance: () => camDist,
+      setCameraCoordinates: (lat, lng) => { camLat = lat; camLng = lng; },
+      setCameraDistance: (dist) => { camDist = dist; }
+    });
+
+    expect(seq2).toBeGreaterThan(seq1);
+    expect(documentaryController.getCurrentDestination()?.name).toBe('Dallas, Texas');
+    expect(documentaryController.getPreviousDestination()?.name).toBe('Sydney Opera House');
+
+    // Verify logs
+    const joinedLogs = logs.join('\n');
+    expect(joinedLogs).toContain('[DESTINATION HANDOFF]');
+    expect(joinedLogs).toContain('previous="Sydney Opera House"');
+    expect(joinedLogs).toContain('previousCoordinates=-33.8568,151.2153');
+    expect(joinedLogs).toContain('current="Dallas, Texas"');
+    expect(joinedLogs).toContain('currentCoordinates=32.7767,-96.7970');
+    expect(joinedLogs).toContain('[DESTINATION COMMITTED]');
+    expect(joinedLogs).toContain('name="Dallas, Texas"');
+    expect(joinedLogs).toContain(`transitionId=${seq2}`);
+    expect(joinedLogs).toContain('[DOCUMENTARY START]');
+    expect(joinedLogs).toContain('startDistance=1.3000');
+    expect(joinedLogs).toContain('targetDistance=1.3000');
+
+    // Verify OSM Map Layer evaluation during zoom-out phase of Dallas transition (dist climbs from 1.30 -> 4.0)
+    camDist = 1.8531;
+    const isDocActive = documentaryController.isActive();
+    const isTransitionOwnedByDoc = isDocActive || (documentaryController.getCurrentDestination() !== null && camDist <= 1.85);
+    const isManualInteracting = false;
+    const hasGlobeShifted = false;
+    const isReturningToGlobe = !isTransitionOwnedByDoc && (camDist > 1.85 || (camDist > 1.55 && (isManualInteracting || hasGlobeShifted)));
+
+    expect(isTransitionOwnedByDoc).toBe(true);
+    expect(isReturningToGlobe).toBe(false);
   });
 });
