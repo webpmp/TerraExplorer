@@ -842,7 +842,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                         ? (skin === 'retro-amber' ? 'bg-black/60 text-[#ffb000] border border-[#ffb000]' : 'bg-black/60 text-[#33ff33] border border-[#33ff33]') 
                         : 'bg-black/50 text-cyan-200 border border-white/10'
                     }`}>
-                      <pre className="whitespace-pre">{`VITE_CARTO_API_KEY="YOUR_CARTO_API_KEY"`}</pre>
+                      <pre className="whitespace-pre">{`VITE_CARTO_API_KEY=your_carto_api_key`}</pre>
                     </div>
                   </div>
                 </div>
@@ -1032,10 +1032,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                       ? (skin === 'retro-amber' ? 'bg-black/60 text-[#ffb000] border border-[#ffb000]' : 'bg-black/60 text-[#33ff33] border border-[#33ff33]') 
                       : 'bg-black/50 text-cyan-200 border border-white/10'
                   }`}>
-                    <pre className="whitespace-pre">{`VITE_NYT_API_KEY="YOUR_NYT_API_KEY"
-VITE_NEWS_API_KEY="YOUR_NEWS_API_KEY"
-VITE_NEWS_DATA_API_KEY="YOUR_NEWS_DATA_API_KEY"
-GEMINI_API_KEY="YOUR_GEMINI_API_KEY"`}</pre>
+                    <pre className="whitespace-pre">{`GEMINI_API_KEY=your_gemini_api_key
+VITE_CARTO_API_KEY=your_carto_api_key
+VITE_NYT_API_KEY=your_nytimes_api_key
+VITE_NEWS_API_KEY=your_newsapi_org_key
+VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                   </div>
                 </div>
               </div>

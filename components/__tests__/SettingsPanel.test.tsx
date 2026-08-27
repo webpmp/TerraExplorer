@@ -216,10 +216,11 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     // .env.local instructions & code block
     expect(html).toContain('API KEYS');
     expect(html).toContain('Add your keys to the project&#x27;s .env.local file:');
-    expect(html).toContain('VITE_NYT_API_KEY=&quot;YOUR_NYT_API_KEY&quot;');
-    expect(html).toContain('VITE_NEWS_API_KEY=&quot;YOUR_NEWS_API_KEY&quot;');
-    expect(html).toContain('VITE_NEWS_DATA_API_KEY=&quot;YOUR_NEWS_DATA_API_KEY&quot;');
-    expect(html).toContain('GEMINI_API_KEY=&quot;YOUR_GEMINI_API_KEY&quot;');
+    expect(html).toContain('GEMINI_API_KEY=your_gemini_api_key');
+    expect(html).toContain('VITE_CARTO_API_KEY=your_carto_api_key');
+    expect(html).toContain('VITE_NYT_API_KEY=your_nytimes_api_key');
+    expect(html).toContain('VITE_NEWS_API_KEY=your_newsapi_org_key');
+    expect(html).toContain('VITE_NEWS_DATA_API_KEY=your_newsdata_io_key');
   });
 
   test('11. PROVIDERS tab News Service dropdown includes exact label "Gemini (Default AI Search)" with value="gemini"', () => {
