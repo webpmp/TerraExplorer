@@ -35,25 +35,9 @@ Terra Explorer is an interactive 3D globe application that lets users freely nav
 
 ## Technology Stack
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/marwin1991/profile-technology-icons/refs/heads/main/icons/react.png" width="48" height="48" alt="React" />
-  &nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/marwin1991/profile-technology-icons/refs/heads/main/icons/typescript.png" width="48" height="48" alt="TypeScript" />
-  &nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/marwin1991/profile-technology-icons/refs/heads/main/icons/tailwind_css.png" width="48" height="48" alt="Tailwind CSS" />
-  &nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/marwin1991/profile-technology-icons/refs/heads/main/icons/vite.png" width="48" height="48" alt="Vite" />
-  &nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/marwin1991/profile-technology-icons/refs/heads/main/icons/node_js.png" width="48" height="48" alt="Node.js" />
-  &nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/marwin1991/profile-technology-icons/refs/heads/main/icons/lucide.png" width="48" height="48" alt="Lucide Icons" />
-  &nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/marwin1991/profile-technology-icons/refs/heads/main/icons/docker.png" width="48" height="48" alt="Docker" />
-  &nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/marwin1991/profile-technology-icons/refs/heads/main/icons/git.png" width="48" height="48" alt="Git" />
-  &nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/marwin1991/profile-technology-icons/refs/heads/main/icons/github.png" width="48" height="48" alt="GitHub" />
-</p>
+<div align="center">
+  <img src="https://github-readme-tech-stack.vercel.app/api/cards?title=Technology+Stack&titleAlign=center&lineCount=3&theme=github_dark&align=center&width=500&line1=react,React,auto;typescript,TypeScript,auto;three.js,Three.js,auto;tailwindcss,Tailwind+CSS,auto;&line2=vite,Vite,auto;nodedotjs,Node.js,auto;googlegemini,Google+Gemini,auto;openstreetmap,OpenStreetMap,auto;&line3=carto,CARTO,auto;lucide,Lucide,auto;vitest,Vitest,auto;docker,Docker,auto;" alt="TerraExplorer Tech Stack" />
+</div>
 
 - **Frontend**: React 19, TypeScript
 - **3D Rendering**: Three.js, React Three Fiber (`@react-three/fiber`), Drei (`@react-three/drei`)
