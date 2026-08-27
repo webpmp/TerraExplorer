@@ -23,6 +23,7 @@ import logoImageBlack from './assets/logo-terra-explorer-black.png';
 import logoImageGreen from './assets/logo-terra-explorer-green.png';
 import logoImageAmber from './assets/logo-terra-explorer-amber.png';
 import { calculateClampedZoomDelta, normalizeWheelDelta } from './utils/cameraZoomUtils';
+import { searchImageRegistry } from './services/imageDeduplicationService';
 import { documentaryController, DocumentaryDestination } from './services/documentaryController';
 import { narrationService, getNarrationDescription, getNarrationTitle } from './services/narrationService';
 import { latLngToVector3, vector3ToLatLng } from './utils/globeCoordinates';
@@ -1584,6 +1585,7 @@ const App: React.FC = () => {
          historicalPeriod: wp.historicalPeriod,
          entities: wp.entities,
          entityType: wp.entityType || geoMarker.type || "historical_waypoint",
+         searchId: (wp as any).searchId,
          climate: getEstimatedClimate(wp.lat, wp.lng, wp.historicalRegion || wp.modernLocation || geoMarker.state || geoMarker.region || "", geoMarker.country || "", wp.entityType || geoMarker.type),
          contextNotes: [],
          news: [],
@@ -2234,6 +2236,8 @@ const App: React.FC = () => {
     setSelectedMarkerId(null);
     setIsFocused(true);
 
+    const searchId = searchImageRegistry.createSearchSession(cleanQuery);
+
     // 2. Active loading state inside the search input
     setScanningStatusText(`LOCATING ${parsedQuery.entity.toUpperCase()}`);
 
@@ -2251,11 +2255,12 @@ const App: React.FC = () => {
       if (pipelineResult.isValid && pipelineResult.waypoints && pipelineResult.waypoints.length > 0) {
         logWaypointSnapshot('App.tsx (Before Set State)', pipelineResult.waypoints[0]);
         
-        setRouteWaypoints(pipelineResult.waypoints);
+        const waypointsWithSearch = pipelineResult.waypoints.map(w => ({ ...w, searchId }));
+        setRouteWaypoints(waypointsWithSearch);
         setCurrentWaypointIndex(0);
         setIsDiscoveryLoading(false);
         console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
-        loadWaypointData(pipelineResult.waypoints[0]);
+        loadWaypointData(waypointsWithSearch[0]);
       } else {
         setSearchError("No identifiable locations found in the route.");
         setIsDiscoveryLoading(false);
@@ -2386,10 +2391,12 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       // Clear current active route when generating new one
       setActiveRouteId(null);
       
+      const searchId = searchImageRegistry.createSearchSession(text);
       const route = await generateRoute(text);
       
       if (route.waypoints && route.waypoints.length > 0) {
-          setRouteWaypoints(route.waypoints);
+          const waypointsWithSearch = route.waypoints.map(w => ({ ...w, searchId }));
+          setRouteWaypoints(waypointsWithSearch);
           
           console.log(`Route Generated: ${route.title}`);
           if (route.routeConfidence) {
@@ -2399,7 +2406,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           setCurrentWaypointIndex(0);
           setIsDiscoveryLoading(false);
           console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
-          loadWaypointData(route.waypoints[0]);
+          loadWaypointData(waypointsWithSearch[0]);
       } else {
           setSearchError("No identifiable locations found in the text.");
           setIsDiscoveryLoading(false);

@@ -340,7 +340,7 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
           }}
           onMouseLeave={() => setIsHoveringImage(false)}
           style={{
-            cursor: isMagnifierActive ? 'zoom-in' : 'default'
+            cursor: isMagnifierActive ? 'none' : 'default'
           }}
         >
           <img 

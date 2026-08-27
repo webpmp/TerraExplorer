@@ -703,7 +703,8 @@ export const SectionHeader: React.FC<{
 };
 
 import { parseNotableFactItem, deduplicateNotableFacts, normalizeFactComparisonKey } from '../utils/notableFactsUtils';
-export { parseNotableFactItem, deduplicateNotableFacts, normalizeFactComparisonKey };
+import { normalizeDescription } from '../utils/descriptionNormalization';
+export { parseNotableFactItem, deduplicateNotableFacts, normalizeFactComparisonKey, normalizeDescription };
 
 export const getCleanDescriptionLines = (info: any) => {
     if (!info || !info.description) return [];
@@ -713,7 +714,9 @@ export const getCleanDescriptionLines = (info: any) => {
     
     if (isPlaceholderString(descText)) return [];
 
-    const sanitizedMarkdown = sanitizeContextMarkdown(descText);
+    const coordinates = info.coordinates || info.waypoint?.coordinates || (typeof info.lat === 'number' && typeof info.lng === 'number' ? { lat: info.lat, lng: info.lng } : null);
+    const normalizedText = normalizeDescription(descText, { coordinates });
+    const sanitizedMarkdown = sanitizeContextMarkdown(normalizedText);
     const rawLines = sanitizedMarkdown.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0 && !isPlaceholderString(l));
     
     const isNotableHeading = (text: string) => {
@@ -1515,7 +1518,12 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
     const fetchImages = async () => {
       try {
-        const foundImages = await fetchAndValidateImages(info);
+        const searchContext = {
+          searchId: (info as any)?.searchId || (rawInfo as any)?.searchId,
+          waypointId: (info as any)?.waypoint?.id || (info as any)?.id || info.name,
+          relatedWaypoints: (info as any)?.relatedWaypoints
+        };
+        const foundImages = await fetchAndValidateImages(info, searchContext);
         setImages(foundImages);
         setWikiImage(foundImages[0]?.url || null);
       } catch (e) {
@@ -1525,7 +1533,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       }
     };
     fetchImages();
-  }, [info?.name, (info as any)?.canonicalName, info?.city, info?.country, info?.coordinates?.lat, info?.coordinates?.lng, info?.imageSearchTerm, info?.primaryImage, info?.images, info?.image, info?.imageCaption, (info as any)?.imageAttribution, (info as any)?.routeTitle, (info as any)?.historicalPeriod, (info as any)?.significance, (info as any)?.entityType]);
+  }, [info?.name, (info as any)?.canonicalName, info?.city, info?.country, info?.coordinates?.lat, info?.coordinates?.lng, info?.imageSearchTerm, info?.primaryImage, info?.images, info?.image, info?.imageCaption, (info as any)?.imageAttribution, (info as any)?.routeTitle, (info as any)?.historicalPeriod, (info as any)?.significance, (info as any)?.entityType, (info as any)?.searchId, (rawInfo as any)?.searchId]);
 
   const themes = {
     'modern': {

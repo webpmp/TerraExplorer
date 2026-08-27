@@ -651,7 +651,11 @@ const Controls: React.FC<ControlsProps> = ({
       
       {/* Copyright & Map Attribution Text */}
       <div className={`text-[10px] md:text-xs text-center -mt-1 ${theme.copyright}`}>
-        © {new Date().getFullYear()} TerraExplorer by Chris Adkins • All Rights Reserved • Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" className="underline hover:opacity-80 pointer-events-auto">OpenStreetMap contributors</a>
+        © {new Date().getFullYear()} TerraExplorer by Chris Adkins • All Rights Reserved<br />
+        Map data ©{' '}
+        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" className="underline hover:opacity-80 pointer-events-auto">OpenStreetMap contributors</a>
+        {' '}• ©{' '}
+        <a href="https://carto.com/attribution/" target="_blank" rel="noopener noreferrer" className="underline hover:opacity-80 pointer-events-auto">CARTO</a>
       </div>
     </div>
   );

@@ -214,16 +214,18 @@ describe('Controls Footer Copyright and Attribution', () => {
     onToggleZoomLock: vi.fn(),
   };
 
-  test('renders dynamic copyright year, all rights reserved, and OpenStreetMap link', () => {
+  test('renders dynamic copyright year, all rights reserved, and OpenStreetMap & CARTO links', () => {
     const currentYear = new Date().getFullYear().toString();
     const html = renderToStaticMarkup(<Controls {...baseProps} />);
 
-    expect(html).toContain(`© ${currentYear} TerraExplorer by Chris Adkins • All Rights Reserved • Map data © `);
+    expect(html).toContain(`© ${currentYear} TerraExplorer by Chris Adkins • All Rights Reserved<br/>Map data © `);
     expect(html).toContain('href="https://www.openstreetmap.org/copyright"');
     expect(html).toContain('target="_blank"');
     expect(html).toContain('rel="noopener noreferrer"');
     expect(html).toContain('class="underline hover:opacity-80 pointer-events-auto"');
     expect(html).toContain('OpenStreetMap contributors</a>');
+    expect(html).toContain('href="https://carto.com/attribution/"');
+    expect(html).toContain('CARTO</a>');
   });
 
   test('verifies theme-aware copyright styling across all 4 themes', () => {

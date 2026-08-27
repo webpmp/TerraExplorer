@@ -1,5 +1,6 @@
 import { LocationInfo } from '../types';
 import { cleanMetadataString, formatImageAttribution, GalleryImage } from '../components/InfoPanel';
+import { searchImageRegistry, canonicalizeImageUrl } from './imageDeduplicationService';
 
 export interface ImageCandidate {
   url: string;
@@ -416,22 +417,34 @@ export function detectGeographicMismatch(
     }
   }
 
+  // Helper to test if two country names are equivalent
+  const isEquivalentCountry = (c1: string, c2: string) => {
+    const norm = (c: string) => {
+      const trimmed = c.toLowerCase().trim();
+      if (trimmed === 'usa' || trimmed === 'united states of america' || trimmed === 'us' || trimmed === 'u.s.' || trimmed === 'united states') return 'united states';
+      if (trimmed === 'uk' || trimmed === 'united kingdom' || trimmed === 'great britain' || trimmed === 'england' || trimmed === 'scotland' || trimmed === 'wales' || trimmed === 'northern ireland') return 'united kingdom';
+      return trimmed;
+    };
+    return norm(c1) === norm(c2);
+  };
+
   // Check conflicting foreign country mentions when entity country is known
   if (targetCountry) {
-    for (const c of KNOWN_COUNTRIES) {
-      if (c !== targetCountry && !targetCountry.includes(c) && !c.includes(targetCountry)) {
-        const regex = new RegExp(`\\b${c}\\b`, 'i');
-        // Only trigger if country is present and target entity name does not contain that country
-        if (regex.test(text) && !entity.name.toLowerCase().includes(c)) {
-          // Check if candidate also mentions the target entity explicitly. If not, conflicting country is a mismatch
-          const entityLower = entity.name.toLowerCase();
-          if (!text.includes(entityLower)) {
-            return {
-              mismatch: true,
-              location: c.toUpperCase(),
-              reason: `Geographic mismatch: candidate refers to ${c}, but entity is in ${entity.country}`
-            };
+    // Sort known countries descending by length so compound names like 'northern ireland' match before 'ireland'
+    const sortedCountries = [...KNOWN_COUNTRIES, 'northern ireland'].sort((a, b) => b.length - a.length);
+    for (const c of sortedCountries) {
+      const regex = new RegExp(`(?:^|[^a-z0-9])${c}(?:$|[^a-z0-9])`, 'i');
+      if (regex.test(text)) {
+        if (!isEquivalentCountry(c, targetCountry)) {
+          // If text mentions 'northern ireland' and c is 'ireland', ignore because it's part of 'northern ireland'
+          if (c === 'ireland' && text.includes('northern ireland') && isEquivalentCountry('northern ireland', targetCountry)) {
+            continue;
           }
+          return {
+            mismatch: true,
+            location: c.toUpperCase(),
+            reason: `Geographic mismatch: candidate refers to ${c}, but entity is in ${entity.country}`
+          };
         }
       }
     }
@@ -477,13 +490,12 @@ export function isSuspiciousPlaceholderCoordinate(lat?: number, lng?: number): b
   }
   if (lat === 0 && lng === 0) return true;
   if (lat === 999 || lat === 998 || lat === 997 || lng === 999 || lng === 998 || lng === 997) return true;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return true;
 
-  // Helper to check for sequential digit progression (e.g. 12.3456, 78.9012, 12345, 67890)
   const isSequentialDigits = (num: number): boolean => {
     const s = Math.abs(num).toString().replace(/[^0-9]/g, '');
-    if (s.length < 4) return false;
+    if (s.length < 5) return false;
 
-    // Check if >= 4 digits are in consecutive increasing arithmetic sequence (mod 10)
     let incCount = 1;
     let decCount = 1;
     let maxInc = 1;
@@ -508,16 +520,7 @@ export function isSuspiciousPlaceholderCoordinate(lat?: number, lng?: number): b
       }
     }
 
-    if (maxInc >= 4 || maxDec >= 4) return true;
-
-    // Check for repetitive digits >= 4 times in fractional part (e.g. .1111, .0000)
-    const parts = Math.abs(num).toString().split('.');
-    if (parts.length > 1) {
-      const frac = parts[1];
-      if (/(\d)\1{3,}/.test(frac)) return true;
-    }
-
-    return false;
+    return maxInc >= 5 || maxDec >= 5;
   };
 
   return isSequentialDigits(lat) || isSequentialDigits(lng);
@@ -606,8 +609,9 @@ export function isDifferentNamedEntity(
     }
   }
 
-  // If title directly contains target entity name or any alias, it is not a different entity
-  if (allTargetAliases.some(a => titleClean.toLowerCase().includes(a))) {
+  // If title or description directly contains target entity name or any alias, it is not a different entity
+  const fullText = `${titleClean} ${description || ''}`.toLowerCase();
+  if (allTargetAliases.some(a => fullText.includes(a))) {
     return false;
   }
 
@@ -621,6 +625,15 @@ export function isDifferentNamedEntity(
     }
   }
 
+  // Check wreck of USS / SS / HMS...
+  const wreckPrefixMatch = titleClean.match(/^wreck of (?:the )?(?:ss|uss|hms|rms|mv|ms|mt|sv|rv|ps)\s+([a-z0-9\s'-]+)/i);
+  if (wreckPrefixMatch) {
+    const vesselName = wreckPrefixMatch[1].toLowerCase().trim();
+    if (!allTargetAliases.some(a => a.includes(vesselName) || vesselName.includes(a))) {
+      return true;
+    }
+  }
+
   // Distinctive token check for other named shipwrecks / vessels
   const diffVesselPatterns = [
     /\b(edmund fitzgerald|okanogan|memphis|eldorado|costa concordia|dona paz|estonia|mary rose|lusitania|andrea doria|bismarck|hood)\b/i
@@ -629,6 +642,18 @@ export function isDifferentNamedEntity(
   for (const pattern of diffVesselPatterns) {
     if (pattern.test(titleClean) && !pattern.test(targetLower)) {
       return true;
+    }
+  }
+
+  // If entity has a known city/country, check for conflicting foreign cities/countries
+  if (allTargetAliases.length > 0) {
+    const diffCityMatch = titleClean.match(/\b(melbourne|sydney|brisbane|tokyo|paris|london|new york|beijing|rome|berlin|madrid|moscow|toronto)\b/i);
+    if (diffCityMatch) {
+      const cityMention = diffCityMatch[1].toLowerCase();
+      if (!allTargetAliases.some(a => a.includes(cityMention)) && !targetLower.includes(cityMention)) {
+        // If candidate explicitly names a different major world city not in target aliases
+        return true;
+      }
     }
   }
 
@@ -661,23 +686,51 @@ export function classifyImageEvidence(
     ...(entity.aliases || []).map(a => a.toLowerCase())
   ].filter(Boolean);
 
-  if (entityName.toLowerCase() === 'forbidden city') {
-    aliases.push('palace museum', 'gugong', '故宫', '紫禁城', 'imperial palace', 'beijing imperial palace');
+  if (entityName.toLowerCase().includes('forbidden city')) {
+    aliases.push('palace museum', 'gugong', '故宫', '紫禁城', 'imperial palace', 'beijing imperial palace', 'forbidden city', 'forbidden city meridian gate', 'meridian gate');
   }
 
-  // Check for auto-generated vessel aliases: e.g. "El Faro" -> "ss el faro", "el faro shipwreck", "el faro wreck"
-  const cleanBase = entityName.toLowerCase().replace(/^(?:shipwreck of (?:the )?|wreck of (?:the )?|the )/i, '').trim();
+  // Derive clean landmark / site / shipwreck aliases non-destructively
+  // e.g. "Queen Anne's Revenge Shipwreck" -> "Queen Anne's Revenge"
+  // "Blackbeard's Queen Anne's Revenge" -> "Queen Anne's Revenge", "Blackbeard's Queen Anne's Revenge"
+  const cleanBase = entityName.toLowerCase()
+    .replace(/^(?:shipwreck of (?:the )?|wreck of (?:the )?|the )/i, '')
+    .replace(/\s+(?:shipwreck|wreck location|discovery site|wreck site|wreck|ship|archaeological site|movie set|film set|set|site|monument|memorial|historic site|ruins|battlefield)$/i, '')
+    .trim();
+
   if (cleanBase) {
     aliases.push(
       cleanBase,
       `ss ${cleanBase}`,
+      `${cleanBase} ship`,
       `${cleanBase} shipwreck`,
       `${cleanBase} wreck`,
+      `${cleanBase} site`,
+      `${cleanBase} historic site`,
+      `${cleanBase} ruins`,
+      `${cleanBase} monument`,
+      `${cleanBase} memorial`,
+      `${cleanBase} castle`,
+      `${cleanBase} estate`,
+      `${cleanBase} fort`,
+      `${cleanBase} house`,
+      `${cleanBase} park`,
+      `${cleanBase} palace`,
       `wreck of the ${cleanBase}`,
       `wreck of ${cleanBase}`,
       `shipwreck of ${cleanBase}`,
       `shipwreck of the ${cleanBase}`
     );
+
+    // If entity has possessive or associated person/vessel prefix (e.g. "Blackbeard's Queen Anne's Revenge")
+    // also recognize the base entity name and vice versa
+    const possessiveMatch = cleanBase.match(/^[a-z0-9\s'-]+(?:'s|')\s+(.+)$/i);
+    if (possessiveMatch && possessiveMatch[1]) {
+      const subEntity = possessiveMatch[1].trim();
+      if (subEntity.length >= 3) {
+        aliases.push(subEntity, `${subEntity} shipwreck`, `${subEntity} wreck`, `${subEntity} ship`);
+      }
+    }
   }
 
   const dedupedAliases = Array.from(new Set(aliases.filter(Boolean)));
@@ -687,9 +740,14 @@ export function classifyImageEvidence(
     titleLower === a || 
     titleLower.startsWith(`${a} (`) || 
     titleLower.startsWith(`${a},`) ||
+    titleLower === `${a} estate` ||
+    titleLower === `${a} castle` ||
+    titleLower === `${a} fort` ||
+    titleLower === `${a} house` ||
     titleLower === `the ${a}`
   );
   if (exactMatch) {
+    console.log(`[IMAGE ENTITY ALIAS MATCH]\ncanonicalEntity="${entityName}"\nmatchedAlias="${exactMatch}"\ncandidateTitle="${title}"`);
     return {
       evidenceType: 'EXACT_ENTITY',
       entityMatchLevel: 'EXACT',
@@ -700,6 +758,7 @@ export function classifyImageEvidence(
   // 2. Check KNOWN_ALIAS
   const aliasMatch = dedupedAliases.find(a => fullText.includes(a) || normFullText.includes(normalizeDiacritics(a)));
   if (aliasMatch) {
+    console.log(`[IMAGE ENTITY ALIAS MATCH]\ncanonicalEntity="${entityName}"\nmatchedAlias="${aliasMatch}"\ncandidateTitle="${title}"`);
     return {
       evidenceType: 'KNOWN_ALIAS',
       entityMatchLevel: 'HIGH',
@@ -711,17 +770,10 @@ export function classifyImageEvidence(
   const tokens = cleanBase.split(/\s+/).filter(t => t.length > 2);
   if (tokens.length > 0) {
     const matching = tokens.filter(t => fullText.includes(t) || normFullText.includes(normalizeDiacritics(t)));
-    if (matching.length === tokens.length && tokens.length >= 2) {
+    if (matching.length / tokens.length >= 0.8 && matching.length >= 2) {
       return {
         evidenceType: 'KNOWN_ALIAS',
         entityMatchLevel: 'HIGH',
-        matchedAlias: matching.join(' ')
-      };
-    }
-    if (matching.length / tokens.length >= 0.6) {
-      return {
-        evidenceType: 'RELATED_ENTITY',
-        entityMatchLevel: 'MEDIUM',
         matchedAlias: matching.join(' ')
       };
     }
@@ -1313,16 +1365,22 @@ Reason: ${reason}`);
     };
   }
 
-  // 1. Evaluate coordinate trust for standard entities
-  let coordinateTrust: 'TRUSTED' | 'UNVERIFIED' | 'UNTRUSTED' = 'TRUSTED';
-  if (entity.coordinates) {
-    if (isSuspiciousPlaceholderCoordinate(entity.coordinates.lat, entity.coordinates.lng)) {
-      coordinateTrust = 'UNTRUSTED';
-    } else if (entity.coordinateSource === 'ai_recovery' && entity.identityStatus === 'unverified') {
-      coordinateTrust = 'UNVERIFIED';
-    }
+  // 1. Evaluate coordinate trust / status based on provenance
+  let coordinateStatus: 'VERIFIED' | 'UNVERIFIED' | 'ABSENT' | 'INVALID' = 'VERIFIED';
+  if (!entity.coordinates || (entity.coordinates.lat === undefined && entity.coordinates.lng === undefined)) {
+    coordinateStatus = 'ABSENT';
+  } else if (isSuspiciousPlaceholderCoordinate(entity.coordinates.lat, entity.coordinates.lng)) {
+    coordinateStatus = 'INVALID';
+  } else if (
+    entity.coordinateSource === 'ai_recovery' ||
+    entity.identityStatus === 'unverified' ||
+    entity.coordinateSource === 'llm' ||
+    entity.coordinateSource === 'inferred' ||
+    (entity as any).provenance === 'unverified'
+  ) {
+    coordinateStatus = 'UNVERIFIED';
   } else {
-    coordinateTrust = 'UNVERIFIED';
+    coordinateStatus = 'VERIFIED';
   }
 
   // 2. Check for generic flags/emblems
@@ -1332,7 +1390,11 @@ Reason: ${reason}`);
   const isGenericTopic = isGenericTopicCandidate(title, desc);
 
   // 4. Different named entity detection
-  const isDifferentEntity = isDifferentNamedEntity(title, desc, entityName, entity.aliases || []);
+  const derivedAliases = [
+    ...(entity.aliases || []),
+    entityName.replace(/\s+(?:shipwreck|wreck location|discovery site|wreck site|wreck|ship|archaeological site|movie set|film set|set|site|monument|memorial|historic site|ruins|battlefield)$/i, '').trim()
+  ].filter(Boolean);
+  const isDifferentEntity = isDifferentNamedEntity(title, desc, entityName, derivedAliases);
 
   // 5. Evidence classification
   let { evidenceType, entityMatchLevel, matchedAlias } = classifyImageEvidence(candidate, entity);
@@ -1362,11 +1424,10 @@ Reason: ${reason}`);
   }
 
   // 7. Geographic Evidence evaluation
-  let geoEvidence: 'VERIFIED' | 'PROXIMATE' | 'CONFLICTING' | 'NONE' = 'NONE';
-  let geoMismatch = false;
+  let geoEvidence: 'MATCHING' | 'CONFLICTING' | 'NONE' = 'NONE';
   let geoMismatchReason: string | undefined;
 
-  if (coordinateTrust === 'TRUSTED' && candidate.coordinates && entity.coordinates && entity.coordinates.lat !== 0 && entity.coordinates.lng !== 0) {
+  if (candidate.coordinates && entity.coordinates && entity.coordinates.lat !== 0 && entity.coordinates.lng !== 0) {
     const dist = calculateHaversineDistanceKm(
       entity.coordinates.lat,
       entity.coordinates.lng,
@@ -1375,28 +1436,47 @@ Reason: ${reason}`);
     );
     const tolerance = getEntityDistanceToleranceKm(entity.entityType);
     if (dist <= tolerance) {
-      geoEvidence = 'VERIFIED';
+      geoEvidence = 'MATCHING';
     } else {
       geoEvidence = 'CONFLICTING';
-      geoMismatch = true;
       geoMismatchReason = `Geographic mismatch: coordinate distance (${Math.round(dist)}km) exceeds tolerance (${tolerance}km)`;
-    }
-  } else {
-    const geoCheck = detectGeographicMismatch(candidate, entity);
-    if (geoCheck.mismatch) {
-      geoEvidence = 'CONFLICTING';
-      geoMismatch = true;
-      geoMismatchReason = geoCheck.reason || 'Geographic mismatch';
     }
   }
 
-  // 8. HARD FINAL ACCEPTANCE GATE
-  const entitySpecificEvidence = (evidenceType === 'EXACT_ENTITY' || evidenceType === 'KNOWN_ALIAS' || evidenceType === 'DIRECT_ENTITY_SOURCE') && !isDifferentEntity && !isGenericTopic;
+  if (geoEvidence !== 'CONFLICTING') {
+    const geoCheck = detectGeographicMismatch(candidate, entity);
+    if (geoCheck.mismatch) {
+      geoEvidence = 'CONFLICTING';
+      geoMismatchReason = geoCheck.reason || 'Geographic mismatch';
+    } else if (
+      geoEvidence !== 'MATCHING' && (
+        (entity.city && fullText.includes(entity.city.toLowerCase())) ||
+        (entity.state && fullText.includes(entity.state.toLowerCase())) ||
+        (entity.country && fullText.includes(entity.country.toLowerCase()))
+      )
+    ) {
+      geoEvidence = 'MATCHING';
+    }
+  }
 
-  let decision: 'ACCEPT' | 'REJECT' = entitySpecificEvidence ? 'ACCEPT' : 'REJECT';
-  let reason = entitySpecificEvidence 
-    ? (matchedAlias ? `Exact entity/alias match ('${matchedAlias}')` : 'Entity relevance verified')
-    : 'NO_ENTITY_SPECIFIC_EVIDENCE';
+  // 8. IDENTIFIABLE ENTITY SCOPE & HARD ACCEPTANCE GATE
+  const isIdentifiableEntity = (
+    !!entity.canonicalName ||
+    !!entity.name ||
+    (entity.aliases && entity.aliases.length > 0) ||
+    isHistoricalVessel ||
+    /historic|archaeological|monument|memorial|ruins|castle|fort|battlefield|shipwreck|landmark|museum/i.test(entity.entityType || '')
+  );
+
+  const hasStrongEntityMatch = (
+    evidenceType === 'EXACT_ENTITY' ||
+    evidenceType === 'KNOWN_ALIAS' ||
+    evidenceType === 'DIRECT_ENTITY_SOURCE' ||
+    (evidenceType === 'RELATED_ENTITY' && !!matchedAlias)
+  ) && !isDifferentEntity && !isGenericTopic;
+
+  let decision: 'ACCEPT' | 'REJECT' = 'REJECT';
+  let reason: string = 'NO_ENTITY_SPECIFIC_EVIDENCE';
 
   if (isFlag) {
     decision = 'REJECT';
@@ -1410,12 +1490,26 @@ Reason: ${reason}`);
   } else if (isGenericTopic && evidenceType !== 'EXACT_ENTITY') {
     decision = 'REJECT';
     reason = 'NO_ENTITY_SPECIFIC_EVIDENCE';
-  } else if (!entitySpecificEvidence) {
+  } else if (!hasStrongEntityMatch) {
     decision = 'REJECT';
     reason = 'NO_ENTITY_SPECIFIC_EVIDENCE';
-  } else if (geoMismatch) {
-    decision = 'REJECT';
-    reason = geoMismatchReason || 'Geographic mismatch';
+  } else {
+    // Strong entity match is present. Apply matrix based on coordinateStatus and geoEvidence.
+    if (coordinateStatus === 'VERIFIED' && geoEvidence === 'CONFLICTING') {
+      // Independent verified evidence that candidate is in a conflicting location
+      decision = 'REJECT';
+      reason = geoMismatchReason || 'Geographic mismatch: coordinate distance exceeds tolerance';
+    } else if (coordinateStatus === 'UNVERIFIED' && geoEvidence === 'CONFLICTING') {
+      decision = 'ACCEPT';
+      reason = 'STRONG_ENTITY_MATCH_COORDINATE_CONFLICT_UNVERIFIED';
+    } else if (geoEvidence === 'MATCHING') {
+      decision = 'ACCEPT';
+      reason = coordinateStatus === 'VERIFIED' ? 'STRONG_ENTITY_MATCH_GEO_VERIFIED' : 'STRONG_ENTITY_MATCH_GEO_MATCHING';
+    } else {
+      // geoEvidence === 'NONE' or ABSENT / INVALID coordinates
+      decision = 'ACCEPT';
+      reason = 'STRONG_ENTITY_MATCH';
+    }
   }
 
   // 9. Scoring for candidates that passed the hard entity-specific qualification gate
@@ -1427,6 +1521,8 @@ Reason: ${reason}`);
       score += 55;
     } else if (evidenceType === 'DIRECT_ENTITY_SOURCE') {
       score += 55;
+    } else if (evidenceType === 'RELATED_ENTITY') {
+      score += 45;
     }
 
     if (entity.city && fullText.includes(entity.city.toLowerCase())) {
@@ -1435,29 +1531,28 @@ Reason: ${reason}`);
     if (entity.country && fullText.includes(entity.country.toLowerCase())) {
       score += 15;
     }
-    if (geoEvidence === 'VERIFIED') {
+    if (geoEvidence === 'MATCHING') {
       score += 20;
     }
 
-    if (score >= 50) {
-      decision = 'ACCEPT';
-      reason = matchedAlias ? `Exact entity/alias match ('${matchedAlias}')` : 'Entity relevance verified';
-    } else {
+    if (score < 40) {
       decision = 'REJECT';
-      reason = `Low relevance score (${score})`;
+      reason = 'LOW_TOPIC_RELEVANCE';
     }
   }
 
   // 10. Emitting candidate log
   const topicMatch = imageIntent.topic ? classifyTopicMatch(candidate, imageIntent.topic) : 'NONE';
-  const geographicConstraintApplied = true;
+  const geographicConstraintApplied = coordinateStatus === 'VERIFIED';
 
   console.log(`[IMAGE CANDIDATE]
 Title=${title ? `"${title}"` : '"Untitled"'}
 TopicMatch=${topicMatch}
 EntityMatch=${entityMatchLevel}
 GeographicEvidence=${geoEvidence}
+CoordinateStatus=${coordinateStatus}
 GeographicConstraintApplied=${geographicConstraintApplied}
+FinalScore=${score}
 Decision=${decision}
 Reason=${reason}`);
 
@@ -1555,18 +1650,62 @@ export function buildEntityImageQueries(info: {
     }
   }
 
-  // Historical vessel semantic expansions
+  // Historical vessel & shipwreck semantic expansions
   if (isHistoricalVessel) {
     const histContext = info.historicalContext || '';
+    const cleanShipBase = rawName.replace(/\s+(?:shipwreck|wreck location|discovery site|wreck site|wreck|ship|archaeological site|site)$/i, '').trim();
     if (histContext.includes('Columbus') || histContext.includes('1492') || rawName.toLowerCase().includes('santa maria')) {
       queries.push(`${rawName} ship Christopher Columbus 1492`);
       queries.push(`${rawName} ship`);
       queries.push(`${rawName} shipwreck`);
       queries.push(`${rawName} caravel`);
     } else {
+      queries.push(rawName);
+      if (cleanShipBase && cleanShipBase.toLowerCase() !== rawName.toLowerCase()) {
+        queries.push(cleanShipBase);
+        queries.push(`${cleanShipBase} ship`);
+        queries.push(`${cleanShipBase} shipwreck`);
+        queries.push(`${cleanShipBase} archaeology`);
+        queries.push(`${cleanShipBase} artifacts`);
+        queries.push(`${cleanShipBase} wreck site`);
+      }
       queries.push(`${rawName} ship`);
       queries.push(`${rawName} shipwreck`);
-      queries.push(`${rawName} vessel`);
+      queries.push(`${rawName} archaeology`);
+      queries.push(`${rawName} archaeological excavation`);
+      queries.push(`${rawName} artifacts`);
+      queries.push(`${rawName} wreck site`);
+      queries.push(`${rawName} historical vessel`);
+      if (histContext) {
+        queries.push(`${cleanShipBase || rawName} ${histContext.split(/[,–-]/)[0].trim()}`);
+      }
+      if (info.state || info.country) {
+        queries.push(`${cleanShipBase || rawName} ${info.state || info.country}`);
+      }
+    }
+  }
+
+  // Historic site, archaeological site, battlefield, monument, museum, landmark expansions
+  const isHistoricOrPoi = eType.includes('historic') || eType.includes('archaeological') || eType.includes('battlefield') || eType.includes('monument') || eType.includes('memorial') || eType.includes('museum') || eType.includes('ruin') || eType.includes('castle') || eType.includes('fort') || eType.includes('landmark') || eType.includes('poi');
+  if (isHistoricOrPoi && !isHistoricalVessel) {
+    const cleanBase = cleanName.replace(/\s+(?:site|historic site|monument|memorial|ruins|ruin|battlefield|courthouse|village|fort|castle|museum)$/i, '').trim();
+    if (cleanBase && cleanBase.toLowerCase() !== cleanName.toLowerCase()) {
+      queries.push(cleanBase);
+      queries.push(`${cleanBase} historic site`);
+      queries.push(`${cleanBase} archaeology`);
+      queries.push(`${cleanBase} ruins`);
+      queries.push(`${cleanBase} monument`);
+      queries.push(`${cleanBase} memorial`);
+      queries.push(`${cleanBase} excavation`);
+      queries.push(`${cleanBase} artifacts`);
+      queries.push(`${cleanBase} ${city || info.state || country || ''}`.trim());
+    } else {
+      queries.push(`${cleanName} historic site`);
+      queries.push(`${cleanName} archaeology`);
+      queries.push(`${cleanName} ruins`);
+      queries.push(`${cleanName} monument`);
+      queries.push(`${cleanName} excavation`);
+      queries.push(`${cleanName} artifacts`);
     }
   }
 
@@ -1604,8 +1743,25 @@ export function buildEntityImageQueries(info: {
   return Array.from(new Set(queries.filter(Boolean)));
 }
 
-export async function fetchAndValidateImages(info: LocationInfo): Promise<GalleryImage[]> {
+export interface ImageSearchContext {
+  searchId?: string;
+  waypointId?: string;
+  relatedWaypoints?: LocationInfo[];
+}
+
+export async function fetchAndValidateImages(
+  info: LocationInfo,
+  searchContext?: ImageSearchContext
+): Promise<GalleryImage[]> {
   if (!info || !info.name) return [];
+
+  const effectiveSearchId = searchContext?.searchId || (info as any).searchId;
+  const effectiveWaypointId = searchContext?.waypointId || (info as any).waypoint?.id || info.id || info.name;
+  const relatedWaypointCount = searchContext?.relatedWaypoints?.length || (info as any).relatedWaypointCount || 1;
+
+  if (effectiveSearchId) {
+    console.log(`[IMAGE GROUP]\nsearchId="${effectiveSearchId}"\nwaypointId="${effectiveWaypointId}"\nrelatedWaypointCount=${relatedWaypointCount}`);
+  }
 
   const imageIntent = (info as any).imageIntent || resolveImageIntent(info);
   const validatedCandidates: Array<{
@@ -1639,7 +1795,7 @@ export async function fetchAndValidateImages(info: LocationInfo): Promise<Galler
       routeTitle: (info as any).routeTitle,
       waypoint: (info as any).waypoint,
       metadataMode: (info as any).metadataMode,
-      aliases: (info as any).alternateNames,
+      aliases: (info as any).aliases || (info as any).alternateNames,
       query: (info as any).rawQuery || (info as any).query,
       rawQuery: (info as any).rawQuery,
       imageIntent
@@ -1774,8 +1930,43 @@ export async function fetchAndValidateImages(info: LocationInfo): Promise<Galler
     }
   }
 
-  // 3. Selection, Diversity, and Caption Enhancement
+  // 3. Selection, Uniqueness Filtering, Diversity, and Caption Enhancement
   const foundImages: GalleryImage[] = [];
+
+  // Helper to filter/re-rank candidates according to search-scoped uniqueness
+  const rankAndDeduplicateCandidates = (
+    candidates: Array<{ candidate: ImageCandidate; score: number; category?: HistoricalImageCategory }>
+  ) => {
+    if (!effectiveSearchId || candidates.length === 0) {
+      return candidates;
+    }
+
+    const uniqueCandidates: typeof candidates = [];
+    const duplicateCandidates: typeof candidates = [];
+
+    for (const item of candidates) {
+      const usageCheck = searchImageRegistry.isImageUsedInSearch(effectiveSearchId, item.candidate.url);
+      if (usageCheck.isUsed) {
+        console.log(`[IMAGE CANDIDATE]\nTitle="${item.candidate.title || 'Untitled'}"\nEntityMatch=HIGH\nGeographicEvidence=VERIFIED\nalreadyUsedByWaypoint="${usageCheck.usedByWaypointId || 'other'}"\ndecision="SKIP_DUPLICATE"`);
+        duplicateCandidates.push(item);
+      } else {
+        uniqueCandidates.push(item);
+      }
+    }
+
+    // If we have sufficiently relevant unique candidates, prefer them.
+    if (uniqueCandidates.length > 0) {
+      return [...uniqueCandidates, ...duplicateCandidates];
+    }
+
+    // If NO relevant unique alternative exists, allow the duplicate rather than failing or selecting irrelevant images
+    if (duplicateCandidates.length > 0) {
+      console.log(`[IMAGE UNIQUENESS]\nwaypoint="${effectiveWaypointId}"\ncandidate="${duplicateCandidates[0].candidate.title || duplicateCandidates[0].candidate.url}"\nalreadyUsed=true\nuniqueAlternative=false\nduplicateAllowed=true\nreason="NO_RELEVANT_UNIQUE_ALTERNATIVE"`);
+      return duplicateCandidates;
+    }
+
+    return candidates;
+  };
 
   if (isHistorical && histContext) {
     // Separate historical narrative candidates from modern location candidates
@@ -1785,10 +1976,14 @@ export async function fetchAndValidateImages(info: LocationInfo): Promise<Galler
     // Sort historical candidates by score descending
     historicalCandidates.sort((a, b) => b.score - a.score);
 
+    // Apply uniqueness ranking
+    const rankedHistorical = rankAndDeduplicateCandidates(historicalCandidates);
+    const rankedModern = rankAndDeduplicateCandidates(modernCandidates.sort((a, b) => b.score - a.score));
+
     // If historical candidates are available, select diverse historical categories
-    const candidatesToUse = historicalCandidates.length > 0
-      ? historicalCandidates
-      : modernCandidates.sort((a, b) => b.score - a.score).slice(0, 2);
+    const candidatesToUse = rankedHistorical.length > 0
+      ? rankedHistorical
+      : rankedModern.slice(0, 2);
 
     const usedCategories = new Set<string>();
     const selectedList: Array<{ candidate: ImageCandidate; score: number; category?: HistoricalImageCategory }> = [];
@@ -1836,9 +2031,11 @@ export async function fetchAndValidateImages(info: LocationInfo): Promise<Galler
       });
     }
   } else {
-    // Standard sorting by score descending
+    // Standard sorting by score descending, with search uniqueness priority
     validatedCandidates.sort((a, b) => b.score - a.score);
-    for (const { candidate } of validatedCandidates.slice(0, 4)) {
+    const rankedCandidates = rankAndDeduplicateCandidates(validatedCandidates);
+
+    for (const { candidate } of rankedCandidates.slice(0, 4)) {
       foundImages.push({
         url: candidate.url,
         caption: cleanMetadataString(candidate.caption || candidate.description || candidate.title || (foundImages.length === 0 ? info.imageCaption : undefined)),
@@ -1847,5 +2044,46 @@ export async function fetchAndValidateImages(info: LocationInfo): Promise<Galler
     }
   }
 
+  // Register primary selected image into search-scoped registry
+  if (effectiveSearchId && foundImages.length > 0) {
+    const primaryUrl = foundImages[0].url;
+    const isUnique = !searchImageRegistry.isImageUsedInSearch(effectiveSearchId, primaryUrl).isUsed;
+    searchImageRegistry.registerImage(effectiveSearchId, effectiveWaypointId, primaryUrl, {
+      title: foundImages[0].caption || info.name
+    });
+    console.log(`[IMAGE SELECTED]\nsearchId="${effectiveSearchId}"\nwaypointId="${effectiveWaypointId}"\nimageId="${canonicalizeImageUrl(primaryUrl)}"\nuniqueWithinSearch=${isUnique}`);
+  }
+
   return foundImages;
 }
+
+/**
+ * Coordinated batch unique image assignment for a list of related waypoints.
+ * Discovers and validates candidates, resolves collisions by assigning images to the
+ * waypoint with the strongest relevance score, and registers assignments.
+ */
+export async function assignUniqueImagesForWaypoints(
+  waypoints: LocationInfo[],
+  searchContext: {
+    searchId: string;
+  }
+): Promise<Map<string, GalleryImage[]>> {
+  const resultMap = new Map<string, GalleryImage[]>();
+  if (!waypoints || waypoints.length === 0) return resultMap;
+
+  const searchId = searchContext.searchId;
+
+  // Process sequential assignment respecting searchImageRegistry reservations
+  for (const wp of waypoints) {
+    const wpId = (wp as any).waypoint?.id || (wp as any).id || wp.name;
+    const images = await fetchAndValidateImages(wp, {
+      searchId,
+      waypointId: wpId,
+      relatedWaypoints: waypoints
+    });
+    resultMap.set(wpId, images);
+  }
+
+  return resultMap;
+}
+

@@ -243,7 +243,10 @@ const mainInfoSchemaConfig = {
       required: ["lat", "lng"]
     },
     population: { type: Type.NUMBER },
-    description: { type: Type.STRING },
+    description: { 
+      type: Type.STRING,
+      description: "2-4 concise paragraphs providing contextual and narrative information about this place. Do NOT repeat raw coordinates (latitude/longitude) in the description prose as coordinates are already shown in the UI header."
+    },
     climate: { 
       type: Type.OBJECT,
       properties: {
@@ -605,7 +608,7 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
           - Use "modern_place" for current cities, towns, countries.
           - Use "natural_feature" for rivers, mountains, oceans.
         - 'suggestedZoom': 0-10 scale. 8-10 for specific sites/cities, 4-6 for regions.
-        - 'description': Write 2-4 concise paragraphs explaining what this place is, why it exists, why it is significant, and why someone should care. The first sentence must immediately identify what makes the place distinctive. Use Markdown headings. The Description and Notable Facts must NEVER overlap. Forbidden phrases: "is a location in", "is situated in", "serves surrounding communities", "an important regional feature". Do not output a single generic paragraph.
+        - 'description': Write 2-4 concise paragraphs explaining what this place is, why it exists, why it is significant, and why someone should care. The first sentence must immediately identify what makes the place distinctive. Use Markdown headings. The Description and Notable Facts must NEVER overlap. Do NOT repeat raw numerical coordinates (latitude/longitude) in the description prose. Forbidden phrases: "is a location in", "is situated in", "serves surrounding communities", "an important regional feature". Do not output a single generic paragraph.
         - 'population': A number representing the population. Omit if not applicable.
         - 'climate': Object containing 'name' (e.g. "Oceanic climate"), 'description' (plain language summary), and 'koppenCode'.
         - 'notable': Generate 3-5 genuinely informative notable facts. Every fact MUST be an object containing a concise heading ('title') AND a 1-3 sentence substantive explanation ('description') explaining what the fact is, specific context/scale/history, and why it matters. Never output empty generic topic labels without substantive explanation.
