@@ -130,26 +130,83 @@ valid: ${coordinatesValid}`);
   if (canonicalName && coords) {
     const histKnowledge = getHistoricalEntityKnowledge(canonicalName);
     if (histKnowledge) {
-      if (histKnowledge.boundingBox) {
-        const { minLat, maxLat, minLng, maxLng } = histKnowledge.boundingBox;
-        if (coords.lat < minLat || coords.lat > maxLat || coords.lng < minLng || coords.lng > maxLng) {
+      const isMarineEntity = 
+        entityType === 'shipwreck_site' || 
+        entityType === 'shipwreck' || 
+        entityType === 'submerged_archaeological_site' || 
+        entityType === 'maritime_disaster_site' ||
+        entityType === 'underwater_cultural_heritage' ||
+        entityType === 'naval_wreck' ||
+        entityType === 'aircraft_wreck_at_sea';
+
+      if (isMarineEntity) {
+        let regionalCompatibility = true;
+
+        if (histKnowledge.boundingBox) {
+          const { minLat, maxLat, minLng, maxLng } = histKnowledge.boundingBox;
+          if (coords.lat < minLat || coords.lat > maxLat || coords.lng < minLng || coords.lng > maxLng) {
+            regionalCompatibility = false;
+          }
+        }
+
+        // For marine entities, check forbidden regions only if a terrestrial administrative boundary was matched
+        const hasLandMatch = Boolean(
+          canonicalCountry && 
+          canonicalCountry !== 'none' && 
+          canonicalCountry !== 'unknown country' && 
+          canonicalCountry !== 'water / open area'
+        );
+
+        if (regionalCompatibility && histKnowledge.forbiddenRegions && hasLandMatch) {
+          const fullRegionStr = `${canonicalCountry} ${canonicalState}`.toLowerCase();
+          for (const forbidden of histKnowledge.forbiddenRegions) {
+            if (fullRegionStr.includes(forbidden.toLowerCase())) {
+              regionalCompatibility = false;
+              break;
+            }
+          }
+        }
+
+        console.log(`[OFFSHORE GEOGRAPHIC VALIDATION]
+entity="${canonicalName}"
+entityType="${entityType}"
+candidateCoordinates=${coords.lat.toFixed(4)},${coords.lng.toFixed(4)}
+expectedRegion="${histKnowledge.expectedRegion}"
+marineEntity=true
+reverseGeocodeLandMatch=${hasLandMatch}
+regionalCompatibility=${regionalCompatibility}
+result=${regionalCompatibility ? 'ACCEPT' : 'REJECT'}`);
+
+        if (!regionalCompatibility) {
           identityValid = false;
           valid = false;
           failureReason = failureReason === 'none'
             ? `Geographic mismatch: coordinate (${coords.lat}, ${coords.lng}) contradicts expected historical region '${histKnowledge.expectedRegion}'`
             : `${failureReason}, Historical geographic mismatch`;
         }
-      }
-      if (histKnowledge.forbiddenRegions) {
-        const fullRegionStr = `${canonicalCountry} ${canonicalState}`.toLowerCase();
-        for (const forbidden of histKnowledge.forbiddenRegions) {
-          if (fullRegionStr.includes(forbidden.toLowerCase())) {
+      } else {
+        // Terrestrial entity validation
+        if (histKnowledge.boundingBox) {
+          const { minLat, maxLat, minLng, maxLng } = histKnowledge.boundingBox;
+          if (coords.lat < minLat || coords.lat > maxLat || coords.lng < minLng || coords.lng > maxLng) {
             identityValid = false;
             valid = false;
             failureReason = failureReason === 'none'
-              ? `Geographic mismatch: region '${forbidden}' contradicts historical entity '${canonicalName}'`
+              ? `Geographic mismatch: coordinate (${coords.lat}, ${coords.lng}) contradicts expected historical region '${histKnowledge.expectedRegion}'`
               : `${failureReason}, Historical geographic mismatch`;
-            break;
+          }
+        }
+        if (histKnowledge.forbiddenRegions) {
+          const fullRegionStr = `${canonicalCountry} ${canonicalState}`.toLowerCase();
+          for (const forbidden of histKnowledge.forbiddenRegions) {
+            if (fullRegionStr.includes(forbidden.toLowerCase())) {
+              identityValid = false;
+              valid = false;
+              failureReason = failureReason === 'none'
+                ? `Geographic mismatch: region '${forbidden}' contradicts historical entity '${canonicalName}'`
+                : `${failureReason}, Historical geographic mismatch`;
+              break;
+            }
           }
         }
       }

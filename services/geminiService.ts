@@ -467,8 +467,8 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
         coordinateSource: "deterministic" as CoordinateSource,
         identityStatus: "verified" as GeographicIdentityStatus,
         country: deterministicRes.context?.country || (deterministicRes as any).country,
-        state: deterministicRes.context?.state || (deterministicRes as any).state,
-        city: deterministicRes.context?.city || (deterministicRes as any).city,
+        state: deterministicRes.context?.state || (deterministicRes as any).state || (deterministicRes.name?.includes(',') ? deterministicRes.name.split(',')[1].trim() : undefined),
+        city: deterministicRes.context?.city || (deterministicRes as any).city || (deterministicRes.name?.includes(',') ? deterministicRes.name.split(',')[0].trim() : (deterministicRes.entityType === 'city' ? deterministicRes.name : undefined)),
         county: deterministicRes.context?.county,
         region: deterministicRes.context?.region,
         description: (deterministicRes as any).description,
@@ -713,6 +713,8 @@ Return only JSON:
           data.name = targetSearchTerm;
           data.coordinates = undefined;
           return { error: "NO_GEOGRAPHIC_DATA", locationInfo: { name: targetSearchTerm }, aiUsed: true };
+        } else {
+          data.canonicalName = data.name;
         }
       }
       
@@ -2865,7 +2867,14 @@ Output ONLY the JSON object.`;
     });
 
     if (recoveryAccepted && parsedCoords) {
-       return { ...parsedCoords, source: "ai_recovery" };
+       return { 
+         ...parsedCoords, 
+         source: "ai_recovery",
+         recoveredEntity: resolvedEntityName,
+         resolvedEntity: resolvedEntityName,
+         name: resolvedEntityName,
+         canonicalName: resolvedEntityName
+       };
     }
     
     return null;
@@ -2873,7 +2882,7 @@ Output ONLY the JSON object.`;
   } catch (error) {
     return null;
   }
-};;
+};
 
 export const recoverLocationMetadata = async (
   entityName: string, 
@@ -2883,17 +2892,25 @@ export const recoverLocationMetadata = async (
   try {
     const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
     
-    const entityTitle = canonicalIdentity?.canonicalName || normalizeLocationEntity(entityName) || entityName;
-    const adminArea = canonicalIdentity?.state || canonicalIdentity?.region || canonicalIdentity?.city || canonicalIdentity?.county || "Unknown area";
+    const entityTitle = canonicalIdentity?.canonicalName || entityName || normalizeLocationEntity(entityName);
+    const cityName = canonicalIdentity?.city;
+    const adminArea = canonicalIdentity?.state || canonicalIdentity?.region || canonicalIdentity?.county || canonicalIdentity?.city || "Unknown area";
     const countryName = canonicalIdentity?.country || "Unknown country";
     const entityTypeStr = canonicalIdentity?.entityType || "settlement";
     const originalQuery = canonicalIdentity?.originalQuery;
+
+    const expectedLocationString = [
+      cityName, 
+      adminArea && adminArea !== cityName && adminArea !== "Unknown area" ? adminArea : null, 
+      countryName && countryName !== "Unknown country" ? countryName : null
+    ].filter(Boolean).join(', ') || `${adminArea}, ${countryName}`;
 
     console.log(`[LLM ENRICHMENT INPUT]\ncanonicalName="${entityTitle}"\nentityType="${entityTypeStr}"\nstate="${adminArea}"\ncountry="${countryName}"\ncoordinates=${coordinates.lat.toFixed(4)},${coordinates.lng.toFixed(4)}\nidentityStatus="${canonicalIdentity?.identityStatus || 'verified'}"`);
 
     const contextDetails = [
       `Canonical entity: ${entityTitle}`,
       `Entity type: ${entityTypeStr}`,
+      cityName ? `City/settlement: ${cityName}` : null,
       `State/region: ${adminArea}`,
       `Country: ${countryName}`,
       `Latitude: ${coordinates.lat}`,
@@ -2917,6 +2934,7 @@ export const recoverLocationMetadata = async (
       Entity type:
       ${entityTypeStr}
 
+      ${cityName ? `City/settlement:\n      ${cityName}\n` : ''}
       State/region:
       ${adminArea}
 
@@ -2948,7 +2966,7 @@ export const recoverLocationMetadata = async (
       Require the response to be a SINGLE JSON object with exactly these top-level fields:
       {
         "name": "${entityTitle}",
-        "locationString": "${adminArea}, ${countryName}",
+        "locationString": "${expectedLocationString}",
         "description": "2-4 substantive educational paragraphs in English explaining what this place is, why it exists, why it is significant, and why someone should care. Write informative narrative without generic template phrases.",
         "population": null,
         "climate": {

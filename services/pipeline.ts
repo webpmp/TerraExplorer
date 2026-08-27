@@ -156,8 +156,13 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
       });
       console.warn(`[ENTITY IDENTITY MISMATCH] Resolver returned "${resolvedData.name}" which differs from requested "${entityResult.entity}". Discarding coordinates and reverting to requested entity.`);
       resolvedData.name = entityResult.entity;
+      resolvedData.canonicalName = entityResult.entity;
       resolvedData.coordinates = undefined;
       error = "NO_GEOGRAPHIC_DATA";
+    } else {
+      if (resolvedData.name && resolvedData.name !== 'Unknown') {
+        resolvedData.canonicalName = resolvedData.canonicalName || resolvedData.name;
+      }
     }
   }
 
@@ -168,42 +173,69 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
       resolvedData = { name: entityResult.entity };
     }
 
-    const recoveryCoords = await recoverCoordinatesFromAi(
-      entityResult.intentResult.normalized.request.rawQuery,
-      entityResult.intentResult.intent,
-      entityResult.entity
-    );
-    
-    let recoveredValid = false;
-    let source: CoordinateSource = "ai_recovery";
-    if (recoveryCoords && isValidCoordinates(recoveryCoords)) {
-      const incoming = {
-         lat: recoveryCoords.lat,
-         lng: recoveryCoords.lng,
-         source: (recoveryCoords as any).source || 'ai_recovery'
-      } as any;
-      
-      const existing = resolvedData.coordinates ? {
-         lat: resolvedData.coordinates.lat,
-         lng: resolvedData.coordinates.lng,
-         source: (resolvedData as any).coordinateSource || (resolvedData.coordinates as any).source || 'ai_recovery'
-      } as any : null;
-      
-      resolvedData.coordinates = mergeCoordinates(existing, incoming);
-      resolvedData.name = entityResult.entity;
-      (resolvedData as any).coordinateSource = incoming.source;
-      (resolvedData as any).identityStatus = (resolvedData as any).identityStatus || "unverified";
+    const isHistoricalDiscovery = entityResult.intentResult.intent === 'DISCOVERY_OBJECT_LOCATION' || entityResult.intentResult.intent === 'HISTORICAL_EVENT';
+    const histKnowledge = isHistoricalDiscovery ? (getHistoricalEntityKnowledge(entityResult.entity) || getHistoricalEntityKnowledge(resolvedData?.name)) : null;
+
+    if (histKnowledge?.approximateCoordinates) {
+      resolvedData.name = histKnowledge.entity;
+      resolvedData.canonicalName = histKnowledge.entity;
+      resolvedData.coordinates = { ...histKnowledge.approximateCoordinates };
+      (resolvedData as any).entityType = histKnowledge.entityType === 'shipwreck' ? 'shipwreck_site' : histKnowledge.entityType;
+      (resolvedData as any).coordinateSource = histKnowledge.approximateCoordinates.source || 'deterministic';
+      (resolvedData as any).identityStatus = 'verified';
+      (resolvedData as any).isApproximate = !histKnowledge.exactLocationConfirmed;
+      (resolvedData as any).exactLocationKnown = histKnowledge.exactLocationKnown ?? true;
+      (resolvedData as any).confirmedWreckLocation = histKnowledge.confirmedWreckLocation ?? true;
+      resolvedData.description = resolvedData.description || histKnowledge.historicalContext || histKnowledge.sourceRationale || "";
       error = undefined;
-      recoveryUsed = true;
-      recoveredValid = true;
-      source = incoming.source;
+      coordinatesValid = true;
+      console.log(`[HISTORICAL KNOWLEDGE APPLIED] Prioritized authoritative historical knowledge for "${entityResult.entity}": ${JSON.stringify(resolvedData.coordinates)}`);
     } else {
-      resolvedData.name = entityResult.entity;
-      resolvedData.coordinates = undefined;
-      error = "NO_GEOGRAPHIC_DATA";
+      const recoveryCoords = await recoverCoordinatesFromAi(
+        entityResult.intentResult.normalized.request.rawQuery,
+        entityResult.intentResult.intent,
+        entityResult.entity
+      );
+      
+      let recoveredValid = false;
+      let source: CoordinateSource = "ai_recovery";
+      if (recoveryCoords && isValidCoordinates(recoveryCoords)) {
+        const incoming = {
+           lat: recoveryCoords.lat,
+           lng: recoveryCoords.lng,
+           source: (recoveryCoords as any).source || 'ai_recovery'
+        } as any;
+        
+        const existing = resolvedData.coordinates ? {
+           lat: resolvedData.coordinates.lat,
+           lng: resolvedData.coordinates.lng,
+           source: (resolvedData as any).coordinateSource || (resolvedData.coordinates as any).source || 'ai_recovery'
+        } as any : null;
+        
+        resolvedData.coordinates = mergeCoordinates(existing, incoming);
+        const recoveredName = (recoveryCoords as any).recoveredEntity || (recoveryCoords as any).resolvedEntity || (recoveryCoords as any).name || (recoveryCoords as any).canonicalName;
+        if (recoveredName) {
+          resolvedData.name = recoveredName;
+          resolvedData.canonicalName = recoveredName;
+        } else {
+          resolvedData.name = entityResult.entity;
+          resolvedData.canonicalName = resolvedData.canonicalName || entityResult.entity;
+        }
+        (resolvedData as any).coordinateSource = incoming.source;
+        (resolvedData as any).identityStatus = (resolvedData as any).identityStatus || "unverified";
+        error = undefined;
+        recoveryUsed = true;
+        recoveredValid = true;
+        source = incoming.source;
+      } else {
+        resolvedData.name = entityResult.entity;
+        resolvedData.canonicalName = resolvedData.canonicalName || entityResult.entity;
+        resolvedData.coordinates = undefined;
+        error = "NO_GEOGRAPHIC_DATA";
+      }
+      
+      console.log(`[COORDINATE RECOVERY]\nRecovery success: ${recoveredValid ? 'Yes' : 'No'}\nRecovered coordinates: ${recoveryCoords ? JSON.stringify(recoveryCoords) : 'None'}\nSource: ${source}`);
     }
-    
-    console.log(`[COORDINATE RECOVERY]\nRecovery success: ${recoveredValid ? 'Yes' : 'No'}\nRecovered coordinates: ${recoveryCoords ? JSON.stringify(recoveryCoords) : 'None'}\nSource: ${source}`);
   }
 
   // Normalize whatever coordinates we have at this point
@@ -245,13 +277,15 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   let canonicalEntity: CanonicalGeographicEntity | null = null;
   let identity: ReturnType<typeof createIdentity> | null = null;
   let entityType: any;
+  let authoritativeHierarchy = '';
+  let locationLabel = '';
 
   if (coordinatesValid && resolvedData && resolvedData.coordinates) {
       const isHistoricalDiscovery = entityResult.intentResult.intent === 'DISCOVERY_OBJECT_LOCATION' || entityResult.intentResult.intent === 'HISTORICAL_EVENT';
-      const histKnowledge = isHistoricalDiscovery ? getHistoricalEntityKnowledge(entityResult.entity) : null;
+      const histKnowledge = isHistoricalDiscovery ? (getHistoricalEntityKnowledge(resolvedData.name) || getHistoricalEntityKnowledge(entityResult.entity)) : null;
       
-      const resolvedCanonical = resolvedData.canonicalName || (resolvedData.name && resolvedData.name !== 'Unknown' ? toCanonicalTitleCase(resolvedData.name) : null);
-      const queryCanonical = entityResult.entity ? toCanonicalTitleCase(entityResult.entity) : null;
+      const resolvedCanonical = resolvedData.canonicalName || (resolvedData.name && resolvedData.name !== 'Unknown' ? resolvedData.name : null);
+      const queryCanonical = entityResult.entity && entityResult.entity !== 'Unknown' ? entityResult.entity : null;
       const canonicalName = histKnowledge?.entity || resolvedCanonical || queryCanonical || (resolvedData.name || 'Unknown');
 
       // Lock resolvedData.name and canonicalName
@@ -259,19 +293,72 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
       resolvedData.canonicalName = canonicalName;
 
       // Populate administrative context if missing from deterministic coordinates
-      if (!resolvedData.country || !resolvedData.state) {
+      if (!resolvedData.country || !resolvedData.state || !resolvedData.city) {
           try {
               const rev = await reverseGeocode(resolvedData.coordinates.lat, resolvedData.coordinates.lng);
               if (rev) {
+                  const revCity = rev.city || rev.town || rev.village || (rev.municipality ? rev.municipality.replace(/^Municipality of\s+/i, '').replace(/\s+Municipality$/i, '').trim() : undefined);
                   resolvedData.country = resolvedData.country || rev.country;
                   resolvedData.state = resolvedData.state || rev.state;
-                  resolvedData.city = resolvedData.city || rev.city;
+                  resolvedData.city = resolvedData.city || revCity;
                   resolvedData.county = resolvedData.county || rev.county;
               }
           } catch {
               // Best effort
           }
       }
+
+      // If administrative context is still missing (e.g. offshore marine site), preserve from validated historical knowledge
+      if (histKnowledge) {
+          if (!resolvedData.country && histKnowledge.country) {
+              resolvedData.country = histKnowledge.country;
+          } else if (!resolvedData.country && histKnowledge.allowedCountries?.length > 0) {
+              resolvedData.country = histKnowledge.allowedCountries[0];
+          }
+          if (!resolvedData.state && histKnowledge.state) {
+              resolvedData.state = histKnowledge.state;
+          }
+          if (!resolvedData.city && histKnowledge.nearbyCity) {
+              resolvedData.city = histKnowledge.nearbyCity;
+          }
+          if (!resolvedData.locationString && (histKnowledge.expectedRegion || histKnowledge.approximateRegion)) {
+              resolvedData.locationString = histKnowledge.expectedRegion || histKnowledge.approximateRegion;
+          }
+      }
+
+      const authCity = (resolvedData as any).city;
+      const authState = (resolvedData as any).state;
+      const authCountry = (resolvedData as any).country;
+
+      locationLabel = '';
+      if (authCity && authCountry) {
+          locationLabel = `${authCity}, ${authCountry}`;
+      } else if (authState && authCountry) {
+          locationLabel = `${authState}, ${authCountry}`;
+      } else if (authCountry) {
+          locationLabel = authCountry;
+      } else if (authCity && authState) {
+          locationLabel = `${authCity}, ${authState}`;
+      } else if (authCity) {
+          locationLabel = authCity;
+      } else if (authState) {
+          locationLabel = authState;
+      }
+
+      authoritativeHierarchy = [authCity, authState, authCountry].filter(Boolean).filter((val, idx, arr) => arr.indexOf(val) === idx).join(', ');
+
+      if (!resolvedData.locationString && authoritativeHierarchy) {
+          resolvedData.locationString = authoritativeHierarchy;
+      }
+
+      console.log(`[GEOGRAPHIC CONTEXT]
+entity="${canonicalName}"
+coordinates=${resolvedData.coordinates.lat.toFixed(7)},${resolvedData.coordinates.lng.toFixed(7)}
+city="${authCity || 'none'}"
+state="${authState || 'none'}"
+country="${authCountry || 'none'}"
+source="${finalSource}"
+locationLabel="${locationLabel || 'none'}"`);
       
       const providerSignals = [
           ...((resolvedData as any).discoverySignals || []),
@@ -373,6 +460,11 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
            console.log(`Metadata Present: true`);
            console.log(`Enrichment Executed: true`);
            
+           if (authoritativeHierarchy && metadataRecovery.locationString && metadataRecovery.locationString !== authoritativeHierarchy) {
+               console.log(`[GEOGRAPHIC CONTEXT PRESERVED]\nauthoritative="${authoritativeHierarchy}"\naiLocationString="${metadataRecovery.locationString}"\naction="authoritative_context_retained"`);
+               metadataRecovery.locationString = authoritativeHierarchy;
+           }
+
            // Strip AI entity categorization to preserve canonical identity
            delete (metadataRecovery as any).type;
            delete (metadataRecovery as any).entityType;
@@ -645,9 +737,23 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
               ? (rawDesc as any).text
               : (typeof (e.metadata as any)?.description === 'string' ? (e.metadata as any).description : ''));
 
+      const address = e.subject.primaryLocation.location.address as any;
+      const finalCity = address?.city || (locationResult as any).locationInfo?.city;
+      const finalState = address?.state || (locationResult as any).locationInfo?.state;
+      const finalCountry = address?.country || (locationResult as any).locationInfo?.country;
+      const finalCounty = address?.county || (locationResult as any).locationInfo?.county;
+
+      let derivedLabel = '';
+      if (finalCity && finalCountry) derivedLabel = `${finalCity}, ${finalCountry}`;
+      else if (finalState && finalCountry) derivedLabel = `${finalState}, ${finalCountry}`;
+      else if (finalCountry) derivedLabel = finalCountry;
+
+      const finalHierarchy = [finalCity, finalState, finalCountry].filter(Boolean).filter((val, idx, arr) => arr.indexOf(val) === idx).join(', ');
+
       (locationResult as any).finalData = {
           name: e.subject.identity.canonicalName,
           canonicalName: e.subject.identity.canonicalName,
+          displayName: e.subject.identity.canonicalName,
           entityType: e.subject.identity.entityType,
           type: e.subject.identity.entityType,
           category: e.subject.identity.category || "place",
@@ -663,13 +769,20 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
           population: e.metadata.population,
           notable: e.metadata.notable,
           news: e.metadata.news,
-          contextNotes: e.metadata.contextNotes
+          contextNotes: e.metadata.contextNotes,
+          city: finalCity,
+          state: finalState,
+          country: finalCountry,
+          county: finalCounty,
+          locationString: address?.full || finalHierarchy || derivedLabel,
+          locationLabel: derivedLabel || address?.full || finalHierarchy
       };
   } else {
-      const displayName = entityResult.entity ? toCanonicalTitleCase(entityResult.entity) : (request.rawQuery || 'Unknown');
+      const displayName = entityResult.entity ? toCanonicalTitleCase(entityResult.entity) : (request.rawQuery ? toCanonicalTitleCase(request.rawQuery) : 'Unknown');
       (locationResult as any).finalData = {
           name: displayName,
           canonicalName: displayName,
+          displayName: displayName,
           intent: entityResult.intentResult.intent
       };
   }

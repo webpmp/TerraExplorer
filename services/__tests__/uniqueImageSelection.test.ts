@@ -358,7 +358,7 @@ describe('Unique Image Selection Across Related Waypoints Suite', () => {
       expect(res.decision).toBe('ACCEPT');
     });
 
-    it('entity-specific image with conflicting unverified coordinates remains accepted', () => {
+    it('entity-specific image with conflicting coordinates is rejected on geographic mismatch', () => {
       const candidate = {
         url: 'https://upload.wikimedia.org/wikipedia/commons/3/3a/QAR_Cannon.jpg',
         title: 'Queen Anne\'s Revenge Shipwreck Cannon',
@@ -366,7 +366,7 @@ describe('Unique Image Selection Across Related Waypoints Suite', () => {
         coordinates: { lat: 34.6922, lng: -76.6853 }
       };
 
-      // Waypoint has incorrect / displaced unverified coordinates (e.g. over Indian Ocean or far away)
+      // Waypoint has conflicting coordinates (e.g. over Indian Ocean or far away)
       const entity = {
         name: 'Queen Anne\'s Revenge Shipwreck',
         entityType: 'shipwreck_site',
@@ -376,8 +376,8 @@ describe('Unique Image Selection Across Related Waypoints Suite', () => {
       };
 
       const res = validateImageCandidate(candidate, entity);
-      expect(res.decision).toBe('ACCEPT');
-      expect(res.reason).toBe('STRONG_ENTITY_MATCH_COORDINATE_CONFLICT_UNVERIFIED');
+      expect(res.decision).toBe('REJECT');
+      expect(res.reason).toContain('Geographic mismatch');
     });
 
     it('entity-specific image with verified matching coordinates receives top rank and score boost', () => {

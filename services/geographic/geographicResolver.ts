@@ -100,6 +100,10 @@ interface NominatimResult {
     town?: string;
     village?: string;
     county?: string;
+    municipality?: string;
+    city_district?: string;
+    suburb?: string;
+    hamlet?: string;
     natural?: string;
     waterway?: string;
     park?: string;
@@ -315,10 +319,11 @@ async function queryNominatim(query: string, normalizedQuery: string): Promise<G
     addressRank: r.address_rank
   };
 
+  const settlement = extractSettlementName(r.address);
   const context = {
     country: r.address?.country,
     state: r.address?.state || r.address?.region,
-    city: r.address?.city || r.address?.town || r.address?.village || r.address?.county,
+    city: settlement || r.address?.county,
     county: r.address?.county,
     region: r.address?.region
   };
@@ -339,6 +344,21 @@ async function queryNominatim(query: string, normalizedQuery: string): Promise<G
     context,
     diagnostics
   };
+}
+
+export function extractSettlementName(addr?: NominatimResult['address']): string | undefined {
+  if (!addr) return undefined;
+  if (addr.city && typeof addr.city === 'string' && addr.city.trim()) return addr.city.trim();
+  if (addr.town && typeof addr.town === 'string' && addr.town.trim()) return addr.town.trim();
+  if (addr.village && typeof addr.village === 'string' && addr.village.trim()) return addr.village.trim();
+  if (addr.municipality && typeof addr.municipality === 'string') {
+    const cleaned = addr.municipality.replace(/^Municipality of\s+/i, '').replace(/\s+Municipality$/i, '').replace(/^Dimos\s+/i, '').replace(/\s+Dimos$/i, '').trim();
+    if (cleaned) return cleaned;
+  }
+  if (addr.city_district && typeof addr.city_district === 'string' && addr.city_district.trim()) return addr.city_district.trim();
+  if (addr.suburb && typeof addr.suburb === 'string' && addr.suburb.trim()) return addr.suburb.trim();
+  if (addr.hamlet && typeof addr.hamlet === 'string' && addr.hamlet.trim()) return addr.hamlet.trim();
+  return undefined;
 }
 
 export interface ReverseGeocodeContext {
@@ -388,11 +408,12 @@ export async function reverseGeocode(lat: number, lng: number): Promise<ReverseG
   if (!result || (!result.address && !result.display_name)) return null;
 
   const addr = result.address;
+  const settlement = extractSettlementName(addr);
   const context: ReverseGeocodeContext = {
     country: addr?.country,
     state: addr?.state,
     county: addr?.county,
-    city: addr?.city,
+    city: settlement || addr?.city,
     town: addr?.town,
     village: addr?.village,
     municipality: addr?.municipality,

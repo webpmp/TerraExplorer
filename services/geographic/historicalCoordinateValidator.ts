@@ -22,6 +22,11 @@ export interface HistoricalEntityKnowledge {
   entityType: string;
   expectedRegion: string;
   approximateRegion?: string;
+  country?: string;
+  state?: string;
+  nearbyCity?: string;
+  region?: string;
+  marineRegion?: string;
   historicalContext?: string;
   sourceRationale?: string;
   confidence?: 'high' | 'medium' | 'low';
@@ -211,6 +216,162 @@ export const HISTORICAL_KNOWLEDGE_BASE: Record<string, HistoricalEntityKnowledge
       confidence: "high"
     },
     boundingBox: { minLat: 31.0, maxLat: 32.0, minLng: 30.0, maxLng: 31.0 }
+  },
+  "ss yongala": {
+    entity: "SS Yongala",
+    entityType: "shipwreck",
+    expectedRegion: "Offshore Cape Bowling Green / Townsville, Queensland, Australia (Coral Sea)",
+    approximateRegion: "Offshore Cape Bowling Green, Townsville, Queensland, Australia",
+    country: "Australia",
+    state: "Queensland",
+    nearbyCity: "Townsville",
+    region: "Offshore Cape Bowling Green",
+    marineRegion: "Coral Sea",
+    historicalContext: "Australian passenger steamship SS Yongala sank on March 23, 1911 during a cyclone with all 122 aboard; discovered in 1958 in the Great Barrier Reef Marine Park off Cape Bowling Green, Queensland.",
+    sourceRationale: "Discovered in 1958 by skin divers Don McMillan and Noel Cook; designated historic shipwreck located approximately 12 nautical miles east of Cape Bowling Green in the Coral Sea.",
+    confidence: "high",
+    allowedCountries: ["Australia"],
+    forbiddenRegions: ["South Australia", "Inland Queensland", "New South Wales", "Victoria", "Western Australia", "Northern Territory", "Tasmania"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: -19.3044,
+      lng: 147.6225,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: -24.0, maxLat: -16.0, minLng: 145.0, maxLng: 153.0 }
+  },
+  "yongala": {
+    entity: "SS Yongala",
+    entityType: "shipwreck",
+    expectedRegion: "Offshore Cape Bowling Green / Townsville, Queensland, Australia (Coral Sea)",
+    approximateRegion: "Offshore Cape Bowling Green, Townsville, Queensland, Australia",
+    country: "Australia",
+    state: "Queensland",
+    nearbyCity: "Townsville",
+    region: "Offshore Cape Bowling Green",
+    marineRegion: "Coral Sea",
+    historicalContext: "Australian passenger steamship SS Yongala sank on March 23, 1911 during a cyclone with all 122 aboard; discovered in 1958 in the Great Barrier Reef Marine Park off Cape Bowling Green, Queensland.",
+    sourceRationale: "Discovered in 1958 by skin divers Don McMillan and Noel Cook; designated historic shipwreck located approximately 12 nautical miles east of Cape Bowling Green in the Coral Sea.",
+    confidence: "high",
+    allowedCountries: ["Australia"],
+    forbiddenRegions: ["South Australia", "Inland Queensland", "New South Wales", "Victoria", "Western Australia", "Northern Territory", "Tasmania"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: -19.3044,
+      lng: 147.6225,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: -24.0, maxLat: -16.0, minLng: 145.0, maxLng: 153.0 }
+  },
+  "the yongala": {
+    entity: "SS Yongala",
+    entityType: "shipwreck",
+    expectedRegion: "Offshore Cape Bowling Green / Townsville, Queensland, Australia (Coral Sea)",
+    approximateRegion: "Offshore Cape Bowling Green, Townsville, Queensland, Australia",
+    country: "Australia",
+    state: "Queensland",
+    nearbyCity: "Townsville",
+    region: "Offshore Cape Bowling Green",
+    marineRegion: "Coral Sea",
+    historicalContext: "Australian passenger steamship SS Yongala sank on March 23, 1911 during a cyclone with all 122 aboard; discovered in 1958 in the Great Barrier Reef Marine Park off Cape Bowling Green, Queensland.",
+    sourceRationale: "Discovered in 1958 by skin divers Don McMillan and Noel Cook; designated historic shipwreck located approximately 12 nautical miles east of Cape Bowling Green in the Coral Sea.",
+    confidence: "high",
+    allowedCountries: ["Australia"],
+    forbiddenRegions: ["South Australia", "Inland Queensland", "New South Wales", "Victoria", "Western Australia", "Northern Territory", "Tasmania"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: -19.3044,
+      lng: 147.6225,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: -24.0, maxLat: -16.0, minLng: 145.0, maxLng: 153.0 }
+  },
+  "yongala shipwreck": {
+    entity: "SS Yongala",
+    entityType: "shipwreck",
+    expectedRegion: "Offshore Cape Bowling Green / Townsville, Queensland, Australia (Coral Sea)",
+    approximateRegion: "Offshore Cape Bowling Green, Townsville, Queensland, Australia",
+    country: "Australia",
+    state: "Queensland",
+    nearbyCity: "Townsville",
+    region: "Offshore Cape Bowling Green",
+    marineRegion: "Coral Sea",
+    historicalContext: "Australian passenger steamship SS Yongala sank on March 23, 1911 during a cyclone with all 122 aboard; discovered in 1958 in the Great Barrier Reef Marine Park off Cape Bowling Green, Queensland.",
+    sourceRationale: "Discovered in 1958 by skin divers Don McMillan and Noel Cook; designated historic shipwreck located approximately 12 nautical miles east of Cape Bowling Green in the Coral Sea.",
+    confidence: "high",
+    allowedCountries: ["Australia"],
+    forbiddenRegions: ["South Australia", "Inland Queensland", "New South Wales", "Victoria", "Western Australia", "Northern Territory", "Tasmania"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: -19.3044,
+      lng: 147.6225,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: -24.0, maxLat: -16.0, minLng: 145.0, maxLng: 153.0 }
+  },
+  "ss yongala shipwreck": {
+    entity: "SS Yongala",
+    entityType: "shipwreck",
+    expectedRegion: "Offshore Cape Bowling Green / Townsville, Queensland, Australia (Coral Sea)",
+    approximateRegion: "Offshore Cape Bowling Green, Townsville, Queensland, Australia",
+    country: "Australia",
+    state: "Queensland",
+    nearbyCity: "Townsville",
+    region: "Offshore Cape Bowling Green",
+    marineRegion: "Coral Sea",
+    historicalContext: "Australian passenger steamship SS Yongala sank on March 23, 1911 during a cyclone with all 122 aboard; discovered in 1958 in the Great Barrier Reef Marine Park off Cape Bowling Green, Queensland.",
+    sourceRationale: "Discovered in 1958 by skin divers Don McMillan and Noel Cook; designated historic shipwreck located approximately 12 nautical miles east of Cape Bowling Green in the Coral Sea.",
+    confidence: "high",
+    allowedCountries: ["Australia"],
+    forbiddenRegions: ["South Australia", "Inland Queensland", "New South Wales", "Victoria", "Western Australia", "Northern Territory", "Tasmania"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: -19.3044,
+      lng: 147.6225,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: -24.0, maxLat: -16.0, minLng: 145.0, maxLng: 153.0 }
+  },
+  "yongala wreck": {
+    entity: "SS Yongala",
+    entityType: "shipwreck",
+    expectedRegion: "Offshore Cape Bowling Green / Townsville, Queensland, Australia (Coral Sea)",
+    approximateRegion: "Offshore Cape Bowling Green, Townsville, Queensland, Australia",
+    country: "Australia",
+    state: "Queensland",
+    nearbyCity: "Townsville",
+    region: "Offshore Cape Bowling Green",
+    marineRegion: "Coral Sea",
+    historicalContext: "Australian passenger steamship SS Yongala sank on March 23, 1911 during a cyclone with all 122 aboard; discovered in 1958 in the Great Barrier Reef Marine Park off Cape Bowling Green, Queensland.",
+    sourceRationale: "Discovered in 1958 by skin divers Don McMillan and Noel Cook; designated historic shipwreck located approximately 12 nautical miles east of Cape Bowling Green in the Coral Sea.",
+    confidence: "high",
+    allowedCountries: ["Australia"],
+    forbiddenRegions: ["South Australia", "Inland Queensland", "New South Wales", "Victoria", "Western Australia", "Northern Territory", "Tasmania"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: -19.3044,
+      lng: 147.6225,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: -24.0, maxLat: -16.0, minLng: 145.0, maxLng: 153.0 }
   }
 };
 
@@ -327,23 +488,63 @@ export async function validateHistoricalCoordinate(
     context?.entityType === 'shipwreck' ||
     context?.entityType === 'archaeological_site';
 
-  if (isHistoricalQuery && context?.expectedRegion) {
-    const expLower = context.expectedRegion.toLowerCase();
-    const revLower = revSummary.toLowerCase();
+  if (isHistoricalQuery) {
+    if (context?.expectedRegion) {
+      const expLower = context.expectedRegion.toLowerCase();
+      const revLower = revSummary.toLowerCase();
 
-    // Check for direct contradiction between expected region and reverse geocode
-    if ((expLower.includes('ocean') || expLower.includes('sea')) && revGeo?.county) {
-      // Expected ocean, but landed in a specific inland county
-      if (!revLower.includes('coastal') && !revLower.includes('island')) {
+      // Check for direct contradiction between expected region and reverse geocode
+      if ((expLower.includes('ocean') || expLower.includes('sea')) && revGeo?.county) {
+        // Expected ocean, but landed in a specific inland county
+        if (!revLower.includes('coastal') && !revLower.includes('island')) {
+          const res: HistoricalCoordinateValidationResult = {
+            valid: false,
+            reason: 'GEOGRAPHIC_MISMATCH',
+            expectedRegion: context.expectedRegion,
+            reverseGeocodeSummary: revSummary
+          };
+          logValidation(entityName, candidateCoords, candidateSource, revSummary, res);
+          return res;
+        }
+      }
+
+      // Positive geographic evidence: expected region matches reverse geocode
+      const expTokens = expLower.split(/[\s,/–-]+/).filter(t => t.length >= 3);
+      const revTokens = revLower.split(/[\s,/–-]+/).filter(t => t.length >= 3);
+      const matchesExpectedRegion = expTokens.some(t => revTokens.includes(t));
+      if (matchesExpectedRegion) {
         const res: HistoricalCoordinateValidationResult = {
-          valid: false,
-          reason: 'GEOGRAPHIC_MISMATCH',
+          valid: true,
+          reason: 'MATCHES_EXPECTED_HISTORICAL_REGION',
           expectedRegion: context.expectedRegion,
           reverseGeocodeSummary: revSummary
         };
         logValidation(entityName, candidateCoords, candidateSource, revSummary, res);
         return res;
       }
+    }
+
+    if (candidateSource === 'deterministic' || candidateSource === 'geocoder') {
+      const res: HistoricalCoordinateValidationResult = {
+        valid: true,
+        reason: 'AUTHORITATIVE_PROVIDER_COORDINATE',
+        expectedRegion: context?.expectedRegion,
+        reverseGeocodeSummary: revSummary
+      };
+      logValidation(entityName, candidateCoords, candidateSource, revSummary, res);
+      return res;
+    }
+
+    // AI-recovered coordinates for historical entities cannot be accepted on NO_CONTRADICTION alone
+    if (candidateSource === 'ai_recovery' || candidateSource === 'ai') {
+      const res: HistoricalCoordinateValidationResult = {
+        valid: false,
+        reason: 'INSUFFICIENT_HISTORICAL_GEOGRAPHIC_EVIDENCE',
+        expectedRegion: context?.expectedRegion,
+        reverseGeocodeSummary: revSummary
+      };
+      logValidation(entityName, candidateCoords, candidateSource, revSummary, res);
+      return res;
     }
   }
 
@@ -402,11 +603,16 @@ export function toCanonicalTitleCase(str: string): string {
 
   // Helper to title-case words without lowercasing already capitalized acronyms/Roman numerals (like II, III, DFW)
   // Also preserves standard English possessive/contraction casing (e.g., Anne's, not Anne'S).
+  const isInputAllUpper = raw === raw.toUpperCase();
   const formatWord = (w: string) => {
     if (!w) return '';
-    // If word is Roman numeral like II, III, IV or acronym, preserve
-    if (/^(?:II|III|IV|VI|VII|VIII|IX|X|USA|UK|DFW)$/i.test(w)) {
+    // If word is Roman numeral or standard initialism, preserve uppercase
+    if (/^(?:II|III|IV|VI|VII|VIII|IX|X|USA|UK|DFW|SS|USS|HMS|RMS|NASA|UNESCO|JPL)$/i.test(w)) {
       return w.toUpperCase();
+    }
+    // If word is already all-caps (acronym / initialism) and length >= 2 in a mixed-case input, preserve
+    if (!isInputAllUpper && w.length >= 2 && /^[A-Z0-9]+$/.test(w)) {
+      return w;
     }
     // Handle words with apostrophes like Anne's or King's or O'Connor
     const formatted = w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();

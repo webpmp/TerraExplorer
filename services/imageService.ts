@@ -1,6 +1,7 @@
 import { LocationInfo } from '../types';
 import { cleanMetadataString, formatImageAttribution, GalleryImage } from '../components/InfoPanel';
 import { searchImageRegistry, canonicalizeImageUrl } from './imageDeduplicationService';
+import { getHistoricalEntityKnowledge } from './geographic/historicalCoordinateValidator';
 
 export interface ImageCandidate {
   url: string;
@@ -596,7 +597,7 @@ export function isDifferentNamedEntity(
   // (e.g. "Dallas Cowboys", "Dallas County", "Dallas Fort Worth International Airport", "Bryce Dallas Howard")
   const nonSettlementPatterns = [
     /\b(?:cowboys|mavericks|stars|rangers|texans|astros|spurs|rockets|fc|united|club|team|franchise)\b/i,
-    /\b(?:county|parish|borough|metroplex|metropolitan area|combined statistical area)\b/i,
+    /\b(?:county|parish|borough|metroplex|metropolitan area|combined statistical area|hundred of|lodge|hotel|motel|station|homestead)\b/i,
     /\b(?:international airport|regional airport|airport|airfield|aerodrome|station|terminal|transit authority)\b/i,
     /\b(?:independent school district|school district|isd|high school|university|college|hospital|medical center)\b/i,
     /\b(?:police department|fire department|sheriff|department of)\b/i,
@@ -609,8 +610,19 @@ export function isDifferentNamedEntity(
     }
   }
 
-  // If title or description directly contains target entity name or any alias, it is not a different entity
+  // Maritime vessel vs non-maritime locality disambiguation
+  const isTargetVessel = targetLower.startsWith('ss ') || targetLower.startsWith('uss ') || targetLower.startsWith('hms ') || targetLower.includes('shipwreck') || targetLower.includes('wreck');
   const fullText = `${titleClean} ${description || ''}`.toLowerCase();
+
+  if (isTargetVessel) {
+    const isLandLocality = /\b(?:hundred of|lodge|hotel|resort|rural locality|town in south australia|south australia|locality in)\b/i.test(fullText);
+    const hasVesselMarker = /\b(?:ship|vessel|wreck|shipwreck|maritime|coral sea|great barrier reef|steamship)\b/i.test(fullText);
+    if (isLandLocality && !hasVesselMarker) {
+      return true;
+    }
+  }
+
+  // If title or description directly contains target entity name or any alias, it is not a different entity
   if (allTargetAliases.some(a => fullText.includes(a))) {
     return false;
   }
@@ -1495,13 +1507,10 @@ Reason: ${reason}`);
     reason = 'NO_ENTITY_SPECIFIC_EVIDENCE';
   } else {
     // Strong entity match is present. Apply matrix based on coordinateStatus and geoEvidence.
-    if (coordinateStatus === 'VERIFIED' && geoEvidence === 'CONFLICTING') {
-      // Independent verified evidence that candidate is in a conflicting location
+    if (geoEvidence === 'CONFLICTING') {
+      // Independent verified evidence or candidate metadata indicates conflicting location
       decision = 'REJECT';
-      reason = geoMismatchReason || 'Geographic mismatch: coordinate distance exceeds tolerance';
-    } else if (coordinateStatus === 'UNVERIFIED' && geoEvidence === 'CONFLICTING') {
-      decision = 'ACCEPT';
-      reason = 'STRONG_ENTITY_MATCH_COORDINATE_CONFLICT_UNVERIFIED';
+      reason = geoMismatchReason || 'Geographic mismatch: candidate geography conflicts with entity location';
     } else if (geoEvidence === 'MATCHING') {
       decision = 'ACCEPT';
       reason = coordinateStatus === 'VERIFIED' ? 'STRONG_ENTITY_MATCH_GEO_VERIFIED' : 'STRONG_ENTITY_MATCH_GEO_MATCHING';
@@ -1885,8 +1894,24 @@ export async function fetchAndValidateImages(
     query: (info as any).query,
     imageIntent
   });
-  const histContextStr = (info as any).historicalContext || ((info as any).intent === 'DISCOVERY_OBJECT_LOCATION' ? 'Christopher Columbus / 1492 / Santa María' : (histContext?.exploration || 'none'));
-  const geoContextStr = [info.city, info.state, info.country].filter(Boolean).join(' / ') || ((info as any).intent === 'DISCOVERY_OBJECT_LOCATION' ? 'Haiti / Northern Hispaniola' : 'Unknown');
+  const resolvedHistKnowledge = getHistoricalEntityKnowledge(info.canonicalName || info.name);
+  let effectiveHistContext = (info as any).historicalContext || resolvedHistKnowledge?.historicalContext || '';
+  const rawEntityName = (info.canonicalName || info.name || '').toLowerCase();
+  if (effectiveHistContext && !rawEntityName.includes('columbus') && !rawEntityName.includes('santa maria')) {
+    if (effectiveHistContext.toLowerCase().includes('columbus') || effectiveHistContext.toLowerCase().includes('santa maría') || effectiveHistContext.toLowerCase().includes('santa maria') || effectiveHistContext.toLowerCase().includes('hispaniola')) {
+      console.warn(`[IMAGE CONTEXT CONFLICT] Discarding stale/conflicting historical context "${effectiveHistContext}" for entity "${info.name}"`);
+      effectiveHistContext = resolvedHistKnowledge?.historicalContext || '';
+    }
+  }
+  const histContextStr = effectiveHistContext || (histContext?.exploration || 'none');
+
+  const geoParts = [info.city, info.state, info.country].filter(Boolean);
+  let geoContextStr = geoParts.length > 0 ? geoParts.join(' / ') : (resolvedHistKnowledge?.approximateRegion || 'Unknown');
+  if (geoContextStr.toLowerCase().includes('hispaniola') || geoContextStr.toLowerCase().includes('haiti')) {
+    if (!rawEntityName.includes('columbus') && !rawEntityName.includes('santa maria') && !rawEntityName.includes('haiti')) {
+      geoContextStr = resolvedHistKnowledge?.approximateRegion || 'Unknown';
+    }
+  }
 
   for (let i = 0; i < queries.length; i++) {
     const query = queries[i];

@@ -28,24 +28,46 @@ export interface GalleryImage {
   attribution?: string;
 }
 
+// Helper to check for placeholder / unavailable strings that must NEVER be displayed in the UI
+export function isPlaceholderString(val: any): boolean {
+  if (val === null || val === undefined) return true;
+  const s = String(val).trim().toLowerCase();
+  return (
+    s === '' ||
+    s === 'unknown' ||
+    s.startsWith('unknown ') ||
+    s === 'unavailable' ||
+    s.startsWith('unavailable ') ||
+    s === 'n/a' ||
+    s === 'na' ||
+    s === 'none' ||
+    s === 'null' ||
+    s === 'undefined' ||
+    s === '[object object]' ||
+    s === 'placeholder' ||
+    s === 'no description' ||
+    s === 'not available' ||
+    s === 'not applicable' ||
+    s === 'no data' ||
+    s === '0' ||
+    s === 'uninhabited' ||
+    s === 'no permanent population' ||
+    s === 'lookup_failed' ||
+    s.startsWith('climate data unavailable') ||
+    s.startsWith('climate data is unavailable') ||
+    s.startsWith('specific climate data is unavailable') ||
+    s.startsWith('documentary enrichment unavailable') ||
+    s.startsWith('information unavailable') ||
+    s.includes('enrichment unavailable') ||
+    s.includes('information unavailable')
+  );
+}
+
 export const cleanMetadataString = (val: unknown): string | undefined => {
   if (val === null || val === undefined) return undefined;
   if (typeof val !== 'string' && typeof val !== 'number') return undefined;
   const str = String(val).trim();
-  if (!str) return undefined;
-  const lower = str.toLowerCase();
-  if (
-    lower === 'undefined' ||
-    lower === 'null' ||
-    lower === 'n/a' ||
-    lower === 'none' ||
-    lower === 'unknown' ||
-    lower === '[object object]' ||
-    lower === 'placeholder' ||
-    lower === 'no description'
-  ) {
-    return undefined;
-  }
+  if (!str || isPlaceholderString(str)) return undefined;
   return str;
 };
 
@@ -107,6 +129,16 @@ const COMMON_GEO_ABBRS: Record<string, string> = {
   uae: 'united arab emirates'
 };
 
+const COMMON_COUNTRY_ABBRS: Record<string, string> = {
+  us: 'united states', usa: 'united states',
+  uk: 'united kingdom',
+  uae: 'united arab emirates'
+};
+
+const CONTINENTS = [
+  'Africa', 'Antarctica', 'Asia', 'Europe', 'North America', 'Oceania', 'South America'
+];
+
 /**
  * Normalizes a geographic or entity name strictly for comparison purposes:
  * - strips diacritics / accents
@@ -129,6 +161,9 @@ export const normalizeGeoComparisonName = (str: unknown): string => {
     .trim();
 };
 
+/**
+ * Standardizes common geographic tokens (e.g. "saint" vs "st", state abbreviations)
+ */
 const standardizeGeoTokens = (norm: string): string => {
   let s = norm
     .replace(/^mt\s+/, 'mount ')
@@ -238,8 +273,8 @@ export const isRedundantWithTitle = (
     // 3. Base component after splitting comma / parentheses
     const baseComp = component.split(',')[0].replace(/\s*\(.*?\)\s*/g, '').trim();
     if (baseComp && baseComp !== component) {
-      const redBaseComp = areGeoComponentsRedundant(baseComp, rawTitle);
-      if (redBaseComp.isRedundant) return true;
+      const redBase = areGeoComponentsRedundant(baseComp, rawTitle);
+      if (redBase.isRedundant) return true;
     }
   }
 
@@ -251,6 +286,275 @@ export interface HeaderGeographicResult {
   displaySubtitle: string | null;
   displayAltNames: string | null;
 }
+
+export interface ParsedLocationHierarchy {
+  settlement?: string;
+  state?: string;
+  country?: string;
+  continent?: string;
+}
+
+const cleanVal = (v: any): string | undefined => {
+  const cleaned = cleanMetadataString(v);
+  if (!cleaned || isPlaceholderString(cleaned)) return undefined;
+  return cleaned;
+};
+
+/**
+ * Extracts a settlement name preferring city > town > village > hamlet > locality > municipality.
+ */
+export const extractHeaderSettlement = (info: any): string | undefined => {
+  if (!info) return undefined;
+  
+  const rawCity = cleanVal(info.city || info.address?.city || info.context?.city || info.waypoint?.city);
+  if (rawCity) return rawCity;
+
+  const rawTown = cleanVal(info.town || info.address?.town || info.context?.town || info.waypoint?.town);
+  if (rawTown) return rawTown;
+
+  const rawVillage = cleanVal(info.village || info.address?.village || info.context?.village || info.waypoint?.village);
+  if (rawVillage) return rawVillage;
+
+  const rawHamlet = cleanVal(info.hamlet || info.address?.hamlet || info.context?.hamlet || info.waypoint?.hamlet);
+  if (rawHamlet) return rawHamlet;
+
+  const rawLocality = cleanVal(info.locality || info.address?.locality || info.context?.locality || info.waypoint?.locality);
+  if (rawLocality) return rawLocality;
+
+  const rawMun = cleanVal(info.municipality || info.address?.municipality || info.context?.municipality || info.waypoint?.municipality);
+  if (rawMun) {
+    const cleanedMun = rawMun
+      .replace(/^Municipality of\s+/i, '')
+      .replace(/\s+Municipality$/i, '')
+      .replace(/^Dimos\s+/i, '')
+      .replace(/\s+Dimos$/i, '')
+      .trim();
+    if (cleanedMun && !isPlaceholderString(cleanedMun)) return cleanedMun;
+  }
+
+  return undefined;
+};
+
+/**
+ * Extracts country name from structured fields.
+ */
+export const extractHeaderCountry = (info: any): string | undefined => {
+  if (!info) return undefined;
+  const rawCountry = cleanVal(info.country || info.context?.country || info.address?.country || info.waypoint?.country);
+  if (rawCountry && !isPlaceholderString(rawCountry)) {
+    return rawCountry;
+  }
+  return undefined;
+};
+
+/**
+ * Extracts state/province/region for fallback when city is absent.
+ */
+export const extractHeaderState = (info: any): string | undefined => {
+  if (!info) return undefined;
+  const rawState = cleanVal(
+    info.state || info.region || info.province || info.adminArea ||
+    info.context?.state || info.context?.region || info.context?.province ||
+    info.address?.state || info.address?.region || info.address?.province ||
+    info.waypoint?.state || info.waypoint?.region
+  );
+  if (rawState && !isPlaceholderString(rawState)) {
+    return rawState;
+  }
+  return undefined;
+};
+
+/**
+ * Parses a comma-separated location string, filtering out postal codes, street addresses,
+ * and administrative noise, extracting candidate settlement, state, country, or continent.
+ */
+export const parseLocationHierarchyString = (locStr: string): ParsedLocationHierarchy => {
+  if (!locStr || typeof locStr !== 'string') return {};
+
+  const rawParts = locStr.split(',').map(s => s.trim()).filter(Boolean);
+  if (rawParts.length === 0) return {};
+
+  const isPostalCode = (s: string) => /^\d{3,6}(-\d{4})?$/i.test(s) || /^\d{2}\s*\d{2,4}$/.test(s) || /^[A-Z]\d[A-Z]\s*\d[A-Z]\d$/i.test(s) || /^[A-Z]{1,2}\d{1,2}[A-Z]?\s*\d[A-Z]{2}$/i.test(s);
+  const isStreetOrBuildingNumber = (s: string) => /^\d+\s+[A-Za-z]/i.test(s) || /^\d+[a-z]?$/i.test(s);
+  const isAdministrativeNoise = (s: string) => /\b(\d+(st|nd|rd|th)?\s+district|district of|regional unit of|regional unit|metropolitan city of|metropolitan city|arrondissement|county|suburb|quarter|borough)\b/i.test(s);
+
+  const cleanParts: string[] = [];
+  let foundCleanMunicipality: string | undefined;
+
+  for (const part of rawParts) {
+    if (isPlaceholderString(part) || isPostalCode(part) || isStreetOrBuildingNumber(part)) {
+      continue;
+    }
+    if (/^Municipality of\s+/i.test(part) || /\s+Municipality$/i.test(part) || /^Dimos\s+/i.test(part) || /\s+Dimos$/i.test(part)) {
+      const cleanMun = part
+        .replace(/^Municipality of\s+/i, '')
+        .replace(/\s+Municipality$/i, '')
+        .replace(/^Dimos\s+/i, '')
+        .replace(/\s+Dimos$/i, '')
+        .trim();
+      if (cleanMun && !isPlaceholderString(cleanMun)) {
+        foundCleanMunicipality = cleanMun;
+        if (!cleanParts.some(p => p.toLowerCase() === cleanMun.toLowerCase())) {
+          cleanParts.push(cleanMun);
+        }
+      }
+      continue;
+    }
+
+    if (isAdministrativeNoise(part)) {
+      continue;
+    }
+
+    if (!cleanParts.some(p => p.toLowerCase() === part.toLowerCase())) {
+      cleanParts.push(part);
+    }
+  }
+
+  if (cleanParts.length === 0) return {};
+
+  if (cleanParts.length === 1) {
+    const single = cleanParts[0];
+    const isContinent = CONTINENTS.some(c => c.toLowerCase() === single.toLowerCase());
+    if (isContinent) return { continent: single };
+    return { country: single };
+  }
+
+  if (cleanParts.length === 2) {
+    const first = cleanParts[0];
+    const second = cleanParts[1];
+    const isContinent = CONTINENTS.some(c => c.toLowerCase() === second.toLowerCase());
+    if (isContinent) {
+      return { country: first, continent: second };
+    }
+    const isUSStateSecond = Boolean(US_STATE_ABBRS[second.toLowerCase()]) || Object.values(US_STATE_ABBRS).some(s => s.toLowerCase() === second.toLowerCase());
+    if (isUSStateSecond) {
+      return { settlement: first, state: second, country: 'United States' };
+    }
+    return { settlement: first, country: second };
+  }
+
+  const country = cleanParts[cleanParts.length - 1];
+  const state = cleanParts[cleanParts.length - 2];
+  const settlement = foundCleanMunicipality || cleanParts[cleanParts.length - 3] || cleanParts[0];
+
+  return { settlement, state, country };
+};
+
+/**
+ * Returns a concise human-readable location string (e.g. "Athens, Greece") for the InfoPanel header.
+ */
+export const getHeaderLocation = (
+  info: any,
+  displayedTitle?: string
+): string | null => {
+  if (!info) return null;
+
+  const rawTitle = cleanMetadataString(
+    displayedTitle ||
+    (info as any).displayName ||
+    info.canonicalName ||
+    info.name ||
+    info.waypoint?.name ||
+    ''
+  ) || '';
+
+  let settlement = extractHeaderSettlement(info);
+  let state = extractHeaderState(info);
+  let country = extractHeaderCountry(info);
+  let continent = cleanVal(info.continent || info.context?.continent);
+
+  const locString = cleanVal(
+    info.locationString ||
+    info.waypoint?.locationString ||
+    info.address?.full ||
+    (info.address?.displayName && info.address.displayName !== rawTitle ? info.address.displayName : undefined)
+  );
+
+  if (locString) {
+    const parsed = parseLocationHierarchyString(locString);
+    if (!settlement && parsed.settlement) settlement = parsed.settlement;
+    if (!state && parsed.state) state = parsed.state;
+    if (!country && parsed.country) country = parsed.country;
+    if (!continent && parsed.continent) continent = parsed.continent;
+  }
+
+  // Check redundancy with title
+  const isSettlementTitle = settlement ? isRedundantWithTitle(settlement, rawTitle, info.name) : false;
+  const isStateTitle = state ? isRedundantWithTitle(state, rawTitle, info.name) : false;
+  const isCountryTitle = country ? isRedundantWithTitle(country, rawTitle, info.name) : false;
+
+  // 1. If the entity itself is a Settlement/City (e.g. title: "Clovis", "Boston", "Paris"):
+  if (isSettlementTitle) {
+    if (state && country && !isStateTitle && !isCountryTitle) {
+      return `${state}, ${country}`;
+    }
+    if (state && !isStateTitle) {
+      return state;
+    }
+    if (country && !isCountryTitle) {
+      return country;
+    }
+    if (continent) {
+      return continent;
+    }
+    return null;
+  }
+
+  // 2. If the entity itself is a State/Province (e.g. title: "California"):
+  if (isStateTitle) {
+    if (country && !isCountryTitle) {
+      return country;
+    }
+    if (continent) {
+      return continent;
+    }
+    return null;
+  }
+
+  // 3. If the entity itself is a Country (e.g. title: "France"):
+  if (isCountryTitle) {
+    if (continent) {
+      return continent;
+    }
+    return null;
+  }
+
+  // 4. For Landmarks, Historical Sites, Natural Features, POIs, Events, etc.:
+  // City + Country when available
+  if (settlement && country) {
+    if (settlement.toLowerCase() === country.toLowerCase() || areGeoComponentsRedundant(settlement, country).isRedundant) {
+      const red = areGeoComponentsRedundant(settlement, country);
+      return red.preferred || settlement;
+    }
+    return `${settlement}, ${country}`;
+  }
+
+  // 5. Fallback: If no city available, but state & country exist: state, country
+  if (state && country) {
+    if (state.toLowerCase() === country.toLowerCase() || areGeoComponentsRedundant(state, country).isRedundant) {
+      const red = areGeoComponentsRedundant(state, country);
+      return red.preferred || state;
+    }
+    return `${state}, ${country}`;
+  }
+
+  // 6. Fallback: If only city available: city
+  if (settlement) {
+    return settlement;
+  }
+
+  // 7. Fallback: If only state available: state
+  if (state) {
+    return state;
+  }
+
+  // 8. Fallback: If only country available: country
+  if (country) {
+    return country;
+  }
+
+  return null;
+};
 
 /**
  * Reusable geographic normalization and deduplication engine that produces
@@ -277,21 +581,6 @@ export const normalizeHeaderGeographicHierarchy = (
     !isRedundantWithTitle(rawTitle, queryOrRouteTitle)
   );
 
-  const cleanVal = (v: any): string | undefined => {
-    const cleaned = cleanMetadataString(v);
-    if (!cleaned || isPlaceholderString(cleaned)) return undefined;
-    return cleaned;
-  };
-
-  const city = cleanVal(info.city || info.town || info.village || info.locality || info.context?.city || info.address?.city || info.address?.town || info.address?.village || info.waypoint?.city);
-  const county = cleanVal(info.county || info.context?.county || info.address?.county || info.waypoint?.county);
-  const state = cleanVal(info.state || info.region || info.province || info.adminArea || info.context?.state || info.context?.region || info.context?.province || info.address?.state || info.address?.region || info.address?.province || info.waypoint?.state || info.waypoint?.region);
-  const territory = cleanVal(info.territory || info.context?.territory || info.address?.territory || info.waypoint?.territory);
-  const country = cleanVal(info.country || info.context?.country || info.address?.country || info.waypoint?.country);
-  const continent = cleanVal(info.continent || info.context?.continent);
-
-  const locString = cleanVal(info.locationString || info.waypoint?.locationString);
-
   // Step A: Parse candidate place name & title geographic qualifiers
   let primaryNameCandidate = rawTitle;
   let titleGeoSuffixes: string[] = [];
@@ -310,79 +599,22 @@ export const normalizeHeaderGeographicHierarchy = (
     }
   }
 
-  // Step B: Collect all candidate geographic components
-  let rawCandidates: string[] = [];
-
-  if (locString) {
-    const parts = locString.split(',').map((s: string) => s.trim()).filter((s: string) => !!cleanVal(s));
-    rawCandidates = parts;
-
-    // Insert structured state/territory/county before country/continent if missing
-    if (county && !rawCandidates.some(c => areGeoComponentsRedundant(c, county).isRedundant)) {
-      const idx = rawCandidates.findIndex(c => (state && areGeoComponentsRedundant(c, state).isRedundant) || (country && areGeoComponentsRedundant(c, country).isRedundant));
-      if (idx !== -1) rawCandidates.splice(idx, 0, county);
-      else rawCandidates.push(county);
-    }
-
-    if (state && !rawCandidates.some(c => areGeoComponentsRedundant(c, state).isRedundant)) {
-      const idx = rawCandidates.findIndex(c => (territory && areGeoComponentsRedundant(c, territory).isRedundant) || (country && areGeoComponentsRedundant(c, country).isRedundant) || (continent && areGeoComponentsRedundant(c, continent).isRedundant));
-      if (idx !== -1) rawCandidates.splice(idx, 0, state);
-      else rawCandidates.push(state);
-    }
-
-    if (territory && !rawCandidates.some(c => areGeoComponentsRedundant(c, territory).isRedundant)) {
-      const idx = rawCandidates.findIndex(c => (country && areGeoComponentsRedundant(c, country).isRedundant) || (continent && areGeoComponentsRedundant(c, continent).isRedundant));
-      if (idx !== -1) rawCandidates.splice(idx, 0, territory);
-      else rawCandidates.push(territory);
-    }
-
-    if (country && !rawCandidates.some(c => areGeoComponentsRedundant(c, country).isRedundant)) {
-      const idx = continent ? rawCandidates.findIndex(c => areGeoComponentsRedundant(c, continent).isRedundant) : -1;
-      if (idx !== -1) rawCandidates.splice(idx, 0, country);
-      else rawCandidates.push(country);
-    }
-
-    if (continent && !rawCandidates.some(c => areGeoComponentsRedundant(c, continent).isRedundant)) {
-      rawCandidates.push(continent);
-    }
-  } else {
-    rawCandidates = [city, county, state, territory, country, continent].filter(Boolean) as string[];
-  }
-
-  // Add titleGeoSuffixes to geographic candidates if not already present
-  for (const suffix of titleGeoSuffixes) {
-    if (suffix && !rawCandidates.some(c => areGeoComponentsRedundant(c, suffix).isRedundant)) {
-      rawCandidates.push(suffix);
-    }
-  }
-
-  // Step C: Deduplicate within the geographic hierarchy
-  const deduplicatedGeo: string[] = [];
-  for (const cand of rawCandidates) {
-    const existingIdx = deduplicatedGeo.findIndex(existing => areGeoComponentsRedundant(existing, cand).isRedundant);
-    if (existingIdx === -1) {
-      deduplicatedGeo.push(cand);
-    } else {
-      const red = areGeoComponentsRedundant(deduplicatedGeo[existingIdx], cand);
-      if (red.preferred && red.preferred !== deduplicatedGeo[existingIdx]) {
-        deduplicatedGeo[existingIdx] = red.preferred;
-      }
-    }
-  }
-
   // Step D: Establish final title
   let finalTitle = rawTitle;
   if (isRouteEventQuery) {
     finalTitle = queryOrRouteTitle;
   } else if (titleGeoSuffixes.length > 0) {
-    // Verify that every suffix in titleGeoSuffixes is a legitimate geographic qualifier
     const allSuffixesAreGeo = titleGeoSuffixes.every(suffix => {
-      const isKnownAbbr = !!US_STATE_ABBRS[suffix.toLowerCase()] || !!COMMON_GEO_ABBRS[suffix.toLowerCase()];
-      const matchesStructured = [city, county, state, territory, country, continent].some(
+      const isKnownAbbr = !!US_STATE_ABBRS[suffix.toLowerCase()] || !!COMMON_GEO_ABBRS[suffix.toLowerCase()] || !!COMMON_COUNTRY_ABBRS[suffix.toLowerCase()];
+      const matchesStructured = [
+        extractHeaderSettlement(info),
+        extractHeaderState(info),
+        extractHeaderCountry(info),
+        cleanVal(info.territory || info.context?.territory)
+      ].some(
         f => f && areGeoComponentsRedundant(f, suffix).isRedundant
       );
-      const matchesLoc = deduplicatedGeo.some(g => areGeoComponentsRedundant(g, suffix).isRedundant);
-      return isKnownAbbr || matchesStructured || matchesLoc;
+      return isKnownAbbr || matchesStructured;
     });
 
     if (allSuffixesAreGeo && primaryNameCandidate.length > 0) {
@@ -390,23 +622,16 @@ export const normalizeHeaderGeographicHierarchy = (
     }
   }
 
-  // Step E: Filter out components from geographic hierarchy that repeat finalTitle or primary place name
-  const filteredGeoComponents: string[] = [];
-  for (const comp of deduplicatedGeo) {
-    if (isRedundantWithTitle(comp, finalTitle, info.name)) {
-      continue;
-    }
-    if (!filteredGeoComponents.some(existing => areGeoComponentsRedundant(existing, comp).isRedundant)) {
-      filteredGeoComponents.push(comp);
-    }
-  }
-
   let finalSubtitle: string | null = null;
   if (isRouteEventQuery) {
-    const parts = [rawTitle !== finalTitle ? primaryNameCandidate : rawTitle, ...filteredGeoComponents].filter(Boolean);
+    const geo = getHeaderLocation(info, primaryNameCandidate);
+    const parts = [
+      primaryNameCandidate,
+      geo && !isRedundantWithTitle(geo, primaryNameCandidate) ? geo : null
+    ].filter(Boolean);
     finalSubtitle = parts.length > 0 ? parts.join(', ') : null;
   } else {
-    finalSubtitle = filteredGeoComponents.length > 0 ? filteredGeoComponents.join(', ') : null;
+    finalSubtitle = getHeaderLocation(info, finalTitle);
   }
 
   // Alternate names
@@ -441,7 +666,7 @@ export const formatGeographicContext = (
   displayedTitle?: string
 ): string | null => {
   if (!info) return null;
-  return normalizeHeaderGeographicHierarchy(info, displayedTitle).displaySubtitle;
+  return getHeaderLocation(info, displayedTitle);
 };
 
 export const getScrollFadeMaskStyle = (topFade: boolean, bottomFade: boolean): React.CSSProperties => {
@@ -512,35 +737,7 @@ interface Note {
   timestamp: number;
 }
 
-// Helper to check for placeholder / unavailable strings that must NEVER be displayed in the UI
-export const isPlaceholderString = (val: any): boolean => {
-  if (val === null || val === undefined) return true;
-  const s = String(val).trim().toLowerCase();
-  return (
-    s === '' ||
-    s === 'unknown' ||
-    s === 'unavailable' ||
-    s === 'n/a' ||
-    s === 'na' ||
-    s === 'not available' ||
-    s === 'not applicable' ||
-    s === 'no data' ||
-    s === 'none' ||
-    s === 'null' ||
-    s === 'undefined' ||
-    s === '0' ||
-    s === 'uninhabited' ||
-    s === 'no permanent population' ||
-    s === 'lookup_failed' ||
-    s.startsWith('climate data unavailable') ||
-    s.startsWith('climate data is unavailable') ||
-    s.startsWith('specific climate data is unavailable') ||
-    s.startsWith('documentary enrichment unavailable') ||
-    s.startsWith('information unavailable') ||
-    s.includes('enrichment unavailable') ||
-    s.includes('information unavailable')
-  );
-};
+
 
 // Helper to validate data availability
 const isValidData = (val: string | null | undefined, isDescription: boolean = false) => {

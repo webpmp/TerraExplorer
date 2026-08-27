@@ -217,7 +217,7 @@ export const classifyGeographicEntityWithEvidence = async (
     }
 
     // 10. Archaeological Sites
-    if (q.match(/\b(pyramids?|ruins?|temple|acropolis|amphitheater)\b/i) ||
+    if (q.match(/\b(pyramids?|ruins?|temple|acropolis|amphitheater|parthenon|colosseum|coliseo|stonehenge|machu picchu|chichen itza|petra|angkor wat|pantheon|forum)\b/i) ||
         signals.some(s => s.includes('archaeological') || s.includes('ruins') || s.includes('ancient') || s.includes('maya') || s.includes('monumento') || s === 'archaeological_site')) {
         return { entityType: 'archaeological_site', confidence: 'authoritative', evidence: `Name or provider tag matched archaeological site` };
     }
@@ -227,7 +227,7 @@ export const classifyGeographicEntityWithEvidence = async (
         return { entityType: 'museum', confidence: 'authoritative', evidence: `Name or provider tag matched museum` };
     }
 
-    if (q.match(/\b(monument|memorial)\b/i) || signals.some(s => s === 'monument' || s.includes('monument'))) {
+    if (q.match(/\b(monument|memorial|statue of liberty|eiffel tower|tower of london|big ben|taj mahal)\b/i) || signals.some(s => s === 'monument' || s.includes('monument'))) {
         return { entityType: 'monument', confidence: 'authoritative', evidence: `Name or provider tag matched monument` };
     }
 
@@ -250,9 +250,14 @@ export const classifyGeographicEntityWithEvidence = async (
         return { entityType: 'trail', confidence: 'authoritative', evidence: `Provider tag matched trail: ${signals.join(', ')}` };
     }
 
-    // 14. Generic natural / landmark provider signals
-    if (signals.some(s => s.includes('landmark') || s.includes('tourism') || s.includes('natural') || s.includes('geology') || s === 'natural_feature' || s === 'landmark')) {
-        return { entityType: 'natural_feature', confidence: 'authoritative', evidence: `Provider tag matched natural/landmark feature: ${signals.join(', ')}` };
+    // 14. Historic landmarks & cultural attraction provider signals
+    if (signals.some(s => s === 'landmark' || s.includes('landmark') || s.includes('historic') || s === 'tourism=attraction' || s === 'attraction' || s === 'tourism=viewpoint')) {
+        return { entityType: 'landmark', confidence: 'authoritative', evidence: `Provider tag matched landmark/attraction: ${signals.join(', ')}` };
+    }
+
+    // 14.1 Generic natural features
+    if (signals.some(s => s.includes('natural') || s.includes('geology') || s === 'natural_feature')) {
+        return { entityType: 'natural_feature', confidence: 'authoritative', evidence: `Provider tag matched natural feature: ${signals.join(', ')}` };
     }
 
     // 14.5 Shipwreck & Discovery Site Signals

@@ -1,5 +1,5 @@
 import { describe, test, it, expect } from 'vitest';
-import { normalizeDisplayText, cleanMetadataString, formatImageAttribution, normalizeGeoComparisonName, areGeoComponentsRedundant, isRedundantWithTitle, formatGeographicContext, normalizeHeaderGeographicHierarchy, calculateScrollFade, getScrollFadeMaskStyle } from '../InfoPanel';
+import { normalizeDisplayText, cleanMetadataString, formatImageAttribution, normalizeGeoComparisonName, areGeoComponentsRedundant, isRedundantWithTitle, formatGeographicContext, normalizeHeaderGeographicHierarchy, getHeaderLocation, calculateScrollFade, getScrollFadeMaskStyle } from '../InfoPanel';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import InfoPanel from '../InfoPanel';
@@ -1359,7 +1359,7 @@ describe('Lightbox Metadata Integration', () => {
       expect(result).toBe('New Mexico, United States');
     });
 
-    it('formats Landmark / POI preserving parent context: Alcatraz Island -> "San Francisco, California, United States"', () => {
+    it('formats Landmark / POI preserving parent context: Alcatraz Island -> "San Francisco, United States"', () => {
       const alcatraz = {
         name: 'Alcatraz Island',
         entityType: 'landmark',
@@ -1373,7 +1373,7 @@ describe('Lightbox Metadata Integration', () => {
       };
 
       const result = formatGeographicContext(alcatraz, 'Alcatraz Island');
-      expect(result).toBe('San Francisco, California, United States');
+      expect(result).toBe('San Francisco, United States');
 
       const html = renderToStaticMarkup(
         <InfoPanel
@@ -1387,7 +1387,7 @@ describe('Lightbox Metadata Integration', () => {
         />
       );
       expect(html).toContain('Alcatraz Island</h2>');
-      expect(html).toContain('San Francisco, California, United States');
+      expect(html).toContain('San Francisco, United States');
     });
 
     it('formats Geographic Feature preserving parent context: Death Valley -> "California, United States"', () => {
@@ -1420,7 +1420,7 @@ describe('Lightbox Metadata Integration', () => {
       expect(html).toContain('California, United States');
     });
 
-    it('formats POI whose title is not present in geographic context: Space Needle -> "Seattle, Washington, United States"', () => {
+    it('formats POI whose title is not present in geographic context: Space Needle -> "Seattle, United States"', () => {
       const spaceNeedle = {
         name: 'Space Needle',
         entityType: 'landmark',
@@ -1431,7 +1431,7 @@ describe('Lightbox Metadata Integration', () => {
       };
 
       const result = formatGeographicContext(spaceNeedle, 'Space Needle');
-      expect(result).toBe('Seattle, Washington, United States');
+      expect(result).toBe('Seattle, United States');
 
       const html = renderToStaticMarkup(
         <InfoPanel
@@ -1445,7 +1445,7 @@ describe('Lightbox Metadata Integration', () => {
         />
       );
       expect(html).toContain('Space Needle</h2>');
-      expect(html).toContain('Seattle, Washington, United States');
+      expect(html).toContain('Seattle, United States');
     });
 
     it('handles Country entity cleanly without repeating country name', () => {
@@ -1628,7 +1628,7 @@ describe('Lightbox Metadata Integration', () => {
 
         const result = normalizeHeaderGeographicHierarchy(kyoto);
         expect(result.displayTitle).toBe('Kyoto');
-        expect(result.displaySubtitle).toBe('Kyoto Prefecture, Kansai, Japan');
+        expect(result.displaySubtitle).toBe('Kyoto Prefecture, Japan');
       });
 
       it('preserves legitimate multi-word entity names containing geographic terms without truncating', () => {
@@ -1686,7 +1686,7 @@ describe('Lightbox Metadata Integration', () => {
         };
         const capitolRes = normalizeHeaderGeographicHierarchy(capitol);
         expect(capitolRes.displayTitle).toBe('Georgia State Capitol');
-        expect(capitolRes.displaySubtitle).toBe('Atlanta, Georgia, United States');
+        expect(capitolRes.displaySubtitle).toBe('Atlanta, United States');
 
         const univ = {
           name: 'Georgia Southern University',
@@ -1701,7 +1701,7 @@ describe('Lightbox Metadata Integration', () => {
         };
         const univRes = normalizeHeaderGeographicHierarchy(univ);
         expect(univRes.displayTitle).toBe('Georgia Southern University');
-        expect(univRes.displaySubtitle).toBe('Statesboro, Georgia, United States');
+        expect(univRes.displaySubtitle).toBe('Statesboro, United States');
       });
 
       it('suppresses subtitle completely when location provides no additional context beyond title', () => {
@@ -2424,6 +2424,121 @@ describe('Lightbox Metadata Integration', () => {
       );
       expect(html).toContain('Angkor Wat');
       expect(html).toContain('Major temple complex in Cambodia.');
+    });
+  });
+
+  describe('getHeaderLocation concise header location engine', () => {
+    it('1. Formats Parthenon with concise city + country "Athens, Greece" from enrichment locationString "Athens, Attica, Greece"', () => {
+      const parthenon = {
+        name: 'Parthenon',
+        canonicalName: 'Parthenon',
+        entityType: 'archaeological_site',
+        city: 'Athens',
+        state: 'Attica',
+        country: 'Greece',
+        locationString: 'Athens, Attica, Greece'
+      };
+      expect(getHeaderLocation(parthenon, 'Parthenon')).toBe('Athens, Greece');
+    });
+
+    it('2. Normalizes noisy Nominatim address for Parthenon to "Athens, Greece"', () => {
+      const noisyParthenon = {
+        name: 'Parthenon',
+        locationString: 'Anafiotika, 3rd District of Athens, Municipality of Athens, Regional Unit of Central Athens, Attica, 117 42, Greece'
+      };
+      expect(getHeaderLocation(noisyParthenon, 'Parthenon')).toBe('Athens, Greece');
+    });
+
+    it('3. Formats normal landmark with city + country: Eiffel Tower -> "Paris, France"', () => {
+      const eiffel = {
+        name: 'Eiffel Tower',
+        city: 'Paris',
+        state: 'Île-de-France',
+        country: 'France',
+        locationString: '5, Avenue Anatole France, Quartier du Gros-Caillou, Paris 7e Arrondissement, Paris, Île-de-France, France'
+      };
+      expect(getHeaderLocation(eiffel, 'Eiffel Tower')).toBe('Paris, France');
+    });
+
+    it('4. Prefers geographic settlement fields in order: city > town > village > hamlet > locality > municipality', () => {
+      // village preference over municipality
+      const villagePlace = {
+        name: 'Keldur Turf Farm',
+        village: 'Keldur',
+        municipality: 'Municipality of Rangárþing ytra',
+        country: 'Iceland'
+      };
+      expect(getHeaderLocation(villagePlace, 'Keldur Turf Farm')).toBe('Keldur, Iceland');
+
+      // town preference over county
+      const townPlace = {
+        name: 'Ravello Cathedral',
+        town: 'Ravello',
+        county: 'Salerno',
+        country: 'Italy'
+      };
+      expect(getHeaderLocation(townPlace, 'Ravello Cathedral')).toBe('Ravello, Italy');
+
+      // municipality fallback normalized
+      const munOnly = {
+        name: 'Ancient Agora',
+        municipality: 'Municipality of Athens',
+        country: 'Greece'
+      };
+      expect(getHeaderLocation(munOnly, 'Ancient Agora')).toBe('Athens, Greece');
+    });
+
+    it('5. Falls back to state + country or country when city is absent', () => {
+      const stateAndCountry = {
+        name: 'Cape Sounion Sanctuary',
+        state: 'Attica',
+        country: 'Greece'
+      };
+      expect(getHeaderLocation(stateAndCountry, 'Cape Sounion Sanctuary')).toBe('Attica, Greece');
+
+      const countryOnly = {
+        name: 'Pacific Trench Site',
+        country: 'Tonga'
+      };
+      expect(getHeaderLocation(countryOnly, 'Pacific Trench Site')).toBe('Tonga');
+    });
+
+    it('6. Gracefully returns null when neither city nor country can be determined', () => {
+      const unknownSite = {
+        name: 'Unknown Anomaly',
+        state: 'Unknown area',
+        country: 'Unknown country'
+      };
+      expect(getHeaderLocation(unknownSite, 'Unknown Anomaly')).toBeNull();
+
+      expect(getHeaderLocation(null)).toBeNull();
+      expect(getHeaderLocation({})).toBeNull();
+    });
+
+    it('7. Formats City entities under their title with state + country: "Boston" -> "Massachusetts, United States"', () => {
+      const boston = {
+        name: 'Boston',
+        entityType: 'city',
+        city: 'Boston',
+        state: 'Massachusetts',
+        country: 'United States'
+      };
+      expect(getHeaderLocation(boston, 'Boston')).toBe('Massachusetts, United States');
+    });
+
+    it('8. Formats Country entities under their title with continent or null: "France" -> "Europe"', () => {
+      const franceWithContinent = {
+        name: 'France',
+        country: 'France',
+        continent: 'Europe'
+      };
+      expect(getHeaderLocation(franceWithContinent, 'France')).toBe('Europe');
+
+      const franceNoContinent = {
+        name: 'France',
+        country: 'France'
+      };
+      expect(getHeaderLocation(franceNoContinent, 'France')).toBeNull();
     });
   });
 });

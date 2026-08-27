@@ -277,6 +277,7 @@ const App: React.FC = () => {
   const [scanningStatusText, setScanningStatusText] = useState<string | null>(null);
   
   const activeMarkerRequestRef = useRef<number>(0);
+  const activeSearchRequestIdRef = useRef<number>(0);
   const activeSelectionIdRef = useRef<string | null>(null);
   const processingMarkerRef = useRef<string | null>(null);
   const isManualControlActiveRef = useRef<boolean>(false);
@@ -2207,24 +2208,25 @@ const App: React.FC = () => {
   const handleSearch = async (query: string) => {
     const cleanQuery = query.trim();
     if (!cleanQuery) return;
+    const currentSearchId = ++activeSearchRequestIdRef.current;
     console.log(`[SearchNarration] SEARCH_SUBMITTED query="${cleanQuery}"`);
+    console.log('[Camera] SEARCH_STARTED rotation preserved');
 
     // 1. Intent routing & entity extraction
     const parsedQuery = routeIntentAndExtractEntity(cleanQuery);
 
     if (parsedQuery.intent === 'EXPLORATORY' || parsedQuery.intent === 'MULTI_LOCATION_DISCOVERY' || parsedQuery.resolutionMode === 'MULTI_LOCATION_EXPLORATION') {
-        handleTraceRoute(cleanQuery);
+        handleTraceRoute(cleanQuery, currentSearchId);
         return;
     }
 
-    setInteractionState('PIN_SELECTED');
+    setInteractionState('GLOBE_SEARCHING');
     setIsDiscoveryLoading(true);
     console.log('[Scan Lifecycle] DISCOVERY_STARTED');
     console.log(`[SearchNarration] PIPELINE_STARTED query="${cleanQuery}" entity="${parsedQuery.entity}"`);
     setIsNewsFetching(false);
     setLocationInfo(null);
     setSearchError(null);
-    setAutoRotate(false);
     console.log(`[Marker Lifecycle] DISCOVERY_REPLACED oldCount=${markers.length} newCount=0`);
     setMarkers([]); 
     setScanningArea(null);
@@ -2241,149 +2243,175 @@ const App: React.FC = () => {
     // 2. Active loading state inside the search input
     setScanningStatusText(`LOCATING ${parsedQuery.entity.toUpperCase()}`);
 
-    // 3. Unified entity resolver lookup
-    const pipelineResult = await runSearchPipeline({
-        rawQuery: cleanQuery,
-        intent: parsedQuery.intent,
-        entity: parsedQuery.entity
-    });
+    try {
+      // 3. Unified entity resolver lookup
+      const pipelineResult = await runSearchPipeline({
+          rawQuery: cleanQuery,
+          intent: parsedQuery.intent,
+          entity: parsedQuery.entity
+      });
 
-    setScanningStatusText(null);
-    console.log(`[SearchNarration] PIPELINE_COMPLETED query="${cleanQuery}" isValid=${pipelineResult.isValid} mode=${pipelineResult.mode} hasFinalData=${!!(pipelineResult as any).finalData}`);
-    
-    if (pipelineResult.mode === 'route') {
-      if (pipelineResult.isValid && pipelineResult.waypoints && pipelineResult.waypoints.length > 0) {
-        logWaypointSnapshot('App.tsx (Before Set State)', pipelineResult.waypoints[0]);
+      if (currentSearchId !== activeSearchRequestIdRef.current) {
+        return;
+      }
+
+      setScanningStatusText(null);
+      console.log(`[SearchNarration] PIPELINE_COMPLETED query="${cleanQuery}" isValid=${pipelineResult.isValid} mode=${pipelineResult.mode} hasFinalData=${!!(pipelineResult as any).finalData}`);
+      
+      if (pipelineResult.mode === 'route') {
+        if (pipelineResult.isValid && pipelineResult.waypoints && pipelineResult.waypoints.length > 0) {
+          logWaypointSnapshot('App.tsx (Before Set State)', pipelineResult.waypoints[0]);
+          
+          console.log('[Camera] DESTINATION_COMMITTED ownership transferred');
+          setAutoRotate(false);
+          setInteractionState('PIN_SELECTED');
+          const waypointsWithSearch = pipelineResult.waypoints.map(w => ({ ...w, searchId }));
+          setRouteWaypoints(waypointsWithSearch);
+          setCurrentWaypointIndex(0);
+          setIsDiscoveryLoading(false);
+          console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
+          loadWaypointData(waypointsWithSearch[0]);
+        } else {
+          console.log('[Camera] SEARCH_NO_RESULT rotation preserved');
+          setInteractionState('GLOBE_IDLE');
+          setSearchError("No identifiable locations found in the route.");
+          setIsDiscoveryLoading(false);
+          console.log('[Scan Lifecycle] DISCOVERY_FAILED');
+        }
+        return;
+      }
+
+      const hasValidCoords = pipelineResult.isValid && (pipelineResult as any).finalData && !pipelineResult.error && (pipelineResult as any).finalData.coordinates;
+
+      if (hasValidCoords) {
+        const finalData = (pipelineResult as any).finalData!;
+        const { lat, lng } = finalData.coordinates;
         
-        const waypointsWithSearch = pipelineResult.waypoints.map(w => ({ ...w, searchId }));
-        setRouteWaypoints(waypointsWithSearch);
-        setCurrentWaypointIndex(0);
+        const searchMarker: MapMarker = {
+          id: `search-${Date.now()}`,
+          name: finalData.name,
+          lat: lat,
+          lng: lng,
+          populationClass: 'large',
+          coordinateSource: finalData.coordinateSource,
+          isApproximate: finalData.isApproximate,
+          exactLocationKnown: finalData.exactLocationKnown,
+          confirmedWreckLocation: finalData.confirmedWreckLocation,
+          entityType: finalData.entityType,
+          intent: finalData.intent,
+          historicalContext: finalData.historicalContext,
+          canonicalName: finalData.canonicalName
+        };
+
+        console.log(`[SearchNarration] SEARCH_RESULT_CREATED name="${finalData.name}" markerId="${searchMarker.id}"`);
+
+        // Invalidate any in-flight background scans and suppress scan state
+        activeScanIdRef.current += 1;
+        setScanningArea(null);
+        setIsScanningArea(false);
+        setScanStatus(null);
+        scanFullyProcessedRef.current = true;
+        programmaticTransitionUntilRef.current = Date.now() + 1500;
+
+        console.log('[Camera] DESTINATION_COMMITTED ownership transferred');
+        setAutoRotate(false);
+        setInteractionState('PIN_SELECTED');
+
+        (finalData as any).id = searchMarker.id;
+        setMarkers([searchMarker]);
+        console.log(`[Marker Lifecycle] DISCOVERY_RESULTS_SET count=1`);
+        activeSelectionIdRef.current = searchMarker.id;
+        console.log(`[SearchNarration] ACTIVE_SELECTION_SET id="${searchMarker.id}"`);
+        setSelectedMarkerId(searchMarker.id);
+        const newCoords = { lat, lng };
+        setSelectedMarkerCoordinates(newCoords);
+        selectedMarkerCoordinatesRef.current = newCoords;
+        console.log(`[SearchNarration] LOCATION_INFO_SET id="${(finalData as any).id}" name="${finalData.name}"`);
+        setLocationInfo(finalData);
+        locationInfoRef.current = finalData;
         setIsDiscoveryLoading(false);
         console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
-        loadWaypointData(waypointsWithSearch[0]);
+
+        if (userSettings.documentaryMode) {
+          startDocumentaryFlow({
+            id: searchMarker.id,
+            name: searchMarker.name,
+            lat,
+            lng,
+            description: finalData.description
+          });
+        } else {
+          setIsDocumentaryActive(false);
+          const zoom = (pipelineResult as any).metadataResult?.coordinateResult?.suggestedZoom || 5;
+          const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : Math.max(1.3, 4.5 - ((zoom / 10) * (4.5 - 1.2)));
+          
+          cameraStateRef.current.routeSuggestedDistance = targetDist;
+          cameraStateRef.current.targetRotation = { lat, lng };
+          
+          requestAnimationFrame(() => {
+             reconcileCameraState();
+          });
+        }
+
+        if (finalData.description) {
+          maybeTriggerNarration(finalData);
+        }
+
       } else {
-        setSearchError("No identifiable locations found in the route.");
-        setIsDiscoveryLoading(false);
-        console.log('[Scan Lifecycle] DISCOVERY_FAILED');
-      }
-      return;
-    }
-
-    const hasValidCoords = pipelineResult.isValid && (pipelineResult as any).finalData && !pipelineResult.error;
-
-    if (hasValidCoords) {
-      const finalData = (pipelineResult as any).finalData!;
-      const { lat, lng } = finalData.coordinates;
-      
-      const searchMarker: MapMarker = {
-        id: `search-${Date.now()}`,
-        name: finalData.name,
-        lat: lat,
-        lng: lng,
-        populationClass: 'large',
-        coordinateSource: finalData.coordinateSource,
-        isApproximate: finalData.isApproximate,
-        exactLocationKnown: finalData.exactLocationKnown,
-        confirmedWreckLocation: finalData.confirmedWreckLocation,
-        entityType: finalData.entityType,
-        intent: finalData.intent,
-        historicalContext: finalData.historicalContext,
-        canonicalName: finalData.canonicalName
-      };
-
-      console.log(`[SearchNarration] SEARCH_RESULT_CREATED name="${finalData.name}" markerId="${searchMarker.id}"`);
-
-      // Invalidate any in-flight background scans and suppress scan state
-      activeScanIdRef.current += 1;
-      setScanningArea(null);
-      setIsScanningArea(false);
-      setScanStatus(null);
-      scanFullyProcessedRef.current = true;
-      programmaticTransitionUntilRef.current = Date.now() + 1500;
-
-      (finalData as any).id = searchMarker.id;
-      setMarkers([searchMarker]);
-      console.log(`[Marker Lifecycle] DISCOVERY_RESULTS_SET count=1`);
-      activeSelectionIdRef.current = searchMarker.id;
-      console.log(`[SearchNarration] ACTIVE_SELECTION_SET id="${searchMarker.id}"`);
-      setSelectedMarkerId(searchMarker.id);
-      const newCoords = { lat, lng };
-      setSelectedMarkerCoordinates(newCoords);
-      selectedMarkerCoordinatesRef.current = newCoords;
-      console.log(`[SearchNarration] LOCATION_INFO_SET id="${(finalData as any).id}" name="${finalData.name}"`);
-      setLocationInfo(finalData);
-      locationInfoRef.current = finalData;
-      setIsDiscoveryLoading(false);
-      console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
-
-      if (userSettings.documentaryMode) {
-        startDocumentaryFlow({
-          id: searchMarker.id,
-          name: searchMarker.name,
-          lat,
-          lng,
-          description: finalData.description
-        });
-      } else {
-        setIsDocumentaryActive(false);
-        const zoom = (pipelineResult as any).metadataResult?.coordinateResult?.suggestedZoom || 5;
-        const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : Math.max(1.3, 4.5 - ((zoom / 10) * (4.5 - 1.2)));
-        
-        cameraStateRef.current.routeSuggestedDistance = targetDist;
-        cameraStateRef.current.targetRotation = { lat, lng };
-        
-        requestAnimationFrame(() => {
-           reconcileCameraState();
-        });
-      }
-
-      if (finalData.description) {
-        maybeTriggerNarration(finalData);
-      }
-
-    } else {
-      const errorData = (pipelineResult as any).metadataResult?.enrichedData;
-      if (errorData) {
-        console.log(`=== INVALID COORDINATE BLOCKED ===
+        console.log('[Camera] SEARCH_NO_RESULT rotation preserved');
+        setInteractionState('GLOBE_IDLE');
+        const errorData = (pipelineResult as any).metadataResult?.enrichedData;
+        if (errorData) {
+          console.log(`=== INVALID COORDINATE BLOCKED ===
 Query: ${query}
 Location: ${errorData.name}
 Coordinates: ${JSON.stringify(errorData.coordinates)}
 Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 ===============================`);
-      }
+        }
 
-      let userError = "Unable to resolve location.";
-      const errorCode = pipelineResult.error;
-      if (errorCode === "UNSUPPORTED_CELESTIAL_BODY") {
-        userError = "TerraExplorer currently supports Earth geography only.";
-      } else if (errorCode === "LM_STUDIO_NO_MODEL") {
-        userError = "No model loaded. Please load a model in LM Studio. Load a model in LM Studio or select another provider in Settings.";
-      } else if (errorCode === "LOCATION_SYSTEM_UNAVAILABLE") {
-        userError = "Location system unavailable.";
-      } else if (errorCode === "NOT_FOUND") {
-        userError = "Could not find location.";
-      } else if (errorCode === "HISTORICAL_LOCATION_UNCONFIRMED") {
-        userError = "Exact historical location is unconfirmed.";
-      } else if (errorCode === "NO_GEOGRAPHIC_DATA") {
-        userError = "No results found for this query.";
-      } else if (errorCode === "TEMP_FAILURE") {
-        userError = "Unable to load location data.";
-      } else if (errorCode === "AMBIGUOUS") {
-        userError = "Location is too ambiguous to resolve.";
+        let userError = "Unable to resolve location.";
+        const errorCode = pipelineResult.error;
+        if (errorCode === "UNSUPPORTED_CELESTIAL_BODY") {
+          userError = "TerraExplorer currently supports Earth geography only.";
+        } else if (errorCode === "LM_STUDIO_NO_MODEL") {
+          userError = "No model loaded. Please load a model in LM Studio. Load a model in LM Studio or select another provider in Settings.";
+        } else if (errorCode === "LOCATION_SYSTEM_UNAVAILABLE") {
+          userError = "Location system unavailable.";
+        } else if (errorCode === "NOT_FOUND") {
+          userError = "Could not find location.";
+        } else if (errorCode === "HISTORICAL_LOCATION_UNCONFIRMED") {
+          userError = "Exact historical location is unconfirmed.";
+        } else if (errorCode === "NO_GEOGRAPHIC_DATA") {
+          userError = "No results found for this query.";
+        } else if (errorCode === "TEMP_FAILURE") {
+          userError = "Unable to load location data.";
+        } else if (errorCode === "AMBIGUOUS") {
+          userError = "Location is too ambiguous to resolve.";
+        }
+        setSearchError(userError);
+        setIsDiscoveryLoading(false);
+        console.log('[Scan Lifecycle] DISCOVERY_FAILED');
       }
-      setSearchError(userError);
+    } catch (err) {
+      if (currentSearchId !== activeSearchRequestIdRef.current) return;
+      setScanningStatusText(null);
+      console.error('[Search] PIPELINE_ERROR during search execution:', err);
+      console.log('[Camera] SEARCH_ERROR rotation preserved');
+      setInteractionState('GLOBE_IDLE');
+      setSearchError("Unable to resolve location.");
       setIsDiscoveryLoading(false);
       console.log('[Scan Lifecycle] DISCOVERY_FAILED');
     }
   };
 
-  const handleTraceRoute = async (text: string) => {
-      setInteractionState('PIN_SELECTED');
+  const handleTraceRoute = async (text: string, searchRequestId?: number) => {
+      const currentSearchId = searchRequestId || ++activeSearchRequestIdRef.current;
+      setInteractionState('GLOBE_SEARCHING');
       setIsDiscoveryLoading(true);
       console.log('[Scan Lifecycle] DISCOVERY_STARTED');
       setSearchError(null);
       setLocationInfo(null);
-      setAutoRotate(false);
       setMarkers([]); 
       setScanningArea(null);
       setIsFocused(true);
@@ -2392,25 +2420,41 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       setActiveRouteId(null);
       
       const searchId = searchImageRegistry.createSearchSession(text);
-      const route = await generateRoute(text);
-      
-      if (route.waypoints && route.waypoints.length > 0) {
-          const waypointsWithSearch = route.waypoints.map(w => ({ ...w, searchId }));
-          setRouteWaypoints(waypointsWithSearch);
-          
-          console.log(`Route Generated: ${route.title}`);
-          if (route.routeConfidence) {
-              console.log(`Confidence: ${route.routeConfidence.level} - ${route.routeConfidence.reasoning}`);
-          }
-          
-          setCurrentWaypointIndex(0);
-          setIsDiscoveryLoading(false);
-          console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
-          loadWaypointData(waypointsWithSearch[0]);
-      } else {
-          setSearchError("No identifiable locations found in the text.");
-          setIsDiscoveryLoading(false);
-          console.log('[Scan Lifecycle] DISCOVERY_FAILED');
+      try {
+        const route = await generateRoute(text);
+        if (currentSearchId !== activeSearchRequestIdRef.current) return;
+        
+        if (route.waypoints && route.waypoints.length > 0) {
+            console.log('[Camera] DESTINATION_COMMITTED ownership transferred');
+            setAutoRotate(false);
+            setInteractionState('PIN_SELECTED');
+            const waypointsWithSearch = route.waypoints.map(w => ({ ...w, searchId }));
+            setRouteWaypoints(waypointsWithSearch);
+            
+            console.log(`Route Generated: ${route.title}`);
+            if (route.routeConfidence) {
+                console.log(`Confidence: ${route.routeConfidence.level} - ${route.routeConfidence.reasoning}`);
+            }
+            
+            setCurrentWaypointIndex(0);
+            setIsDiscoveryLoading(false);
+            console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
+            loadWaypointData(waypointsWithSearch[0]);
+        } else {
+            console.log('[Camera] SEARCH_NO_RESULT rotation preserved');
+            setInteractionState('GLOBE_IDLE');
+            setSearchError("No identifiable locations found in the text.");
+            setIsDiscoveryLoading(false);
+            console.log('[Scan Lifecycle] DISCOVERY_FAILED');
+        }
+      } catch (err) {
+        if (currentSearchId !== activeSearchRequestIdRef.current) return;
+        console.error('[Route] PIPELINE_ERROR generating route:', err);
+        console.log('[Camera] SEARCH_ERROR rotation preserved');
+        setInteractionState('GLOBE_IDLE');
+        setSearchError("Unable to trace route.");
+        setIsDiscoveryLoading(false);
+        console.log('[Scan Lifecycle] DISCOVERY_FAILED');
       }
   };
 
@@ -2951,7 +2995,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
                  if (zoomedOut) setIsFocused(false);
               }}
               onOSMChange={setIsOSMActive}
-              disabled={isDiscoveryLoading || routeWaypoints.length > 0 || !!locationInfo || markers.length > 0}
+              disabled={routeWaypoints.length > 0 || !!locationInfo || markers.length > 0}
             />
           </Suspense>
         </Canvas>
