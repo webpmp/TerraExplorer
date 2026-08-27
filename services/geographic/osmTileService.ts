@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { latLngToVector3 } from '../../utils/globeCoordinates';
+import { SkinType } from '../../types';
+import { transformRetroVectorStyle } from '../../utils/osmPalettes';
 
 export type OSMDetailLevel =
   | 'global'
@@ -254,6 +256,32 @@ export class OSMTileService {
     }
 
     return `${baseUrl}?key=${encodeURIComponent(apiKey)}`;
+  }
+
+  private vectorStyleCache = new Map<string, any>();
+
+  /**
+   * Fetches the authoritative CARTO GL vector style JSON and applies theme-specific
+   * label overrides (for Retro Green and Retro Amber) before passing it to MapLibre.
+   */
+  public async fetchVectorStyle(skin: SkinType = 'modern'): Promise<any> {
+    const cacheKey = `vector-style:${skin}`;
+    if (this.vectorStyleCache.has(cacheKey)) {
+      return this.vectorStyleCache.get(cacheKey);
+    }
+
+    const url = this.getVectorStyleUrl(skin);
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const styleJson = await res.json();
+      const transformed = transformRetroVectorStyle(styleJson, skin);
+      this.vectorStyleCache.set(cacheKey, transformed);
+      return transformed;
+    } catch (err) {
+      console.warn(`[OSM VECTOR] Failed to fetch/transform vector style for ${skin}, falling back to URL:`, err);
+      return url;
+    }
   }
 
   /**

@@ -17,7 +17,11 @@ import {
   OSM_RASTER_ALTITUDE
 } from '../services/geographic/osmTileService';
 import { documentaryController } from '../services/documentaryController';
-import { getOsmPalette } from '../utils/osmPalettes';
+import {
+  getOsmPalette,
+  transformRetroVectorStyle,
+  applyOSMThemeLayerStyles
+} from '../utils/osmPalettes';
 import { getConnectingLineColor } from '../utils/routeLineColor';
 import {
   calculateOSMRouteArrow,
@@ -517,7 +521,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
     onMapReadyRef.current = onMapReady;
   }, [onMapReady]);
 
-  const initMapLibre = useCallback(() => {
+  const initMapLibre = useCallback(async () => {
     const container = mapLibreContainerRef.current;
     if (!container) return;
 
@@ -554,13 +558,13 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
       height: containerHeight
     });
 
-    const styleUrl = osmTileService.getVectorStyleUrl(skin);
+    const vectorStyle = await osmTileService.fetchVectorStyle(skin);
     const maplibreGlobal = (typeof window !== 'undefined' && (window as any).maplibregl) ? (window as any).maplibregl : maplibregl;
 
     try {
       const map = new maplibreGlobal.Map({
         container,
-        style: styleUrl,
+        style: vectorStyle,
         center: [osmCameraCenterRef.current.lng || 0, osmCameraCenterRef.current.lat || 0],
         zoom: Math.max(0, activeTileZoomRef.current - 1),
         interactive: false,
@@ -575,10 +579,12 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
       }
 
       map.on('styledata', () => {
+        applyOSMThemeLayerStyles(map, skin);
         console.log(`[OSM VECTOR] VECTOR_MAP_STYLE_LOADED id=${mapId} isStyleLoaded=${map.isStyleLoaded()}`);
       });
 
       map.on('load', () => {
+        applyOSMThemeLayerStyles(map, skin);
         console.log(`[OSM VECTOR] VECTOR_MAP_READY id=${mapId} (load event)`);
         const mapCanvas = map.getCanvas ? map.getCanvas() : null;
         console.log(`[OSM VECTOR] VECTOR_MAP_CANVAS_ATTACHED id=${mapId} exists=${!!mapCanvas}`);
@@ -626,13 +632,14 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
       prevSkinRef.current = skin;
 
       if (mapLibreMapRef.current) {
-        const newStyleUrl = osmTileService.getVectorStyleUrl(skin);
-        console.log(`[OSM VECTOR] THEME_SWITCH from=${oldSkin} to=${skin} newStyle=${newStyleUrl}`);
-        try {
-          mapLibreMapRef.current.setStyle(newStyleUrl);
-        } catch (e) {
-          console.error('[OSM VECTOR] setStyle error:', e);
-        }
+        console.log(`[OSM VECTOR] THEME_SWITCH from=${oldSkin} to=${skin}`);
+        osmTileService.fetchVectorStyle(skin).then((newStyle) => {
+          try {
+            mapLibreMapRef.current?.setStyle(newStyle);
+          } catch (e) {
+            console.error('[OSM VECTOR] setStyle error:', e);
+          }
+        });
       }
 
       if (opacityRef.current > 0.01 || activeTilesMapRef.current.size > 0) {

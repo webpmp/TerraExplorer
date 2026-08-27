@@ -215,6 +215,42 @@ describe('OSM Tile Service & Tile Spherical Mesh Tests', () => {
     }
   });
 
+  it('fetches, transforms, and caches vector style JSON for retro and modern skins', async () => {
+    const mockStyleJson = {
+      version: 8,
+      layers: [
+        { id: 'roadname_major', type: 'symbol', paint: { 'text-color': '#383838' } },
+        { id: 'roadname_pri', type: 'symbol', paint: { 'text-color': 'rgba(189, 189, 189, 1)' } },
+        { id: 'poi_stadium', type: 'symbol', paint: { 'text-color': '#515151' } }
+      ]
+    };
+
+    const originalFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = async () => ({
+        ok: true,
+        json: async () => JSON.parse(JSON.stringify(mockStyleJson))
+      }) as any;
+
+      // retro-green returns transformed style
+      const greenStyle = await osmTileService.fetchVectorStyle('retro-green');
+      const majorRoad = greenStyle.layers.find((l: any) => l.id === 'roadname_major');
+      const priRoad = greenStyle.layers.find((l: any) => l.id === 'roadname_pri');
+      const poiStadium = greenStyle.layers.find((l: any) => l.id === 'poi_stadium');
+
+      expect(majorRoad.paint['text-color']).toBe('#b0b0b0');
+      expect(priRoad.paint['text-color']).toBe('rgba(189, 189, 189, 1)');
+      expect(poiStadium.paint['text-color']).toBe('#b0b0b0');
+
+      // modern returns unchanged style
+      const modernStyle = await osmTileService.fetchVectorStyle('modern');
+      const modernMajorRoad = modernStyle.layers.find((l: any) => l.id === 'roadname_major');
+      expect(modernMajorRoad.paint['text-color']).toBe('#383838');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('projects geographic marker coordinates to exact Web Mercator pixel positions and separates them naturally with zoom', () => {
     const centerLat = 37.7749;
     const centerLng = -122.4194;
