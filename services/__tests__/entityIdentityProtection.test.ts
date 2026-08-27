@@ -165,5 +165,122 @@ describe('Entity Identity Protection Suite (Coordinate Recovery)', () => {
       expect(res.entity?.subject.primaryLocation.location.coordinates.lat).toBeCloseTo(31.5590, 3);
       expect(res.entity?.subject.primaryLocation.location.coordinates.lng).toBeCloseTo(35.4732, 3);
     });
+
+    describe('Ambiguous Geographic Entity Disambiguation and Qualification', () => {
+      it('1. "Where is Yellowstone?" must NOT resolve to Yellowstone County solely because Nominatim returns it first', async () => {
+        // Mock resolver returning Yellowstone County
+        vi.spyOn(geminiService, 'resolveLocationQuery').mockResolvedValue({
+          error: undefined,
+          locationInfo: {
+            name: 'Yellowstone County',
+            entityType: 'administrative_region',
+            coordinates: { lat: 45.9645, lng: -108.2760, source: 'geocoder' as any }
+          }
+        } as any);
+
+        vi.spyOn(geminiService, 'recoverCoordinatesFromAi').mockResolvedValue(null);
+
+        const res = await runSearchPipeline({ rawQuery: 'Where is Yellowstone?' });
+        // The pipeline must reject Yellowstone County as a semantic mismatch for generic "Yellowstone"
+        expect(res.entity?.subject?.identity?.canonicalName).not.toBe('Yellowstone County');
+        expect(res.isValid).toBe(false);
+        expect(res.error).toBe('NO_GEOGRAPHIC_DATA');
+      });
+
+      it('2. "Where is Yellowstone County?" must resolve to Yellowstone County, Montana', async () => {
+        vi.spyOn(geminiService, 'resolveLocationQuery').mockResolvedValue({
+          error: undefined,
+          locationInfo: {
+            name: 'Yellowstone County',
+            entityType: 'administrative_region',
+            state: 'Montana',
+            country: 'United States',
+            coordinates: { lat: 45.9645, lng: -108.2760, source: 'geocoder' as any },
+            description: 'Yellowstone County is located in the U.S. state of Montana.'
+          }
+        } as any);
+
+        const res = await runSearchPipeline({ rawQuery: 'Where is Yellowstone County?' });
+        expect(res.isValid).toBe(true);
+        expect(res.entity?.subject.identity.canonicalName).toContain('Yellowstone County');
+        expect(res.entity?.subject.primaryLocation.location.coordinates.lat).toBeCloseTo(45.9645, 3);
+        expect(res.entity?.subject.primaryLocation.location.coordinates.lng).toBeCloseTo(-108.2760, 3);
+      });
+
+      it('3. "Where is Yellowstone National Park?" must resolve to Yellowstone National Park', async () => {
+        vi.spyOn(geminiService, 'resolveLocationQuery').mockResolvedValue({
+          error: undefined,
+          locationInfo: {
+            name: 'Yellowstone National Park',
+            entityType: 'natural_feature',
+            state: 'Wyoming',
+            country: 'United States',
+            coordinates: { lat: 44.4280, lng: -110.5885, source: 'geocoder' as any },
+            description: 'Yellowstone National Park is a national park located primarily in Wyoming.'
+          }
+        } as any);
+
+        const res = await runSearchPipeline({ rawQuery: 'Where is Yellowstone National Park?' });
+        expect(res.isValid).toBe(true);
+        expect(res.entity?.subject.identity.canonicalName).toContain('Yellowstone National Park');
+        expect(res.entity?.subject.primaryLocation.location.coordinates.lat).toBeCloseTo(44.4280, 3);
+        expect(res.entity?.subject.primaryLocation.location.coordinates.lng).toBeCloseTo(-110.5885, 3);
+      });
+
+      it('4. "Where is Yellowstone River?" must resolve to Yellowstone River', async () => {
+        vi.spyOn(geminiService, 'resolveLocationQuery').mockResolvedValue({
+          error: undefined,
+          locationInfo: {
+            name: 'Yellowstone River',
+            entityType: 'natural_feature',
+            state: 'North Dakota',
+            country: 'United States',
+            coordinates: { lat: 47.9806, lng: -103.9806, source: 'geocoder' as any },
+            description: 'The Yellowstone River is a tributary of the Missouri River.'
+          }
+        } as any);
+
+        const res = await runSearchPipeline({ rawQuery: 'Where is Yellowstone River?' });
+        expect(res.isValid).toBe(true);
+        expect(res.entity?.subject.identity.canonicalName).toContain('Yellowstone River');
+        expect(res.entity?.subject.primaryLocation.location.coordinates.lat).toBeCloseTo(47.9806, 3);
+      });
+
+      it('5. A clearly specified administrative-region query must continue to work', async () => {
+        vi.spyOn(geminiService, 'resolveLocationQuery').mockResolvedValue({
+          error: undefined,
+          locationInfo: {
+            name: 'Cook County',
+            entityType: 'administrative_region',
+            state: 'Illinois',
+            country: 'United States',
+            coordinates: { lat: 41.8401, lng: -87.8167, source: 'geocoder' as any },
+            description: 'Cook County is the most populous county in Illinois.'
+          }
+        } as any);
+
+        const res = await runSearchPipeline({ rawQuery: 'Cook County' });
+        expect(res.isValid).toBe(true);
+        expect(res.entity?.subject.identity.canonicalName).toContain('Cook County');
+      });
+
+      it('6. A clearly specified national park query must continue to work', async () => {
+        vi.spyOn(geminiService, 'resolveLocationQuery').mockResolvedValue({
+          error: undefined,
+          locationInfo: {
+            name: 'Yosemite National Park',
+            entityType: 'natural_feature',
+            state: 'California',
+            country: 'United States',
+            coordinates: { lat: 37.8651, lng: -119.5383, source: 'geocoder' as any },
+            description: 'Yosemite National Park is in California’s Sierra Nevada mountains.'
+          }
+        } as any);
+
+        const res = await runSearchPipeline({ rawQuery: 'Yosemite National Park' });
+        expect(res.isValid).toBe(true);
+        expect(res.entity?.subject.identity.canonicalName).toContain('Yosemite National Park');
+      });
+    });
   });
 });

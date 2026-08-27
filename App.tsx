@@ -2583,11 +2583,9 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
     activeMarkerRequestRef.current++;
     setInteractionState(markers.length > 0 || routeWaypoints.length > 0 ? 'PINS_RENDERED' : 'GLOBE_IDLE');
     setLocationInfo(null);
-    setSelectedMarkerId(null);
-    setSelectedMarkerCoordinates(null);
     setIsNewsFetching(false);
     setIsFocused(false);
-    console.log(`[Marker Lifecycle] INFOPANEL_CLOSED markersPreserved=${markers.length} routeWaypointsPreserved=${routeWaypoints.length}`);
+    console.log(`[Marker Lifecycle] INFOPANEL_CLOSED markersPreserved=${markers.length} routeWaypointsPreserved=${routeWaypoints.length} selectedMarkerPreserved=${selectedMarkerId}`);
   };
 
   const getCurrentFavorite = () => {

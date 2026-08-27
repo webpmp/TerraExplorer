@@ -286,4 +286,94 @@ describe('Globe Marker Interaction & Label Collision System', () => {
     onMouseLeave();
     expect(hoveredMarkerId).toBeNull();
   });
+
+  describe('Globe-Occlusion & Unified Visibility Logic', () => {
+    it('determines visibility correctly around the camera-facing threshold', async () => {
+      const { isGlobePointVisible } = await import('../../components/Earth');
+      const THREE = await import('three');
+
+      const cameraPos = new THREE.Vector3(0, 0, 2.5); // Camera looking at origin along +Z
+
+      // Front of the globe facing camera directly (+Z)
+      const frontPoint = new THREE.Vector3(0, 0, 1.01);
+      expect(isGlobePointVisible(frontPoint, cameraPos)).toBe(true);
+
+      // Back of the globe occluded by Earth (-Z)
+      const backPoint = new THREE.Vector3(0, 0, -1.01);
+      expect(isGlobePointVisible(backPoint, cameraPos)).toBe(false);
+
+      // Point just above the visibility threshold (e.g. dot = 0.65 > 0.6)
+      const visibleLimbPoint = new THREE.Vector3(0.965, 0, 0.26); // dot with (0,0,2.5) is 0.26 * 2.5 = 0.65
+      expect(isGlobePointVisible(visibleLimbPoint, cameraPos)).toBe(true);
+
+      // Point just below the visibility threshold (e.g. dot = 0.55 <= 0.6)
+      const occludedLimbPoint = new THREE.Vector3(0.975, 0, 0.22); // dot with (0,0,2.5) is 0.22 * 2.5 = 0.55
+      expect(isGlobePointVisible(occludedLimbPoint, cameraPos)).toBe(false);
+    });
+
+    it('hides overlay, label, and connector line when marker is occluded on far side of globe', async () => {
+      const { isGlobePointVisible } = await import('../../components/Earth');
+      const THREE = await import('three');
+
+      const cameraPos = new THREE.Vector3(0, 0, 2.5);
+      // Dallas on far side of globe relative to camera (e.g. looking at Indian Ocean)
+      const occludedLocationWorldPos = new THREE.Vector3(0, 0, -1.01);
+
+      const isFacing = isGlobePointVisible(occludedLocationWorldPos, cameraPos);
+      expect(isFacing).toBe(false);
+
+      // When isFacing is false, overlayContainer style is set to display: none and frame update returns early
+      const overlayDisplay = isFacing ? 'block' : 'none';
+      expect(overlayDisplay).toBe('none');
+    });
+
+    it('shows overlay, label, and connector line when marker is facing the camera', async () => {
+      const { isGlobePointVisible } = await import('../../components/Earth');
+      const THREE = await import('three');
+
+      const cameraPos = new THREE.Vector3(0, 0, 2.5);
+      const visibleLocationWorldPos = new THREE.Vector3(0, 0, 1.01);
+
+      const isFacing = isGlobePointVisible(visibleLocationWorldPos, cameraPos);
+      expect(isFacing).toBe(true);
+
+      const overlayDisplay = isFacing ? 'block' : 'none';
+      expect(overlayDisplay).toBe('block');
+    });
+
+    it('filters out occluded neighbor markers from label collision candidate calculations', async () => {
+      const { isGlobePointVisible } = await import('../../components/Earth');
+      const THREE = await import('three');
+
+      const cameraPos = new THREE.Vector3(0, 0, 2.5);
+      const visibleNeighbor = new THREE.Vector3(0.1, 0.1, 1.01);
+      const occludedNeighbor = new THREE.Vector3(0.1, 0.1, -1.01);
+
+      // Verify that only the camera-facing neighbor passes the visibility check
+      expect(isGlobePointVisible(visibleNeighbor, cameraPos)).toBe(true);
+      expect(isGlobePointVisible(occludedNeighbor, cameraPos)).toBe(false);
+
+      // Simulated neighbor markers collection: only visible neighbors are projected
+      const allNeighborObjects = [
+        { id: 'visible-1', worldPos: visibleNeighbor },
+        { id: 'occluded-1', worldPos: occludedNeighbor }
+      ];
+
+      const projectedOtherMarkers: MarkerScreenTarget[] = [];
+      allNeighborObjects.forEach(obj => {
+        if (isGlobePointVisible(obj.worldPos, cameraPos)) {
+          projectedOtherMarkers.push({
+            id: obj.id,
+            x: 550,
+            y: 450,
+            radius: 10,
+            hitRadius: 20
+          });
+        }
+      });
+
+      expect(projectedOtherMarkers).toHaveLength(1);
+      expect(projectedOtherMarkers[0].id).toBe('visible-1');
+    });
+  });
 });

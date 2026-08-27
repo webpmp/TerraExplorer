@@ -845,95 +845,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const isMultiLocation = Boolean(routeNav?.total && routeNav.total > 1);
   const isSingleLocation = !isMultiLocation;
 
-  if (!rawInfo) {
-    if (isLoading || isError) {
-      const isRetroSkin = skin === 'retro-green' || skin === 'retro-amber';
-      const isParchmentSkin = skin === 'parchment';
-      const themeConfig = {
-        'modern': {
-          container: "bg-black/75 backdrop-blur-md border border-cyan-400/30 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] text-white font-sans",
-          header: "bg-gradient-to-r from-blue-900 to-cyan-900",
-          headerTitle: "brand-font text-white",
-          locationTitle: "brand-font text-white",
-          subtext: "text-cyan-200 opacity-90",
-          closeBtn: "hover:bg-white/20 text-white rounded-full",
-          panelBg: "bg-transparent",
-          bodyText: "text-gray-100"
-        },
-        'retro-green': {
-          container: "bg-black/85 backdrop-blur-sm border-2 border-green-400 shadow-[0_0_20px_rgba(74,222,128,0.2)] text-green-300 font-retro tracking-widest",
-          header: "bg-green-900/30",
-          headerTitle: "text-green-300 uppercase",
-          locationTitle: "text-green-300 uppercase",
-          subtext: "text-green-300",
-          closeBtn: "hover:bg-green-400 hover:text-black text-green-300 border border-green-400 rounded-none",
-          panelBg: "bg-transparent",
-          bodyText: "text-green-200"
-        },
-        'retro-amber': {
-          container: "bg-black/85 backdrop-blur-sm border-2 border-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.2)] text-amber-300 font-retro tracking-widest",
-          header: "bg-amber-900/30",
-          headerTitle: "text-amber-300 uppercase",
-          locationTitle: "text-amber-300 uppercase",
-          subtext: "text-amber-300",
-          closeBtn: "hover:bg-amber-400 hover:text-black text-amber-300 border border-amber-400 rounded-none",
-          panelBg: "bg-transparent",
-          bodyText: "text-amber-200"
-        },
-        'parchment': {
-          container: "bg-[#f4ead5] border border-[#8b5a2b] shadow-[4px_4px_10px_rgba(0,0,0,0.3)] text-[#3e2723] font-sans",
-          header: "bg-[#e8d5b5]/30",
-          headerTitle: "text-[#8b5a2b] uppercase tracking-wider brand-font",
-          locationTitle: "text-[#8b5a2b] font-garamond tracking-wide",
-          subtext: "text-[#8b5a2b]",
-          closeBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] border border-transparent rounded",
-          panelBg: "bg-transparent",
-          bodyText: "text-[#5c3a21]"
-        }
-      }[skin];
-
-      return (
-        <div 
-          className="absolute top-[282px] right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-342px)] flex flex-col gap-3 animate-in slide-in-from-right-12 fade-in duration-500 pointer-events-none"
-          data-testid="info-panel"
-          data-infopanel="true"
-        >
-          <div className={`${themeConfig.container} flex flex-col shrink min-h-0 overflow-hidden pointer-events-auto`}>
-            <div className={`relative p-5 shrink-0 flex flex-col items-center ${skin === 'modern' ? 'border-b border-white/10' : ''} ${themeConfig.header}`}>
-              <button onClick={onClose} className={`absolute top-3 right-3 p-1 z-50 pointer-events-auto transition-colors ${themeConfig.closeBtn}`} aria-label="Close panel">
-                <X size={20} />
-              </button>
-              <div className="flex flex-col gap-2 items-center text-center">
-                <h2 className={`text-2xl font-bold text-center ${themeConfig.locationTitle || themeConfig.headerTitle}`}>
-                  {isError ? "Error" : "Searching..."}
-                </h2>
-              </div>
-            </div>
-            <div className={`p-6 space-y-8 animate-pulse ${themeConfig.panelBg}`}>
-              {isError ? (
-                <div className="text-center space-y-3">
-                  <p className={`font-medium ${themeConfig.headerTitle}`}>{errorMessage || "Unable to retrieve location details"}</p>
-                  {onRetry && (
-                    <button onClick={onRetry} className={`px-4 py-1.5 mt-2 text-xs uppercase tracking-wider font-bold rounded transition-colors bg-white/10 hover:bg-white/20 ${themeConfig.bodyText}`}>
-                      Retry
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className={`h-4 ${isRetroSkin ? 'bg-green-500/20' : 'bg-white/10'} rounded w-3/4`}></div>
-                  <div className={`h-4 ${isParchmentSkin ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
-                  <div className={`h-4 w-[90%] ${isRetroSkin ? 'bg-current opacity-30' : isParchmentSkin ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      );
-    }
-    return null;
-  }
-
   const info = React.useMemo(() => {
     if (!rawInfo) return null;
 
@@ -2261,7 +2172,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                             errorMessage?.includes("No model loaded");
 
   const showContentSkeleton = isLoading && (!info?.description) && !isLMStudioNoModel && !isError;
-  const contextItems = info.contextNotes;
+  const contextItems = info?.contextNotes;
+
+  if (!rawInfo && !isLoading && !isError) {
+    return null;
+  }
 
   return (
     <>
@@ -2344,7 +2259,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             <div className="flex flex-col gap-2 items-center text-center">
               <div className="flex flex-col items-center justify-center gap-1">
                  <h2 className={`${titleSize} font-bold text-center ${theme.locationTitle || theme.headerTitle}`}>
-                   {displayTitle}
+                   {displayTitle || (isError ? "Error" : isLoading ? "Searching..." : "Location Info")}
                  </h2>
                  {displaySubtitle && (
                    <div className={`mt-1 ${isParchment ? 'text-xl font-normal font-garamond text-[#8b5a2b]' : `${bodySize} font-medium ${isRetro ? 'text-current opacity-90' : 'text-slate-300'}`}`}>
@@ -2363,9 +2278,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                  )}
               </div>
               <p className={`${subtextSize} font-mono ${theme.subtext}`}>
-                {isValidCoordinates(info.coordinates)
-                  ? `${info.coordinates.lat >= 0 ? info.coordinates.lat.toFixed(2) + '° N' : Math.abs(info.coordinates.lat).toFixed(2) + '° S'}, ${info.coordinates.lng >= 0 ? info.coordinates.lng.toFixed(2) + '° E' : Math.abs(info.coordinates.lng).toFixed(2) + '° W'}${info.isApproximate ? ' (Approximate)' : ''}`
-                  : 'Coordinates unavailable'}
+                {isValidCoordinates(info?.coordinates)
+                  ? `${info!.coordinates.lat >= 0 ? info!.coordinates.lat.toFixed(2) + '° N' : Math.abs(info!.coordinates.lat).toFixed(2) + '° S'}, ${info!.coordinates.lng >= 0 ? info!.coordinates.lng.toFixed(2) + '° E' : Math.abs(info!.coordinates.lng).toFixed(2) + '° W'}${info?.isApproximate ? ' (Approximate)' : ''}`
+                  : (isLoading ? 'Searching...' : 'Coordinates unavailable')}
               </p>
             </div>
           </div>
@@ -2431,7 +2346,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                     <div className={`h-4 w-[90%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
                  </div>
                </div>
-            ) : (
+            ) : info ? (
                 <div className="p-5 pb-6 space-y-5 animate-in fade-in duration-300">
                     {schema.ui.sections.map((section: any) => {
                         const renderer = SECTION_RENDERERS[section.id];
@@ -2439,7 +2354,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                         return null;
                     })}
                 </div>
-            )}
+            ) : null}
           </div>
         </div>
         

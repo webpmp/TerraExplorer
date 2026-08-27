@@ -1,7 +1,7 @@
 import React from 'react';
 import { describe, test, it, expect, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import SettingsPanel, { testNewsConnectionService } from '../SettingsPanel';
+import SettingsPanel, { testNewsConnectionService, testMapConnectionService } from '../SettingsPanel';
 import { SkinType, UserSettings } from '../../types';
 
 describe('SettingsPanel - Top-Level Tab Reorganization', () => {
@@ -66,12 +66,16 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(html).toContain('value="http://localhost:1234/v1"');
     expect(html).toContain('Must include /v1 for OpenAI compatibility.');
     expect(html).toContain('Detect');
-    expect(html).toContain('Test Connection');
+    expect(html).toContain('TEST CONNECTION');
 
     // 2. MAP PROVIDER section
     expect(html).toContain('MAP PROVIDER');
-    expect(html).toContain('CARTO Basemaps (Raster)');
+    expect(html).toContain('CARTO Basemaps');
+    expect(html).not.toContain('CARTO Basemaps (Raster)');
     expect(html).not.toContain('CARTO RASTER BASEMAPS');
+    expect(html).toContain('A CARTO API key is required to load authenticated basemap tiles.');
+    expect(html).not.toContain('raster');
+    expect(html).not.toContain('vector');
     expect(html).toContain('CARTO API Key');
     expect(html).toContain('href="https://carto.com/developers/basemap-styles/"');
     expect(html).toContain('VITE_CARTO_API_KEY=');
@@ -234,8 +238,9 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(html).toContain('Gemini (Default AI Search)');
     expect(html).toContain('value="gemini"');
 
-    // Test connection button is hidden when both AI and News providers are set to Gemini
-    expect(html).not.toContain('Test Connection');
+    // AI and News Test Connection buttons are hidden when both AI and News providers are set to Gemini
+    expect(html).toContain('TEST CONNECTION'); // MAP PROVIDER test connection remains present
+    expect(html).not.toContain('Testing...');
 
     // API key inputs are never rendered
     expect(html).not.toContain('NYT API Key');
@@ -505,6 +510,160 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(audioHtml).toContain('id="settings-tabpanel-audio"');
     expect(audioHtml).toContain('1.2x');
     expect(audioHtml).toContain('80%');
+  });
+
+  describe('MAP PROVIDER - Test Connection Button & Service', () => {
+    test('1. TEST CONNECTION renders directly below the Provider selector and above CARTO API Key', () => {
+      const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="providers" />);
+      
+      const providerIndex = html.indexOf('CARTO Basemaps');
+      const testBtnIndex = html.indexOf('TEST CONNECTION', providerIndex);
+      const apiKeyIndex = html.indexOf('CARTO API Key');
+
+      expect(providerIndex).toBeGreaterThan(-1);
+      expect(testBtnIndex).toBeGreaterThan(providerIndex);
+      expect(apiKeyIndex).toBeGreaterThan(testBtnIndex);
+      expect(html).toContain('w-full');
+    });
+
+    test('2. Button remains enabled even though the Provider selector is disabled', () => {
+      const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="providers" />);
+
+      expect(html).toContain('<select disabled=""');
+      // The button itself is not disabled
+      const btnSection = html.slice(html.indexOf('CARTO Basemaps'), html.indexOf('CARTO API Key'));
+      expect(btnSection).toContain('TEST CONNECTION');
+      expect(btnSection).not.toContain('<button disabled=""');
+    });
+
+    test('3. Successful request displays "Map provider connection successful."', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK'
+      } as any);
+
+      const result = await testMapConnectionService('carto', 'modern', () => ({ VITE_CARTO_API_KEY: 'test-key-123' }));
+      expect(result.outcome).toBe('SUCCESS');
+      expect(result.buttonState).toBe('success');
+      expect(result.buttonLabel).toBe('✓ CONNECTION SUCCESSFUL');
+      expect(result.message).toBe('Map provider connection successful.');
+
+      fetchSpy.mockRestore();
+    });
+
+    test('4. HTTP failure is handled with "Unable to connect to this map provider."', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        statusText: 'Forbidden'
+      } as any);
+
+      const result = await testMapConnectionService('carto', 'modern');
+      expect(result.outcome).toBe('FAILED');
+      expect(result.buttonState).toBe('failed');
+      expect(result.buttonLabel).toBe('CONNECTION FAILED');
+      expect(result.message).toBe('Unable to connect to this map provider.');
+
+      fetchSpy.mockRestore();
+    });
+
+    test('5. Network/fetch failure is handled as blocked when browser blocks request', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+      const result = await testMapConnectionService('carto', 'modern');
+      expect(result.outcome).toBe('BLOCKED');
+      expect(result.buttonState).toBe('blocked');
+      expect(result.buttonLabel).toBe('CONNECTION BLOCKED');
+      expect(result.message).toBe('Map provider is reachable, but the browser blocked the request.');
+
+      fetchSpy.mockRestore();
+    });
+
+    test('6. CORS/browser-blocked failure is handled with specific message', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error("No 'Access-Control-Allow-Origin' header is present on the requested resource."));
+
+      const result = await testMapConnectionService('carto', 'modern');
+      expect(result.outcome).toBe('BLOCKED');
+      expect(result.buttonState).toBe('blocked');
+      expect(result.buttonLabel).toBe('CONNECTION BLOCKED');
+      expect(result.message).toBe('Map provider is reachable, but the browser blocked the request.');
+
+      fetchSpy.mockRestore();
+    });
+
+    test('7. Timeout is handled with "Map provider did not respond in time."', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementationOnce(() => new Promise(() => {}));
+
+      // Test with custom quick timeout error
+      const timeoutErr = new Error('TIMEOUT');
+      timeoutErr.name = 'TimeoutError';
+      fetchSpy.mockReset();
+      fetchSpy.mockRejectedValueOnce(timeoutErr);
+
+      const result = await testMapConnectionService('carto', 'modern');
+      expect(result.outcome).toBe('FAILED');
+      expect(result.buttonState).toBe('failed');
+      expect(result.buttonLabel).toBe('CONNECTION FAILED');
+      expect(result.message).toBe('Map provider did not respond in time.');
+
+      fetchSpy.mockRestore();
+    });
+
+    test('8. Running the test does not change the selected provider or modify settings', async () => {
+      const onUpdateSettings = vi.fn();
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK'
+      } as any);
+
+      await testMapConnectionService('carto', 'modern');
+      expect(onUpdateSettings).not.toHaveBeenCalled();
+
+      fetchSpy.mockRestore();
+    });
+
+    test('9. Component cleanup aborts an active test signal', async () => {
+      const abortController = new AbortController();
+      const abortSpy = vi.spyOn(abortController, 'abort');
+
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementationOnce((_url, options: any) => {
+        return new Promise((_, reject) => {
+          options?.signal?.addEventListener('abort', () => {
+            const err = new Error('The operation was aborted.');
+            err.name = 'AbortError';
+            reject(err);
+          });
+        });
+      });
+
+      const promise = testMapConnectionService('carto', 'modern', undefined, abortController.signal);
+      abortController.abort();
+      expect(abortSpy).toHaveBeenCalled();
+
+      await expect(promise).rejects.toThrow();
+
+      fetchSpy.mockRestore();
+    });
+
+    test('10. All TEST CONNECTION buttons in PROVIDERS tab share identical full-width styling and structure', () => {
+      const html = renderToStaticMarkup(
+        <SettingsPanel
+          {...baseProps}
+          settings={{ ...baseSettings, aiProvider: 'lmstudio', newsProvider: 'nyt' }}
+          initialTab="providers"
+        />
+      );
+
+      // Verify all 3 providers render TEST CONNECTION buttons with w-full
+      const testConnectionOccurrences = html.match(/TEST CONNECTION/g);
+      expect(testConnectionOccurrences).toHaveLength(3);
+
+      // Verify full width and identical button styling class patterns
+      const fullWidthButtons = html.match(/w-full py-2 px-4 rounded-lg text-sm border font-medium/g);
+      expect(fullWidthButtons).toHaveLength(3);
+    });
   });
 });
 

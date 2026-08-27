@@ -30,15 +30,98 @@ describe('Parchment Theme & Proportional Marker Styling System', () => {
     it('preserves other theme marker colors with black waypoint fill for Retro Green and Retro Amber', () => {
       const modernWp = getThemeMarkerColors('modern', { isWaypoint: true });
       expect(modernWp.fill).toBe('#00e5ff');
-      expect(modernWp.outline).toBe('#ffffff');
+      expect(modernWp.outline).toBe('#00e5ff'); // Modern inner ring matches center fill
+
+      const modernRegular = getThemeMarkerColors('modern', { isWaypoint: false });
+      expect(modernRegular.fill).toBe('#ff0000');
+      expect(modernRegular.outline).toBe('#ff0000'); // Modern inner ring matches center fill
+
+      const modernFavorite = getThemeMarkerColors('modern', { isFavorite: true });
+      expect(modernFavorite.fill).toBe('#d946ef');
+      expect(modernFavorite.outline).toBe('#d946ef');
+
+      const modernAnchor = getThemeMarkerColors('modern', { isAnchor: true });
+      expect(modernAnchor.fill).toBe('#3b82f6');
+      expect(modernAnchor.outline).toBe('#3b82f6');
 
       const greenWp = getThemeMarkerColors('retro-green', { isWaypoint: true });
       expect(greenWp.fill).toBe('#000000');
       expect(greenWp.outline).toBe('#4ade80');
 
+      const greenRegular = getThemeMarkerColors('retro-green', { isWaypoint: false });
+      expect(greenRegular.fill).toBe('#a3e635');
+      expect(greenRegular.outline).toBe('#4ade80');
+
       const amberWp = getThemeMarkerColors('retro-amber', { isWaypoint: true });
       expect(amberWp.fill).toBe('#000000');
       expect(amberWp.outline).toBe('#fbbf24');
+
+      const amberRegular = getThemeMarkerColors('retro-amber', { isWaypoint: false });
+      expect(amberRegular.fill).toBe('#fcd34d');
+      expect(amberRegular.outline).toBe('#fbbf24');
+    });
+
+    describe('Modern Theme Marker Ring Layer Invariants', () => {
+      it('1. MODERN marker outer ring remains white via box-shadow', () => {
+        const unselectedShadow = getMarkerBoxShadow('modern', false);
+        expect(unselectedShadow).toBe('0 1px 4px rgba(0, 0, 0, 0.4)');
+
+        const selectedShadow = getMarkerBoxShadow('modern', true);
+        expect(selectedShadow).toContain('0 0 0 3px rgba(255, 255, 255, 0.85)');
+      });
+
+      it('2. MODERN marker inner ring uses the center-fill color', () => {
+        const defaultMarker = getThemeMarkerColors('modern', { isWaypoint: false });
+        expect(defaultMarker.outline).toBe(defaultMarker.fill);
+
+        const waypointMarker = getThemeMarkerColors('modern', { isWaypoint: true });
+        expect(waypointMarker.outline).toBe(waypointMarker.fill);
+
+        const customMarker = getThemeMarkerColors('modern', { customColor: '#00ffff' });
+        expect(customMarker.outline).toBe('#00ffff');
+        expect(customMarker.fill).toBe('#00ffff');
+      });
+
+      it('3. MODERN marker center fill remains unchanged', () => {
+        expect(getThemeMarkerColors('modern', { isWaypoint: false }).fill).toBe('#ff0000');
+        expect(getThemeMarkerColors('modern', { isWaypoint: true }).fill).toBe('#00e5ff');
+        expect(getThemeMarkerColors('modern', { isFavorite: true }).fill).toBe('#d946ef');
+        expect(getThemeMarkerColors('modern', { isAnchor: true }).fill).toBe('#3b82f6');
+      });
+
+      it('4. CRT Green marker colors remain unchanged', () => {
+        const regular = getThemeMarkerColors('retro-green', { isWaypoint: false });
+        expect(regular.fill).toBe('#a3e635');
+        expect(regular.outline).toBe('#4ade80');
+
+        const waypoint = getThemeMarkerColors('retro-green', { isWaypoint: true });
+        expect(waypoint.fill).toBe('#000000');
+        expect(waypoint.outline).toBe('#4ade80');
+      });
+
+      it('5. CRT Amber marker colors remain unchanged', () => {
+        const regular = getThemeMarkerColors('retro-amber', { isWaypoint: false });
+        expect(regular.fill).toBe('#fcd34d');
+        expect(regular.outline).toBe('#fbbf24');
+
+        const waypoint = getThemeMarkerColors('retro-amber', { isWaypoint: true });
+        expect(waypoint.fill).toBe('#000000');
+        expect(waypoint.outline).toBe('#fbbf24');
+      });
+
+      it('6. Parchment marker colors remain unchanged', () => {
+        const regular = getThemeMarkerColors('parchment', { isWaypoint: false });
+        expect(regular.fill).toBe('#8b5a2b');
+        expect(regular.outline).toBe('#f4ead5');
+
+        const waypoint = getThemeMarkerColors('parchment', { isWaypoint: true });
+        expect(waypoint.fill).toBe('#8b5a2b');
+        expect(waypoint.outline).toBe('#f4ead5');
+
+        const favorite = getThemeMarkerColors('parchment', { isFavorite: true });
+        expect(favorite.fill).toBe('#8b0000');
+        expect(favorite.outline).toBe('#f4ead5');
+      });
     });
   });
 

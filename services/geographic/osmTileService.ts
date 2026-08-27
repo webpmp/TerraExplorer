@@ -240,6 +240,23 @@ export class OSMTileService {
   }
 
   /**
+   * Get authenticated CARTO GL vector style URL.
+   * Voyager for Modern/Parchment, Dark Matter for CRT Green/Amber.
+   */
+  public getVectorStyleUrl(skin: string = 'modern'): string {
+    const apiKey = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_CARTO_API_KEY : undefined;
+    const styleName = (skin === 'retro-amber' || skin === 'retro-green') ? 'dark-matter-gl-style' : 'voyager-gl-style';
+    const baseUrl = `https://basemaps.cartocdn.com/gl/${styleName}/style.json`;
+
+    if (!apiKey) {
+      console.warn('[OSM VECTOR] Missing VITE_CARTO_API_KEY; vector style may fail to authenticate.');
+      return baseUrl;
+    }
+
+    return `${baseUrl}?key=${encodeURIComponent(apiKey)}`;
+  }
+
+  /**
    * Get public CartoDB raster tile URL styled per application skin.
    * Uses Carto Voyager ('rastertiles/voyager') for rich cartographic detail, high-contrast roads, vegetation, and water.
    */

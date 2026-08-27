@@ -27,6 +27,108 @@ export interface NewsConnectionTestResult {
   message: string;
 }
 
+export type MapConnectionTestOutcome = 'SUCCESS' | 'FAILED' | 'BLOCKED';
+
+export interface MapConnectionTestResult {
+  outcome: MapConnectionTestOutcome;
+  buttonState: 'idle' | 'testing' | 'success' | 'failed' | 'blocked';
+  buttonLabel: string;
+  message: string;
+  status?: number | string;
+}
+
+export const testMapConnectionService = async (
+  provider: string = 'carto',
+  skin: SkinType = 'modern',
+  envGetter?: () => Record<string, string | undefined>,
+  signal?: AbortSignal
+): Promise<MapConnectionTestResult> => {
+  const defaultGetEnv = () => typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env : (typeof process !== 'undefined' ? process.env : {});
+  const env = (envGetter || defaultGetEnv)();
+  const apiKey = env?.VITE_CARTO_API_KEY;
+
+  const styleName = (skin === 'retro-amber' || skin === 'retro-green') ? 'dark-matter-gl-style' : 'voyager-gl-style';
+  const baseUrl = `https://basemaps.cartocdn.com/gl/${styleName}/style.json`;
+  const url = apiKey ? `${baseUrl}?key=${encodeURIComponent(apiKey)}` : baseUrl;
+
+  let timeoutId: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const err = new Error('TIMEOUT');
+      err.name = 'TimeoutError';
+      reject(err);
+    }, 10000);
+  });
+
+  try {
+    const fetchPromise = fetch(url, {
+      method: 'GET',
+      mode: 'cors',
+      signal
+    });
+
+    const res = await Promise.race([fetchPromise, timeoutPromise]);
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      return {
+        outcome: 'SUCCESS',
+        buttonState: 'success',
+        buttonLabel: '✓ CONNECTION SUCCESSFUL',
+        message: 'Map provider connection successful.',
+        status: res.status
+      };
+    } else {
+      return {
+        outcome: 'FAILED',
+        buttonState: 'failed',
+        buttonLabel: 'CONNECTION FAILED',
+        message: 'Unable to connect to this map provider.',
+        status: res.status
+      };
+    }
+  } catch (e: any) {
+    clearTimeout(timeoutId);
+
+    if (e.name === 'AbortError' || signal?.aborted) {
+      throw e;
+    }
+
+    if (e.name === 'TimeoutError' || e.message === 'TIMEOUT') {
+      return {
+        outcome: 'FAILED',
+        buttonState: 'failed',
+        buttonLabel: 'CONNECTION FAILED',
+        message: 'Map provider did not respond in time.'
+      };
+    }
+
+    const errStr = `${e.name || ''} ${e.message || ''} ${e.toString ? e.toString() : ''}`.toLowerCase();
+    const isCorsOrBlocked = errStr.includes('cors') ||
+      errStr.includes('access-control') ||
+      errStr.includes('blocked') ||
+      errStr.includes('failed to fetch') ||
+      errStr.includes('networkerror') ||
+      errStr.includes('typeerror');
+
+    if (isCorsOrBlocked) {
+      return {
+        outcome: 'BLOCKED',
+        buttonState: 'blocked',
+        buttonLabel: 'CONNECTION BLOCKED',
+        message: 'Map provider is reachable, but the browser blocked the request.'
+      };
+    }
+
+    return {
+      outcome: 'FAILED',
+      buttonState: 'failed',
+      buttonLabel: 'CONNECTION FAILED',
+      message: 'Unable to connect to this map provider.'
+    };
+  }
+};
+
 export const testNewsConnectionService = async (
   provider: NewsProvider,
   apiKeys?: { nytApiKey?: string; newsApiKey?: string; newsDataApiKey?: string },
@@ -159,6 +261,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
   const [modelTestMessage, setModelTestMessage] = React.useState('');
   const [newsTestStatus, setNewsTestStatus] = React.useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [newsTestMessage, setNewsTestMessage] = React.useState('');
+  const [mapTestStatus, setMapTestStatus] = React.useState<'idle' | 'testing' | 'success' | 'failed' | 'blocked'>('idle');
+  const [mapTestMessage, setMapTestMessage] = React.useState('');
+  const mapTestAbortControllerRef = React.useRef<AbortController | null>(null);
   const [isVoiceTesting, setIsVoiceTesting] = React.useState(false);
   const [voiceTestMessage, setVoiceTestMessage] = React.useState('');
 
@@ -166,7 +271,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
     const unsubscribe = narrationService.onVoicesChanged((voices) => {
       setAvailableVoices(voices);
     });
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      if (mapTestAbortControllerRef.current) {
+        mapTestAbortControllerRef.current.abort();
+      }
+    };
   }, []);
 
   const handleDetectModels = async () => {
@@ -216,6 +326,32 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
     } catch (e: any) {
       setModelTestStatus('error');
       setModelTestMessage(e.message || 'Connection failed');
+    }
+  };
+
+  const handleTestMapConnection = async () => {
+    if (mapTestAbortControllerRef.current) {
+      mapTestAbortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    mapTestAbortControllerRef.current = abortController;
+
+    setMapTestStatus('testing');
+    setMapTestMessage('');
+
+    try {
+      const result = await testMapConnectionService('carto', skin, undefined, abortController.signal);
+      if (abortController.signal.aborted) return;
+      setMapTestStatus(result.buttonState);
+      setMapTestMessage(result.message);
+    } catch (e: any) {
+      if (e.name === 'AbortError' || abortController.signal.aborted) return;
+      setMapTestStatus('failed');
+      setMapTestMessage('Unable to connect to this map provider.');
+    } finally {
+      if (mapTestAbortControllerRef.current === abortController) {
+        mapTestAbortControllerRef.current = null;
+      }
     }
   };
 
@@ -580,24 +716,34 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                       </div>
                     )}
 
-                    <div className="pt-2 flex items-center gap-3">
+                    <div className="space-y-2">
                       <button
                         type="button"
                         onClick={handleTestModelConnection}
                         disabled={modelTestStatus === 'testing' || !settings.lmStudioUrl}
-                        className={`px-4 py-2 rounded-lg text-sm border font-medium transition-colors
+                        className={`w-full py-2 px-4 rounded-lg text-sm border font-medium transition-colors disabled:opacity-50
                           ${isParchment ? 'border-[#8b5a2b] bg-[#8b5a2b]/10 hover:bg-[#8b5a2b]/20 text-[#8b5a2b]' : ''}
-                          ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20' : ''}
-                          ${isRetro ? 'border-[#33ff33] rounded-none hover:bg-[#33ff33]/20 text-[#33ff33] disabled:opacity-50' : ''}
+                          ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20 text-white' : ''}
+                          ${isRetro ? 'border-[#33ff33] rounded-none hover:bg-[#33ff33]/20 text-[#33ff33]' : ''}
                           ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
                         `}
                       >
-                        {modelTestStatus === 'testing' ? 'Testing...' : 'Test Connection'}
+                        {modelTestStatus === 'testing'
+                          ? 'TESTING...'
+                          : modelTestStatus === 'success'
+                          ? '✓ CONNECTION SUCCESSFUL'
+                          : modelTestStatus === 'error'
+                          ? 'CONNECTION FAILED'
+                          : 'TEST CONNECTION'}
                       </button>
                       {modelTestStatus !== 'idle' && (
-                        <span className={`text-xs ${modelTestStatus === 'success' ? 'text-green-500' : 'text-red-500'}`}>
+                        <p className={`text-xs ${
+                          modelTestStatus === 'success'
+                            ? (isParchment ? 'text-[#2e7d32]' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-[#33ff33]') : 'text-green-400')
+                            : (isParchment ? 'text-[#c62828]' : 'text-red-400')
+                        }`}>
                           {modelTestMessage}
-                        </span>
+                        </p>
                       )}
                     </div>
                   </div>
@@ -623,8 +769,43 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                     disabled
                     className={`${inputClasses} opacity-90 cursor-default`}
                   >
-                    <option value="carto">CARTO Basemaps (Raster)</option>
+                    <option value="carto">CARTO Basemaps</option>
                   </select>
+                </div>
+
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={handleTestMapConnection}
+                    disabled={mapTestStatus === 'testing'}
+                    className={`w-full py-2 px-4 rounded-lg text-sm border font-medium transition-colors disabled:opacity-50
+                      ${isParchment ? 'border-[#8b5a2b] bg-[#8b5a2b]/10 hover:bg-[#8b5a2b]/20 text-[#8b5a2b]' : ''}
+                      ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20 text-white' : ''}
+                      ${isRetro ? 'border-[#33ff33] rounded-none hover:bg-[#33ff33]/20 text-[#33ff33]' : ''}
+                      ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
+                    `}
+                  >
+                    {mapTestStatus === 'testing'
+                      ? 'TESTING...'
+                      : mapTestStatus === 'success'
+                      ? '✓ CONNECTION SUCCESSFUL'
+                      : mapTestStatus === 'failed'
+                      ? 'CONNECTION FAILED'
+                      : mapTestStatus === 'blocked'
+                      ? 'CONNECTION BLOCKED'
+                      : 'TEST CONNECTION'}
+                  </button>
+                  {mapTestStatus !== 'idle' && (
+                    <p className={`text-xs ${
+                      mapTestStatus === 'success'
+                        ? (isParchment ? 'text-[#2e7d32]' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-[#33ff33]') : 'text-green-400')
+                        : mapTestStatus === 'blocked'
+                        ? (isParchment ? 'text-[#b78103]' : 'text-amber-400')
+                        : (isParchment ? 'text-[#c62828]' : 'text-red-400')
+                    }`}>
+                      {mapTestMessage}
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-3 text-xs">
@@ -643,7 +824,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                       </a>
                     </div>
                     <p className={`mt-0.5 opacity-70 ${isRetro ? 'uppercase' : ''}`}>
-                      A CARTO API key is required to load authenticated raster basemap tiles.
+                      A CARTO API key is required to load authenticated basemap tiles.
                     </p>
                   </div>
 
@@ -733,24 +914,34 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                 </div>
 
                 {settings.newsProvider !== 'gemini' && (
-                  <div className="pt-1 flex items-center gap-3">
+                  <div className="space-y-2">
                     <button
                       type="button"
                       onClick={handleTestNewsConnection}
                       disabled={newsTestStatus === 'testing'}
-                      className={`px-4 py-2 rounded-lg text-sm border font-medium transition-colors
+                      className={`w-full py-2 px-4 rounded-lg text-sm border font-medium transition-colors disabled:opacity-50
                         ${isParchment ? 'border-[#8b5a2b] bg-[#8b5a2b]/10 hover:bg-[#8b5a2b]/20 text-[#8b5a2b]' : ''}
-                        ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20' : ''}
-                        ${isRetro ? 'border-[#33ff33] rounded-none hover:bg-[#33ff33]/20 text-[#33ff33] disabled:opacity-50' : ''}
+                        ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20 text-white' : ''}
+                        ${isRetro ? 'border-[#33ff33] rounded-none hover:bg-[#33ff33]/20 text-[#33ff33]' : ''}
                         ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
                       `}
                     >
-                      {newsTestStatus === 'testing' ? 'Testing...' : 'Test Connection'}
+                      {newsTestStatus === 'testing'
+                        ? 'TESTING...'
+                        : newsTestStatus === 'success'
+                        ? '✓ CONNECTION SUCCESSFUL'
+                        : newsTestStatus === 'error'
+                        ? 'CONNECTION FAILED'
+                        : 'TEST CONNECTION'}
                     </button>
                     {newsTestStatus !== 'idle' && (
-                      <span className={`text-xs ${newsTestStatus === 'success' ? 'text-green-500' : 'text-red-500'}`}>
+                      <p className={`text-xs ${
+                        newsTestStatus === 'success'
+                          ? (isParchment ? 'text-[#2e7d32]' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-[#33ff33]') : 'text-green-400')
+                          : (isParchment ? 'text-[#c62828]' : 'text-red-400')
+                      }`}>
                         {newsTestMessage}
-                      </span>
+                      </p>
                     )}
                   </div>
                 )}

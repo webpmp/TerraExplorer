@@ -21,6 +21,7 @@ import { isPlaceholderString } from '../components/InfoPanel';
 import { validateEarthGeography } from './celestialCapabilities';
 import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
 import { validateHistoricalCoordinate, getHistoricalEntityKnowledge, toCanonicalTitleCase } from './geographic/historicalCoordinateValidator';
+import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation } from './geographic/entityIdentityValidator';
 
 export const EnrichmentMetrics = {
     retry: 0,
@@ -485,34 +486,61 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
           console.log(`COORDINATE_VERIFICATION_ATTEMPT\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}`);
           const geoEntity = await resolveGeographicEntity(normalizedQuery || query);
           if (geoEntity && !('status' in geoEntity) && geoEntity.coordinates && isValidCoordinates(geoEntity.coordinates)) {
-            console.log(`COORDINATE_VERIFICATION_SUCCESS\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}\ncoordinates: ${geoEntity.coordinates.lat}, ${geoEntity.coordinates.lng}`);
-            
-            resolvedData = {
-              name: geoEntity.name.split(',')[0].trim(),
-              locationString: geoEntity.name,
-              type: geoEntity.entityType === 'city' ? LocationType.CITY : (geoEntity.entityType === 'country' ? LocationType.COUNTRY : LocationType.POI),
-              entityType: geoEntity.entityType,
-              coordinates: {
-                lat: geoEntity.coordinates.lat,
-                lng: geoEntity.coordinates.lng,
-                source: (geoEntity.source === GeographicSource.NOMINATIM ? "geocoder" : "deterministic") as CoordinateSource
-              },
-              coordinateSource: (geoEntity.source === GeographicSource.NOMINATIM ? "geocoder" : "deterministic") as CoordinateSource,
-              identityStatus: (geoEntity.identityStatus || "verified") as GeographicIdentityStatus,
-              country: geoEntity.context?.country,
-              state: geoEntity.context?.state,
-              city: geoEntity.context?.city,
-              county: geoEntity.context?.county,
-              region: geoEntity.context?.region,
-              osmId: geoEntity.osmId,
-              osmType: geoEntity.osmType,
-              wikidataId: geoEntity.wikidataId,
-              wikipedia: geoEntity.wikipedia,
-              description: `Information on ${geoEntity.name.split(',')[0].trim()}.`,
-              funFacts: [],
-              notable: []
-            };
-            suggestedZoom = geoEntity.suggestedZoom || 8;
+            const candidateShortName = geoEntity.name.split(',')[0].trim();
+            const identityCheck = validateEntityIdentity(
+              normalizedQuery || query,
+              candidateShortName,
+              {
+                rawQuery: rawQuery || query,
+                intent,
+                candidateEntityType: geoEntity.entityType,
+                candidateCanonicalName: candidateShortName,
+                coordinatesValid: true
+              }
+            );
+
+            logEntityIdentityValidation({
+              requestedEntity: normalizedQuery || query,
+              candidateName: candidateShortName,
+              candidateEntityType: geoEntity.entityType,
+              intent,
+              identityValid: identityCheck.matches,
+              identityStatus: identityCheck.matches ? (geoEntity.identityStatus || 'verified') : 'unverified',
+              rejectionReason: identityCheck.matches ? undefined : identityCheck.rejectionReason
+            });
+
+            if (identityCheck.matches) {
+              console.log(`COORDINATE_VERIFICATION_SUCCESS\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}\ncoordinates: ${geoEntity.coordinates.lat}, ${geoEntity.coordinates.lng}`);
+              
+              resolvedData = {
+                name: candidateShortName,
+                locationString: geoEntity.name,
+                type: geoEntity.entityType === 'city' ? LocationType.CITY : (geoEntity.entityType === 'country' ? LocationType.COUNTRY : LocationType.POI),
+                entityType: geoEntity.entityType,
+                coordinates: {
+                  lat: geoEntity.coordinates.lat,
+                  lng: geoEntity.coordinates.lng,
+                  source: (geoEntity.source === GeographicSource.NOMINATIM ? "geocoder" : "deterministic") as CoordinateSource
+                },
+                coordinateSource: (geoEntity.source === GeographicSource.NOMINATIM ? "geocoder" : "deterministic") as CoordinateSource,
+                identityStatus: (geoEntity.identityStatus || "verified") as GeographicIdentityStatus,
+                country: geoEntity.context?.country,
+                state: geoEntity.context?.state,
+                city: geoEntity.context?.city,
+                county: geoEntity.context?.county,
+                region: geoEntity.context?.region,
+                osmId: geoEntity.osmId,
+                osmType: geoEntity.osmType,
+                wikidataId: geoEntity.wikidataId,
+                wikipedia: geoEntity.wikipedia,
+                description: `Information on ${candidateShortName}.`,
+                funFacts: [],
+                notable: []
+              };
+              suggestedZoom = geoEntity.suggestedZoom || 8;
+            } else {
+              console.log(`COORDINATE_VERIFICATION_FAILED\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}\nreason: entity_identity_mismatch (${identityCheck.rejectionReason})`);
+            }
           } else {
             console.log(`COORDINATE_VERIFICATION_FAILED\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}\nreason: no_authoritative_match`);
           }

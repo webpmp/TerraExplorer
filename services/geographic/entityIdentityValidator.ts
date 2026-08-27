@@ -5,12 +5,14 @@ export interface EntityIdentityMatchOptions {
   intent?: string;
   entityType?: string;
   recoveredEntityType?: string;
+  candidateEntityType?: string;
+  candidateCanonicalName?: string;
   coordinatesValid?: boolean;
 }
 
 export interface EntityIdentityMatchResult {
   matches: boolean;
-  rejectionReason: 'NONE' | 'ENTITY_IDENTITY_MISMATCH' | 'COORDINATE_INVALID' | 'UNRESOLVED_ENTITY';
+  rejectionReason: 'NONE' | 'ENTITY_IDENTITY_MISMATCH' | 'COORDINATE_INVALID' | 'UNRESOLVED_ENTITY' | 'SEMANTIC_INTENT_MISMATCH' | 'AMBIGUOUS_GENERIC_ENTITY';
   requestedEntity: string;
   recoveredEntity: string;
   details?: string;
@@ -23,6 +25,19 @@ const GENERIC_STOP_WORDS = new Set([
   'about', 'me', 'here', 'site', 'no', 'number', 'location', 'place', 'area', 'point',
   'interest', 'poi', 'discovery', 'recovery', 'expedition', 'shipwreck', 'wreck', 'sunken',
   'sinking', 'vessel', 'ship', 'boat', 'plane', 'aircraft', 'ruins'
+]);
+
+// Administrative entity qualifiers that narrow a generic entity name
+const ADMINISTRATIVE_QUALIFIERS = new Set([
+  'county', 'parish', 'borough', 'district', 'municipality', 'township',
+  'province', 'department', 'prefecture', 'canton', 'governorate'
+]);
+
+// Natural feature qualifiers
+const NATURAL_QUALIFIERS = new Set([
+  'park', 'national park', 'national forest', 'forest', 'river', 'lake', 'mountain',
+  'mount', 'canyon', 'valley', 'caldera', 'volcano', 'bay', 'gulf', 'island', 'falls',
+  'waterfall', 'sea', 'ocean', 'glacier', 'desert', 'reef', 'cave', 'caves'
 ]);
 
 /**
@@ -48,8 +63,7 @@ export function extractDistinctiveEntityTokens(text: string): string[] {
 /**
  * Validates that a recovered entity refers to the same underlying entity as the requested entity.
  * 
- * Strict protection against AI entity substitution (e.g. substituting 'Site No. 1, USS Eldorado'
- * for 'Shipwreck Of The El Faro').
+ * Strict protection against AI entity substitution and semantic geocoder mismatch.
  */
 export function validateEntityIdentity(
   requestedEntity: string,
@@ -83,15 +97,44 @@ export function validateEntityIdentity(
 
   const reqLower = reqStr.toLowerCase();
   const recLower = recStr.toLowerCase();
+  const rawQueryLower = (options.rawQuery || '').toLowerCase();
+  const intent = options.intent || '';
+  const candidateEntityType = (options.candidateEntityType || options.recoveredEntityType || '').toLowerCase();
 
-  // 1. Direct or substring match
-  if (reqLower === recLower || reqLower.includes(recLower) || recLower.includes(reqLower)) {
+  // Semantic Guard: If user query or intent is NATURAL_LOCATION (or generic query without administrative qualifiers),
+  // but geocoder returned an administrative region that appends a qualifier (e.g., "Yellowstone" -> "Yellowstone County"),
+  // verify whether the user actually asked for an administrative division.
+  const recWords = recLower.split(/[\s,]+/);
+  const recHasAdminQualifier = recWords.some(w => ADMINISTRATIVE_QUALIFIERS.has(w));
+  const reqHasAdminQualifier = reqLower.split(/[\s,]+/).some(w => ADMINISTRATIVE_QUALIFIERS.has(w)) ||
+                               rawQueryLower.split(/[\s,]+/).some(w => ADMINISTRATIVE_QUALIFIERS.has(w));
+
+  if (recHasAdminQualifier && !reqHasAdminQualifier) {
+    const isNaturalOrGenericIntent = intent === 'NATURAL_LOCATION' || intent === 'EXPLORATORY' || intent === 'GENERAL_LOCATION' || !intent;
+    const isAdministrativeCandidate = candidateEntityType === 'administrative_region' || 
+                                     candidateEntityType === 'county' || 
+                                     candidateEntityType === 'state' || 
+                                     candidateEntityType === 'region';
+
+    if (isNaturalOrGenericIntent || isAdministrativeCandidate) {
+      return {
+        matches: false,
+        rejectionReason: 'SEMANTIC_INTENT_MISMATCH',
+        requestedEntity: reqStr,
+        recoveredEntity: recStr,
+        details: `Requested generic/natural entity "${reqStr}" cannot resolve to administrative region "${recStr}" without explicit user qualification.`
+      };
+    }
+  }
+
+  // 1. Exact match
+  if (reqLower === recLower) {
     return {
       matches: true,
       rejectionReason: 'NONE',
       requestedEntity: reqStr,
       recoveredEntity: recStr,
-      details: 'Direct or substring match'
+      details: 'Exact match'
     };
   }
 
@@ -110,7 +153,19 @@ export function validateEntityIdentity(
     }
   }
 
-  // 3. Token-based overlap and conflict detection
+  // 3. Substring matching with qualification preservation
+  if (reqLower.includes(recLower) || recLower.includes(reqLower)) {
+    // If requested contains recovered (e.g. "Yellowstone National Park" contains "Yellowstone National Park, WY")
+    return {
+      matches: true,
+      rejectionReason: 'NONE',
+      requestedEntity: reqStr,
+      recoveredEntity: recStr,
+      details: 'Substring match'
+    };
+  }
+
+  // 4. Token-based overlap and conflict detection
   const reqTokens = extractDistinctiveEntityTokens(reqStr);
   const recTokens = extractDistinctiveEntityTokens(recStr);
 
@@ -181,4 +236,26 @@ entityIdentityMatch: ${params.entityIdentityMatch}
 coordinateValidity: ${params.coordinateValidity}
 recoveryAccepted: ${params.recoveryAccepted}
 rejectionReason: ${params.rejectionReason}`);
+}
+
+/**
+ * Emits the required structured log block for candidate entity identity validation.
+ */
+export function logEntityIdentityValidation(params: {
+  requestedEntity: string;
+  candidateName: string;
+  candidateEntityType?: string;
+  intent?: string;
+  identityValid: boolean;
+  identityStatus: string;
+  rejectionReason?: string;
+}): void {
+  console.log(`[ENTITY_IDENTITY_VALIDATION]
+requestedEntity: "${params.requestedEntity}"
+candidateName: "${params.candidateName}"
+candidateEntityType: "${params.candidateEntityType || 'unknown'}"
+intent: "${params.intent || 'unknown'}"
+identityStatus: "${params.identityStatus}"
+valid: ${params.identityValid}
+rejectionReason: ${params.rejectionReason || 'none'}`);
 }

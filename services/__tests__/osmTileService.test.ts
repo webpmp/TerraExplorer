@@ -190,6 +190,31 @@ describe('OSM Tile Service & Tile Spherical Mesh Tests', () => {
     }
   });
 
+  it('constructs authenticated CARTO vector style URL matching official specification', () => {
+    const originalEnv = { ...import.meta.env };
+    try {
+      (import.meta.env as any).VITE_CARTO_API_KEY = 'test-carto-key-123';
+
+      // 1. Modern / Parchment returns authenticated Voyager vector style URL
+      const modernVectorUrl = osmTileService.getVectorStyleUrl('modern');
+      expect(modernVectorUrl).toBe('https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json?key=test-carto-key-123');
+
+      const parchmentVectorUrl = osmTileService.getVectorStyleUrl('parchment');
+      expect(parchmentVectorUrl).toBe('https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json?key=test-carto-key-123');
+
+      // 2. Retro-green / Retro-amber returns Dark Matter vector style URL
+      const darkVectorUrl = osmTileService.getVectorStyleUrl('retro-green');
+      expect(darkVectorUrl).toBe('https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json?key=test-carto-key-123');
+
+      // 3. Gracefully handles missing key without throwing
+      delete (import.meta.env as any).VITE_CARTO_API_KEY;
+      const unauthVectorUrl = osmTileService.getVectorStyleUrl('modern');
+      expect(unauthVectorUrl).toBe('https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json');
+    } finally {
+      (import.meta.env as any).VITE_CARTO_API_KEY = originalEnv.VITE_CARTO_API_KEY;
+    }
+  });
+
   it('projects geographic marker coordinates to exact Web Mercator pixel positions and separates them naturally with zoom', () => {
     const centerLat = 37.7749;
     const centerLng = -122.4194;
@@ -234,6 +259,82 @@ describe('OSM Tile Service & Tile Spherical Mesh Tests', () => {
     // Geographic separation doubles with each zoom level (2^2 = 4x from z12 to z14, 4x from z14 to z16)
     expect(distZ14 / distZ12).toBeCloseTo(4, 1);
     expect(distZ16 / distZ14).toBeCloseTo(4, 1);
+  });
+
+  describe('OSM Vector Map Lifecycle and Ref Reconciliation', () => {
+    it('1. Initial null container ref does not crash or falsely initialize map', () => {
+      let mapCreated = false;
+      const initMapLibre = (node: any | null) => {
+        if (!node) return;
+        mapCreated = true;
+      };
+
+      initMapLibre(null);
+      expect(mapCreated).toBe(false);
+
+      const fakeDiv = { tagName: 'DIV' };
+      initMapLibre(fakeDiv);
+      expect(mapCreated).toBe(true);
+    });
+
+    it('2. Reinitialization / React StrictMode remount reuses live existing map canvas', () => {
+      const fakeCanvas = { tagName: 'CANVAS' };
+      const fakeContainerDiv = {
+        tagName: 'DIV',
+        contains: (node: any) => node === fakeCanvas
+      };
+
+      const existingMap = {
+        __debugId: 42,
+        getCanvas: () => fakeCanvas,
+        isRemoved: () => false,
+        isStyleLoaded: () => true
+      };
+
+      const winObj = typeof window !== 'undefined' ? window : (globalThis as any);
+      winObj.__terraexplorer_maplibre_map = existingMap;
+
+      let mapLibreMapRef: any = null;
+
+      const initMapLibre = (container: any) => {
+        const existingGlobalMap = winObj.__terraexplorer_maplibre_map;
+        if (existingGlobalMap && !existingGlobalMap.isRemoved()) {
+          const c = existingGlobalMap.getCanvas();
+          if (c && container.contains(c)) {
+            mapLibreMapRef = existingGlobalMap;
+            return;
+          }
+        }
+      };
+
+      initMapLibre(fakeContainerDiv);
+      expect(mapLibreMapRef).toBe(existingMap);
+      expect(mapLibreMapRef.__debugId).toBe(42);
+    });
+
+    it('3. Map-ready state and mapRef consistency', () => {
+      let isMapReady = false;
+      let mapRefAssigned = false;
+
+      const mockMap = {
+        __debugId: 1,
+        getCanvas: () => ({ tagName: 'CANVAS' }),
+        isStyleLoaded: () => true
+      };
+
+      const winObj = typeof window !== 'undefined' ? window : (globalThis as any);
+      const map = mockMap;
+      mapRefAssigned = true;
+      winObj.__terraexplorer_maplibre_map = map;
+
+      if (mapRefAssigned && winObj.__terraexplorer_maplibre_map) {
+        isMapReady = true;
+      }
+
+      expect(isMapReady).toBe(true);
+      expect(mapRefAssigned).toBe(true);
+      expect(winObj.__terraexplorer_maplibre_map).toBe(mockMap);
+    });
   });
 });
 

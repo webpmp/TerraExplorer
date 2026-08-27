@@ -131,6 +131,14 @@ const AtmosphereGlowShader = {
   `
 };
 
+/**
+ * Helper to determine whether a 3D globe point is facing the camera / visible on the globe.
+ * Preserves the exact coordinate space, normalization, threshold, and semantics used by UniversalMarker.
+ */
+export const isGlobePointVisible = (worldPosition: THREE.Vector3, cameraPosition: THREE.Vector3): boolean => {
+  return worldPosition.dot(cameraPosition) > 0.6;
+};
+
 const UniversalMarker: React.FC<{ 
   position: THREE.Vector3, 
   color: string | THREE.Color, 
@@ -223,7 +231,7 @@ const UniversalMarker: React.FC<{
         meshRef.current.getWorldPosition(wp);
 
         // Check if marker is facing the camera
-        const isFacingCam = wp.dot(camera.position) > 0.6;
+        const isFacingCam = isGlobePointVisible(wp, camera.position);
         if (!isFacingCam) {
           domHitRef.current.style.display = 'none';
         } else {
@@ -583,13 +591,22 @@ const HoverOverlay: React.FC<{
       return;
     }
 
+    // 1. Refresh world position every frame and determine camera-facing visibility
+    const wp = new THREE.Vector3();
+    activeObject.getWorldPosition(wp);
+
+    const isFacingCam = isGlobePointVisible(wp, camera.position);
+    if (!isFacingCam) {
+      if (overlayContainerRef.current) {
+        overlayContainerRef.current.style.display = 'none';
+      }
+      return;
+    }
+
     if (overlayContainerRef.current) {
       overlayContainerRef.current.style.display = 'block';
     }
 
-    // 1. Refresh world position every frame
-    const wp = new THREE.Vector3();
-    activeObject.getWorldPosition(wp);
     containerGroupRef.current.position.copy(wp);
 
     // 2. Compute dynamic pin radius in screen pixels
@@ -621,8 +638,8 @@ const HoverOverlay: React.FC<{
           const otherWp = new THREE.Vector3();
           obj.getWorldPosition(otherWp);
 
-          // Check if facing camera
-          if (otherWp.dot(camera.position) > 0.5) {
+          // Check if facing camera using identical visibility rule
+          if (isGlobePointVisible(otherWp, camera.position)) {
             const sc = otherWp.clone().project(camera);
             const ox = (sc.x * widthHalf) + widthHalf;
             const oy = -(sc.y * heightHalf) + heightHalf;
@@ -860,6 +877,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
                 lng: wp.lng,
                 baseSize: WAYPOINT_SIZE, 
                 color: waypointColor,
+                outlineColor: waypointColorInfo.outline,
                 id: wp.id,
                 isWaypoint: true,
                 isMultiLocation,
@@ -872,13 +890,15 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     // 1. Regular Markers
     markers.forEach(m => {
        if (m && typeof m.lat === 'number' && typeof m.lng === 'number') {
+         const mColorInfo = m.color ? getThemeMarkerColors(skin, { customColor: m.color }) : regularMarkerColorInfo;
          allMarkers.push({
             type: 'marker',
             data: m,
             lat: m.lat,
             lng: m.lng,
             baseSize: m.populationClass === 'large' ? MARKER_SIZE_LARGE : MARKER_SIZE_SMALL,
-            color: markerColor,
+            color: m.color || markerColor,
+            outlineColor: mColorInfo.outline,
             id: m.id
          });
        }
@@ -894,6 +914,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
                     lng: f.lng,
                     baseSize: MARKER_SIZE_LARGE,
                     color: favoriteColor,
+                    outlineColor: favoriteColorInfo.outline,
                     id: f.id
                 });
             }
@@ -1394,7 +1415,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
           key={markerKey}
           position={marker.position}
           color={marker.isAnchor ? (isModern ? '#3b82f6' : '#ffffff') : marker.color}
-          outlineColor={outlineColor}
+          outlineColor={marker.isAnchor ? (isModern ? '#3b82f6' : '#ffffff') : (marker.outlineColor || outlineColor)}
           size={marker.isAnchor ? 0.022 : marker.visualSize}
           hitSize={marker.hitSize}
           isRetro={!isModern}

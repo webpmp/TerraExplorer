@@ -2350,6 +2350,81 @@ describe('Lightbox Metadata Integration', () => {
       expect(carouselIndex).toBeGreaterThan(descriptionIndex);
       expect(notableFactsIndex).toBeGreaterThan(carouselIndex);
     });
+
+    it('renders smoothly during search lifecycle transitions: old selection -> discovery cleared -> search in progress -> result arrives', () => {
+      // 1. Initial location selected
+      const initialLocation = {
+        name: 'Rome',
+        entityType: 'city',
+        description: 'Capital of Italy.',
+        coordinates: { lat: 41.9028, lng: 12.4964 }
+      };
+      let html = renderToStaticMarkup(
+        <InfoPanel
+          info={initialLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+      expect(html).toContain('Rome');
+
+      // 2. Search submitted & discovery cleared: transient loading state with null info
+      expect(() => {
+        html = renderToStaticMarkup(
+          <InfoPanel
+            info={null}
+            onClose={() => {}}
+            isLoading={true}
+            skin="modern"
+            isFavorite={false}
+            onSaveFavorite={() => {}}
+            onRemoveFavorite={() => {}}
+          />
+        );
+      }).not.toThrow();
+      expect(html).toContain('Searching...');
+
+      // 3. Transient idle state with null info before results arrive
+      expect(() => {
+        html = renderToStaticMarkup(
+          <InfoPanel
+            info={null}
+            onClose={() => {}}
+            isLoading={false}
+            skin="modern"
+            isFavorite={false}
+            onSaveFavorite={() => {}}
+            onRemoveFavorite={() => {}}
+          />
+        );
+      }).not.toThrow();
+      expect(html).toBe('');
+
+      // 4. New search result arrives
+      const newLocation = {
+        name: 'Angkor Wat',
+        entityType: 'historical_monument',
+        description: 'Major temple complex in Cambodia.',
+        coordinates: { lat: 13.4125, lng: 103.8670 }
+      };
+      html = renderToStaticMarkup(
+        <InfoPanel
+          info={newLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+      expect(html).toContain('Angkor Wat');
+      expect(html).toContain('Major temple complex in Cambodia.');
+    });
   });
 });
 

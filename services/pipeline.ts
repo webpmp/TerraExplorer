@@ -13,7 +13,7 @@ import { isPlaceholderString } from '../components/InfoPanel';
 import { validateEarthGeography } from './celestialCapabilities';
 import { getHistoricalEntityKnowledge, toCanonicalTitleCase } from './geographic/historicalCoordinateValidator';
 import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
-import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck } from './geographic/entityIdentityValidator';
+import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation } from './geographic/entityIdentityValidator';
 
 // --- PIPELINE TYPES ---
 
@@ -129,8 +129,22 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   if (resolvedData && resolvedData.name) {
     const initialIdentityCheck = validateEntityIdentity(entityResult.entity, resolvedData.name, {
       rawQuery: entityResult.intentResult.normalized.request.rawQuery,
-      intent: entityResult.intentResult.intent
+      intent: entityResult.intentResult.intent,
+      candidateEntityType: (resolvedData as any).entityType,
+      candidateCanonicalName: resolvedData.name,
+      coordinatesValid: Boolean(resolvedData.coordinates)
     });
+
+    logEntityIdentityValidation({
+      requestedEntity: entityResult.entity,
+      candidateName: resolvedData.name,
+      candidateEntityType: (resolvedData as any).entityType,
+      intent: entityResult.intentResult.intent,
+      identityValid: initialIdentityCheck.matches,
+      identityStatus: initialIdentityCheck.matches ? ((resolvedData as any).identityStatus || 'verified') : 'unverified',
+      rejectionReason: initialIdentityCheck.matches ? undefined : initialIdentityCheck.rejectionReason
+    });
+
     if (!initialIdentityCheck.matches) {
       logCoordinateRecoveryIdentityCheck({
         requestedEntity: entityResult.entity,
@@ -138,7 +152,7 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
         entityIdentityMatch: false,
         coordinateValidity: Boolean(resolvedData.coordinates),
         recoveryAccepted: false,
-        rejectionReason: 'ENTITY_IDENTITY_MISMATCH'
+        rejectionReason: initialIdentityCheck.rejectionReason || 'ENTITY_IDENTITY_MISMATCH'
       });
       console.warn(`[ENTITY IDENTITY MISMATCH] Resolver returned "${resolvedData.name}" which differs from requested "${entityResult.entity}". Discarding coordinates and reverting to requested entity.`);
       resolvedData.name = entityResult.entity;

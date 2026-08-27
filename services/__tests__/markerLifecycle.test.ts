@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { MapMarker } from '../../types';
 
 describe('Marker Lifecycle & InfoPanel Separation', () => {
-  it('preserves discovery markers when InfoPanel is opened and closed', () => {
+  it('preserves discovery markers and marker selection/presentation when InfoPanel is opened and closed', () => {
     let markers: MapMarker[] = [];
     let selectedMarkerId: string | null = null;
     let isInfoPanelOpen = false;
@@ -22,10 +22,15 @@ describe('Marker Lifecycle & InfoPanel Separation', () => {
     };
 
     const closeInfoPanel = () => {
+      // Architectural rule: closing InfoPanel closes the panel UI, but does NOT deselect the marker!
+      isInfoPanelOpen = false;
+      logs.push(`[Marker Lifecycle] INFOPANEL_CLOSED markersPreserved=${markers.length} selectedMarkerPreserved=${selectedMarkerId}`);
+    };
+
+    const deselectMarker = () => {
       selectedMarkerId = null;
       isInfoPanelOpen = false;
-      // CRITICAL INVARIANT: do NOT clear markers!
-      logs.push(`[Marker Lifecycle] INFOPANEL_CLOSED markersPreserved=${markers.length}`);
+      logs.push(`[Marker Lifecycle] MARKER_DESELECTED`);
     };
 
     // 1. Discovery returns 6 markers
@@ -46,27 +51,32 @@ describe('Marker Lifecycle & InfoPanel Separation', () => {
     expect(isInfoPanelOpen).toBe(true);
     expect(markers.length).toBe(6);
 
-    // 3. Close InfoPanel
+    // 3. Close InfoPanel: Marker MUST remain selected!
     closeInfoPanel();
-    expect(selectedMarkerId).toBeNull();
+    expect(selectedMarkerId).toBe('1');
     expect(isInfoPanelOpen).toBe(false);
-    expect(markers.length).toBe(6); // Markers MUST still be 6!
+    expect(markers.length).toBe(6);
 
-    // 4. Select another marker and close again
+    // 4. Select another marker: transfers selection
     selectMarker(markers[2]);
     expect(selectedMarkerId).toBe('3');
     expect(isInfoPanelOpen).toBe(true);
     expect(markers.length).toBe(6);
 
     closeInfoPanel();
-    expect(selectedMarkerId).toBeNull();
+    expect(selectedMarkerId).toBe('3');
     expect(isInfoPanelOpen).toBe(false);
     expect(markers.length).toBe(6);
+
+    // 5. Explicit deselection removes selection
+    deselectMarker();
+    expect(selectedMarkerId).toBeNull();
+    expect(isInfoPanelOpen).toBe(false);
 
     expect(logs).toContain('[Marker Lifecycle] DISCOVERY_RESULTS_SET count=6');
     expect(logs).toContain('[Marker Lifecycle] MARKER_SELECTED name="Place 1"');
     expect(logs).toContain('[Marker Lifecycle] INFOPANEL_OPEN');
-    expect(logs).toContain('[Marker Lifecycle] INFOPANEL_CLOSED markersPreserved=6');
+    expect(logs).toContain('[Marker Lifecycle] INFOPANEL_CLOSED markersPreserved=6 selectedMarkerPreserved=1');
   });
 
   it('replaces old markers only when a new discovery scan or new search occurs', () => {

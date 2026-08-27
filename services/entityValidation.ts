@@ -164,6 +164,12 @@ coordinateSource: "${coordinateSource || 'unknown'}"
 identityStatus: "${identityStatus || 'unverified'}"
 valid: ${identityValid}`);
 
+  console.log(`[ENTITY_IDENTITY_VALIDATION]
+canonicalName: "${canonicalName || 'none'}"
+entityType: "${entityType || 'none'}"
+identityStatus: "${identityStatus || 'unverified'}"
+valid: ${identityValid}`);
+
   // Level 3: Enrichment Identity Validity
   const metadata = entity.metadata as any || {};
   const descriptionText = typeof metadata.description === 'string' 

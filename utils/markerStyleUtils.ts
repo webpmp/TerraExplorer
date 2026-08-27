@@ -113,18 +113,20 @@ export function getThemeMarkerColors(
   }
 
   // Modern skin
+  // Inner ring (outline) uses the exact same color as the center fill, while outer ring is rendered white via boxShadow.
   if (isAnchor) {
-    return { fill: '#3b82f6', outline: '#ffffff' };
+    return { fill: '#3b82f6', outline: '#3b82f6' };
   }
   if (isFavorite) {
-    return { fill: '#d946ef', outline: '#ffffff' };
+    return { fill: '#d946ef', outline: '#d946ef' };
   }
   if (isWaypoint) {
-    return { fill: '#00e5ff', outline: '#ffffff' };
+    return { fill: '#00e5ff', outline: '#00e5ff' };
   }
+  const fill = customColor || '#ff0000';
   return {
-    fill: customColor || '#ff0000',
-    outline: '#ffffff'
+    fill,
+    outline: fill
   };
 }
 
