@@ -15,6 +15,10 @@
 
 Terra Explorer is an interactive 3D globe application that lets users freely navigate the planet or quickly jump to cities, states, landmarks, and unique points of interest through a powerful search experience. It supports rich data layers including shipwrecks, natural wonders, and historical sites, provides overlays with location overviews, current news, and notable people associated with each place, and includes the Trace Route feature that extracts locations from any article, URL, or text block to build a connected journey across them.
 
+<div align="center">
+  <img src="https://github-readme-tech-stack.vercel.app/api/cards?title=Technology+Stack&titleAlign=center&lineCount=3&theme=github_dark&align=center&width=500&line1=react,React,auto;typescript,TypeScript,auto;three.js,Three.js,auto;tailwindcss,Tailwind+CSS,auto;&line2=vite,Vite,auto;nodedotjs,Node.js,auto;googlegemini,Google+Gemini,auto;openstreetmap,OpenStreetMap,auto;&line3=carto,CARTO,auto;lucide,Lucide,auto;vitest,Vitest,auto;docker,Docker,auto;" alt="TerraExplorer Tech Stack" />
+</div>
+
 ## Features
 
 - **Interactive 3D Globe**: Seamlessly rotate, zoom, and explore a high-fidelity 3D model of the Earth.
@@ -32,21 +36,6 @@ Terra Explorer is an interactive 3D globe application that lets users freely nav
 - **Personal Notes**: Add and save personal notes for specific locations, persisted locally.
 - **Smart Search**: Use natural-language search to resolve questions and location references to specific geographic coordinates.
 - **Trace Route**: Paste an article, URL, or text block and the system identifies referenced locations and generates a connected journey across them.
-
-## Technology Stack
-
-<div align="center">
-  <img src="https://github-readme-tech-stack.vercel.app/api/cards?title=Technology+Stack&titleAlign=center&lineCount=3&theme=github_dark&align=center&width=500&line1=react,React,auto;typescript,TypeScript,auto;three.js,Three.js,auto;tailwindcss,Tailwind+CSS,auto;&line2=vite,Vite,auto;nodedotjs,Node.js,auto;googlegemini,Google+Gemini,auto;openstreetmap,OpenStreetMap,auto;&line3=carto,CARTO,auto;lucide,Lucide,auto;vitest,Vitest,auto;docker,Docker,auto;" alt="TerraExplorer Tech Stack" />
-</div>
-
-- **Frontend**: React 19, TypeScript
-- **3D Rendering**: Three.js, React Three Fiber (`@react-three/fiber`), Drei (`@react-three/drei`)
-- **Styling**: Tailwind CSS
-- **Build Tool**: Vite
-- **AI**: Google Gemini / Google GenAI SDK (`@google/genai`), LM Studio (Local OpenAI-compatible API)
-- **Mapping**: CARTO Vector Maps, MapLibre GL (`maplibre-gl`), OpenStreetMap
-- **Icons**: Lucide React
-- **Testing**: Vitest
 
 ## Map Configuration & Attribution
 
