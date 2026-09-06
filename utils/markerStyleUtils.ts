@@ -1,4 +1,5 @@
 import { SkinType } from '../types';
+import { getRouteGroupColorIndex, MODERN_ROUTE_PALETTE_GLOBE } from './routeLineColor';
 
 export interface MarkerColors {
   fill: string;
@@ -87,9 +88,10 @@ export function getThemeMarkerColors(
     isAnchor?: boolean;
     customColor?: string;
     highwayOutlineColor?: string;
+    routeGroupId?: string;
   } = {}
 ): MarkerColors {
-  const { isWaypoint = false, isFavorite = false, isAnchor = false, customColor, highwayOutlineColor } = options;
+  const { isWaypoint = false, isFavorite = false, isAnchor = false, customColor, highwayOutlineColor, routeGroupId } = options;
 
   if (skin === 'parchment') {
     return {
@@ -121,7 +123,12 @@ export function getThemeMarkerColors(
     return { fill: '#d946ef', outline: '#d946ef' };
   }
   if (isWaypoint) {
-    return { fill: '#00e5ff', outline: '#00e5ff' };
+    if (customColor) {
+      return { fill: customColor, outline: customColor };
+    }
+    const colorIdx = getRouteGroupColorIndex(routeGroupId);
+    const fill = MODERN_ROUTE_PALETTE_GLOBE[colorIdx];
+    return { fill, outline: fill };
   }
   const fill = customColor || '#ff0000';
   return {

@@ -29,8 +29,12 @@ import {
   ROUTE_LINE_DASH_ARRAY,
   ROUTE_LINE_STROKE_WIDTH,
   getRouteLineOpacity,
-  isRouteSequential
+  getRouteSegmentStyle
 } from '../utils/osmRouteArrowUtils';
+import {
+  isRouteSequential,
+  getSequentialRouteSegments
+} from '../utils/routeSequenceUtils';
 import {
   calculateMarkerFontSize,
   getThemeMarkerColors,
@@ -1688,7 +1692,38 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
               }}
             >
               {/* OSM Active Route Connection Line Overlay */}
-              {osmProjection && routeWaypoints && routeWaypoints.length > 1 && isRouteSequential(routeWaypoints) && (
+              {osmProjection && routeWaypoints && routeWaypoints.length > 1 && getSequentialRouteSegments(routeWaypoints).length > 0 && (() => {
+                const sequentialSegments = getSequentialRouteSegments(routeWaypoints);
+                const uniqueWaypointIds = new Set(routeWaypoints.map(w => w.id));
+                const routeGroupsMap = new Map<string, { name: string; count: number }>();
+                routeWaypoints.forEach(w => {
+                  const gId = w.routeGroupId || 'default';
+                  const gName = w.routeGroupName || 'Default Group';
+                  if (!routeGroupsMap.has(gId)) {
+                    routeGroupsMap.set(gId, { name: gName, count: 0 });
+                  }
+                  routeGroupsMap.get(gId)!.count++;
+                });
+
+                console.log(`[OSM RENDER STATE]\n` +
+                  `TOTAL WAYPOINTS: ${routeWaypoints.length}\n` +
+                  `UNIQUE WAYPOINT IDS: ${uniqueWaypointIds.size}\n` +
+                  `UNIQUE ROUTE GROUPS: ${routeGroupsMap.size}\n\n` +
+                  `ROUTE GROUPS:\n` +
+                  Array.from(routeGroupsMap.entries()).map(([id, info]) => `  - ${info.name} (id: ${id}): ${info.count} waypoints`).join('\n') + `\n\n` +
+                  `WAYPOINTS:\n` +
+                  routeWaypoints.map((w, idx) => `  ${idx + 1}. id=${w.id} name="${w.name}" lat=${w.lat} lng=${w.lng} seq=${w.sequence} routeGroupId=${w.routeGroupId} routeGroupName="${w.routeGroupName}"`).join('\n') + `\n\n` +
+                  `SEGMENTS:\n` +
+                  sequentialSegments.flatMap(seg => {
+                    const groupWaypoints = seg.waypoints;
+                    return groupWaypoints.slice(0, -1).map((wp, i) => {
+                      const nextWp = groupWaypoints[i + 1];
+                      return `  - fromId=${wp.id} fromName="${wp.name}" fromSeq=${wp.sequence} fromGroup=${wp.routeGroupId} -> toId=${nextWp.id} toName="${nextWp.name}" toSeq=${nextWp.sequence} toGroup=${nextWp.routeGroupId}`;
+                    });
+                  }).join('\n')
+                );
+
+                return (
                 <svg
                   style={{
                     position: 'absolute',
@@ -1701,124 +1736,137 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                     overflow: 'visible'
                   }}
                 >
-                  {routeWaypoints.slice(0, -1).map((wp, i) => {
-                    const nextWp = routeWaypoints[i + 1];
-                    if (
-                      typeof wp.lat !== 'number' || typeof wp.lng !== 'number' ||
-                      typeof nextWp.lat !== 'number' || typeof nextWp.lng !== 'number'
-                    ) {
-                      return null;
-                    }
+                  {sequentialSegments.flatMap((segment, segIdx) => {
+                    const groupWaypoints = segment.waypoints;
+                    return groupWaypoints.slice(0, -1).map((wp, i) => {
+                      const nextWp = groupWaypoints[i + 1];
+                      if (
+                        typeof wp.lat !== 'number' || typeof wp.lng !== 'number' ||
+                        typeof nextWp.lat !== 'number' || typeof nextWp.lng !== 'number'
+                      ) {
+                        return null;
+                      }
 
-                    const n = Math.pow(2, osmProjection.z);
+                      const n = Math.pow(2, osmProjection.z);
 
-                    // Project wp1
-                    const x1 = ((wp.lng + 180) / 360) * n;
-                    const latRad1 = (Math.max(-85.0511, Math.min(85.0511, wp.lat)) * Math.PI) / 180;
-                    const y1 = ((1 - Math.log(Math.tan(latRad1) + 1 / Math.cos(latRad1)) / Math.PI) / 2) * n;
-                    const sx1 = osmProjection.screenCenterX + (x1 - osmProjection.exactX) * 256;
-                    const sy1 = osmProjection.screenCenterY + (y1 - osmProjection.exactY) * 256;
+                      // Project wp1
+                      const x1 = ((wp.lng + 180) / 360) * n;
+                      const latRad1 = (Math.max(-85.0511, Math.min(85.0511, wp.lat)) * Math.PI) / 180;
+                      const y1 = ((1 - Math.log(Math.tan(latRad1) + 1 / Math.cos(latRad1)) / Math.PI) / 2) * n;
+                      const sx1 = osmProjection.screenCenterX + (x1 - osmProjection.exactX) * 256;
+                      const sy1 = osmProjection.screenCenterY + (y1 - osmProjection.exactY) * 256;
 
-                    // Project wp2 (handling antimeridian wrap if needed)
-                    let lng2 = nextWp.lng;
-                    if (lng2 - wp.lng > 180) lng2 -= 360;
-                    else if (lng2 - wp.lng < -180) lng2 += 360;
+                      // Project wp2 (handling antimeridian wrap if needed)
+                      let lng2 = nextWp.lng;
+                      if (lng2 - wp.lng > 180) lng2 -= 360;
+                      else if (lng2 - wp.lng < -180) lng2 += 360;
 
-                    const x2 = ((lng2 + 180) / 360) * n;
-                    const latRad2 = (Math.max(-85.0511, Math.min(85.0511, nextWp.lat)) * Math.PI) / 180;
-                    const y2 = ((1 - Math.log(Math.tan(latRad2) + 1 / Math.cos(latRad2)) / Math.PI) / 2) * n;
-                    const sx2 = osmProjection.screenCenterX + (x2 - osmProjection.exactX) * 256;
-                    const sy2 = osmProjection.screenCenterY + (y2 - osmProjection.exactY) * 256;
+                      const x2 = ((lng2 + 180) / 360) * n;
+                      const latRad2 = (Math.max(-85.0511, Math.min(85.0511, nextWp.lat)) * Math.PI) / 180;
+                      const y2 = ((1 - Math.log(Math.tan(latRad2) + 1 / Math.cos(latRad2)) / Math.PI) / 2) * n;
+                      const sx2 = osmProjection.screenCenterX + (x2 - osmProjection.exactX) * 256;
+                      const sy2 = osmProjection.screenCenterY + (y2 - osmProjection.exactY) * 256;
 
-                    // Check if both points are far off-screen
-                    if (
-                      (sx1 < -500 && sx2 < -500) ||
-                      (sx1 > viewportSize.width + 500 && sx2 > viewportSize.width + 500) ||
-                      (sy1 < -500 && sy2 < -500) ||
-                      (sy1 > viewportSize.height + 500 && sy2 > viewportSize.height + 500)
-                    ) {
-                      return null;
-                    }
+                      // Check if both points are far off-screen
+                      if (
+                        (sx1 < -500 && sx2 < -500) ||
+                        (sx1 > viewportSize.width + 500 && sx2 > viewportSize.width + 500) ||
+                        (sy1 < -500 && sy2 < -500) ||
+                        (sy1 > viewportSize.height + 500 && sy2 > viewportSize.height + 500)
+                      ) {
+                        return null;
+                      }
 
-                    const routeColor = getConnectingLineColor({
-                      theme: skin,
-                      mapLayer: 'osm'
-                    });
+                      const routeColor = getConnectingLineColor({
+                        theme: skin,
+                        mapLayer: 'osm',
+                        routeGroupId: segment.group.id
+                      });
 
-                    // Resolve destination waypoint metadata and label bounds for collision avoidance
-                    const matchingNextMarker = markers?.find(
-                      (m) =>
-                        (m.id && m.id === nextWp.id) ||
-                        (typeof m.lat === 'number' &&
-                          typeof m.lng === 'number' &&
-                          Math.abs(m.lat - nextWp.lat) < 0.0001 &&
-                          Math.abs(m.lng - nextWp.lng) < 0.0001)
-                    );
-                    const isNextSelected =
-                      selectedMarkerId === nextWp.id ||
-                      (matchingNextMarker && selectedMarkerId === matchingNextMarker.id);
-                    const nextPinSize = isNextSelected ? 22 : 16;
-                    const nextMarkerRadius = nextPinSize / 2;
-                    const nextVisualOffset = calculateOSMMarkerVisualOffset(osmProjection.z, {
-                      pinSize: nextPinSize,
-                      isSelected: isNextSelected
-                    });
-                    const nextLayout = matchingNextMarker ? markerLayoutMap.get(matchingNextMarker.id ?? '') : null;
-                    const nextMarkerCenter = {
-                      x: nextLayout ? nextLayout.x : (sx2 + nextVisualOffset.x),
-                      y: nextLayout ? nextLayout.y : (sy2 + nextVisualOffset.y)
-                    };
+                      // Resolve destination waypoint metadata and label bounds for collision avoidance
+                      const matchingNextMarker = markers?.find(
+                        (m) =>
+                          (m.id && m.id === nextWp.id) ||
+                          (typeof m.lat === 'number' &&
+                            typeof m.lng === 'number' &&
+                            Math.abs(m.lat - nextWp.lat) < 0.0001 &&
+                            Math.abs(m.lng - nextWp.lng) < 0.0001)
+                      );
+                      const isNextSelected =
+                        selectedMarkerId === nextWp.id ||
+                        (matchingNextMarker && selectedMarkerId === matchingNextMarker.id);
+                      const nextPinSize = isNextSelected ? 22 : 16;
+                      const nextMarkerRadius = nextPinSize / 2;
+                      const nextVisualOffset = calculateOSMMarkerVisualOffset(osmProjection.z, {
+                        pinSize: nextPinSize,
+                        isSelected: isNextSelected
+                      });
+                      const nextLayout = matchingNextMarker ? markerLayoutMap.get(matchingNextMarker.id ?? '') : null;
+                      const nextMarkerCenter = {
+                        x: nextLayout ? nextLayout.x : (sx2 + nextVisualOffset.x),
+                        y: nextLayout ? nextLayout.y : (sy2 + nextVisualOffset.y)
+                      };
 
-                    const nextDisplayName =
-                      (matchingNextMarker?.data as any)?.displayName ||
-                      matchingNextMarker?.data?.name ||
-                      matchingNextMarker?.name ||
-                      nextWp.name ||
-                      `Waypoint ${i + 2}`;
+                      const nextDisplayName =
+                        (matchingNextMarker?.data as any)?.displayName ||
+                        matchingNextMarker?.data?.name ||
+                        matchingNextMarker?.name ||
+                        nextWp.name ||
+                        `Waypoint ${i + 2}`;
 
-                    const nextLabelBounds = estimateOSMLabelBounds(
-                      nextMarkerCenter,
-                      nextDisplayName,
-                      nextPinSize,
-                      'top'
-                    );
+                      const nextLabelBounds = estimateOSMLabelBounds(
+                        nextMarkerCenter,
+                        nextDisplayName,
+                        nextPinSize,
+                        'top'
+                      );
 
-                    const arrow = calculateOSMRouteArrow({
-                      start: { x: sx1, y: sy1 },
-                      end: { x: sx2, y: sy2 },
-                      startMarkerRadius: 8,
-                      destinationMarkerRadius: nextMarkerRadius,
-                      destinationMarkerCenter: nextMarkerCenter,
-                      destinationLabelBounds: nextLabelBounds
-                    });
+                      const arrow = calculateOSMRouteArrow({
+                        start: { x: sx1, y: sy1 },
+                        end: { x: sx2, y: sy2 },
+                        startMarkerRadius: 8,
+                        destinationMarkerRadius: nextMarkerRadius,
+                        destinationMarkerCenter: nextMarkerCenter,
+                        destinationLabelBounds: nextLabelBounds
+                      });
 
-                    return (
-                      <g key={`osm-route-seg-${wp.id || i}-${nextWp.id || i + 1}`}>
-                        {/* Main dashed thematic route line with no background casing */}
-                        <line
-                          x1={sx1}
-                          y1={sy1}
-                          x2={sx2}
-                          y2={sy2}
-                          stroke={routeColor}
-                          strokeWidth={ROUTE_LINE_STROKE_WIDTH}
-                          strokeDasharray={ROUTE_LINE_DASH_ARRAY}
-                          strokeLinecap="round"
-                          opacity={getRouteLineOpacity(skin)}
-                        />
-                        {/* Subtle Directional Arrow pointing toward the next waypoint */}
-                        {arrow && (
-                          <polygon
-                            points={arrow.pointsString}
-                            fill={routeColor}
-                            opacity={getRouteLineOpacity(skin)}
+                      const dx = sx2 - sx1;
+                      const dy = sy2 - sy1;
+                      const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+
+                      const segStyle = getRouteSegmentStyle(wp.segmentEvidence || segment.segmentEvidence, skin);
+
+                      console.log(`[OSM ROUTE SEGMENT]\nfromId=${wp.id}\nfromName=${wp.name}\nfromSequence=${wp.sequence}\ntoId=${nextWp.id}\ntoName=${nextWp.name}\ntoSequence=${nextWp.sequence}\nevidence=${wp.segmentEvidence || segment.segmentEvidence || 'DOCUMENTED_ROUTE_SEGMENT'}\nisSecondary=${segStyle.isSecondary}\nfromScreen=(${sx1.toFixed(1)}, ${sy1.toFixed(1)})\ntoScreen=(${sx2.toFixed(1)}, ${sy2.toFixed(1)})\ndx=${dx.toFixed(1)}\ndy=${dy.toFixed(1)}\nangle=${angle.toFixed(1)}°`);
+
+                      return (
+                        <g key={`osm-route-seg-${segment.group.id}-${wp.id || i}-${nextWp.id || i + 1}`}>
+                          {/* Thematic route line: solid/primary for DOCUMENTED_ROUTE_SEGMENT, faded/secondary for HIGH_LEVEL_HISTORICAL_ASSOCIATION */}
+                          <line
+                            x1={sx1}
+                            y1={sy1}
+                            x2={sx2}
+                            y2={sy2}
+                            stroke={routeColor}
+                            strokeWidth={segStyle.strokeWidth}
+                            strokeDasharray={segStyle.strokeDasharray}
+                            strokeLinecap="round"
+                            opacity={segStyle.opacity}
                           />
-                        )}
-                      </g>
-                    );
+                          {/* Subtle Directional Arrow pointing toward the next waypoint */}
+                          {arrow && (
+                            <polygon
+                              points={arrow.pointsString}
+                              fill={routeColor}
+                              opacity={segStyle.opacity}
+                            />
+                          )}
+                        </g>
+                      );
+                    });
                   })}
                 </svg>
-              )}
+                );
+              })()}
 
               {osmProjection && visibleMarkers && visibleMarkers.map((marker, idx) => {
                 if (typeof marker.lat !== 'number' || typeof marker.lng !== 'number') return null;

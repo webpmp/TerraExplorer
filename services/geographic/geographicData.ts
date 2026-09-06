@@ -153,6 +153,8 @@ export const DETERMINISTIC_LOCATION_DB: Record<string, DeterministicLocationEntr
   "grand canyon": { name: "Grand Canyon National Park", type: LocationType.POI, entityType: "canyon", lat: 36.0565, lng: -112.1250, suggestedZoom: 8, context: { state: "Arizona", country: "United States" } },
   "the grand canyon": { name: "Grand Canyon National Park", type: LocationType.POI, entityType: "canyon", lat: 36.0565, lng: -112.1250, suggestedZoom: 8, context: { state: "Arizona", country: "United States" } },
   "grand canyon national park": { name: "Grand Canyon National Park", type: LocationType.POI, entityType: "national_park", lat: 36.0565, lng: -112.1250, suggestedZoom: 8, context: { state: "Arizona", country: "United States" } },
+  "antelope canyon": { name: "Antelope Canyon", type: LocationType.POI, entityType: "canyon", lat: 36.8619, lng: -111.3743, suggestedZoom: 10, context: { city: "Page", county: "Coconino County", state: "Arizona", country: "United States" } },
+  "antelope canyon, arizona": { name: "Antelope Canyon", type: LocationType.POI, entityType: "canyon", lat: 36.8619, lng: -111.3743, suggestedZoom: 10, context: { city: "Page", county: "Coconino County", state: "Arizona", country: "United States" } },
   "mount rainier": { name: "Mount Rainier National Park", type: LocationType.POI, entityType: "national_park", lat: 46.8523, lng: -121.7603, suggestedZoom: 8 },
   "lake tahoe": { name: "Lake Tahoe", type: LocationType.POI, entityType: "natural_feature", lat: 39.0968, lng: -120.0324, suggestedZoom: 8 },
   "matterhorn": { name: "Matterhorn", type: LocationType.POI, entityType: "mountain", lat: 45.9765, lng: 7.6586, suggestedZoom: 8, context: { country: "Switzerland / Italy", state: "Valais / Aosta Valley", region: "Pennine Alps" } },

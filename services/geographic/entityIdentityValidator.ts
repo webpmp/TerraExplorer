@@ -239,6 +239,109 @@ rejectionReason: ${params.rejectionReason}`);
 }
 
 /**
+ * Known historical entity conflation pairs that must never be treated as valid aliases.
+ */
+const KNOWN_ENTITY_CONFLATIONS: Array<[RegExp, RegExp]> = [
+  // Fort Gibson (OK) vs Fort Osage (MO)
+  [/\bfort\s+gibson\b/i, /\bfort\s+osage\b/i],
+  [/\bfort\s+osage\b/i, /\bfort\s+gibson\b/i],
+
+  // Fort Jackson (AL) vs Fort Osage (MO)
+  [/\bfort\s+jackson\b/i, /\bfort\s+osage\b/i],
+  [/\bfort\s+osage\b/i, /\bfort\s+jackson\b/i],
+
+  // Fort Jackson (AL) vs Fort Franklin (TN/PA)
+  [/\bfort\s+jackson\b/i, /\bfort\s+franklin\b/i],
+  [/\bfort\s+franklin\b/i, /\bfort\s+jackson\b/i],
+
+  // Fort Gibson (OK) vs Fort Franklin
+  [/\bfort\s+gibson\b/i, /\bfort\s+franklin\b/i],
+  [/\bfort\s+franklin\b/i, /\bfort\s+gibson\b/i],
+
+  // Fort Gibson (OK) vs Fort Jackson (AL)
+  [/\bfort\s+gibson\b/i, /\bfort\s+jackson\b/i],
+  [/\bfort\s+jackson\b/i, /\bfort\s+gibson\b/i],
+
+  // Fort Cass (TN) vs Fort Osage / Fort Jackson
+  [/\bfort\s+cass\b/i, /\bfort\s+osage\b/i],
+  [/\bfort\s+cass\b/i, /\bfort\s+jackson\b/i],
+  [/\bfort\s+cass\b/i, /\bfort\s+gibson\b/i],
+
+  // Oklahoma City (Central OK) vs Fort Coffee (Eastern OK)
+  [/\boklahoma\s+city\b/i, /\bfort\s+coffee\b/i],
+  [/\bfort\s+coffee\b/i, /\boklahoma\s+city\b/i],
+
+  // Gunter's Landing (AL) vs Gunter Island (or unrelated Gunter features)
+  [/\bgunter'?s?\s+landing\b/i, /\bgunter\s+island\b/i],
+  [/\bgunter\s+island\b/i, /\bgunter'?s?\s+landing\b/i],
+
+  // Memphis (TN) vs Fort Pillow (TN)
+  [/\bmemphis\b/i, /\bfort\s+pillow\b/i],
+  [/\bfort\s+pillow\b/i, /\bmemphis\b/i]
+];
+
+/**
+ * Validates whether candidateAlias is a historically valid alias for canonicalName.
+ *
+ * Strictly rejects:
+ * - Known historical entity conflations (e.g. Fort Gibson = Fort Osage).
+ * - Distinct entities that merely share generic descriptors ("Fort", "Camp", "Mount", "Battle").
+ * - Entities in contradictory geographic/historical contexts.
+ */
+export function validateEntityAlias(
+  canonicalName: string,
+  candidateAlias: string
+): boolean {
+  const cName = (canonicalName || '').trim();
+  const cAlias = (candidateAlias || '').trim();
+
+  if (!cName || !cAlias) return false;
+
+  const nameLower = cName.toLowerCase();
+  const aliasLower = cAlias.toLowerCase();
+
+  if (nameLower === aliasLower) return true;
+
+  // 1. Check known entity conflation rules
+  for (const [patternA, patternB] of KNOWN_ENTITY_CONFLATIONS) {
+    if (patternA.test(nameLower) && patternB.test(aliasLower)) {
+      console.warn(`[ENTITY ALIAS REJECTED] Known conflation between "${canonicalName}" and proposed alias "${candidateAlias}".`);
+      return false;
+    }
+  }
+
+  // 2. Check if candidate alias conflicts with another known knowledge-base entity
+  const targetKnowledge = getHistoricalEntityKnowledge(nameLower);
+  const aliasKnowledge = getHistoricalEntityKnowledge(aliasLower);
+
+  if (targetKnowledge && aliasKnowledge) {
+    if (targetKnowledge.entity.toLowerCase() !== aliasKnowledge.entity.toLowerCase()) {
+      console.warn(`[ENTITY ALIAS REJECTED] Proposed alias "${candidateAlias}" resolves to distinct known historical entity "${aliasKnowledge.entity}" rather than "${targetKnowledge.entity}".`);
+      return false;
+    }
+  }
+
+  // 3. Reject if the core distinctive name tokens (excluding generic "Fort", "Site", "Point", etc.) have zero overlap
+  const nameTokens = extractDistinctiveEntityTokens(cName).filter(t => t !== 'fort' && t !== 'camp' && t !== 'post' && t !== 'site');
+  const aliasTokens = extractDistinctiveEntityTokens(cAlias).filter(t => t !== 'fort' && t !== 'camp' && t !== 'post' && t !== 'site');
+
+  if (nameTokens.length > 0 && aliasTokens.length > 0) {
+    const aliasTokenSet = new Set(aliasTokens);
+    const hasOverlap = nameTokens.some(t => aliasTokenSet.has(t));
+    if (!hasOverlap) {
+      // Check if one is a translation/historical alias of the other in knowledge base
+      if (targetKnowledge && (targetKnowledge.historicalContext?.toLowerCase().includes(aliasLower) || targetKnowledge.sourceRationale?.toLowerCase().includes(aliasLower))) {
+        return true;
+      }
+      // Zero distinctive token overlap and not in knowledge context -> reject alias
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
  * Emits the required structured log block for candidate entity identity validation.
  */
 export function logEntityIdentityValidation(params: {
@@ -259,3 +362,197 @@ identityStatus: "${params.identityStatus}"
 valid: ${params.identityValid}
 rejectionReason: ${params.rejectionReason || 'none'}`);
 }
+
+export type CoordinateTrustLevel = 'verified' | 'provisional' | 'unverified';
+
+export interface EntityCoordinateValidationOptions {
+  requestedEntity: string;
+  recoveredEntity?: string;
+  coordinates: { lat: number; lng: number };
+  reverseGeographicContext?: {
+    country?: string;
+    state?: string;
+    county?: string;
+    city?: string;
+    region?: string;
+    [key: string]: any;
+  } | null;
+  authoritativeEntityContext?: {
+    country?: string;
+    state?: string;
+    county?: string;
+    city?: string;
+    region?: string;
+    lat?: number;
+    lng?: number;
+    [key: string]: any;
+  } | null;
+}
+
+export interface EntityCoordinateValidationResult {
+  consistent: boolean;
+  result: 'MATCH' | 'ENTITY_COORDINATE_MISMATCH' | 'COORDINATE_INVALID' | 'UNVERIFIED';
+  coordinateTrust: CoordinateTrustLevel;
+  rejectionReason?: string;
+}
+
+/**
+ * Validates candidate coordinates against authoritative regional context and reverse geocoding.
+ * 
+ * Geographic hierarchy:
+ * - country/state: strong constraint
+ * - county/municipality/known locality: contextual constraint
+ */
+export function validateEntityCoordinates(
+  params: EntityCoordinateValidationOptions
+): EntityCoordinateValidationResult {
+  const { coordinates, reverseGeographicContext, authoritativeEntityContext, requestedEntity } = params;
+
+  if (!coordinates || typeof coordinates.lat !== 'number' || typeof coordinates.lng !== 'number' || isNaN(coordinates.lat) || isNaN(coordinates.lng)) {
+    return {
+      consistent: false,
+      result: 'COORDINATE_INVALID',
+      coordinateTrust: 'unverified',
+      rejectionReason: 'Invalid numeric coordinates'
+    };
+  }
+
+  // If no authoritative context is available to corroborate or contradict
+  if (!authoritativeEntityContext) {
+    return {
+      consistent: true,
+      result: 'UNVERIFIED',
+      coordinateTrust: 'provisional',
+      rejectionReason: undefined
+    };
+  }
+
+  // If reverse geocoding is unavailable
+  if (!reverseGeographicContext) {
+    return {
+      consistent: true,
+      result: 'UNVERIFIED',
+      coordinateTrust: 'provisional',
+      rejectionReason: undefined
+    };
+  }
+
+  const clean = (val?: string) => (val || '').trim().toLowerCase();
+
+  const authCountry = clean(authoritativeEntityContext.country);
+  const revCountry = clean(reverseGeographicContext.country);
+
+  // 1. Country match (strong constraint)
+  if (authCountry && revCountry) {
+    const normAuthCountry = authCountry === 'usa' ? 'united states' : authCountry;
+    const normRevCountry = revCountry === 'usa' ? 'united states' : revCountry;
+
+    if (normAuthCountry !== normRevCountry && !normAuthCountry.includes(normRevCountry) && !normRevCountry.includes(normAuthCountry)) {
+      return {
+        consistent: false,
+        result: 'ENTITY_COORDINATE_MISMATCH',
+        coordinateTrust: 'unverified',
+        rejectionReason: `Country mismatch: candidate coordinates in "${reverseGeographicContext.country}" conflict with authoritative "${authoritativeEntityContext.country}"`
+      };
+    }
+  }
+
+  // 2. State / Province match (strong constraint)
+  const authState = clean(authoritativeEntityContext.state);
+  const revState = clean(reverseGeographicContext.state || reverseGeographicContext.region);
+
+  if (authState && revState) {
+    if (authState !== revState && !authState.includes(revState) && !revState.includes(authState)) {
+      return {
+        consistent: false,
+        result: 'ENTITY_COORDINATE_MISMATCH',
+        coordinateTrust: 'unverified',
+        rejectionReason: `State/Region mismatch: candidate coordinates in "${reverseGeographicContext.state || reverseGeographicContext.region}" conflict with authoritative "${authoritativeEntityContext.state}"`
+      };
+    }
+  }
+
+  // 3. County / Municipality / Known Locality match (contextual constraint)
+  const authCounty = clean(authoritativeEntityContext.county);
+  const revCounty = clean(reverseGeographicContext.county);
+
+  if (authCounty && revCounty) {
+    const stripCountyWord = (s: string) => s.replace(/\s+county$/i, '').trim();
+    const cAuth = stripCountyWord(authCounty);
+    const cRev = stripCountyWord(revCounty);
+
+    if (cAuth && cRev && cAuth !== cRev) {
+      return {
+        consistent: false,
+        result: 'ENTITY_COORDINATE_MISMATCH',
+        coordinateTrust: 'unverified',
+        rejectionReason: `County mismatch: candidate coordinates in "${reverseGeographicContext.county}" conflict with authoritative "${authoritativeEntityContext.county}"`
+      };
+    }
+  }
+
+  // 4. City / Known Locality check if authoritative city exists
+  const authCity = clean(authoritativeEntityContext.city);
+  const revCity = clean(reverseGeographicContext.city || reverseGeographicContext.town || reverseGeographicContext.village);
+
+  // If coordinates also have authoritative coordinates, check distance as a sanity fallback
+  if (typeof authoritativeEntityContext.lat === 'number' && typeof authoritativeEntityContext.lng === 'number') {
+    const R = 6371; // km
+    const dLat = (coordinates.lat - authoritativeEntityContext.lat) * Math.PI / 180;
+    const dLon = (coordinates.lng - authoritativeEntityContext.lng) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(authoritativeEntityContext.lat * Math.PI / 180) * Math.cos(coordinates.lat * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distKm = R * c;
+
+    // If more than 150km away from authoritative point in same state, consider mismatch
+    if (distKm > 150) {
+      return {
+        consistent: false,
+        result: 'ENTITY_COORDINATE_MISMATCH',
+        coordinateTrust: 'unverified',
+        rejectionReason: `Distance mismatch: candidate coordinates are ${Math.round(distKm)}km away from authoritative location`
+      };
+    }
+  }
+
+  // Corroborated!
+  return {
+    consistent: true,
+    result: 'MATCH',
+    coordinateTrust: 'verified',
+    rejectionReason: undefined
+  };
+}
+
+/**
+ * Emits the required structured log block for AI coordinate trust.
+ */
+export function logAiCoordinateTrust(params: {
+  coordinateSource: string;
+  coordinateTrust: string;
+  reason: string;
+}): void {
+  console.log(`[AI COORDINATE TRUST]
+coordinateSource=${params.coordinateSource}
+coordinateTrust=${params.coordinateTrust}
+reason=${params.reason}`);
+}
+
+/**
+ * Emits the required structured log block for entity coordinate validation.
+ */
+export function logEntityCoordinateValidation(params: {
+  entity: string;
+  consistent: boolean;
+  result: string;
+  reason: string;
+}): void {
+  console.log(`[ENTITY COORDINATE VALIDATION]
+entity=${params.entity}
+consistent=${params.consistent}
+result=${params.result}
+reason=${params.reason}`);
+}
+

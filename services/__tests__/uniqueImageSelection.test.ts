@@ -377,7 +377,7 @@ describe('Unique Image Selection Across Related Waypoints Suite', () => {
 
       const res = validateImageCandidate(candidate, entity);
       expect(res.decision).toBe('REJECT');
-      expect(res.reason).toContain('Geographic mismatch');
+      expect(res.reason).toBe('GEOGRAPHIC_CONFLICT');
     });
 
     it('entity-specific image with verified matching coordinates receives top rank and score boost', () => {

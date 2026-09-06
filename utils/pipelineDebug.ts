@@ -30,6 +30,9 @@ Alternate Names: ${waypoint.alternateNames && waypoint.alternateNames.length > 0
 
 export function logFieldDiff(stage: string, beforeObj: any, afterObj: any) {
     if (!PIPELINE_DEBUG) return;
+    if (!beforeObj || typeof beforeObj !== 'object' || !afterObj || typeof afterObj !== 'object') {
+        return;
+    }
     
     const beforeKeys = Object.keys(beforeObj);
     const afterKeys = Object.keys(afterObj);

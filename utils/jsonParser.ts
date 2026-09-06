@@ -207,6 +207,25 @@ export const repairJson = (text: string): { repaired: string, repairs: string[] 
         }
     }
 
+    // 3.5 Fix doubled opening or closing delimiters (e.g., `[{\n  {\n` or `{{\n` or `]\n  ]\n}`)
+    const doubledOpenBraceRegex = /([\[,]\s*)\{\s*\{/g;
+    if (doubledOpenBraceRegex.test(repaired)) {
+        repaired = repaired.replace(doubledOpenBraceRegex, '$1{');
+        repairs.push("Fixed doubled open braces");
+    }
+
+    const doubledOpenBracketRegex = /([:,]\s*)\[\s*\[/g;
+    if (doubledOpenBracketRegex.test(repaired)) {
+        repaired = repaired.replace(doubledOpenBracketRegex, '$1[');
+        repairs.push("Fixed doubled open brackets");
+    }
+
+    const doubledCloseBracketRegex = /\]\s*\]/g;
+    if (doubledCloseBracketRegex.test(repaired)) {
+        repaired = repaired.replace(doubledCloseBracketRegex, ']');
+        repairs.push("Fixed doubled close brackets");
+    }
+
     // 4. Remove trailing commas
     const trailingCommaRegex = /,\s*([\]}])/g;
     if (trailingCommaRegex.test(repaired)) {

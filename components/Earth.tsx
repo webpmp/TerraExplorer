@@ -32,7 +32,8 @@ import { OSMMapLayer } from './OSMMapLayer';
 import { OSMTransitionFog } from './OSMTransitionFog';
 import { evaluateLabelPlacement, MarkerScreenTarget, ScreenRect } from '../utils/labelCollisionHelper';
 import { OSM_DETAIL_THRESHOLD } from '../services/geographic/osmTileService';
-import { buildGlobeRouteGeometry, getRouteLineOpacity, isRouteSequential } from '../utils/osmRouteArrowUtils';
+import { buildGlobeRouteGeometry, getRouteLineOpacity } from '../utils/osmRouteArrowUtils';
+import { isRouteSequential, getSequentialRouteSegments, logRouteRenderModel } from '../utils/routeSequenceUtils';
 import {
   calculateMarkerFontSize,
   calculateMarkerBorderWidth,
@@ -383,6 +384,10 @@ const RouteLine: React.FC<{
   skin: SkinType,
   markerPositions?: Map<string, THREE.Vector3>
 }> = ({ waypoints, skin, markerPositions }) => {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const matRef = useRef<THREE.MeshBasicMaterial>(null);
+  const prevHandoffStateRef = useRef<string>('');
+
   const geometry = useMemo(() => {
     return buildGlobeRouteGeometry({
       waypoints,
@@ -392,11 +397,51 @@ const RouteLine: React.FC<{
     });
   }, [waypoints, skin, markerPositions]);
 
+  useFrame((state) => {
+    if (meshRef.current && matRef.current) {
+      const distance = state.camera.position.length();
+      const isOSMActive = distance <= OSM_DETAIL_THRESHOLD;
+      
+      // Handoff window: 1.45 (OSM threshold) to 1.70
+      const baseOpacity = getRouteLineOpacity(skin);
+      let targetOpacity = baseOpacity;
+      let handoffState = 'GLOBE_ACTIVE';
+
+      if (isOSMActive) {
+        targetOpacity = 0;
+        meshRef.current.visible = false;
+        handoffState = 'OSM_ACTIVE_GLOBE_HIDDEN';
+      } else if (distance < 1.70) {
+        // Linear fade out as camera approaches OSM detail threshold
+        const t = Math.max(0, Math.min(1, (distance - OSM_DETAIL_THRESHOLD) / (1.70 - OSM_DETAIL_THRESHOLD)));
+        targetOpacity = baseOpacity * t;
+        meshRef.current.visible = targetOpacity > 0.01;
+        handoffState = 'HANDOFF_TRANSITION';
+      } else {
+        meshRef.current.visible = true;
+        targetOpacity = baseOpacity;
+        handoffState = 'GLOBE_ACTIVE';
+      }
+
+      matRef.current.opacity = targetOpacity;
+
+      if (prevHandoffStateRef.current !== handoffState) {
+        prevHandoffStateRef.current = handoffState;
+        console.log(`[Route Line Handoff]
+osmVisibility=${(distance <= OSM_DETAIL_THRESHOLD ? 1 : Math.max(0, 1 - (distance - OSM_DETAIL_THRESHOLD) / 0.5)).toFixed(3)}
+globeRouteLineVisible=${meshRef.current.visible}
+osmRouteLineVisible=${isOSMActive}
+handoffState=${handoffState}`);
+      }
+    }
+  });
+
   if (!geometry) return null;
 
   return (
-    <mesh geometry={geometry}>
+    <mesh ref={meshRef} geometry={geometry}>
       <meshBasicMaterial 
+        ref={matRef}
         vertexColors 
         side={THREE.DoubleSide} 
         transparent 
@@ -852,6 +897,9 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
 
   // Memoize positions and declustering logic
   const { processedMarkers, adjustedPositions } = useMemo(() => {
+    if (routeWaypoints && routeWaypoints.length > 0) {
+      logRouteRenderModel(routeWaypoints);
+    }
     const allMarkers: any[] = [];
     
     // Constants for sizing and clustering
@@ -870,18 +918,23 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     // 0. Waypoints (High priority)
     if (routeWaypoints && routeWaypoints.length > 0) {
         routeWaypoints.forEach((wp, idx) => {
+             const displayNum = typeof wp.sequence === 'number' ? wp.sequence : idx + 1;
+             console.log(`[WAYPOINT DISPLAY IDENTITY]\nid=${wp.id}\nname=${wp.name}\nrouteGroupId=${wp.routeGroupId || 'none'}\nsequence=${wp.sequence}\nglobalSequence=${wp.globalSequence}\narrayIndex=${idx}\ndisplayNumber=${displayNum}`);
+
+             const wpThemeColor = getThemeMarkerColors(skin, { isWaypoint: true, routeGroupId: wp.routeGroupId });
+
              allMarkers.push({
                 type: 'waypoint',
                 data: wp,
                 lat: wp.lat,
                 lng: wp.lng,
                 baseSize: WAYPOINT_SIZE, 
-                color: waypointColor,
-                outlineColor: waypointColorInfo.outline,
+                color: wpThemeColor.fill,
+                outlineColor: wpThemeColor.outline,
                 id: wp.id,
                 isWaypoint: true,
                 isMultiLocation,
-                index: idx,
+                index: typeof wp.sequence === 'number' ? wp.sequence - 1 : idx,
                 role: wp.role
              });
         });
@@ -1330,7 +1383,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     <>
     <group ref={groupRef}>
       {/* Route Lines */}
-      {routeWaypoints && routeWaypoints.length > 1 && isRouteSequential(routeWaypoints) && (
+      {routeWaypoints && routeWaypoints.length > 1 && getSequentialRouteSegments(routeWaypoints).length > 0 && (
           <RouteLine 
             waypoints={routeWaypoints} 
             skin={skin} 

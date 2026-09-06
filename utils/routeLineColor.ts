@@ -12,7 +12,27 @@ export interface ConnectingLineColorOptions {
   theme: SkinType;
   mapLayer: MapLayerType;
   backgroundContext?: BackgroundContext;
+  routeGroupId?: string;
 }
+
+// Deterministic, high-contrast route color palettes for multi-route events
+export const MODERN_ROUTE_PALETTE_GLOBE = [
+  '#00e5ff', // Cyan (Default / Route 1)
+  '#f59e0b', // Amber (Route 2)
+  '#ec4899', // Pink / Magenta (Route 3)
+  '#10b981', // Emerald (Route 4)
+  '#8b5cf6', // Violet (Route 5)
+  '#06b6d4'  // Light Cyan (Route 6)
+];
+
+export const MODERN_ROUTE_PALETTE_OSM = [
+  '#0891b2', // Deep Cyan (Default / Route 1)
+  '#d97706', // Deep Amber (Route 2)
+  '#db2777', // Deep Rose/Pink (Route 3)
+  '#059669', // Deep Emerald (Route 4)
+  '#7c3aed', // Deep Violet (Route 5)
+  '#0284c7'  // Deep Sky Blue (Route 6)
+];
 
 /**
  * Deterministically determines whether a geographic coordinate is over bright terrain,
@@ -57,11 +77,29 @@ export function isBrightTerrainAt(lat: number, lng: number): boolean {
   return false;
 }
 
+export function getRouteGroupColorIndex(routeGroupId?: string): number {
+  if (!routeGroupId || routeGroupId === 'default' || routeGroupId === 'main') {
+    return 0;
+  }
+  const cleanId = routeGroupId.toLowerCase().trim();
+  if (cleanId === 'northern-route') return 0;
+  if (cleanId === 'benge-route') return 1;
+  if (cleanId === 'bell-route') return 2;
+  if (cleanId === 'water-route') return 3;
+
+  let hash = 0;
+  for (let i = 0; i < cleanId.length; i++) {
+    hash = (hash << 5) - hash + cleanId.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash) % MODERN_ROUTE_PALETTE_GLOBE.length;
+}
+
 /**
  * Resolves the contrast-appropriate connecting line color for a route segment or dash mark.
  */
 export function getConnectingLineColor(options: ConnectingLineColorOptions): string {
-  const { theme, mapLayer, backgroundContext } = options;
+  const { theme, mapLayer, backgroundContext, routeGroupId } = options;
 
   if (theme === 'parchment') {
     return '#8b5a2b';
@@ -75,10 +113,15 @@ export function getConnectingLineColor(options: ConnectingLineColorOptions): str
 
   // Modern theme
   if (mapLayer === 'osm') {
+    if (routeGroupId && routeGroupId !== 'default' && routeGroupId !== 'main') {
+      const colorIdx = getRouteGroupColorIndex(routeGroupId);
+      return MODERN_ROUTE_PALETTE_OSM[colorIdx];
+    }
     return '#111111';
   }
 
   // Modern Globe: Check if underlying terrain is bright
+  const colorIdx = getRouteGroupColorIndex(routeGroupId);
   if (backgroundContext) {
     if (backgroundContext.isBrightTerrain === true) {
       return '#111111';
@@ -90,5 +133,6 @@ export function getConnectingLineColor(options: ConnectingLineColorOptions): str
     }
   }
 
-  return '#00e5ff'; // Vibrant cyan on dark globe background
+  return MODERN_ROUTE_PALETTE_GLOBE[colorIdx];
 }
+

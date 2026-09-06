@@ -110,8 +110,9 @@ export const classifyGeographicEntityWithEvidence = async (
     ) || ['city', 'town', 'village', 'municipality'].includes(adminContext?.type);
 
     const isExplicitProtectedAreaName = q.match(/\b(special reserve|national reserve|nature reserve|wildlife reserve|game reserve|forest reserve|faunal reserve|biosphere reserve|ecological reserve|national park|state park|provincial park|tribal park|parque nacional|parc national|wildlife sanctuary|national monument)\b/i) !== null;
+    const isDescriptiveCollectionOrFeature = q.match(/\b(canals?|waterways?|beaches|waterfalls?|mountains?|canyons?|valleys?|islands?|skyline|waterfront)\b/i) !== null;
 
-    if (hasAuthoritativeSettlementTag && !isExplicitProtectedAreaName) {
+    if (hasAuthoritativeSettlementTag && !isExplicitProtectedAreaName && !isDescriptiveCollectionOrFeature) {
         return { entityType: 'settlement', confidence: 'authoritative', evidence: `Authoritative provider settlement type: ${signals.join(', ')}` };
     }
 

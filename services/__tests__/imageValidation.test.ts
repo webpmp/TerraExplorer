@@ -63,7 +63,7 @@ describe('Image Relevance & Validation System', () => {
 
       const result = validateImageCandidate(sfCabaret, forbiddenCityEntity);
       expect(result.decision).toBe('REJECT');
-      expect(result.reason).toContain('Geographic mismatch');
+      expect(result.reason).toBe('GEOGRAPHIC_CONFLICT');
     });
 
     it('rejects national flags and emblems for the landmark', () => {

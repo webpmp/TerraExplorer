@@ -14,11 +14,29 @@ export interface ImageCandidate {
   pageUrl?: string;
 }
 
+export type ImageSubjectShape =
+  | 'SPECIFIC_ENTITY'
+  | 'GEOGRAPHIC_FEATURE'
+  | 'GEOGRAPHIC_COLLECTION'
+  | 'DESCRIPTIVE_GEOGRAPHIC_QUERY'
+  | 'BROAD_LOCATION'
+  | 'TOPIC';
+
+export type ImageValidationPolicy =
+  | 'STRICT_ENTITY'
+  | 'GEOGRAPHIC_FEATURE'
+  | 'LOCATION_REPRESENTATIVE'
+  | 'HISTORICAL_WAYPOINT'
+  | 'TOPIC_REPRESENTATIVE';
+
+export type ImageRelevanceTier = 1 | 2 | 3 | 4;
+
 export interface ImageValidationResult {
   score: number;
   decision: 'ACCEPT' | 'REJECT';
   reason: string;
   candidate: ImageCandidate;
+  tier?: ImageRelevanceTier;
 }
 
 export type ResolvedImageIntentType = 'ENTITY_SPECIFIC' | 'GENERIC_TOPIC' | 'UNRESOLVED';
@@ -29,6 +47,10 @@ export interface ResolvedImageIntent {
   entity?: string;
   entityRequired: boolean;
   geographicConstraint: boolean;
+  shape?: ImageSubjectShape;
+  policy?: ImageValidationPolicy;
+  featureType?: string;
+  parentLocation?: string;
   source: 'USER_QUERY' | 'ROUTE_CONTEXT' | 'ENTITY_NAME' | 'FALLBACK_QUERY' | 'UNKNOWN';
   fallback?: 'ORIGINAL_QUERY' | 'NONE';
 }
@@ -37,8 +59,12 @@ export function logImageIntent(intent: ResolvedImageIntent): void {
   const lines = [
     '[IMAGE INTENT]',
     `type=${intent.type}`,
+    `shape=${intent.shape || 'none'}`,
+    `policy=${intent.policy || 'none'}`,
     `topic=${intent.topic ? `"${intent.topic}"` : 'none'}`,
     `entity=${intent.entity ? `"${intent.entity}"` : 'none'}`,
+    `featureType=${intent.featureType || 'none'}`,
+    `parentLocation=${intent.parentLocation || 'none'}`,
     `entityRequired=${intent.entityRequired}`,
     `geographicConstraint=${intent.geographicConstraint}`
   ];
@@ -151,6 +177,8 @@ export function resolveImageIntent(input: string | {
       entity: nameString || undefined,
       entityRequired: false,
       geographicConstraint: false,
+      shape: 'TOPIC',
+      policy: 'TOPIC_REPRESENTATIVE',
       source: queryString ? 'USER_QUERY' : (routeTitleString ? 'ROUTE_CONTEXT' : 'ENTITY_NAME')
     };
   }
@@ -166,12 +194,128 @@ export function resolveImageIntent(input: string | {
       }
     }
 
+    const effectiveTarget = targetEntity || nameString;
+    const rawTarget = typeof input === 'object' ? input : { name: effectiveTarget };
+
+    // Determine Subject Shape & Validation Policy Hierarchy:
+    // A. HISTORICAL WAYPOINT (Completely isolated policy)
+    if (isHistoricalWaypointEntity(rawTarget)) {
+      return {
+        type: 'ENTITY_SPECIFIC',
+        topic: undefined,
+        entity: effectiveTarget,
+        entityRequired: true,
+        geographicConstraint: true,
+        shape: 'SPECIFIC_ENTITY',
+        policy: 'HISTORICAL_WAYPOINT',
+        source: queryString ? 'USER_QUERY' : 'ENTITY_NAME'
+      };
+    }
+
+    // Extraction helper for feature type & parent location
+    const featurePatterns = [
+      { pattern: /\b(canals?|waterways?|canale|canali)\b/i, normalized: 'canal' },
+      { pattern: /\b(waterfalls?|falls?)\b/i, normalized: 'waterfall' },
+      { pattern: /\b(beaches?|beach)\b/i, normalized: 'beach' },
+      { pattern: /\b(mountains?|mountain\s+ranges?|peaks?)\b/i, normalized: 'mountain' },
+      { pattern: /\b(canyons?|gorges?)\b/i, normalized: 'canyon' },
+      { pattern: /\b(valleys?)\b/i, normalized: 'valley' },
+      { pattern: /\b(islands?|isles?)\b/i, normalized: 'island' },
+      { pattern: /\b(waterfront|harbors?|harbours?)\b/i, normalized: 'waterfront' },
+      { pattern: /\b(skylines?)\b/i, normalized: 'skyline' },
+      { pattern: /\b(districts?|neighborhoods?|quarters?)\b/i, normalized: 'district' },
+      { pattern: /\b(rivers?)\b/i, normalized: 'river' }
+    ];
+
+    const searchStr = `${queryString} ${effectiveTarget}`.toLowerCase();
+    let featureType: string | undefined;
+    for (const fp of featurePatterns) {
+      if (fp.pattern.test(searchStr)) {
+        featureType = fp.normalized;
+        break;
+      }
+    }
+
+    // Extract parentLocation if identifiable
+    let parentLocation: string | undefined;
+    if (featureType) {
+      // Pattern 1: "Venice Canals" -> "Venice"
+      const prefixMatch = effectiveTarget.match(new RegExp(`^(.*?)\\s+(?:${featureType}s?|waterways?|falls?|peaks?|ranges?)$`, 'i'));
+      if (prefixMatch && prefixMatch[1].trim()) {
+        parentLocation = prefixMatch[1].trim();
+      }
+      // Pattern 2: "Canals of Venice" or "Waterfalls in Yosemite"
+      if (!parentLocation) {
+        const prepMatch = effectiveTarget.match(new RegExp(`(?:${featureType}s?|waterways?|falls?)\\s+(?:of|in|near|around)\\s+(.+?)$`, 'i'));
+        if (prepMatch && prepMatch[1].trim()) {
+          parentLocation = prepMatch[1].trim();
+        }
+      }
+      // Pattern 3: Query check "Where is Venice Canals?" or "Waterfalls in Yosemite"
+      if (!parentLocation && queryString) {
+        const qPrepMatch = queryString.match(new RegExp(`(?:${featureType}s?|waterways?|falls?)\\s+(?:of|in|near|around)\\s+([a-z0-9\\s'-]+?)(?:\\?|$|\\.|,)`, 'i'));
+        if (qPrepMatch && qPrepMatch[1].trim()) {
+          parentLocation = qPrepMatch[1].trim();
+        }
+      }
+      // Fallback: if input has city, state, or country
+      if (!parentLocation && typeof input === 'object') {
+        parentLocation = (input as any).city || (input as any).state || (input as any).country;
+      }
+    }
+
+    // Check Plural / Collection patterns: "Venice Canals", "Beaches of Maui", "Waterfalls in Yosemite"
+    const isPluralCollection = /\b(canals|beaches|waterfalls|falls|islands|isles|mountains|canyons|valleys)\b/i.test(effectiveTarget) ||
+      /\b(?:canals|beaches|waterfalls|islands|mountains)\s+(?:of|in)\b/i.test(queryString);
+
+    // Check Descriptive query pattern: "Venice waterfront", "Yosemite waterfalls", "Maui beaches"
+    const isDescriptiveQuery = Boolean(featureType) && (
+      isPluralCollection ||
+      /\b(waterfront|skyline|district|waterway)\b/i.test(effectiveTarget) ||
+      /\b(?:waterfront|skyline|district|waterway)\b/i.test(queryString)
+    );
+
+    // Check Broad location: city, country, region without specific landmark
+    const eType = (typeof input === 'object' ? (input.entityType || input.type || '') : '').toLowerCase();
+    const isBroadSettlementOrRegion = ['settlement', 'city', 'town', 'village', 'country', 'state', 'province', 'administrative_region', 'administrative'].includes(eType) ||
+      (typeof input === 'object' && !featureType && !/landmark|museum|monument|building|castle|fort|memorial|historic/i.test(eType) && (input as any).city === effectiveTarget);
+
+    let shape: ImageSubjectShape;
+    let policy: ImageValidationPolicy;
+    let entityRequired = true;
+
+    if (isPluralCollection) {
+      shape = 'GEOGRAPHIC_COLLECTION';
+      policy = 'GEOGRAPHIC_FEATURE';
+      entityRequired = false;
+    } else if (isDescriptiveQuery) {
+      shape = 'DESCRIPTIVE_GEOGRAPHIC_QUERY';
+      policy = 'GEOGRAPHIC_FEATURE';
+      entityRequired = false;
+    } else if (isBroadSettlementOrRegion) {
+      shape = 'BROAD_LOCATION';
+      policy = 'LOCATION_REPRESENTATIVE';
+      entityRequired = false;
+    } else if (featureType) {
+      shape = 'GEOGRAPHIC_FEATURE';
+      policy = 'GEOGRAPHIC_FEATURE';
+      entityRequired = false;
+    } else {
+      shape = 'SPECIFIC_ENTITY';
+      policy = 'STRICT_ENTITY';
+      entityRequired = true;
+    }
+
     return {
       type: 'ENTITY_SPECIFIC',
       topic: undefined,
-      entity: targetEntity || nameString,
-      entityRequired: true,
+      entity: effectiveTarget,
+      entityRequired,
       geographicConstraint: true,
+      shape,
+      policy,
+      featureType,
+      parentLocation,
       source: queryString ? 'USER_QUERY' : 'ENTITY_NAME'
     };
   }
@@ -353,6 +497,11 @@ const KNOWN_MAJOR_CITIES: Record<string, string> = {
   'vancouver': 'canada'
 };
 
+const CANADIAN_PROVINCES = [
+  'ontario', 'quebec', 'british columbia', 'alberta', 'manitoba', 'saskatchewan',
+  'nova scotia', 'new brunswick', 'newfoundland', 'prince edward island', 'northwest territories', 'yukon', 'nunavut'
+];
+
 const US_STATES = [
   'california', 'texas', 'florida', 'new york', 'illinois', 'pennsylvania', 'ohio', 'georgia',
   'north carolina', 'michigan', 'new jersey', 'virginia', 'washington', 'arizona', 'massachusetts',
@@ -391,7 +540,7 @@ export function detectGeographicMismatch(
   const targetCity = (entity.city || '').toLowerCase().trim();
   const targetState = (entity.state || '').toLowerCase().trim();
 
-  // If entity is in China (e.g. Forbidden City in Beijing, China) and candidate text explicitly mentions San Francisco, California, USA
+  // If entity is outside the United States and candidate text explicitly mentions a US city or state
   if (targetCountry && targetCountry !== 'united states' && targetCountry !== 'usa') {
     for (const usCity of Object.keys(KNOWN_MAJOR_CITIES)) {
       if (KNOWN_MAJOR_CITIES[usCity] === 'united states') {
@@ -413,6 +562,20 @@ export function detectGeographicMismatch(
           mismatch: true,
           location: `${usState.charAt(0).toUpperCase() + usState.slice(1)}, United States`,
           reason: `Geographic mismatch: candidate refers to ${usState}, but entity is in ${entity.country}`
+        };
+      }
+    }
+  }
+
+  // If entity is outside Canada and candidate text explicitly mentions a Canadian province
+  if (targetCountry && targetCountry !== 'canada') {
+    for (const province of CANADIAN_PROVINCES) {
+      const regex = new RegExp(`\\b${province}\\b`, 'i');
+      if (regex.test(text) && !entity.name.toLowerCase().includes(province)) {
+        return {
+          mismatch: true,
+          location: `${province.charAt(0).toUpperCase() + province.slice(1)}, Canada`,
+          reason: `Geographic mismatch: candidate refers to ${province}, but entity is in ${entity.country}`
         };
       }
     }
@@ -464,6 +627,33 @@ export function detectGeographicMismatch(
             reason: `Geographic mismatch: candidate refers to ${city}, but landmark is in ${entity.city}`
           };
         }
+      }
+    }
+  }
+
+  // Check homonymous city in conflicting state/province:
+  // e.g. Entity is "Florence, Italy" or "Milan, Italy" or "Venice, Italy" or "Rome, Italy" or "London, England"
+  // but candidate is "Milan, Ohio" or "Rome, Georgia" or "Venice, Florida" or "London, Ontario"
+  const entityCityOrName = targetCity || entity.name.toLowerCase().split(/[,–-]/)[0].trim();
+  if (targetCountry && targetCountry !== 'united states' && targetCountry !== 'usa' && targetCountry !== 'canada') {
+    const homonymUSMatch = text.match(new RegExp(`\\b${entityCityOrName}\\b[\\s,]+(?:in\\s+)?([a-z\\s]+)`, 'i'));
+    if (homonymUSMatch) {
+      const rest = homonymUSMatch[1].toLowerCase().trim();
+      const stateMatch = US_STATES.find(st => rest.startsWith(st) || rest.includes(st));
+      if (stateMatch) {
+        return {
+          mismatch: true,
+          location: `${entityCityOrName.charAt(0).toUpperCase() + entityCityOrName.slice(1)}, ${stateMatch.charAt(0).toUpperCase() + stateMatch.slice(1)}`,
+          reason: `Geographic mismatch: candidate refers to ${entityCityOrName} in ${stateMatch}, but entity is in ${entity.country}`
+        };
+      }
+      const provinceMatch = CANADIAN_PROVINCES.find(prov => rest.startsWith(prov) || rest.includes(prov));
+      if (provinceMatch) {
+        return {
+          mismatch: true,
+          location: `${entityCityOrName.charAt(0).toUpperCase() + entityCityOrName.slice(1)}, ${provinceMatch.charAt(0).toUpperCase() + provinceMatch.slice(1)}`,
+          reason: `Geographic mismatch: candidate refers to ${entityCityOrName} in ${provinceMatch}, but entity is in ${entity.country}`
+        };
       }
     }
   }
@@ -594,18 +784,50 @@ export function isDifferentNamedEntity(
   const allTargetAliases = [targetLower, ...aliases.map(a => a.toLowerCase().trim())].filter(Boolean);
 
   // Non-settlement organization, facility, person, or administrative division check
-  // (e.g. "Dallas Cowboys", "Dallas County", "Dallas Fort Worth International Airport", "Bryce Dallas Howard")
+  // (e.g. "Dallas Cowboys", "Dallas County", "Dallas Fort Worth International Airport", "Bryce Dallas Howard", "ADX Florence", "Florence Nightingale", "Florence Welch", "Florence (drug)")
   const nonSettlementPatterns = [
     /\b(?:cowboys|mavericks|stars|rangers|texans|astros|spurs|rockets|fc|united|club|team|franchise)\b/i,
+    /\b(?:athletics|sports|basketball|football|baseball|soccer|softball|volleyball|lacrosse|track and field|roster|tournament|championship|division [i|ii|iii]|ncaa|naia|athletic program|athletic team)\b/i,
+    /\b(?:antelopes|wildcats|bulldogs|tigers|badgers|wolverines|gators|tar heels|seminoles|buckeyes|longhorns|sooners)\b/i,
+    /\b(?:logo|insignia|crest|emblem|mascot)\b/i,
     /\b(?:county|parish|borough|metroplex|metropolitan area|combined statistical area|hundred of|lodge|hotel|motel|station|homestead)\b/i,
     /\b(?:international airport|regional airport|airport|airfield|aerodrome|station|terminal|transit authority)\b/i,
     /\b(?:independent school district|school district|isd|high school|university|college|hospital|medical center)\b/i,
     /\b(?:police department|fire department|sheriff|department of)\b/i,
-    /\b(?:howard|actor|actress|director|singer|musician|politician|author|player|coach)\b/i
+    /\b(?:adx|admax|usp|penitentiary|correctional\s+(?:institution|facility|center)|federal\s+prison|state\s+prison|detention\s+center|prison)\b/i,
+    /\b(?:nightingale|welch|kundera|actor|actress|director|singer|musician|politician|author|player|coach|nurse|novelist|athlete)\b/i,
+    /\((?:drug|medication|pharmaceutical|album|song|single|band|film|tv\s+series|novel|magazine|comics)\)$/i
   ];
 
   for (const pattern of nonSettlementPatterns) {
     if (pattern.test(titleClean) && !pattern.test(targetLower)) {
+      return true;
+    }
+  }
+
+  // Geographic natural feature vs conflicting feature type check (e.g. Antelope Island vs Antelope Canyon)
+  const naturalFeatureTypes: Array<{ type: string; regex: RegExp }> = [
+    { type: 'canyon', regex: /\b(?:canyons?|gorges?|ravines?|chasms?)\b/i },
+    { type: 'island', regex: /\b(?:islands?|isles?|atolls?|archipelagos?)\b/i },
+    { type: 'mountain', regex: /\b(?:mountains?|peaks?|ranges?|summits?)\b/i },
+    { type: 'lake', regex: /\b(?:lakes?|lochs?|reservoirs?)\b/i },
+    { type: 'falls', regex: /\b(?:waterfalls?|falls?|cascades?)\b/i },
+    { type: 'river', regex: /\b(?:rivers?|creeks?|streams?)\b/i }
+  ];
+
+  const targetFeatureType = naturalFeatureTypes.find(f => f.regex.test(targetLower));
+  if (targetFeatureType) {
+    // If target is a natural feature (e.g. canyon), check if candidate explicitly represents a different feature type
+    for (const f of naturalFeatureTypes) {
+      if (f.type !== targetFeatureType.type && f.regex.test(titleClean) && !targetFeatureType.regex.test(titleClean)) {
+        return true;
+      }
+    }
+
+    // If target is a natural feature, check if candidate represents an administrative place or settlement (e.g. "Antelope, Oregon", "Antelope (city)")
+    // But do NOT treat "Antelope Canyon, Arizona" as a settlement disambiguation!
+    const settlementDisambiguation = /,\s*(?:[A-Z][a-z]+|[A-Z]{2})(?:\s+USA|\s+United States)?$|\((?:city|town|village|census-designated place|cdp|community|unincorporated community)\)$/i;
+    if (settlementDisambiguation.test(titleClean) && !settlementDisambiguation.test(targetEntityName) && !targetFeatureType.regex.test(titleClean)) {
       return true;
     }
   }
@@ -622,17 +844,29 @@ export function isDifferentNamedEntity(
     }
   }
 
-  // If title or description directly contains target entity name or any alias, it is not a different entity
+  // If candidate title looks like a person, sports team, or facility while target is a settlement/region
+  const isTargetSettlement = /\b(city|town|village|settlement|municipality|capital|metro)\b/i.test(targetLower);
+  // Also check if candidate is a person (e.g. Bryce Dallas Howard, Florence Nightingale)
+  const isPersonCandidate = /\b(?:actress|actor|director|singer|musician|politician|author|novelist|athlete)\b/i.test(description || '');
+  if (isPersonCandidate && (isTargetSettlement || !/\b(?:actress|actor|director|singer|musician|politician|author|novelist|athlete)\b/i.test(targetLower))) {
+    return true;
+  }
+
+  // If title or description directly contains target entity name or any alias, check if candidate title is an overt person, prison, or disambiguation before accepting
   if (allTargetAliases.some(a => fullText.includes(a))) {
-    return false;
+    const isOvertPersonOrFacility = nonSettlementPatterns.some(pattern => pattern.test(titleClean) && !pattern.test(targetLower));
+    if (!isOvertPersonOrFacility) {
+      return false;
+    }
   }
 
   // Vessel prefixes: SS, USS, HMS, RMS, MV, MS, MT, SV, RV, PS
   const vesselPrefixMatch = titleClean.match(/^(?:ss|uss|hms|rms|mv|ms|mt|sv|rv|ps)\s+([a-z0-9\s'-]+)/i);
   if (vesselPrefixMatch) {
     const vesselName = vesselPrefixMatch[1].toLowerCase().trim();
-    // If the vessel name does not match any target alias
-    if (!allTargetAliases.some(a => a.includes(vesselName) || vesselName.includes(a))) {
+    // If the vessel name does not match any target alias or fullText narrative context
+    const hasVesselInAliasesOrContext = allTargetAliases.some(a => a.includes(vesselName) || vesselName.includes(a) || fullText.includes(a));
+    if (!hasVesselInAliasesOrContext) {
       return true;
     }
   }
@@ -641,7 +875,8 @@ export function isDifferentNamedEntity(
   const wreckPrefixMatch = titleClean.match(/^wreck of (?:the )?(?:ss|uss|hms|rms|mv|ms|mt|sv|rv|ps)\s+([a-z0-9\s'-]+)/i);
   if (wreckPrefixMatch) {
     const vesselName = wreckPrefixMatch[1].toLowerCase().trim();
-    if (!allTargetAliases.some(a => a.includes(vesselName) || vesselName.includes(a))) {
+    const hasVesselInAliasesOrContext = allTargetAliases.some(a => a.includes(vesselName) || vesselName.includes(a) || fullText.includes(a));
+    if (!hasVesselInAliasesOrContext) {
       return true;
     }
   }
@@ -654,6 +889,34 @@ export function isDifferentNamedEntity(
   for (const pattern of diffVesselPatterns) {
     if (pattern.test(titleClean) && !pattern.test(targetLower)) {
       return true;
+    }
+  }
+
+  // Conflicting historical trail / route detection
+  // (e.g. Fort Gibson / Trail of Tears must reject Oregon Trail, Chilkoot Trail, Mormon Trail, Appalachian Trail)
+  const knownTrails = [
+    { name: 'oregon trail', regex: /\boregon\s+trail\b/i },
+    { name: 'trail of tears', regex: /\btrail\s+of\s+tears\b/i },
+    { name: 'chilkoot trail', regex: /\bchilkoot\s+trail\b/i },
+    { name: 'mormon trail', regex: /\bmormon\s+trail\b/i },
+    { name: 'santa fe trail', regex: /\bsanta\s+fe\s+trail\b/i },
+    { name: 'california trail', regex: /\bcalifornia\s+trail\b/i },
+    { name: 'appalachian trail', regex: /\bappalachian\s+trail\b/i },
+    { name: 'boone trace', regex: /\bboone(?:'s)?\s+trace\b/i },
+    { name: 'wilderness road', regex: /\bwilderness\s+road\b/i },
+    { name: 'overland trail', regex: /\boverland\s+trail\b/i },
+    { name: 'pony express', regex: /\bpony\s+express\b/i }
+  ];
+
+  for (const trail of knownTrails) {
+    if (trail.regex.test(fullText)) {
+      const isTargetRelatedToTrail = allTargetAliases.some(a => trail.regex.test(a)) ||
+        trail.regex.test(targetLower) ||
+        (description && trail.regex.test(description));
+      if (!isTargetRelatedToTrail) {
+        // If image explicitly mentions an unrelated historical trail, reject it
+        return true;
+      }
     }
   }
 
@@ -778,23 +1041,103 @@ export function classifyImageEvidence(
     };
   }
 
-  // 3. Significant token match if >= 80% distinctive tokens match
-  const tokens = cleanBase.split(/\s+/).filter(t => t.length > 2);
-  if (tokens.length > 0) {
-    const matching = tokens.filter(t => fullText.includes(t) || normFullText.includes(normalizeDiacritics(t)));
-    if (matching.length / tokens.length >= 0.8 && matching.length >= 2) {
-      return {
-        evidenceType: 'KNOWN_ALIAS',
-        entityMatchLevel: 'HIGH',
-        matchedAlias: matching.join(' ')
-      };
-    }
-  }
-
   return {
     evidenceType: 'UNKNOWN',
     entityMatchLevel: 'NONE'
   };
+}
+
+export function classifySemanticFeatureMatch(
+  candidate: ImageCandidate,
+  entity: {
+    name: string;
+    canonicalName?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    coordinates?: { lat: number; lng: number };
+    aliases?: string[];
+  },
+  context: {
+    featureType?: string;
+    parentLocation?: string;
+  }
+): 'STRONG' | 'MODERATE' | 'WEAK' | 'NONE' {
+  const fullText = `${candidate.title || ''} ${candidate.description || ''} ${candidate.caption || ''}`.toLowerCase();
+  const titleLower = (candidate.title || '').toLowerCase();
+
+  const featureType = (context.featureType || '').toLowerCase().trim();
+  const parentLocation = (context.parentLocation || entity.city || entity.state || '').toLowerCase().trim();
+  const country = (entity.country || '').toLowerCase().trim();
+
+  // If no featureType is specified, check parent location match
+  if (!featureType) {
+    if (parentLocation && fullText.includes(parentLocation)) {
+      return 'MODERATE';
+    }
+    return 'NONE';
+  }
+
+  // Related generic vocabulary for featureType
+  const featureEquivalents: Record<string, RegExp> = {
+    canal: /\b(canals?|canale|canali|waterways?|gracht|grachten)\b/i,
+    waterfall: /\b(waterfalls?|falls?|cascade|cascades)\b/i,
+    beach: /\b(beaches?|beach|coast|shore|coastline)\b/i,
+    mountain: /\b(mountains?|mountain\s+range|ranges?|peaks?|summit|pass)\b/i,
+    canyon: /\b(canyons?|gorges?|ravine)\b/i,
+    valley: /\b(valleys?|vale)\b/i,
+    island: /\b(islands?|isles?|atoll|archipelago)\b/i,
+    waterfront: /\b(waterfront|harbors?|harbours?|port|quay|marina)\b/i,
+    skyline: /\b(skylines?|cityscape|panorama|aerial\s+view)\b/i,
+    district: /\b(districts?|neighborhoods?|quarters?|boroughs?)\b/i,
+    river: /\b(rivers?|streams?|creeks?)\b/i
+  };
+
+  const featureRegex = featureEquivalents[featureType] || new RegExp(`\\b${featureType}s?\\b`, 'i');
+  const hasFeatureMention = featureRegex.test(fullText);
+  const hasParentLocationMention = parentLocation ? fullText.includes(parentLocation) : false;
+
+  // Geographic consistency check from coordinates if candidate has coordinates
+  let geoConsistent = false;
+  if (candidate.coordinates && entity.coordinates && entity.coordinates.lat !== 0 && entity.coordinates.lng !== 0) {
+    const dist = calculateHaversineDistanceKm(
+      entity.coordinates.lat,
+      entity.coordinates.lng,
+      candidate.coordinates.lat,
+      candidate.coordinates.lng
+    );
+    if (dist <= 60) {
+      geoConsistent = true;
+    }
+  }
+
+  // STRONG Semantic Feature Match:
+  // 1. Both feature type AND parent location appear in candidate title or text
+  //    (e.g., "Grand Canal (Venice)", "Venice canals", "Yosemite falls")
+  // 2. Or feature type appears in title/text AND candidate coordinates/metadata place it within the parent location
+  // 3. Or candidate title has feature type and candidate text has parent location
+  if (hasFeatureMention && (hasParentLocationMention || geoConsistent)) {
+    return 'STRONG';
+  }
+
+  // If candidate is a direct named feature where title has the feature type, and parent location is in entity city/state
+  if (hasFeatureMention && parentLocation && (entity.city?.toLowerCase() === parentLocation || entity.state?.toLowerCase() === parentLocation)) {
+    return 'STRONG';
+  }
+
+  // MODERATE Semantic Match:
+  // Candidate represents the parent location (e.g., "Venice", "Yosemite") or matches feature type only without parent location
+  if (hasParentLocationMention) {
+    return 'MODERATE';
+  }
+
+  // WEAK:
+  // Only country / broad region or feature type alone in an unknown location
+  if (hasFeatureMention || (country && fullText.includes(country))) {
+    return 'WEAK';
+  }
+
+  return 'NONE';
 }
 
 export type HistoricalImageCategory =
@@ -861,11 +1204,12 @@ export function isHistoricalWaypointEntity(entity: {
   if (
     eType.includes('historical_waypoint') ||
     eType.includes('battlefield') ||
-    eType.includes('archaeological')
+    eType.includes('archaeological') ||
+    Boolean(entity.isHistoricalWaypoint) ||
+    Boolean(entity.waypoint)
   ) {
     return true;
   }
-  if (entity.metadataMode === 'historical_site') return true;
   if (entity.intent === 'HISTORICAL_EVENT' || entity.intent === 'exploration' || entity.intent === 'historical_event') return true;
   if (Boolean(entity.historicalPeriod || (entity.routeTitle && !combined.includes('filming')))) return true;
   return false;
@@ -873,8 +1217,31 @@ export function isHistoricalWaypointEntity(entity: {
 
 export function extractHistoricalImageContext(info: any): HistoricalImageContext {
   const wp = info?.waypoint || {};
-  const exploration = (info?.routeTitle || wp?.routeTitle || info?.routeContext?.title || info?.historicalContext || '').trim();
-  const event = (info?.significance || wp?.significance || '').trim();
+  let exploration = (info?.routeTitle || wp?.routeTitle || info?.routeContext?.title || info?.historicalContext || '').trim();
+  // Filter out UI placeholder labels from leaking into search context
+  if (/^(from route|route context|historical significance|notable facts|image|none)$/i.test(exploration)) {
+    exploration = (info?.historicalContext || '').trim();
+    if (/^(from route|route context|historical significance|notable facts|image|none)$/i.test(exploration)) {
+      exploration = '';
+    }
+  }
+  const rawEvent = (info?.significance || wp?.significance || '').trim();
+  // Sanitize event: take only short topic/phrase (at most 3-4 words or clean title), not full prose sentences
+  let event: string | undefined = undefined;
+  if (rawEvent) {
+    const isProse = /^(it|this|the|they|he|she|in|at|a|an)\s+(marks|serves|was|is|took|were|became|occurred|started|began)\b/i.test(rawEvent) ||
+                    rawEvent.includes('.') ||
+                    rawEvent.split(/\s+/).length > 6;
+    if (!isProse) {
+      event = rawEvent;
+    } else {
+      // If it mentions specific historical terms like treaty, battle, siege, council, extract just the noun phrase
+      const eventNounMatch = rawEvent.match(/\b(treaty of [a-z0-9\s'-]+|battle of [a-z0-9\s'-]+|siege of [a-z0-9\s'-]+|council of [a-z0-9\s'-]+)\b/i);
+      if (eventNounMatch) {
+        event = eventNounMatch[1].trim();
+      }
+    }
+  }
   const period = (info?.historicalPeriod || wp?.historicalPeriod || '').trim();
   
   // Extract 4-digit year or period mention (e.g. "1804", "19th century", "1804-1806")
@@ -950,70 +1317,94 @@ export function buildHistoricalImageQueries(context: HistoricalImageContext): st
   const queries: string[] = [];
   const { exploration, event, period, year, cleanLocationName, waypointName, region, people, activities, artifacts } = context;
 
-  // 1. exploration + historical event (e.g. "Lewis and Clark Expedition final preparations departure 1804")
-  if (exploration && event) {
-    const cleanEvent = event.replace(/[^\w\s]/g, ' ').split(/\s+/).slice(0, 5).join(' ');
-    queries.push(`${exploration} ${cleanEvent} ${year || ''}`.trim());
-  }
-
-  // 2. exploration + waypoint + historical period (e.g. "Lewis and Clark Expedition St. Charles 1804", "Lewis and Clark St. Charles Missouri")
-  if (exploration && cleanLocationName) {
-    if (year) {
-      queries.push(`${exploration} ${cleanLocationName} ${year}`.trim());
+  // 1. Entity-first historical site / canonical entity queries (Highest Priority)
+  if (cleanLocationName) {
+    queries.push(cleanLocationName);
+    if (context.country && context.country.toLowerCase() !== cleanLocationName.toLowerCase()) {
+      queries.push(`${cleanLocationName} ${context.country}`);
+      if (exploration) {
+        queries.push(`${cleanLocationName} ${context.country} ${exploration}`);
+      }
     }
+    queries.push(`${cleanLocationName} historic site`);
+    queries.push(`${cleanLocationName} historic buildings`);
+    queries.push(`${cleanLocationName} archaeological site`);
     if (region && region.toLowerCase() !== cleanLocationName.toLowerCase()) {
-      queries.push(`${exploration} ${cleanLocationName} ${region}`.trim());
-    } else {
-      queries.push(`${exploration} ${cleanLocationName}`.trim());
+      queries.push(`${cleanLocationName} ${region}`);
     }
-  }
+    if (exploration) {
+      queries.push(`${cleanLocationName} ${exploration}`);
+    }
+    if (year || period) {
+      queries.push(`${cleanLocationName} ${year || period}`);
+    }
+    queries.push(`historic ${cleanLocationName} painting engraving`);
 
-  // 3. exploration + major historical activity / artifact (e.g. "Lewis and Clark keelboat", "Corps of Discovery 1804")
-  if (exploration) {
+    // 2. Entity + historical event / treaty / battle / document
+    if (event) {
+      queries.push(`${cleanLocationName} ${event}`);
+    }
+
+    // 3. exploration + entity + historical period (e.g. "Lewis and Clark Expedition St. Charles 1804")
+    if (exploration) {
+      if (year) {
+        queries.push(`${exploration} ${cleanLocationName} ${year}`.trim());
+      }
+      if (region && region.toLowerCase() !== cleanLocationName.toLowerCase()) {
+        queries.push(`${exploration} ${cleanLocationName} ${region}`.trim());
+      }
+      // Entity-specific map/document query
+      queries.push(`${cleanLocationName} ${exploration} map`.trim());
+      queries.push(`${cleanLocationName} historical map`.trim());
+    }
+
+    // 4. Entity + major historical activity / artifact
+    if (activities.length > 0) {
+      for (const act of activities.slice(0, 2)) {
+        queries.push(`${cleanLocationName} ${act}`.trim());
+        if (exploration) {
+          queries.push(`${exploration} ${cleanLocationName} ${act}`.trim());
+        }
+      }
+    }
+    if (artifacts.length > 0) {
+      for (const art of artifacts.slice(0, 2)) {
+        queries.push(`${cleanLocationName} ${art}`.trim());
+        if (exploration) {
+          queries.push(`${exploration} ${cleanLocationName} ${art}`.trim());
+        }
+      }
+    }
+    if (exploration && (exploration.toLowerCase().includes('lewis and clark') || exploration.toLowerCase().includes('discovery'))) {
+      queries.push(`${cleanLocationName} Lewis and Clark keelboat`.trim());
+    }
+
+    // 5. Named historical people + Entity
+    if (people.length > 0) {
+      for (const p of people.slice(0, 2)) {
+        queries.push(`${cleanLocationName} ${p}`.trim());
+      }
+    }
+
+    // 6. waypoint + historical period / 19th century / historic
+    if (year || period) {
+      queries.push(`${cleanLocationName} ${region || ''} ${year || period} historical`.trim());
+    }
+  } else if (exploration) {
+    // If no cleanLocationName exists (general route search), build exploration-level queries
+    if (event) {
+      queries.push(`${exploration} ${event} ${year || ''}`.trim());
+    }
     if (activities.length > 0) {
       for (const act of activities.slice(0, 3)) {
         queries.push(`${exploration} ${act}`.trim());
       }
     }
-    if (artifacts.length > 0) {
-      for (const art of artifacts.slice(0, 3)) {
-        queries.push(`${exploration} ${art}`.trim());
-      }
-    }
-    if (exploration.toLowerCase().includes('lewis and clark') || exploration.toLowerCase().includes('discovery')) {
-      queries.push(`${exploration} keelboat`);
-      queries.push(`Corps of Discovery ${year || '1804'}`);
-    }
-    if (year) {
-      queries.push(`${exploration} ${year}`.trim());
-    }
-  }
-
-  // 4. exploration + historical maps / journals / illustrations
-  if (exploration) {
     queries.push(`${exploration} map ${region || ''}`.trim());
     queries.push(`${exploration} historical illustration artwork`.trim());
-    queries.push(`${exploration} journal map`.trim());
   }
 
-  // 5. Named historical people / Corps of Discovery
-  if (people.length > 0) {
-    for (const p of people.slice(0, 2)) {
-      queries.push(`${p} ${exploration || ''} ${year || ''}`.trim());
-    }
-  }
-
-  // 6. waypoint + historical period / 19th century / historic
-  if (cleanLocationName && (year || period)) {
-    queries.push(`${cleanLocationName} ${region || ''} ${year || period} historical`.trim());
-  }
-
-  // 7. historical depiction of waypoint
-  if (cleanLocationName) {
-    queries.push(`historic ${cleanLocationName} ${region || ''} painting engraving`.trim());
-  }
-
-  // 8. Fallback modern location query (placed last)
+  // Fallback modern location query (placed last)
   if (cleanLocationName && region && region.toLowerCase() !== cleanLocationName.toLowerCase()) {
     queries.push(`${cleanLocationName} ${region}`.trim());
   } else if (waypointName) {
@@ -1156,6 +1547,8 @@ export function validateImageCandidate(
     waypoint?: any;
     metadataMode?: string;
     aliases?: string[];
+    entities?: string[];
+    routeContext?: any;
     query?: string;
     rawQuery?: string;
     imageIntent?: ResolvedImageIntent;
@@ -1325,28 +1718,159 @@ Reason=${reason}`);
         break;
     }
 
-    let score = baseScore;
-    const expLower = (histContext.exploration || '').toLowerCase();
-    const locLower = (histContext.cleanLocationName || '').toLowerCase();
+    // Check for conflicting historical trail contamination
+    const trailConflict = isDifferentNamedEntity(title, desc, entityName, [
+      histContext.cleanLocationName || '',
+      histContext.exploration || '',
+      ...(histContext.people || []),
+      ...(histContext.artifacts || []),
+      ...(entity.entities || []),
+      ...(entity.aliases || [])
+    ]);
 
+    if (trailConflict) {
+      console.log(`[IMAGE CANDIDATE (HISTORICAL WAYPOINT)] REJECTED due to conflicting entity/trail.`);
+      return {
+        score: 0,
+        decision: 'REJECT',
+        reason: 'Image represents a conflicting historical trail or different named entity.',
+        candidate
+      };
+    }
+
+    // Check for conflicting geographic entities / administrative divisions
+    const geoMismatch = detectGeographicMismatch(candidate, {
+      name: entityName,
+      city: entity.city || histContext.cleanLocationName,
+      state: entity.state || histContext.region,
+      country: entity.country || histContext.country,
+      coordinates: entity.coordinates,
+      entityType: entity.entityType
+    });
+
+    if (geoMismatch.mismatch) {
+      console.log(`[IMAGE CANDIDATE (HISTORICAL WAYPOINT)] REJECTED due to geographic mismatch: ${geoMismatch.reason}`);
+      return {
+        score: 0,
+        decision: 'REJECT',
+        reason: geoMismatch.reason || 'GEOGRAPHIC_CONFLICT',
+        candidate
+      };
+    }
+
+    // 1. Entity Relevance (Primary Signal)
+    let entityMatch = 'NONE';
+    let entityScore = 0;
+    const cleanLoc = (histContext.cleanLocationName || '').toLowerCase();
+    const canonName = (entity.canonicalName || '').toLowerCase();
+    const eName = (entityName || '').toLowerCase();
+    const rawAliases = [
+      cleanLoc,
+      canonName,
+      eName,
+      cleanLoc.split(',')[0].trim(),
+      canonName.split(',')[0].trim(),
+      eName.split(',')[0].trim(),
+      ...(entity.aliases || []).map(a => a.toLowerCase())
+    ].filter(Boolean);
+    const entityAliases = Array.from(new Set(rawAliases));
+
+    // Strict entity title match: Must NOT be accompanied by person names, correctional facilities, or incompatible classifications
+    const titleLower = title.toLowerCase().trim();
+    const isExactTitleCandidate = entityAliases.some(alias => {
+      if (alias.length < 3) return false;
+      if (titleLower === alias) return true;
+      if (titleLower.startsWith(`${alias} (`) || titleLower.startsWith(`${alias},`)) return true;
+      if (titleLower.startsWith(`${alias} cathedral`) || titleLower.startsWith(`${alias} duomo`) || titleLower.startsWith(`${alias} basilica`)) return true;
+      if (titleLower.startsWith(`historic ${alias}`) || titleLower.startsWith(`view of ${alias}`) || titleLower.startsWith(`map of ${alias}`)) return true;
+      // Word boundary match: ensure it doesn't match Florence Nightingale, Jack London, etc.
+      const boundaryRegex = new RegExp(`\\b${alias}\\b`, 'i');
+      if (boundaryRegex.test(titleLower)) {
+        // Ensure no overt conflicting person surname, facility, or media token in the title
+        const isConflicting = /\b(?:nightingale|welch|kundera|actor|actress|director|singer|musician|politician|author|player|coach|nurse|novelist|athlete|adx|penitentiary|prison)\b/i.test(titleLower) ||
+          /\((?:drug|medication|pharmaceutical|album|song|single|band|film|tv\s+series|novel|magazine|comics)\)$/i.test(titleLower);
+        return !isConflicting;
+      }
+      return false;
+    });
+
+    if (isExactTitleCandidate) {
+      entityMatch = 'EXACT_TITLE';
+      entityScore = 50;
+    } else if (entityAliases.some(alias => alias.length >= 3 && fullText.includes(alias))) {
+      entityMatch = 'STRONG_DESCRIPTION';
+      entityScore = 35;
+    } else if (histContext.people.some(p => fullText.includes(p.toLowerCase()))) {
+      entityMatch = 'KEY_FIGURE';
+      entityScore = 25;
+    } else if (histContext.artifacts.some(art => fullText.includes(art))) {
+      entityMatch = 'KEY_ARTIFACT';
+      entityScore = 20;
+    }
+
+    // 2. Narrative / Event Relevance
+    let narrativeMatch = 'NONE';
+    let narrativeScore = 0;
+    const expLower = (histContext.exploration || '').toLowerCase();
     if (expLower && fullText.includes(expLower)) {
-      score += 20;
+      narrativeMatch = 'EXPEDITION_MATCH';
+      narrativeScore = 20;
+    } else if (histContext.activities.some(act => fullText.includes(act))) {
+      narrativeMatch = 'ACTIVITY_MATCH';
+      narrativeScore = 10;
     }
+
+    // 3. Geographic Relevance
+    let geographicMatch = 'NONE';
+    let geoScore = 0;
+    const regionLower = (histContext.region || entity.state || '').toLowerCase();
+    const countryLower = (histContext.country || entity.country || '').toLowerCase();
+    if (regionLower && fullText.includes(regionLower)) {
+      geographicMatch = 'REGION_MATCH';
+      geoScore = 15;
+    } else if (countryLower && fullText.includes(countryLower)) {
+      geographicMatch = 'COUNTRY_MATCH';
+      geoScore = 5;
+    }
+
+    // 4. Historical Period Relevance
+    let periodScore = 0;
     if (histContext.year && fullText.includes(histContext.year.toLowerCase())) {
-      score += 15;
+      periodScore = 15;
+    } else if (histContext.period && fullText.includes(histContext.period.toLowerCase())) {
+      periodScore = 10;
     }
-    if (locLower && fullText.includes(locLower)) {
-      score += 10;
+
+    // 5. Image Type Relevance (Base Score)
+    let typeScore = baseScore;
+
+    // When entityRequired is true (default for ENTITY_SPECIFIC historical waypoints),
+    // entityMatch=NONE must be a hard rejection for normal entity imagery.
+    // Narrative match to the larger historical event must NEVER override missing entity identity.
+    const isDocumentOrMap = category === 'HISTORICAL_MAP' || category === 'HISTORICAL_ARTIFACT';
+    const hasEntityEvidence = entityMatch !== 'NONE';
+
+    if (imageIntent.entityRequired && !hasEntityEvidence) {
+      console.log(`[IMAGE CANDIDATE (HISTORICAL WAYPOINT)] REJECTED due to entityRequired=true and entityMatch=NONE.`);
+      return {
+        score: 0,
+        decision: 'REJECT',
+        reason: 'NO_ENTITY_SPECIFIC_EVIDENCE',
+        candidate
+      };
     }
-    if (histContext.activities.some(act => fullText.includes(act))) {
-      score += 10;
+
+    if (entityMatch === 'NONE') {
+      console.log(`[IMAGE CANDIDATE (HISTORICAL WAYPOINT)] REJECTED due to lack of entity match.`);
+      return {
+        score: 0,
+        decision: 'REJECT',
+        reason: 'NO_ENTITY_SPECIFIC_EVIDENCE',
+        candidate
+      };
     }
-    if (histContext.artifacts.some(art => fullText.includes(art))) {
-      score += 10;
-    }
-    if (histContext.people.some(p => fullText.includes(p.toLowerCase()))) {
-      score += 10;
-    }
+
+    let score = typeScore + entityScore + narrativeScore + geoScore + periodScore;
 
     // Strong negative preference / penalty against modern location photography on historical waypoints
     if (isModern) {
@@ -1354,20 +1878,21 @@ Reason=${reason}`);
       score = Math.min(score, 30);
     }
 
-    const decision: 'ACCEPT' | 'REJECT' = score >= 45 ? 'ACCEPT' : 'REJECT';
+    // Require both adequate total score AND confirmed entity match level for acceptance
+    const decision: 'ACCEPT' | 'REJECT' = (entityScore >= 20 && score >= 45) ? 'ACCEPT' : 'REJECT';
     const reason = decision === 'ACCEPT'
-      ? `Historical narrative match (${category}, score ${score})`
-      : `Insufficient historical narrative relevance (${category}, score ${score})`;
+      ? `Historical entity match (${category}, score ${score})`
+      : `Insufficient historical entity relevance (${category}, score ${score})`;
 
-    console.log(`[IMAGE CANDIDATE (HISTORICAL WAYPOINT)]
-Title: ${title || 'Untitled'}
-Waypoint: ${entityName}
-Exploration: ${histContext.exploration || 'N/A'}
-Category: ${category}
-Is Modern Photo: ${isModern}
-Score: ${score}
-Decision: ${decision}
-Reason: ${reason}`);
+    // Diagnostic logging for Image Entity Relevance
+    console.log(`[Image Entity Relevance]
+entity="${entityName}"
+candidate="${title || 'Untitled'}"
+entityMatch=${entityMatch}
+narrativeMatch=${narrativeMatch}
+geographicMatch=${geographicMatch}
+finalScore=${score}
+decision=${decision}`);
 
     return {
       score,
@@ -1471,7 +1996,7 @@ Reason: ${reason}`);
     }
   }
 
-  // 8. IDENTIFIABLE ENTITY SCOPE & HARD ACCEPTANCE GATE
+  // 8. IDENTIFIABLE ENTITY SCOPE & MULTI-SIGNAL POLICY QUALIFICATION
   const isIdentifiableEntity = (
     !!entity.canonicalName ||
     !!entity.name ||
@@ -1487,9 +2012,24 @@ Reason: ${reason}`);
     (evidenceType === 'RELATED_ENTITY' && !!matchedAlias)
   ) && !isDifferentEntity && !isGenericTopic;
 
+  const semanticFeatureMatch = classifySemanticFeatureMatch(candidate, entity, {
+    featureType: imageIntent.featureType,
+    parentLocation: imageIntent.parentLocation || entity.city || entity.state
+  });
+
+  const topicMatch = imageIntent.topic ? classifyTopicMatch(candidate, imageIntent.topic) : 'NONE';
+  const policy: ImageValidationPolicy = imageIntent.policy || (isHistoricalWaypoint ? 'HISTORICAL_WAYPOINT' : (isGenericTopic ? 'TOPIC_REPRESENTATIVE' : 'STRICT_ENTITY'));
+  const shape: ImageSubjectShape = imageIntent.shape || (isHistoricalWaypoint ? 'SPECIFIC_ENTITY' : (isGenericTopic ? 'TOPIC' : 'SPECIFIC_ENTITY'));
+
   let decision: 'ACCEPT' | 'REJECT' = 'REJECT';
   let reason: string = 'NO_ENTITY_SPECIFIC_EVIDENCE';
+  let tier: ImageRelevanceTier | undefined;
 
+  const isGeoConflicting = geoEvidence === 'CONFLICTING';
+  const conflictEvidenceTrusted = coordinateStatus === 'VERIFIED';
+  const isUntrustedGeoConflict = isGeoConflicting && !conflictEvidenceTrusted && hasStrongEntityMatch && (semanticFeatureMatch === 'STRONG');
+
+  // Hard Rejections across all policies:
   if (isFlag) {
     decision = 'REJECT';
     reason = 'Generic national flag, insufficient entity relevance';
@@ -1499,59 +2039,156 @@ Reason: ${reason}`);
   } else if (isDifferentEntity) {
     decision = 'REJECT';
     reason = 'DIFFERENT_ENTITY';
-  } else if (isGenericTopic && evidenceType !== 'EXACT_ENTITY') {
+  } else if (isGeoConflicting && !isUntrustedGeoConflict) {
     decision = 'REJECT';
-    reason = 'NO_ENTITY_SPECIFIC_EVIDENCE';
-  } else if (!hasStrongEntityMatch) {
-    decision = 'REJECT';
-    reason = 'NO_ENTITY_SPECIFIC_EVIDENCE';
+    reason = 'GEOGRAPHIC_CONFLICT';
   } else {
-    // Strong entity match is present. Apply matrix based on coordinateStatus and geoEvidence.
-    if (geoEvidence === 'CONFLICTING') {
-      // Independent verified evidence or candidate metadata indicates conflicting location
-      decision = 'REJECT';
-      reason = geoMismatchReason || 'Geographic mismatch: candidate geography conflicts with entity location';
-    } else if (geoEvidence === 'MATCHING') {
-      decision = 'ACCEPT';
-      reason = coordinateStatus === 'VERIFIED' ? 'STRONG_ENTITY_MATCH_GEO_VERIFIED' : 'STRONG_ENTITY_MATCH_GEO_MATCHING';
-    } else {
-      // geoEvidence === 'NONE' or ABSENT / INVALID coordinates
-      decision = 'ACCEPT';
-      reason = 'STRONG_ENTITY_MATCH';
+    switch (policy) {
+      case 'HISTORICAL_WAYPOINT': {
+        // Complete isolation: strict entity and historical narrative relevance only
+        if (!hasStrongEntityMatch) {
+          decision = 'REJECT';
+          reason = 'NO_ENTITY_SPECIFIC_EVIDENCE';
+        } else {
+          decision = 'ACCEPT';
+          tier = 1;
+          reason = coordinateStatus === 'VERIFIED' ? 'STRONG_ENTITY_MATCH_GEO_VERIFIED' : 'STRONG_ENTITY_MATCH';
+        }
+        break;
+      }
+
+      case 'STRICT_ENTITY': {
+        // Strict landmarks: only Tier 1 is acceptable
+        if (!hasStrongEntityMatch) {
+          decision = 'REJECT';
+          reason = 'NO_ENTITY_SPECIFIC_EVIDENCE';
+        } else {
+          decision = 'ACCEPT';
+          tier = 1;
+          reason = coordinateStatus === 'VERIFIED' ? 'STRONG_ENTITY_MATCH_GEO_VERIFIED' : 'STRONG_ENTITY_MATCH';
+        }
+        break;
+      }
+
+      case 'GEOGRAPHIC_FEATURE': {
+        // For individual geographic features (e.g. Antelope Canyon), candidate must match the entity itself or verified alias
+        if (hasStrongEntityMatch) {
+          decision = 'ACCEPT';
+          tier = 1;
+          reason = 'EXACT_OR_ALIAS_FEATURE_MATCH';
+        } else if (shape === 'GEOGRAPHIC_COLLECTION' || shape === 'DESCRIPTIVE_GEOGRAPHIC_QUERY') {
+          // Geographic collections or descriptive queries allow strong related component features or representative parent views
+          if (semanticFeatureMatch === 'STRONG') {
+            decision = 'ACCEPT';
+            tier = 2;
+            reason = 'STRONG_RELATED_FEATURE_MATCH';
+          } else if (semanticFeatureMatch === 'MODERATE' && geoEvidence === 'MATCHING') {
+            decision = 'ACCEPT';
+            tier = 3;
+            reason = 'REPRESENTATIVE_LOCATION_FEATURE';
+          } else if (topicMatch === 'STRONG') {
+            decision = 'ACCEPT';
+            tier = 2;
+            reason = 'STRONG_TOPIC_FEATURE_MATCH';
+          } else {
+            decision = 'REJECT';
+            reason = 'INSUFFICIENT_FEATURE_RELEVANCE';
+          }
+        } else {
+          // Single specific feature without strong entity match must be rejected
+          decision = 'REJECT';
+          reason = 'NO_ENTITY_SPECIFIC_EVIDENCE';
+        }
+        break;
+      }
+
+      case 'LOCATION_REPRESENTATIVE': {
+        // Broad locations (e.g. "Where is Venice?", "Show me Paris")
+        if (hasStrongEntityMatch) {
+          decision = 'ACCEPT';
+          tier = 1;
+          reason = 'EXACT_LOCATION_MATCH';
+        } else if (semanticFeatureMatch === 'STRONG' || semanticFeatureMatch === 'MODERATE' || geoEvidence === 'MATCHING') {
+          decision = 'ACCEPT';
+          tier = (semanticFeatureMatch === 'STRONG') ? 2 : 3;
+          reason = 'LOCATION_REPRESENTATIVE_MATCH';
+        } else {
+          decision = 'REJECT';
+          reason = 'INSUFFICIENT_LOCATION_EVIDENCE';
+        }
+        break;
+      }
+
+      case 'TOPIC_REPRESENTATIVE':
+      default: {
+        if (evidenceType === 'EXACT_ENTITY' || topicMatch === 'STRONG') {
+          decision = 'ACCEPT';
+          tier = (evidenceType === 'EXACT_ENTITY') ? 1 : 2;
+          reason = 'STRONG_TOPIC_MATCH';
+        } else if (topicMatch === 'MODERATE') {
+          decision = 'ACCEPT';
+          tier = 3;
+          reason = 'MODERATE_TOPIC_MATCH';
+        } else {
+          decision = 'REJECT';
+          reason = 'NO_ENTITY_SPECIFIC_EVIDENCE';
+        }
+        break;
+      }
     }
   }
 
-  // 9. Scoring for candidates that passed the hard entity-specific qualification gate
+  // 9. Scoring for accepted candidates within their tier
   let score = 0;
   if (decision === 'ACCEPT') {
-    if (evidenceType === 'EXACT_ENTITY') {
+    if (tier === 1) {
       score += 60;
-    } else if (evidenceType === 'KNOWN_ALIAS') {
-      score += 55;
-    } else if (evidenceType === 'DIRECT_ENTITY_SOURCE') {
-      score += 55;
-    } else if (evidenceType === 'RELATED_ENTITY') {
+      if (evidenceType === 'EXACT_ENTITY') score += 10;
+    } else if (tier === 2) {
       score += 45;
+    } else if (tier === 3) {
+      score += 30;
+    } else {
+      score += 15;
     }
 
     if (entity.city && fullText.includes(entity.city.toLowerCase())) {
-      score += 20;
-    }
-    if (entity.country && fullText.includes(entity.country.toLowerCase())) {
       score += 15;
     }
-    if (geoEvidence === 'MATCHING') {
-      score += 20;
+    if (entity.country && fullText.includes(entity.country.toLowerCase())) {
+      score += 10;
     }
-
-    if (score < 40) {
-      decision = 'REJECT';
-      reason = 'LOW_TOPIC_RELEVANCE';
+    if (geoEvidence === 'MATCHING') {
+      score += 15;
+    }
+    if (coordinateStatus === 'VERIFIED') {
+      score += 10;
     }
   }
 
-  // 10. Emitting candidate log
-  const topicMatch = imageIntent.topic ? classifyTopicMatch(candidate, imageIntent.topic) : 'NONE';
+  // 10. Emitting diagnostic candidate validation logs
+  console.log(`[IMAGE GEOGRAPHIC EVIDENCE]
+candidateEntityMatch=${entityMatchLevel}
+candidateSemanticMatch=${semanticFeatureMatch}
+canonicalCoordinateSource=${entity.coordinateSource || 'unknown'}
+canonicalCoordinateTrust=${coordinateStatus}
+geographicConflict=${isGeoConflicting}
+conflictEvidenceTrusted=${conflictEvidenceTrusted}
+finalDecision=${decision}`);
+
+  console.log(`[IMAGE VALIDATION]
+entity="${entity.name || ''}"
+shape="${shape}"
+policy="${policy}"
+candidate="${title || 'Untitled'}"
+EntityMatch=${entityMatchLevel}
+SemanticFeatureMatch=${semanticFeatureMatch}
+GeographicEvidence=${geoEvidence}
+GeographicConflict=${isGeoConflicting}
+Tier=${tier ?? 'NONE'}
+Decision=${decision}
+Reason=${reason}`);
+
   const geographicConstraintApplied = coordinateStatus === 'VERIFIED';
 
   console.log(`[IMAGE CANDIDATE]
@@ -1569,7 +2206,8 @@ Reason=${reason}`);
     score,
     decision,
     reason,
-    candidate
+    candidate,
+    tier
   };
 }
 
@@ -1738,6 +2376,26 @@ export function buildEntityImageQueries(info: {
     queries.push(`${cleanName} ${country}`);
   }
 
+  // Geographic collection and descriptive query expansions (generic feature-oriented queries)
+  if (imageIntent.shape === 'GEOGRAPHIC_COLLECTION' || imageIntent.shape === 'DESCRIPTIVE_GEOGRAPHIC_QUERY' || imageIntent.policy === 'GEOGRAPHIC_FEATURE') {
+    const featType = imageIntent.featureType;
+    const pLoc = imageIntent.parentLocation || city || country;
+    if (featType && pLoc) {
+      queries.push(`${cleanName}`);
+      queries.push(`${pLoc} ${featType}s`);
+      queries.push(`${featType}s ${pLoc}`);
+      queries.push(`${pLoc} ${featType}`);
+      if (country && pLoc.toLowerCase() !== country.toLowerCase()) {
+        queries.push(`${featType} ${pLoc} ${country}`);
+        queries.push(`${pLoc} ${featType}s ${country}`);
+      }
+      if (featType === 'canal') {
+        queries.push(`${pLoc} waterways`);
+        queries.push(`${pLoc} canal network`);
+      }
+    }
+  }
+
   // Clean location name for modern/general places
   if (!isHistoricalVessel && cleanName) {
     queries.push(cleanName);
@@ -1758,6 +2416,9 @@ export interface ImageSearchContext {
   relatedWaypoints?: LocationInfo[];
 }
 
+// Request-level in-flight deduplication cache
+const inFlightImageRequests = new Map<string, Promise<GalleryImage[]>>();
+
 export async function fetchAndValidateImages(
   info: LocationInfo,
   searchContext?: ImageSearchContext
@@ -1768,6 +2429,37 @@ export async function fetchAndValidateImages(
   const effectiveWaypointId = searchContext?.waypointId || (info as any).waypoint?.id || info.id || info.name;
   const relatedWaypointCount = searchContext?.relatedWaypoints?.length || (info as any).relatedWaypointCount || 1;
 
+  // Compute request deduplication key
+  const cleanEntityName = (info.canonicalName || info.name || '').toLowerCase().trim();
+  const routeGroupId = (info as any).routeGroupId || (info as any).waypoint?.routeGroupId || '';
+  const intentStr = (info as any).intent || '';
+  const dedupeKey = `${effectiveSearchId || 'no-search'}::${effectiveWaypointId}::${cleanEntityName}::${routeGroupId}::${intentStr}`;
+
+  if (inFlightImageRequests.has(dedupeKey)) {
+    return inFlightImageRequests.get(dedupeKey)!;
+  }
+
+  const fetchPromise = (async () => {
+    try {
+      return await _fetchAndValidateImagesInternal(info, searchContext, effectiveSearchId, effectiveWaypointId, relatedWaypointCount);
+    } finally {
+      // Clear in-flight cache after completion or failure
+      inFlightImageRequests.delete(dedupeKey);
+    }
+  })();
+
+  inFlightImageRequests.set(dedupeKey, fetchPromise);
+  return fetchPromise;
+}
+
+async function _fetchAndValidateImagesInternal(
+  info: LocationInfo,
+  searchContext: ImageSearchContext | undefined,
+  effectiveSearchId: string | undefined,
+  effectiveWaypointId: string,
+  relatedWaypointCount: number
+): Promise<GalleryImage[]> {
+
   if (effectiveSearchId) {
     console.log(`[IMAGE GROUP]\nsearchId="${effectiveSearchId}"\nwaypointId="${effectiveWaypointId}"\nrelatedWaypointCount=${relatedWaypointCount}`);
   }
@@ -1776,6 +2468,7 @@ export async function fetchAndValidateImages(
   const validatedCandidates: Array<{
     candidate: ImageCandidate;
     score: number;
+    tier?: ImageRelevanceTier;
     category?: HistoricalImageCategory;
   }> = [];
   const seenUrls = new Set<string>();
@@ -1819,6 +2512,7 @@ export async function fetchAndValidateImages(
       validatedCandidates.push({
         candidate,
         score: validation.score,
+        tier: validation.tier,
         category
       });
     }
@@ -1915,7 +2609,11 @@ export async function fetchAndValidateImages(
 
   for (let i = 0; i < queries.length; i++) {
     const query = queries[i];
-    const contextStr = (info as any).context || (info as any).routeTitle || (info as any).significance || histContextStr;
+    let candidateContext = (info as any).context || (info as any).routeTitle || (info as any).significance || histContextStr;
+    if (typeof candidateContext === 'string' && /^(from route|route context|historical significance|notable facts|image|none)$/i.test(candidateContext.trim())) {
+      candidateContext = histContextStr !== 'none' ? histContextStr : ((info as any).significance || '');
+    }
+    const contextStr = candidateContext || histContextStr;
     console.log(`[IMAGE SEARCH]\nentity="${info.name}"\ncontext="${contextStr}"`);
     console.log(`[IMAGE SEARCH DETAILS]\nEntity: ${info.name}\nEntity Type: ${info.entityType || (info as any).type || 'unknown'}\nIntent: ${(info as any).intent || 'unknown'}\nHistorical Context: ${histContextStr}\nGeographic Context: ${geoContextStr}\nQuery: ${query}`);
 
@@ -2056,11 +2754,27 @@ export async function fetchAndValidateImages(
       });
     }
   } else {
-    // Standard sorting by score descending, with search uniqueness priority
-    validatedCandidates.sort((a, b) => b.score - a.score);
-    const rankedCandidates = rankAndDeduplicateCandidates(validatedCandidates);
+    // Tier-based grouping and selection:
+    // Select Tier 1 first; use Tier 2 only after Tier 1 availability is determined;
+    // use Tier 3 only when higher tiers are empty or insufficient; use Tier 4 only where explicitly permitted.
+    const tier1 = validatedCandidates.filter(c => c.tier === 1).sort((a, b) => b.score - a.score);
+    const tier2 = validatedCandidates.filter(c => c.tier === 2).sort((a, b) => b.score - a.score);
+    const tier3 = validatedCandidates.filter(c => c.tier === 3).sort((a, b) => b.score - a.score);
+    const tier4 = validatedCandidates.filter(c => c.tier === 4 || (!c.tier && c.score > 0)).sort((a, b) => b.score - a.score);
 
-    for (const { candidate } of rankedCandidates.slice(0, 4)) {
+    const rankedTier1 = rankAndDeduplicateCandidates(tier1);
+    const rankedTier2 = rankAndDeduplicateCandidates(tier2);
+    const rankedTier3 = rankAndDeduplicateCandidates(tier3);
+    const rankedTier4 = rankAndDeduplicateCandidates(tier4);
+
+    const prioritizedCandidates = [
+      ...rankedTier1,
+      ...rankedTier2,
+      ...rankedTier3,
+      ...rankedTier4
+    ];
+
+    for (const { candidate } of prioritizedCandidates.slice(0, 4)) {
       foundImages.push({
         url: candidate.url,
         caption: cleanMetadataString(candidate.caption || candidate.description || candidate.title || (foundImages.length === 0 ? info.imageCaption : undefined)),

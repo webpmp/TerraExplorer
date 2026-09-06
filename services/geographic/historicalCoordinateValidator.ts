@@ -372,6 +372,268 @@ export const HISTORICAL_KNOWLEDGE_BASE: Record<string, HistoricalEntityKnowledge
       confidence: "high"
     },
     boundingBox: { minLat: -24.0, maxLat: -16.0, minLng: 145.0, maxLng: 153.0 }
+  },
+  "trail of tears": {
+    entity: "Trail of Tears",
+    entityType: "historical_event",
+    expectedRegion: "Southeastern United States (Georgia, Tennessee, Alabama, North Carolina) to Indian Territory (Oklahoma)",
+    approximateRegion: "Southeastern United States to Oklahoma",
+    historicalContext: "Forced displacement and relocation of Cherokee, Muscogee, Seminole, Chickasaw, and Choctaw nations between 1830 and 1850 across multiple overland detachments and water routes to Indian Territory.",
+    sourceRationale: "National Park Service National Historic Trail documentation of Cherokee removal routes (Northern Route, Benge Route, Bell Route, Water Route).",
+    confidence: "high",
+    allowedCountries: ["United States"],
+    forbiddenRegions: ["Europe", "Asia", "Africa", "South America", "Canada"],
+    exactLocationConfirmed: false,
+    exactLocationKnown: true,
+    confirmedWreckLocation: false,
+    approximateCoordinates: {
+      lat: 35.8000,
+      lng: -88.5000,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 33.0, maxLat: 39.0, minLng: -96.0, maxLng: -82.0 }
+  },
+  "the trail of tears": {
+    entity: "Trail of Tears",
+    entityType: "historical_event",
+    expectedRegion: "Southeastern United States (Georgia, Tennessee, Alabama, North Carolina) to Indian Territory (Oklahoma)",
+    approximateRegion: "Southeastern United States to Oklahoma",
+    historicalContext: "Forced displacement and relocation of Cherokee, Muscogee, Seminole, Chickasaw, and Choctaw nations between 1830 and 1850 across multiple overland detachments and water routes to Indian Territory.",
+    sourceRationale: "National Park Service National Historic Trail documentation of Cherokee removal routes.",
+    confidence: "high",
+    allowedCountries: ["United States"],
+    forbiddenRegions: ["Europe", "Asia", "Africa", "South America", "Canada"],
+    exactLocationConfirmed: false,
+    exactLocationKnown: true,
+    confirmedWreckLocation: false,
+    approximateCoordinates: {
+      lat: 35.8000,
+      lng: -88.5000,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 33.0, maxLat: 39.0, minLng: -96.0, maxLng: -82.0 }
+  },
+  "fort gibson": {
+    entity: "Fort Gibson",
+    entityType: "historical_site",
+    expectedRegion: "Muskogee County / Cherokee County, Oklahoma, United States",
+    approximateRegion: "Fort Gibson, Oklahoma, United States",
+    country: "United States",
+    state: "Oklahoma",
+    historicalContext: "Key military post established in 1824 on the Grand River in Indian Territory; served as the terminus and primary receiving station for Cherokee and Creek removal detachments during the Trail of Tears.",
+    sourceRationale: "National Historic Landmark site in Fort Gibson, Muskogee/Cherokee County, Oklahoma (approx 35.80°N, 95.25°W). Distinct from Fort Osage (Missouri).",
+    confidence: "high",
+    allowedCountries: ["United States"],
+    forbiddenRegions: ["Missouri", "Jackson County, Missouri", "Alabama", "Tennessee", "Pennsylvania"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 35.7981,
+      lng: -95.2497,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 35.5, maxLat: 36.2, minLng: -95.6, maxLng: -94.9 }
+  },
+  "tahlequah": {
+    entity: "Tahlequah",
+    entityType: "historical_site",
+    expectedRegion: "Cherokee County, Oklahoma, United States",
+    approximateRegion: "Tahlequah, Oklahoma, United States",
+    country: "United States",
+    state: "Oklahoma",
+    historicalContext: "Capital of the Cherokee Nation established in 1839 in Indian Territory following forced removal on the Trail of Tears.",
+    sourceRationale: "Cherokee Nation capital in Cherokee County, Oklahoma (approx 35.91°N, 94.97°W).",
+    confidence: "high",
+    allowedCountries: ["United States"],
+    forbiddenRegions: ["Georgia", "Tennessee", "Alabama", "Missouri"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 35.9154,
+      lng: -94.9700,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 35.7, maxLat: 36.1, minLng: -95.2, maxLng: -94.7 }
+  },
+  "new echota": {
+    entity: "New Echota",
+    entityType: "historical_site",
+    expectedRegion: "Gordon County, Georgia, United States",
+    approximateRegion: "New Echota Historic Site, Calhoun, Georgia, United States",
+    country: "United States",
+    state: "Georgia",
+    historicalContext: "Capital of the Cherokee Nation from 1825 until forced removal; site of the controversial 1835 Treaty of New Echota.",
+    sourceRationale: "State historic site in Gordon County, Georgia (approx 34.54°N, 84.91°W).",
+    confidence: "high",
+    allowedCountries: ["United States"],
+    forbiddenRegions: ["Oklahoma", "Arkansas", "Missouri", "Illinois"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 34.5408,
+      lng: -84.9100,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 34.3, maxLat: 34.8, minLng: -85.2, maxLng: -84.6 }
+  },
+  "fort cass": {
+    entity: "Fort Cass",
+    entityType: "historical_site",
+    expectedRegion: "Charleston, Bradley County, Tennessee, United States",
+    approximateRegion: "Charleston, Bradley County, Tennessee",
+    country: "United States",
+    state: "Tennessee",
+    historicalContext: "Headquarters for the military removal of the Cherokee and primary internment camp/staging area where thousands were assembled before departure on the Trail of Tears.",
+    sourceRationale: "Military headquarters and concentration camp site at Charleston on the Hiwassee River, Bradley County, Tennessee.",
+    confidence: "high",
+    allowedCountries: ["United States"],
+    forbiddenRegions: ["Oklahoma", "Missouri", "Arkansas"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 35.2858,
+      lng: -84.7578,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 35.0, maxLat: 35.6, minLng: -85.1, maxLng: -84.4 }
+  },
+  "fort jackson": {
+    entity: "Fort Jackson",
+    entityType: "historical_site",
+    expectedRegion: "Elmore County, Alabama, United States",
+    approximateRegion: "Fort Jackson / Fort Toulouse, Wetumpka, Alabama",
+    country: "United States",
+    state: "Alabama",
+    historicalContext: "Historic fort on the Coosa and Tallapoosa rivers in Alabama; site of the 1814 Treaty of Fort Jackson ending the Creek War.",
+    sourceRationale: "Historic site in Elmore County, Alabama. Distinct from Fort Gibson (OK), Fort Osage (MO), and Fort Franklin.",
+    confidence: "high",
+    allowedCountries: ["United States"],
+    forbiddenRegions: ["Oklahoma", "Missouri", "Tennessee", "Pennsylvania"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 32.5025,
+      lng: -86.2553,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 32.2, maxLat: 32.8, minLng: -86.5, maxLng: -86.0 }
+  },
+  "fort osage": {
+    entity: "Fort Osage",
+    entityType: "historical_site",
+    expectedRegion: "Sibley, Jackson County, Missouri, United States",
+    approximateRegion: "Sibley, Jackson County, Missouri",
+    country: "United States",
+    state: "Missouri",
+    historicalContext: "Early 19th-century factory trading post and military fort on the Missouri River established by William Clark in 1808.",
+    sourceRationale: "National Historic Landmark in Sibley, Jackson County, Missouri. Distinct from Fort Gibson (Oklahoma) and Fort Jackson (Alabama).",
+    confidence: "high",
+    allowedCountries: ["United States"],
+    forbiddenRegions: ["Oklahoma", "Alabama", "Tennessee", "Georgia"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 39.1883,
+      lng: -94.1950,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 39.0, maxLat: 39.4, minLng: -94.4, maxLng: -93.9 }
+  },
+  "fort payne": {
+    entity: "Fort Payne",
+    entityType: "historical_site",
+    expectedRegion: "DeKalb County, Alabama, United States",
+    approximateRegion: "Fort Payne, DeKalb County, Alabama",
+    country: "United States",
+    state: "Alabama",
+    historicalContext: "Cherokee removal fort and internment site in Alabama from which the John Benge detachment departed on the Trail of Tears in 1838.",
+    sourceRationale: "Historic removal site in Fort Payne, DeKalb County, Alabama (approx 34.44°N, 85.72°W).",
+    confidence: "high",
+    allowedCountries: ["United States"],
+    forbiddenRegions: ["Oklahoma", "Missouri", "Tennessee", "Pennsylvania"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 34.4442,
+      lng: -85.7197,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 34.2, maxLat: 34.7, minLng: -86.0, maxLng: -85.4 }
+  },
+  "fort coffee": {
+    entity: "Fort Coffee",
+    entityType: "historical_site",
+    expectedRegion: "Le Flore County, Oklahoma, United States",
+    approximateRegion: "Fort Coffee / Spiro, Le Flore County, Oklahoma",
+    country: "United States",
+    state: "Oklahoma",
+    historicalContext: "Military garrison established in 1834 on the Arkansas River in Indian Territory; served as the primary arrival river landing and receiving depot for Choctaw and Cherokee water route detachments.",
+    sourceRationale: "Historic military post and river landing site on Swallow Rock overlooking the Arkansas River in Le Flore County, Oklahoma (approx 35.30°N, 94.61°W). Distinct from Oklahoma City.",
+    confidence: "high",
+    allowedCountries: ["United States"],
+    forbiddenRegions: ["Oklahoma City", "Missouri", "Tennessee", "Georgia", "Alabama"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 35.3042,
+      lng: -94.6144,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 35.1, maxLat: 35.5, minLng: -94.8, maxLng: -94.4 }
+  },
+  "ross's landing": {
+    entity: "Ross's Landing",
+    entityType: "historical_site",
+    expectedRegion: "Chattanooga, Hamilton County, Tennessee, United States",
+    approximateRegion: "Ross's Landing, Chattanooga, Tennessee",
+    country: "United States",
+    state: "Tennessee",
+    historicalContext: "Cherokee trading post established by John Ross and primary embarkation point on the Tennessee River for water route detachments during the Trail of Tears.",
+    sourceRationale: "Historic riverfront landing in Chattanooga, Hamilton County, Tennessee (approx 35.056°N, 85.309°W).",
+    confidence: "high",
+    allowedCountries: ["United States"],
+    forbiddenRegions: ["Oklahoma", "Missouri", "Illinois", "Arkansas"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 35.0560,
+      lng: -85.3090,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 34.9, maxLat: 35.2, minLng: -85.5, maxLng: -85.1 }
+  },
+  "gunter's landing": {
+    entity: "Gunter's Landing",
+    entityType: "historical_site",
+    expectedRegion: "Guntersville, Marshall County, Alabama, United States",
+    approximateRegion: "Guntersville, Marshall County, Alabama",
+    country: "United States",
+    state: "Alabama",
+    historicalContext: "Cherokee river settlement and ferry landing on the Tennessee River established by John Gunter; key river crossing for the John Benge detachment in 1838.",
+    sourceRationale: "Historic Tennessee River crossing site in Guntersville, Marshall County, Alabama (approx 34.358°N, 86.294°W).",
+    confidence: "high",
+    allowedCountries: ["United States"],
+    forbiddenRegions: ["Oklahoma", "Missouri", "Tennessee", "Georgia"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 34.3581,
+      lng: -86.2944,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 34.2, maxLat: 34.5, minLng: -86.5, maxLng: -86.1 }
   }
 };
 

@@ -723,6 +723,10 @@ interface InfoPanelProps {
   routeNav?: {
     current: number;
     total: number;
+    routeGroupName?: string;
+    routeGroupId?: string;
+    routeLocalCurrent?: number;
+    routeLocalTotal?: number;
     onNext: () => void;
     onPrev: () => void;
   };
@@ -1085,7 +1089,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
     const geographicDesc = extractText(rawInfo.description) || null;
     const historicalDesc = extractText(wp.description) || null;
-    const routeContextText = rawInfo.routeContext?.text ? extractText(rawInfo.routeContext.text) : null;
+    const routeContextText = (rawInfo.routeContext?.text ? extractText(rawInfo.routeContext.text) : null) ||
+      (wp.routeContext?.text ? extractText(wp.routeContext.text) : null) ||
+      (wp.routeContextText ? extractText(wp.routeContextText) : null);
     
     let combinedDescParts: string[] = [];
 
@@ -1387,6 +1393,19 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       routeTitle: (wp as any)?.routeTitle || (rawInfo as any)?.routeTitle || (rawInfo as any)?.routeContext?.title,
       entities: (wp as any)?.entities || (rawInfo as any)?.entities,
       highlights: (wp as any)?.highlights || (rawInfo as any)?.highlights,
+      // Route Context Source Precedence:
+      // 1. rawInfo.routeContext
+      // 2. wp.routeContext
+      // 3. wp.routeContextText
+      // 4. authoritative route-specific historical content
+      // 5. undefined
+      routeContext: rawInfo.routeContext
+        ? rawInfo.routeContext
+        : (wp.routeContext
+          ? wp.routeContext
+          : (wp.routeContextText
+            ? { title: wp.routeGroupName || 'Route Context', text: wp.routeContextText }
+            : undefined)),
       description: desc,
       population,
       climate,
@@ -1923,9 +1942,12 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           <div className="space-y-4">
             {renderRouteContext && (
               <div className="mb-2">
-                <h3 className={`text-xs font-bold uppercase tracking-widest mb-1 ${isRetro ? 'text-current' : isParchment ? 'text-[#8b5a2b]' : 'text-cyan-400'}`}>
-                  {info.routeContext.title}
-                </h3>
+                <SectionHeader 
+                  title={info.routeContext.title} 
+                  theme={theme} 
+                  isRetro={isRetro} 
+                  isParchment={isParchment} 
+                />
                 <p className={`${bodyTextStyle} mb-3 border-b ${isRetro ? 'border-current/30' : isParchment ? 'border-[#8b5a2b]/30' : 'border-white/10'} pb-3`}>
                   {info.routeContext.text}
                 </p>
@@ -2471,11 +2493,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                      {displaySubtitle}
                    </div>
                  )}
-                 {displayAltNames && (
-                   <p className={`mt-0.5 text-xs ${isRetro ? 'text-current opacity-70' : isParchment ? 'text-[#8b5a2b]/80' : 'text-slate-400'}`}>
-                     {displayAltNames}
-                   </p>
-                 )}
                  {displayCategory && (
                    <span className={`${smallTextSize} uppercase px-2 py-0.5 ${theme.tag}`}>
                      {displayCategory.toUpperCase()}
@@ -2496,10 +2513,17 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                 <button onClick={routeNav.onPrev} className={`p-1.5 rounded-full ${theme.navBtn}`}>
                     <ChevronLeft size={16} />
                 </button>
-                <div className="flex flex-col items-center">
-                   <span className={`${isRetro ? 'text-base' : 'text-xs'} font-bold uppercase tracking-widest ${theme.subtext}`}>
-                       Waypoint {routeNav.current} of {routeNav.total}
-                   </span>
+                <div className="flex flex-col items-center text-center px-2">
+                    {routeNav.routeGroupName && (
+                      <span className={`text-[10px] uppercase tracking-wider font-semibold opacity-75 mb-0.5 ${theme.subtext}`}>
+                        {routeNav.routeGroupName}
+                      </span>
+                    )}
+                    <span className={`${isRetro ? 'text-base' : 'text-xs'} font-bold uppercase tracking-widest ${theme.subtext}`}>
+                        {routeNav.routeGroupName && routeNav.routeLocalCurrent !== undefined && routeNav.routeLocalTotal !== undefined
+                          ? `Waypoint ${routeNav.routeLocalCurrent} of ${routeNav.routeLocalTotal}`
+                          : `Waypoint ${routeNav.current} of ${routeNav.total}`}
+                    </span>
                 </div>
                 <button onClick={routeNav.onNext} className={`p-1.5 rounded-full ${theme.navBtn}`}>
                     <ChevronRight size={16} />

@@ -4,18 +4,28 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import {
   generateContentWithRetry,
   getInfoFromFeature,
+  generateRoute,
+  isGeminiConfigured,
+  ai,
   LMStudioNoModelError,
   isLMStudioNoModelError
 } from '../geminiService';
+import { runSearchPipeline } from '../pipeline';
 import { mergeLocationInfo } from '../locationService';
 import InfoPanel from '../../components/InfoPanel';
 import { LocationInfo, LocationType, MapMarker } from '../../types';
 
-describe('LM Studio Missing Model Error Handling', () => {
+describe('LM Studio Missing Model Error Handling & Gemini Fallback', () => {
   const originalFetch = global.fetch;
   const originalLocalStorage = global.localStorage;
+  const originalEnv = { ...process.env };
 
   beforeEach(() => {
+    // Reset process.env for each test
+    delete process.env.API_KEY;
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.VITE_GEMINI_API_KEY;
+
     // Mock userSettings in localStorage to select LM Studio
     const settings = {
       aiProvider: 'lmstudio',
@@ -43,10 +53,11 @@ describe('LM Studio Missing Model Error Handling', () => {
   afterEach(() => {
     global.fetch = originalFetch;
     global.localStorage = originalLocalStorage;
+    process.env = { ...originalEnv };
     vi.restoreAllMocks();
   });
 
-  it('1 & 2. Converts HTTP 400 "No models loaded" into LMStudioNoModelError', async () => {
+  it('1 & 2. When Gemini is not configured, converts HTTP 400 "No models loaded" into LMStudioNoModelError', async () => {
     const rawLMStudioError = "No models loaded. Please load a model in the developer page or use the 'lms load' command.";
     
     global.fetch = vi.fn().mockResolvedValue({
@@ -55,6 +66,8 @@ describe('LM Studio Missing Model Error Handling', () => {
       statusText: 'Bad Request',
       text: async () => rawLMStudioError
     } as unknown as Response);
+
+    const warnSpy = vi.spyOn(console, 'warn');
 
     await expect(
       generateContentWithRetry({ contents: 'Test prompt' })
@@ -70,6 +83,81 @@ describe('LM Studio Missing Model Error Handling', () => {
       expect(err.message).not.toContain('developer page');
       expect(err.message).not.toContain('lms load');
     }
+
+    expect(warnSpy).toHaveBeenCalledWith('[AI Provider] LM Studio has no loaded model');
+    expect(warnSpy).toHaveBeenCalledWith('[AI Provider] No fallback provider available');
+  });
+
+  it('3. When Gemini IS configured, automatically falls back to Gemini and logs fallback steps', async () => {
+    process.env.GEMINI_API_KEY = 'test-gemini-key';
+    expect(isGeminiConfigured()).toBe(true);
+
+    const rawLMStudioError = "No models loaded. Please load a model in the developer page or use the 'lms load' command.";
+    
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      statusText: 'Bad Request',
+      text: async () => rawLMStudioError
+    } as unknown as Response);
+
+    const mockGeminiResponse = {
+      text: JSON.stringify({
+        name: 'Cherokee Trail of Tears',
+        waypoints: [
+          { name: 'New Echota', lat: 34.54, lng: -84.91 }
+        ]
+      })
+    };
+
+    const generateContentSpy = vi.spyOn(ai.models, 'generateContent').mockResolvedValue(mockGeminiResponse as any);
+    const logSpy = vi.spyOn(console, 'log');
+    const warnSpy = vi.spyOn(console, 'warn');
+
+    const result = await generateContentWithRetry({ contents: 'Trace Cherokee Trail of Tears' });
+
+    expect(generateContentSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith('[AI Provider] LM Studio has no loaded model');
+    expect(logSpy).toHaveBeenCalledWith('[AI Provider] LM Studio generation started');
+    expect(logSpy).toHaveBeenCalledWith('[AI Provider] Attempting Gemini fallback');
+    expect(logSpy).toHaveBeenCalledWith('[AI Provider] Gemini fallback successful');
+    expect(result.text).toContain('Cherokee Trail of Tears');
+  });
+
+  it('4. generateRoute re-throws LMStudioNoModelError when no fallback is configured, preventing empty route swallowing', async () => {
+    const rawLMStudioError = "No models loaded. Please load a model in the developer page or use the 'lms load' command.";
+    
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      statusText: 'Bad Request',
+      text: async () => rawLMStudioError
+    } as unknown as Response);
+
+    await expect(
+      generateRoute('Non-canonical Custom Expedition')
+    ).rejects.toThrow(LMStudioNoModelError);
+  });
+
+  it('5. runSearchPipeline catches LMStudioNoModelError and returns error: "LM_STUDIO_NO_MODEL"', async () => {
+    const rawLMStudioError = "No models loaded. Please load a model in the developer page or use the 'lms load' command.";
+    
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      statusText: 'Bad Request',
+      text: async () => rawLMStudioError
+    } as unknown as Response);
+
+    const pipelineResult = await runSearchPipeline({
+      rawQuery: 'Route from Paris to Rome',
+      selectedLocation: null
+    });
+
+    expect(pipelineResult.mode).toBe('route');
+    expect(pipelineResult.isValid).toBe(false);
+    expect((pipelineResult as any).error).toBe('LM_STUDIO_NO_MODEL');
+    expect(pipelineResult.waypoints).toEqual([]);
   });
 
   it('6. An unrelated LM Studio HTTP 400 error continues through the generic error path', async () => {
@@ -120,7 +208,7 @@ describe('LM Studio Missing Model Error Handling', () => {
     expect(result.text).toContain('Burj Khalifa');
   });
 
-  it('Propagates LMStudioNoModelError through getInfoFromFeature with clean user-facing error fields', async () => {
+  it('Propagates LMStudioNoModelError through getInfoFromFeature with clean user-facing error fields when no fallback', async () => {
     const rawLMStudioError = "No models loaded. Please load a model in the developer page or use the 'lms load' command.";
     
     global.fetch = vi.fn().mockResolvedValue({

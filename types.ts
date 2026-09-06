@@ -317,6 +317,27 @@ export interface UserSettings {
   narrationVolume?: number;
 }
 
+export type RouteEvidenceMode =
+  | 'DOCUMENTED_ROUTE'
+  | 'MULTI_ROUTE_EVENT'
+  | 'REGIONAL_EVENT'
+  | 'LLM_INFERRED_ROUTE';
+
+export interface RouteGroup {
+  id: string;
+  name: string;
+  type?:
+    | 'documented_route'
+    | 'detachment'
+    | 'contingent'
+    | 'regional_cluster'
+    | 'inferred_route';
+  isSequential: boolean;
+  routeEvidenceMode?: RouteEvidenceMode;
+  description?: string;
+  waypoints: Waypoint[];
+}
+
 export interface Route {
   title?: string;
   routeType?: 'single_location' | 'regional_event' | 'multi_location_campaign' | 'fixed_path' | 'network' | 'conceptual' | 'point';
@@ -326,6 +347,28 @@ export interface Route {
     reasoning: string;
   };
   isSequential?: boolean;
+  routeEvidenceMode?: RouteEvidenceMode;
+  routeGroups?: RouteGroup[];
+}
+
+export type WaypointType =
+  | 'route_waypoint'
+  | 'historical_site'
+  | 'administrative_depot';
+
+export type SegmentEvidence =
+  | 'DOCUMENTED_ROUTE_SEGMENT'
+  | 'HIGH_LEVEL_HISTORICAL_ASSOCIATION'
+  | 'INFERRED_CONNECTION';
+
+export interface RouteWaypointMembership {
+  routeGroupId: string;
+  routeGroupName?: string;
+  sequence?: number;
+  membershipType?:
+    | 'ROUTE_EXCLUSIVE'
+    | 'SHARED_ROUTE_ANCHOR'
+    | 'EVENT_LEVEL_ANCHOR';
 }
 
 export interface Waypoint {
@@ -338,12 +381,21 @@ export interface Waypoint {
   lng: number;
   context?: string;
   entityType?: string;
+  waypointType?: WaypointType;
+  segmentEvidence?: SegmentEvidence;
+  segmentEvidenceReason?: string;
   discoverySignals?: string[];
   role?: "primary" | "related" | "administrative" | "historical_context";
   parentId?: string;
-  sequence?: number;
+  sequence?: number; // Route-group-local sequence (1, 2, ...) within its route group
+  globalSequence?: number; // Global array order (1, 2, ...) across all waypoints in the event
   alternateNames?: string[];
   routeTitle?: string;
+  routeContext?: {
+    title: string;
+    text: string;
+  };
+  routeContextText?: string;
   description?: string;
   significance?: string;
   highlights?: string[];
@@ -363,6 +415,19 @@ export interface Waypoint {
   temporalRelation?: string;
   relationship?: string;
   order?: number;
+  routeGroupId?: string;
+  routeGroupName?: string;
+  memberships?: RouteWaypointMembership[];
+  routeEvidenceMode?: RouteEvidenceMode;
+  modelConfidence?: {
+    level: 'high' | 'medium' | 'low';
+    reasoning: string;
+  };
+  verifiedEvidence?: {
+    verified: boolean;
+    evidence: string;
+    source: string;
+  };
 }
 
 export interface FavoriteLocation {

@@ -10,6 +10,7 @@ import { recordResolution, recordAliasMatch, recordValidationFailure } from './g
 import { validateGeographicResolution } from './geographicValidation';
 import { isLowSignificancePoi } from './classification';
 import { CoordinateSource, GeographicIdentityStatus } from '../../types';
+import { getHistoricalEntityKnowledge } from './historicalCoordinateValidator';
 
 export const GeographicSource = {
   CACHE: "cache",
@@ -740,29 +741,93 @@ export async function resolveGeographicMetadata(marker: MapMarker): Promise<MapM
   
   result.populationStatus = "pending";
 
-  result.populationStatus = "pending";
-
   console.log(`[Entity] Resolving ${marker.name}`);
   
   // 1. Reverse Geocoder (OSM Nominatim)
   const geocodeResult = await reverseGeocode(marker.lat, marker.lng);
-  let resolvedProvider = "DeterministicDB"; // default if we had to use the marker's existing data
+  let resolvedProvider = "DeterministicDB";
   
-  if (geocodeResult) {
+  const isHistorical = marker.type === 'historical_waypoint' || 
+                       marker.type === 'historic_site' || 
+                       marker.type === 'historical_event_site' ||
+                       Boolean((marker as any).waypoint);
+
+  const histKb = isHistorical ? getHistoricalEntityKnowledge(marker.name) : undefined;
+
+  // Geographic conflict & bounding box check for historical waypoint
+  let geocodeStateConflict = false;
+  if (histKb) {
+    if (histKb.boundingBox) {
+      const { minLat, maxLat, minLng, maxLng } = histKb.boundingBox;
+      const inBox = marker.lat >= minLat && marker.lat <= maxLat && marker.lng >= minLng && marker.lng <= maxLng;
+      if (!inBox) {
+        geocodeStateConflict = true;
+      }
+    }
+
+    if (geocodeResult) {
+      const revGeoState = (geocodeResult.state || '').toLowerCase();
+      const revGeoFull = `${geocodeResult.country || ''} ${geocodeResult.state || ''} ${geocodeResult.displayName || ''}`.toLowerCase();
+      
+      // Check forbidden regions or state mismatch
+      if (histKb.forbiddenRegions && histKb.forbiddenRegions.some(f => revGeoFull.includes(f.toLowerCase()))) {
+        geocodeStateConflict = true;
+      } else if (histKb.state && revGeoState && !revGeoState.includes(histKb.state.toLowerCase()) && !histKb.state.toLowerCase().includes(revGeoState)) {
+        geocodeStateConflict = true;
+      }
+    }
+
+    if (geocodeStateConflict) {
+      console.warn(`[Entity Resolution] Geographic conflict detected for "${marker.name}". Coordinates (${marker.lat}, ${marker.lng}) conflict with expected "${histKb.expectedRegion}".`);
+      if (histKb.approximateCoordinates) {
+        console.log(`[Entity Resolution] Correcting coordinates for "${marker.name}" to authoritative (${histKb.approximateCoordinates.lat}, ${histKb.approximateCoordinates.lng}).`);
+        result.lat = histKb.approximateCoordinates.lat;
+        result.lng = histKb.approximateCoordinates.lng;
+        result.state = histKb.state || result.state;
+        result.country = histKb.country || result.country;
+      }
+    }
+  }
+
+  if (geocodeResult && !geocodeStateConflict) {
     resolvedProvider = "Nominatim";
     
-    // Nominatim takes precedence. Existing values supplement missing fields.
-    result.country = geocodeResult.country ?? result.country;
-    result.state = geocodeResult.state ?? result.state;
-    result.city = geocodeResult.city ?? result.city;
+    // For historical waypoints, the route coordinates and canonical entity name are authoritative.
+    // Reverse geocoding provides broad regional metadata (state, country) but must NEVER substitute
+    // the entity's identity or replace its location with a nearest modern locality.
+    if (isHistorical) {
+      result.country = geocodeResult.country ?? result.country;
+      result.state = geocodeResult.state ?? result.state;
+      // Do not overwrite city/locality for historical waypoints unless the marker specifically lacked one
+      // and the reverse geocoded locality is within the same expected regional scope
+      if (!result.city && geocodeResult.state === result.state) {
+        result.city = geocodeResult.city;
+      }
+    } else {
+      result.country = geocodeResult.country ?? result.country;
+      result.state = geocodeResult.state ?? result.state;
+      result.city = geocodeResult.city ?? result.city;
+    }
   } else {
-    // We rely on whatever deterministic data was passed in the marker.
-    if (result.country || result.state || result.city) {
+    // We rely on whatever deterministic data was passed in the marker or knowledge base.
+    if (histKb) {
+      result.country = histKb.country || result.country;
+      result.state = histKb.state || result.state;
+      resolvedProvider = "DeterministicDB";
+    } else if (result.country || result.state || result.city) {
       resolvedProvider = "DeterministicDB";
     } else {
       resolvedProvider = "AI_Fallback";
     }
   }
+
+  // Diagnostic log for Entity Resolution
+  console.log(`[Entity Resolution]
+entity="${marker.name}"
+authoritativeCoordinates=${result.lat.toFixed(4)},${result.lng.toFixed(4)}
+reverseGeocode=${geocodeResult && !geocodeStateConflict ? `${geocodeResult.city || geocodeResult.town || ''}, ${geocodeResult.state || ''}, ${geocodeResult.country || ''}` : 'null'}
+identityPreserved=${result.name === marker.name}
+coordinatesPreserved=${result.lat === marker.lat && result.lng === marker.lng}`);
 
   // 2. Validate Entity Classification First
   const originalType = result.type || 'unknown';

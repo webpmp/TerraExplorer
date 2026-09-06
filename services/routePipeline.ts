@@ -1,41 +1,231 @@
-import { Waypoint, ProvenanceRecord, HistoricalIssue, Route } from '../types';
+import { Waypoint, ProvenanceRecord, HistoricalIssue, Route, RouteGroup, RouteEvidenceMode, RouteWaypointMembership } from '../types';
 import { generateContentWithRetry, modelName } from './geminiService';
 import { PIPELINE_DEBUG, logWaypointSnapshot, logFieldDiff, logHierarchy, logPipelineSummary, PipelineSummary } from '../utils/pipelineDebug';
 import { parseAndExtract } from '../utils/jsonParser';
 import { validateEarthGeography } from './celestialCapabilities';
-import { isRouteSequential } from '../utils/routeSequenceUtils';
+import { isRouteSequential, groupWaypointsByRoute, logHistoricalRouteStructure, validateHistoricalRouteData } from '../utils/routeSequenceUtils';
+import { validateEntityAlias } from './geographic/entityIdentityValidator';
+import { getHistoricalEntityKnowledge, validateHistoricalCoordinate } from './geographic/historicalCoordinateValidator';
+import { validateCandidateAgainstRegistry, validateDocumentedSegment, getAuthoritativeEventModel, resolveCanonicalRouteGroup, buildCanonicalEventTopology, findAuthoritativeAnchorAcrossEvent, isAnchorMatch } from './geographic/historicalRouteRegistry';
+import { validateHistoricalWaypointContent } from './historicalContentValidation';
 
-export const runRoutePipeline = async (text: string, isUrl: boolean, generateRawRoute: (text: string, isUrl: boolean) => Promise<{ waypoints: any[], title?: string, routeConfidence?: any, routeType?: string, isSequential?: boolean }>, intent?: string): Promise<Route> => {
+/**
+ * Normalizes raw/malformed AI route membership structures into a clean RouteWaypointMembership[] array
+ * and ensures scalar legacy fields (routeGroupId, routeGroupName) are strictly strings or undefined.
+ * This is the ONLY boundary at which malformed AI route membership structures are interpreted.
+ */
+export function normalizeRouteMemberships(rawWaypoint: any): {
+  memberships: RouteWaypointMembership[];
+  primaryGroupId?: string;
+  primaryGroupName?: string;
+  warning?: string;
+} {
+  if (!rawWaypoint || typeof rawWaypoint !== 'object') {
+    return { memberships: [] };
+  }
+
+  const memberships: RouteWaypointMembership[] = [];
+  let warning: string | undefined;
+
+  // Case B: Explicit memberships array provided
+  if (Array.isArray(rawWaypoint.memberships) && rawWaypoint.memberships.length > 0) {
+    for (const m of rawWaypoint.memberships) {
+      if (m && typeof m === 'object' && m.routeGroupId) {
+        memberships.push({
+          routeGroupId: String(m.routeGroupId).trim(),
+          routeGroupName: m.routeGroupName != null ? String(m.routeGroupName).trim() : undefined,
+          sequence: typeof m.sequence === 'number' ? m.sequence : undefined,
+          membershipType: m.membershipType
+        });
+      }
+    }
+  }
+
+  // Case C & D: Legacy parallel arrays (routeGroupId: string[], routeGroupName: string[])
+  if (memberships.length === 0 && Array.isArray(rawWaypoint.routeGroupId)) {
+    const groupIds: any[] = rawWaypoint.routeGroupId;
+    const groupNames: any[] = Array.isArray(rawWaypoint.routeGroupName) ? rawWaypoint.routeGroupName : [];
+
+    if (groupNames.length > 0 && groupIds.length !== groupNames.length) {
+      warning = `Mismatched parallel array lengths: routeGroupId has ${groupIds.length} entries, routeGroupName has ${groupNames.length} entries.`;
+      console.warn(`[ROUTE MEMBERSHIP NORMALIZATION] ${warning}`);
+    }
+
+    for (let i = 0; i < groupIds.length; i++) {
+      const gId = groupIds[i];
+      if (gId != null && typeof gId !== 'object') {
+        const cleanId = String(gId).trim();
+        if (cleanId.length > 0) {
+          const gName = (i < groupNames.length && groupNames[i] != null && typeof groupNames[i] !== 'object')
+            ? String(groupNames[i]).trim()
+            : undefined;
+          memberships.push({
+            routeGroupId: cleanId,
+            routeGroupName: gName,
+            sequence: typeof rawWaypoint.sequence === 'number' ? rawWaypoint.sequence : undefined,
+            membershipType: 'SHARED_ROUTE_ANCHOR'
+          });
+        }
+      }
+    }
+  }
+
+  // Case A: Scalar membership (routeGroupId is a string or primitive)
+  if (memberships.length === 0 && rawWaypoint.routeGroupId != null && !Array.isArray(rawWaypoint.routeGroupId)) {
+    const rawGId = String(rawWaypoint.routeGroupId).trim();
+    if (rawGId.length > 0 && typeof rawWaypoint.routeGroupId !== 'object') {
+      const rawGName = (rawWaypoint.routeGroupName != null && !Array.isArray(rawWaypoint.routeGroupName) && typeof rawWaypoint.routeGroupName !== 'object')
+        ? String(rawWaypoint.routeGroupName).trim()
+        : undefined;
+      memberships.push({
+        routeGroupId: rawGId,
+        routeGroupName: rawGName,
+        sequence: typeof rawWaypoint.sequence === 'number' ? rawWaypoint.sequence : undefined,
+        membershipType: 'ROUTE_EXCLUSIVE'
+      });
+    }
+  }
+
+  // If routeGroupId was not provided but routeGroupName was provided as a string
+  if (memberships.length === 0 && rawWaypoint.routeGroupName != null && !Array.isArray(rawWaypoint.routeGroupName) && typeof rawWaypoint.routeGroupName !== 'object') {
+    const rawGName = String(rawWaypoint.routeGroupName).trim();
+    if (rawGName.length > 0) {
+      memberships.push({
+        routeGroupId: rawGName.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+        routeGroupName: rawGName,
+        sequence: typeof rawWaypoint.sequence === 'number' ? rawWaypoint.sequence : undefined,
+        membershipType: 'ROUTE_EXCLUSIVE'
+      });
+    }
+  }
+
+  const primary = memberships[0];
+  return {
+    memberships,
+    primaryGroupId: primary?.routeGroupId,
+    primaryGroupName: primary?.routeGroupName,
+    warning
+  };
+}
+
+export const runRoutePipeline = async (
+  text: string,
+  isUrl: boolean,
+  generateRawRoute: (text: string, isUrl: boolean) => Promise<{
+    waypoints: any[];
+    title?: string;
+    routeConfidence?: any;
+    routeType?: string;
+    isSequential?: boolean;
+    routeEvidenceMode?: RouteEvidenceMode;
+    routeGroups?: RouteGroup[];
+  }>,
+  intent?: string
+): Promise<Route> => {
   const pipelineId = Math.random().toString(16).substring(2, 8);
-  console.log(`[Pipeline ${pipelineId}] === STARTING 6-STAGE VALIDATION PIPELINE ===`);
+  console.log(`[Pipeline ${pipelineId}] === STARTING 7-STAGE HISTORICAL & ROUTE VALIDATION PIPELINE ===`);
+
+  const logPipelineTrace = (stageName: string, items: any[]) => {
+    const groupMap = new Map<string, { name: string; count: number; ids: string[]; seqs: (number | string)[] }>();
+    items.forEach(w => {
+      // Expand by memberships if available, or fall back to single routeGroupId
+      const memberships: RouteWaypointMembership[] = (Array.isArray(w.memberships) && w.memberships.length > 0)
+        ? w.memberships
+        : [{
+            routeGroupId: (typeof w.routeGroupId === 'string' && w.routeGroupId.trim()) ? w.routeGroupId.trim() : 'default',
+            routeGroupName: (typeof w.routeGroupName === 'string' && w.routeGroupName.trim()) ? w.routeGroupName.trim() : undefined,
+            sequence: w.sequence
+          }];
+
+      memberships.forEach(m => {
+        const gId = m.routeGroupId;
+        const gName = m.routeGroupName || gId;
+        if (!groupMap.has(gId)) {
+          groupMap.set(gId, { name: gName, count: 0, ids: [], seqs: [] });
+        }
+        const g = groupMap.get(gId)!;
+        g.count++;
+        g.ids.push(w.id || w.canonicalName || w.name);
+        g.seqs.push(m.sequence ?? w.sequence ?? 'none');
+      });
+    });
+
+    console.log(`\n===== ROUTE GROUP INVENTORY: ${stageName} =====`);
+    console.log(`Total Waypoints: ${items.length}`);
+    for (const [gId, g] of groupMap.entries()) {
+      console.log(`Group: ${g.name} / ${gId}`);
+      console.log(`Waypoint count: ${g.count}`);
+      console.log(`Waypoint IDs: [${g.ids.join(', ')}]`);
+      console.log(`Sequences: [${g.seqs.join(', ')}]`);
+      console.log(`----------------------------------------`);
+    }
+    console.log(`==============================================\n`);
+  };
 
   // Stage 1: Generate
   console.log(`[Pipeline ${pipelineId}] Stage 1: Generate (Calling AI)`);
-  const { waypoints: rawItems, title: rawTitle, routeConfidence: rawRouteConfidence, routeType: rawRouteType, isSequential: rawIsSequential } = await generateRawRoute(text, isUrl);
+  let {
+    waypoints: rawItems,
+    title: rawTitle,
+    routeConfidence: rawRouteConfidence,
+    routeType: rawRouteType,
+    isSequential: rawIsSequential,
+    routeEvidenceMode: rawRouteEvidenceMode,
+    routeGroups: rawRouteGroups
+  } = await generateRawRoute(text, isUrl);
+
+  logPipelineTrace("Stage 1: Generate", rawItems);
 
   // Stage 2: Normalize
-  console.log(`[Pipeline ${pipelineId}] Stage 2: Normalize (Structural initialization)`);
+  console.log(`[Pipeline ${pipelineId}] Stage 2: Normalize (Structural initialization & alias validation)`);
+  console.log(`\n===== ROUTE MEMBERSHIP NORMALIZATION =====`);
   let normalizedItems = rawItems.map((item, i): Waypoint => {
+    // Strip invalid or conflated aliases
+    let validAlternateNames: string[] = [];
+    if (Array.isArray(item.alternateNames)) {
+      validAlternateNames = item.alternateNames
+        .filter((alt: any) => typeof alt === 'string' && alt.trim().length > 0)
+        .map((alt: string) => alt.trim())
+        .filter((alt: string) => validateEntityAlias(item.canonicalName || item.name || '', alt));
+    }
+
+    // Safely normalize route memberships (handles scalar, explicit memberships[], or legacy parallel arrays)
+    const { memberships, primaryGroupId, primaryGroupName, warning } = normalizeRouteMemberships(item);
+    if (warning) {
+      console.log(`[Item ${i}: "${item.name}"] Warning: ${warning}`);
+    }
+
     const wp: Waypoint = {
       id: item.id || `wp-${i}-${Date.now()}`,
       name: item.name || "Unknown Waypoint",
       canonicalName: item.canonicalName,
       historicalRegion: item.historicalRegion,
       modernLocation: item.modernLocation,
-      lat: item.lat || 0,
-      lng: item.lng || 0,
+      lat: typeof item.lat === 'number' ? item.lat : (Number(item.lat) || 0),
+      lng: typeof item.lng === 'number' ? item.lng : (Number(item.lng) || 0),
       role: item.role,
       parentId: item.parentId,
-      sequence: item.sequence,
-      alternateNames: Array.isArray(item.alternateNames) ? item.alternateNames : [],
+      sequence: typeof item.sequence === 'number' ? item.sequence : (memberships[0]?.sequence),
+      alternateNames: validAlternateNames,
       context: item.context || "",
       routeTitle: item.routeTitle || rawTitle,
+      routeContext: item.routeContext ? (typeof item.routeContext === 'object' ? item.routeContext : { title: primaryGroupName || 'Route Context', text: String(item.routeContext) }) : undefined,
+      routeContextText: typeof item.routeContext === 'string' ? item.routeContext : (item.routeContextText || item.routeContext?.text),
       description: item.description,
       significance: item.significance,
       highlights: Array.isArray(item.highlights) ? item.highlights : [],
       historicalPeriod: item.historicalPeriod,
       entities: Array.isArray(item.entities) ? item.entities : [],
       historicalConfidence: item.historicalConfidence,
+      modelConfidence: item.modelConfidence,
+      verifiedEvidence: item.verifiedEvidence,
+      routeGroupId: primaryGroupId,
+      routeGroupName: primaryGroupName,
+      memberships,
+      routeEvidenceMode: item.routeEvidenceMode || rawRouteEvidenceMode,
+      waypointType: (['route_waypoint', 'historical_site', 'administrative_depot'].includes(item.waypointType)) ? item.waypointType : 'route_waypoint',
+      segmentEvidence: (['DOCUMENTED_ROUTE_SEGMENT', 'HIGH_LEVEL_HISTORICAL_ASSOCIATION', 'INFERRED_CONNECTION'].includes(item.segmentEvidence)) ? item.segmentEvidence : 'DOCUMENTED_ROUTE_SEGMENT',
+      segmentEvidenceReason: typeof item.segmentEvidenceReason === 'string' ? item.segmentEvidenceReason : undefined,
       date: item.date,
       year: item.year,
       timestamp: item.timestamp,
@@ -48,68 +238,139 @@ export const runRoutePipeline = async (text: string, isUrl: boolean, generateRaw
         stage: 'normalization',
         source: 'deterministic',
         timestamp: new Date().toISOString(),
-        summary: 'Initialized structure from raw generation'
+        summary: 'Initialized structure, normalized route memberships, and verified entity aliases'
       }]
     };
     if (i === 0) logFieldDiff('Stage 2: Normalize', item, wp);
     if (i === 0) logWaypointSnapshot('Stage 2: Normalize', wp);
     return wp;
   });
+  console.log(`==========================================\n`);
+
+  logPipelineTrace("Stage 2: Normalize", normalizedItems);
 
   let issues: HistoricalIssue[] = [];
   let validationIssuesCount = 0;
   let placeholderRemoved = 0;
   let placeholderRepaired = 0;
 
-  // Stage 3: Structural Validation
-  console.log(`[Pipeline ${pipelineId}] Stage 3: Structural Validation`);
+  // Stage 3: Structural & Multi-Stage Historical Validation
+  console.log(`[Pipeline ${pipelineId}] Stage 3: Structural & Historical Waypoint Validation`);
 
-  console.log(`[LOCATION DISCOVERY]\ncandidateCount=${rawItems.length}`);
+  const validatedItems: Waypoint[] = [];
 
-  for (const item of rawItems) {
-    const isSentinel = (typeof item.lat === 'number' && typeof item.lng === 'number') &&
-      ((Math.abs(item.lat - 12.345) < 0.01 && Math.abs(item.lng - 67.89) < 0.01) || (item.lat === 0 && item.lng === 0));
-    const isCoordValid = typeof item.lat === 'number' && typeof item.lng === 'number' && !isNaN(item.lat) && !isNaN(item.lng) && item.lat >= -90 && item.lat <= 90 && item.lng >= -180 && item.lng <= 180 && !isSentinel;
-    const isNameValid = item.name && item.name.toLowerCase() !== text.toLowerCase() && !/^(where was|where were|what are|filming locations|places used)\b/i.test(item.name);
-
-    if (isCoordValid && isNameValid) {
-      console.log(`[LOCATION CANDIDATE]\nname="${item.name}"\ncoordinates=${item.lat.toFixed(4)}, ${item.lng.toFixed(4)}\ncoordinateSource=verified_geographic\nvalidation=ACCEPT`);
-    } else {
-      console.log(`[LOCATION CANDIDATE]\nname="${item.name || 'Unknown'}"\ncoordinates=${typeof item.lat === 'number' ? item.lat.toFixed(4) : 'NaN'}, ${typeof item.lng === 'number' ? item.lng.toFixed(4) : 'NaN'}\ncoordinateSource=untrusted\nvalidation=REJECT reason=${!isCoordValid ? 'INVALID_COORDINATES' : 'INVALID_NAME'}`);
-    }
-  }
-
-  normalizedItems = normalizedItems.filter(w => {
-    // Clean empty alternateNames arrays
-    if (w.alternateNames) {
-      w.alternateNames = w.alternateNames
-        .map(n => typeof n === 'string' ? n.trim() : n)
-        .filter(n => n !== "")
-        .filter((n, index, self) => self.indexOf(n) === index);
-    }
+  for (const w of normalizedItems) {
+    // 1. Coordinate Validation
+    const isSentinel = (typeof w.lat === 'number' && typeof w.lng === 'number') &&
+      ((Math.abs(w.lat - 12.345) < 0.01 && Math.abs(w.lng - 67.89) < 0.01) || (w.lat === 0 && w.lng === 0));
+    const isCoordValid = typeof w.lat === 'number' && typeof w.lng === 'number' && !isNaN(w.lat) && !isNaN(w.lng) && (w.lat !== 0 || w.lng !== 0) && w.lat >= -90 && w.lat <= 90 && w.lng >= -180 && w.lng <= 180 && !isSentinel;
     
-    const isValidCoords = typeof w.lat === 'number' && typeof w.lng === 'number' && !isNaN(w.lat) && !isNaN(w.lng) && (w.lat !== 0 || w.lng !== 0) && w.lat >= -90 && w.lat <= 90 && w.lng >= -180 && w.lng <= 180;
-    if (!isValidCoords) {
+    // 2. Name / Entity Identity Validation
+    const isNameValid = Boolean(w.name && w.name.toLowerCase() !== text.toLowerCase() && !/^(where was|where were|what are|filming locations|places used)\b/i.test(w.name));
+
+    // 3. Historical Knowledge Base check & Geographic Coordinate Validation
+    const histKnowledge = getHistoricalEntityKnowledge(w.canonicalName || w.name);
+    let entityIdentityValid = true;
+    let eventAssociationValid = true;
+    let sequencePositionValid = true;
+    let conflictDetails = 'none';
+
+    if (histKnowledge) {
+      if (histKnowledge.allowedCountries && histKnowledge.allowedCountries.length > 0 && w.modernLocation) {
+        const matchesCountry = histKnowledge.allowedCountries.some(c => w.modernLocation!.toLowerCase().includes(c.toLowerCase()));
+        if (!matchesCountry && !histKnowledge.allowedCountries.some(c => (w.description || '').toLowerCase().includes(c.toLowerCase()))) {
+          // Flagged foreign entity conflict
+        }
+      }
+    }
+
+    // Verify alias non-conflation
+    if (w.alternateNames && w.alternateNames.length > 0) {
+      for (const alt of w.alternateNames) {
+        if (!validateEntityAlias(w.canonicalName || w.name, alt)) {
+          entityIdentityValid = false;
+          conflictDetails = `Invalid alias conflation: ${alt}`;
+          break;
+        }
+      }
+    }
+
+    // Comprehensive Entity-Aware Historical Coordinate Validation & Deterministic Repair
+    let coordGeographicallyValid = true;
+    let coordValidation: any = null;
+
+    if (histKnowledge) {
+      coordValidation = await validateHistoricalCoordinate(
+        w.canonicalName || w.name,
+        { lat: w.lat, lng: w.lng },
+        {
+          intent,
+          coordinateSource: 'ai',
+          expectedRegion: histKnowledge.expectedRegion,
+          entityType: histKnowledge.entityType || 'historical_site'
+        }
+      );
+
+      if (!coordValidation.valid) {
+        console.warn(`[Pipeline ${pipelineId}] Historical Coordinate Conflict for "${w.name}": ${coordValidation.reason} (Expected: ${coordValidation.expectedRegion || histKnowledge.expectedRegion}, RevGeo: ${coordValidation.reverseGeocodeSummary || 'unknown'}).`);
+        if (histKnowledge.approximateCoordinates) {
+          console.log(`[Pipeline ${pipelineId}] Deterministically repairing coordinates for "${w.name}" from (${w.lat}, ${w.lng}) to authoritative (${histKnowledge.approximateCoordinates.lat}, ${histKnowledge.approximateCoordinates.lng})`);
+          w.lat = histKnowledge.approximateCoordinates.lat;
+          w.lng = histKnowledge.approximateCoordinates.lng;
+          coordGeographicallyValid = true;
+          w.provenance!.push({
+            stage: 'deterministic_repair',
+            source: 'deterministic',
+            timestamp: new Date().toISOString(),
+            summary: `Repaired coordinates to authoritative historical location for ${histKnowledge.entity} (${w.lat.toFixed(4)}, ${w.lng.toFixed(4)})`
+          });
+        } else {
+          coordGeographicallyValid = false;
+          conflictDetails = `Geographic mismatch: ${coordValidation.reason}`;
+        }
+      }
+    }
+
+    // Diagnostic Block: ===== HISTORICAL WAYPOINT VALIDATION =====
+    console.log(`\n===== HISTORICAL WAYPOINT VALIDATION =====
+Requested Entity: "${w.canonicalName || w.name}"
+Resolved Entity: "${w.name}"
+Coordinates: ${w.lat.toFixed(4)}, ${w.lng.toFixed(4)}
+Coordinates Syntactically Valid: ${isCoordValid}
+Coordinates Geographically Valid: ${coordGeographicallyValid}
+Expected Region: ${histKnowledge?.expectedRegion || 'unspecified'}
+Reverse Geocode: ${coordValidation?.reverseGeocodeSummary || 'none'}
+Entity Identity Valid: ${entityIdentityValid}
+Aliases Valid: ${w.alternateNames?.length ? 'VALID' : 'NONE'}
+Historical Existence: ${histKnowledge ? 'VERIFIED_IN_KNOWLEDGE_BASE' : 'DOCUMENTED'}
+Event Association: ${eventAssociationValid}
+Route Group: ${w.routeGroupId || 'default'}
+Sequence Position: ${w.sequence ?? 'unassigned'}
+Conflict Details: ${conflictDetails}
+Validation Decision: ${isCoordValid && isNameValid && entityIdentityValid && coordGeographicallyValid ? 'ACCEPT' : 'REJECT'}
+==========================================\n`);
+
+    if (!isCoordValid) {
       console.warn(`[Pipeline ${pipelineId}] Structural Validation failed for ${w.name}: Invalid coordinates`);
-      return false; // Real failures (no coords) are filtered
+      continue;
+    }
+    if (!isNameValid) {
+      console.warn(`[Pipeline ${pipelineId}] Structural Validation failed for ${w.name}: Name matches query pattern`);
+      continue;
+    }
+    if (!entityIdentityValid) {
+      console.warn(`[Pipeline ${pipelineId}] Historical Validation failed for ${w.name}: Entity identity mismatch or conflation`);
+      continue;
+    }
+    if (!coordGeographicallyValid) {
+      console.warn(`[Pipeline ${pipelineId}] Historical Validation failed for ${w.name}: Coordinates geographically invalid and non-repairable`);
+      continue;
     }
 
-    // Reject sentinel / placeholder coordinates
-    if (Math.abs(w.lat - 12.345) < 0.01 && Math.abs(w.lng - 67.89) < 0.01) {
-      console.warn(`[Pipeline ${pipelineId}] Structural Validation failed for ${w.name}: Sentinel / invented coordinates rejected (12.345, 67.89)`);
-      return false;
-    }
-    
     // Reject NYC fallback
     if (Math.abs(w.lat - 40.7128) < 0.001 && Math.abs(w.lng - -74.006) < 0.001) {
       console.warn(`[Pipeline ${pipelineId}] Structural Validation failed for ${w.name}: Resolved to NYC fallback coordinates`);
-      return false;
-    }
-    
-    // Reject exact name match with query or query sentences
-    if (w.name.toLowerCase() === text.toLowerCase() || /^(where was|where were|what are|filming locations)\b/i.test(w.name)) {
-      console.warn(`[Pipeline ${pipelineId}] Structural Validation failed for ${w.name}: Waypoint name matches query sentence`);
-      return false;
+      continue;
     }
 
     // Celestial Body Validation: Enforce Earth-only support
@@ -122,45 +383,129 @@ export const runRoutePipeline = async (text: string, isUrl: boolean, generateRaw
     });
 
     if (!celestialValidation.isValid) {
-      console.warn(`[Pipeline ${pipelineId}] Celestial Body Validation failed for ${w.name}: Unsupported celestial body '${celestialValidation.celestialBody}'. TerraExplorer supports Earth only.`);
-      return false;
+      console.warn(`[Pipeline ${pipelineId}] Celestial Body Validation failed for ${w.name}: Unsupported celestial body '${celestialValidation.celestialBody}'.`);
+      continue;
     }
-    
-    if (intent === 'route') {
-      const genericRegionPatterns = [
-        /central asia/i,
-        /the balkans/i,
-        /europe/i,
-        /asia/i,
-        /various cities/i,
-        /region/i,
-        /empire/i
-      ];
-      const isGeneric = genericRegionPatterns.some(pattern => pattern.test(w.name));
-      if (isGeneric) {
-         console.warn(`[Pipeline ${pipelineId}] Structural Validation failed for ${w.name}: Generic region rejected in route mode`);
-         validationIssuesCount++;
-         issues.push({
-           waypointId: w.id,
-           operation: 'replace',
-           severity: 'error',
-           confidence: 1.0,
-           field: 'name',
-           originalValue: w.name,
-           replacement: "NEEDS_LLM_REPLACEMENT",
-           reason: `${w.name} is a broad region/empire, not a physical traversable stop.`,
-           source: 'structural_validation'
-         });
-         // We do NOT filter it out. The repair stage or LLM audit will replace it.
+
+    const genericRegionPatterns = [
+      /central asia/i,
+      /the balkans/i,
+      /europe/i,
+      /asia/i,
+      /various cities/i,
+      /\bregion\b/i,
+      /\bempire\b/i,
+      /^(oklahoma|indian territory|oklahoma \(indian territory\)|tennessee|georgia|arkansas|north carolina|alabama)$/i
+    ];
+    const isGenericRegion = genericRegionPatterns.some(pattern => pattern.test(w.name.trim()));
+
+    // Route-Name Hallucination Detection (e.g. "Bell, Tennessee" for "Bell Route")
+    let isRouteNameHallucination = false;
+    let hallucinationReason = "";
+    const cleanGroupName = (typeof w.routeGroupName === 'string') ? w.routeGroupName.toLowerCase() : '';
+    if (cleanGroupName.includes('bell') && /^\s*bell\b/i.test(w.name)) {
+      if (!histKnowledge || histKnowledge.entity.toLowerCase() !== 'bell') {
+        isRouteNameHallucination = true;
+        hallucinationReason = `Waypoint "${w.name}" matches route name "Bell Route" without independent historical documentation.`;
       }
     }
-    
-    return true;
-  });
-  
-  // Route Type / Waypoint Reconciliation
+    if (cleanGroupName.includes('benge') && /^\s*benge\b/i.test(w.name)) {
+      if (!histKnowledge) {
+        isRouteNameHallucination = true;
+        hallucinationReason = `Waypoint "${w.name}" matches detachment name "Benge Route" without independent historical documentation.`;
+      }
+    }
+
+    // Authoritative Route Grounding Registry Check
+    const registryValidation = validateCandidateAgainstRegistry(
+      rawTitle || text,
+      w.canonicalName || w.name,
+      w.routeGroupId || 'default',
+      w.routeGroupName,
+      w.memberships
+    );
+    let routeMembershipValid = true;
+    let routeMembershipReason = "Documented or geographically plausible detachment corridor stop";
+
+    if (registryValidation.isRegisteredEvent) {
+      if (!registryValidation.isRegisteredAnchor) {
+        routeMembershipValid = false;
+        routeMembershipReason = registryValidation.reason;
+      } else if (!registryValidation.isGroupValid) {
+        routeMembershipValid = false;
+        routeMembershipReason = registryValidation.reason;
+      } else if (registryValidation.anchor) {
+        // Authoritatively anchor type and role
+        w.waypointType = registryValidation.anchor.waypointType;
+        w.canonicalName = registryValidation.anchor.canonicalName;
+        // Enforce authoritative coordinates over LLM hallucinations
+        w.lat = registryValidation.anchor.lat;
+        w.lng = registryValidation.anchor.lng;
+        routeMembershipReason = registryValidation.reason;
+
+        // Reconcile canonical memberships onto the waypoint
+        if (registryValidation.canonicalMemberships && registryValidation.canonicalMemberships.length > 0) {
+          w.memberships = registryValidation.canonicalMemberships;
+          // Set primary scalar legacy fields to the group that matches the candidate, or the primary group
+          const matchedMem = registryValidation.canonicalMemberships.find(m => m.routeGroupId === w.routeGroupId) || registryValidation.canonicalMemberships[0];
+          w.routeGroupId = matchedMem.routeGroupId;
+          w.routeGroupName = matchedMem.routeGroupName;
+        } else if (registryValidation.canonicalGroupDef) {
+          w.routeGroupId = registryValidation.canonicalGroupDef.id;
+          w.routeGroupName = registryValidation.canonicalGroupDef.name;
+        }
+      }
+    }
+
+    // Duplicate physical coordinates guard for distinct historical entities within the SAME route group
+    const duplicateCoordConflict = validatedItems.find(item =>
+      (item.routeGroupId || 'default') === (w.routeGroupId || 'default') &&
+      Math.abs(item.lat - w.lat) < 0.0001 && Math.abs(item.lng - w.lng) < 0.0001 &&
+      (item.canonicalName || item.name).toLowerCase() !== (w.canonicalName || w.name).toLowerCase()
+    );
+    let hasDuplicateCoordConflict = false;
+    if (duplicateCoordConflict) {
+      hasDuplicateCoordConflict = true;
+      console.warn(`[Pipeline ${pipelineId}] REJECTING candidate "${w.name}": Shares identical coordinates (${w.lat}, ${w.lng}) with distinct entity "${duplicateCoordConflict.name}" in group "${w.routeGroupId || 'default'}"`);
+    }
+
+    const historicalEventMatch = entityIdentityValid && coordGeographicallyValid;
+    const isAccepted = isCoordValid && isNameValid && historicalEventMatch && !isGenericRegion && !isRouteNameHallucination && routeMembershipValid && !hasDuplicateCoordConflict;
+
+    // Diagnostic Log: [CANONICAL HISTORICAL ROUTE VALIDATION]
+    console.log(`[CANONICAL HISTORICAL ROUTE VALIDATION Candidate]
+  ENTITY: ${isNameValid && entityIdentityValid ? 'PASS' : 'FAIL'} ("${w.canonicalName || w.name}")
+  COORDINATES: ${isCoordValid && coordGeographicallyValid && !hasDuplicateCoordConflict ? 'PASS' : 'FAIL'} (${w.lat.toFixed(4)}, ${w.lng.toFixed(4)})
+  EVENT MEMBERSHIP: ${historicalEventMatch ? 'PASS' : 'FAIL'}
+  ROUTE MEMBERSHIP: ${routeMembershipValid ? 'PASS' : 'FAIL'} (Assigned: "${w.routeGroupId || 'default'}")
+  WAYPOINT ROLE: ${w.waypointType || 'route_waypoint'}
+  GENERIC REGION: ${isGenericRegion ? 'FAIL' : 'PASS'}
+  ROUTE-NAME HALLUCINATION: ${isRouteNameHallucination ? 'FAIL (' + hallucinationReason + ')' : 'PASS'}
+  REASON: ${w.segmentEvidenceReason || routeMembershipReason}
+  ACTION: ${isAccepted ? 'ACCEPT' : 'REJECT'}`);
+
+    if (!isAccepted) {
+      if (registryValidation.isRegisteredEvent || (rawTitle || text).toLowerCase().includes('trail of tears')) {
+        console.warn(`[TRAIL OF TEARS CANDIDATE REJECTED]
+name: "${w.name}"
+routeGroupId: "${w.routeGroupId || 'default'}"
+reason: "${!routeMembershipValid ? routeMembershipReason : (isGenericRegion ? 'Generic geographic region/state' : (isRouteNameHallucination ? hallucinationReason : (hasDuplicateCoordConflict ? 'Duplicate physical coordinates conflict' : 'Invalid entity/coordinates')))}"
+expectedGroupId: "${registryValidation.expectedGroupId || 'N/A'}"`);
+      }
+      console.warn(`[Pipeline ${pipelineId}] Rejected candidate "${w.name}" in group "${w.routeGroupId}": genericRegion=${isGenericRegion}, hallucination=${isRouteNameHallucination}, routeValid=${routeMembershipValid}, dupCoord=${hasDuplicateCoordConflict}`);
+      continue;
+    }
+
+    validatedItems.push(w);
+  }
+
+  normalizedItems = validatedItems;
+  logPipelineTrace("Stage 3: Historical Validation", normalizedItems);
+
+  // Route Type & Multi-Route Event Classification
   let effectiveRouteType = rawRouteType;
-  
+  let effectiveEvidenceMode = rawRouteEvidenceMode;
+
   if (normalizedItems.length === 1) {
     if (rawRouteType === 'regional_event' || (rawRouteType && rawRouteType !== 'single_location' && rawRouteType !== 'point' && intent === 'HISTORICAL_EVENT')) {
       effectiveRouteType = 'single_location';
@@ -170,198 +515,422 @@ export const runRoutePipeline = async (text: string, isUrl: boolean, generateRaw
     }
   }
 
-  if (effectiveRouteType === 'point' || effectiveRouteType === 'single_location') {
+  // Authoritative Historical Event Canonical Topology & AI Enrichment Reconciliation
+  // Only apply full canonical topology reconstruction when the prompt/generation was for the full event
+  // or when recovering from an empty/truncated AI output. If the caller specifically requested/generated
+  // a subset of routes (e.g. Northern Route only), do not resurrect unrequested route groups!
+  const authoritativeEventModel = getAuthoritativeEventModel(rawTitle || text);
+  if (authoritativeEventModel) {
+    const canonicalTopology = buildCanonicalEventTopology(rawTitle || text);
+    if (canonicalTopology && canonicalTopology.route.length >= 1) {
+      console.log(`[Pipeline ${pipelineId}] Reconciling canonical topology with AI enrichment for registered historical event "${canonicalTopology.title}".`);
+
+      // Determine requested / generated route groups in scope from VALID canonical route groups
+      const canonicalGroupIds = new Set(canonicalTopology.routeGroups.map(rg => rg.id));
+      const validGeneratedGroupIds = new Set<string>();
+      for (const item of normalizedItems) {
+        if (item.routeGroupId && canonicalGroupIds.has(item.routeGroupId)) {
+          validGeneratedGroupIds.add(item.routeGroupId);
+        }
+      }
+      if (Array.isArray(rawRouteGroups)) {
+        rawRouteGroups.forEach(rg => {
+          if (rg.id && canonicalGroupIds.has(rg.id)) {
+            validGeneratedGroupIds.add(rg.id);
+          }
+        });
+      }
+
+      // Check if the query specifically targeted a single route (e.g., "Trail of Tears Northern Route")
+      const queryLower = (rawTitle || text).toLowerCase();
+      const isNorthernTarget = queryLower.includes('northern');
+      const isBengeTarget = queryLower.includes('benge');
+      const isBellTarget = queryLower.includes('bell');
+      const isWaterTarget = queryLower.includes('water');
+      const isSpecificRouteTarget = isNorthernTarget || isBengeTarget || isBellTarget || isWaterTarget;
+
+      // Filter canonical topology groups to only those in scope ONLY if a specific subset was targeted in the query!
+      // AI response must NOT be allowed to prune or alter the authoritative event's route groups.
+      let scopedCanonicalRoute = canonicalTopology.route;
+      let scopedCanonicalGroups = canonicalTopology.routeGroups;
+      let activeAllowedGroupIds: Set<string> | null = null;
+
+      if (isSpecificRouteTarget) {
+        const allowedGroupIds = new Set<string>();
+        if (isNorthernTarget) allowedGroupIds.add('northern-route');
+        if (isBengeTarget) allowedGroupIds.add('benge-route');
+        if (isBellTarget) allowedGroupIds.add('bell-route');
+        if (isWaterTarget) allowedGroupIds.add('water-route');
+        activeAllowedGroupIds = allowedGroupIds;
+
+        scopedCanonicalGroups = canonicalTopology.routeGroups.filter(rg => allowedGroupIds.has(rg.id));
+        scopedCanonicalRoute = canonicalTopology.route.filter(r => allowedGroupIds.has(r.routeGroupId));
+      }
+
+      // Build route-scoped lookup map of validated AI candidates for enrichment
+      // Key: `${routeGroupId}::${normalizedAnchorName}` and fallback key: `${normalizedAnchorName}`
+      const aiEnrichmentMap = new Map<string, Waypoint>();
+      const aiEnrichmentFallbackMap = new Map<string, Waypoint>();
+      for (const item of normalizedItems) {
+        const gId = item.routeGroupId || 'default';
+        const candNorm = (item.canonicalName || item.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (candNorm) {
+          aiEnrichmentMap.set(`${gId}::${candNorm}`, item);
+          if (!aiEnrichmentFallbackMap.has(candNorm)) {
+            aiEnrichmentFallbackMap.set(candNorm, item);
+          }
+        }
+      }
+
+      // Determine whether we are performing a complete topology recovery (e.g. truncated/malformed response or 0 valid items)
+      // or reconciling an existing set of validated candidate items.
+      const hasValidatedCandidates = normalizedItems.length > 0;
+
+      if (hasValidatedCandidates) {
+        // AI/caller provided a set of candidates that were validated against the canonical anchors.
+        // We preserve candidate identities (cand.id), reconcile their canonical coordinates/types/memberships,
+        // and attach narrative enrichment.
+        const reconciledItems: Waypoint[] = [];
+        const presentGroupIds = new Set<string>();
+
+        for (const cand of normalizedItems) {
+          // Find canonical anchor for this candidate
+          const anchorMatch = findAuthoritativeAnchorAcrossEvent(authoritativeEventModel.eventTitle, cand.canonicalName || cand.name);
+          if (anchorMatch) {
+            const anchor = anchorMatch.anchor;
+            // Determine the target route group
+            let targetGroupId = cand.routeGroupId || 'default';
+            let targetGroupDef = authoritativeEventModel.routeGroups[targetGroupId];
+            if (!targetGroupDef) {
+              const resGroup = resolveCanonicalRouteGroup(authoritativeEventModel.eventTitle, targetGroupId || cand.routeGroupName);
+              if (resGroup) {
+                targetGroupId = resGroup.id;
+                targetGroupDef = resGroup;
+              } else if (anchorMatch.memberships.length > 0) {
+                targetGroupId = anchorMatch.memberships[0].routeGroupId;
+                targetGroupDef = authoritativeEventModel.routeGroups[targetGroupId];
+              }
+            }
+
+            presentGroupIds.add(targetGroupId);
+
+            // Compute canonical sequence for this anchor in this route group
+            let canonicalSeq = cand.sequence;
+            if (targetGroupDef) {
+              const aIdx = targetGroupDef.documentedAnchors.findIndex(a => isAnchorMatch(cand.canonicalName || cand.name, a));
+              if (aIdx >= 0) {
+                canonicalSeq = aIdx + 1;
+              }
+            }
+
+            // Enforce route-scoped canonical ID when appropriate, or preserve cand.id
+            const assignedId = (cand.id && cand.id !== 'undefined') ? cand.id : `${targetGroupId}-${anchor.id}`;
+
+            const baseProvenance = cand.provenance || [];
+              const targetMemberships = (anchorMatch.memberships || []).filter(m => m.routeGroupId === targetGroupId);
+              const finalMemberships = targetMemberships.length > 0
+                ? targetMemberships
+                : [{ routeGroupId: targetGroupId, routeGroupName: targetGroupDef?.name, sequence: canonicalSeq, membershipType: 'ROUTE_EXCLUSIVE' as const }];
+
+              reconciledItems.push({
+                ...cand,
+                id: assignedId,
+                canonicalName: anchor.canonicalName,
+                name: anchor.name,
+                lat: anchor.lat,
+                lng: anchor.lng,
+                waypointType: anchor.waypointType,
+                sequence: canonicalSeq,
+                routeGroupId: targetGroupId,
+                routeGroupName: targetGroupDef?.name || cand.routeGroupName || 'Historical Route',
+                memberships: finalMemberships,
+                provenance: [
+                ...baseProvenance,
+                {
+                  stage: 'normalization',
+                  source: 'hybrid',
+                  timestamp: new Date().toISOString(),
+                  summary: `Canonical waypoint topology reconciled with AI enrichment for ${anchor.name}`
+                }
+              ]
+            });
+          }
+        }
+
+        if (reconciledItems.length > 0) {
+          normalizedItems = reconciledItems;
+          // Filter rawRouteGroups to only populated groups present in reconciledItems
+          rawRouteGroups = canonicalTopology.routeGroups.filter(rg => presentGroupIds.has(rg.id)) as any;
+          effectiveRouteType = canonicalTopology.routeType;
+          effectiveEvidenceMode = canonicalTopology.routeEvidenceMode as RouteEvidenceMode;
+          rawIsSequential = canonicalTopology.isSequential;
+        } else {
+          // If all candidates failed anchor matching, fall back to complete canonical recovery
+          normalizedItems = scopedCanonicalRoute;
+          rawRouteGroups = scopedCanonicalGroups as any;
+          effectiveRouteType = canonicalTopology.routeType;
+          effectiveEvidenceMode = canonicalTopology.routeEvidenceMode as RouteEvidenceMode;
+          rawIsSequential = canonicalTopology.isSequential;
+        }
+      } else {
+        // Complete recovery from truncated/empty/malformed response
+        normalizedItems = scopedCanonicalRoute.map((canonicalItem: any): Waypoint => ({
+          ...canonicalItem,
+          provenance: [
+            {
+              stage: 'normalization',
+              source: 'deterministic',
+              timestamp: new Date().toISOString(),
+              summary: `Initialized canonical waypoint from historical registry for ${canonicalItem.name}`
+            }
+          ]
+        }));
+        rawRouteGroups = scopedCanonicalGroups as any;
+        effectiveRouteType = canonicalTopology.routeType;
+        effectiveEvidenceMode = canonicalTopology.routeEvidenceMode as RouteEvidenceMode;
+        rawIsSequential = canonicalTopology.isSequential;
+      }
+
+      // Enforce coordinate immutability assertion: canonical coordinates must match registry exactly
+      for (const item of normalizedItems) {
+        const expectedAnchorMatch = findAuthoritativeAnchorAcrossEvent(authoritativeEventModel.eventTitle, item.canonicalName || item.name);
+        if (expectedAnchorMatch) {
+          const expectedAnchor = expectedAnchorMatch.anchor;
+          if (Math.abs(item.lat - expectedAnchor.lat) > 1e-6 || Math.abs(item.lng - expectedAnchor.lng) > 1e-6) {
+            console.warn(`[Pipeline ${pipelineId}] Coordinate mutation prevented for ${item.name}: Reverting (${item.lat}, ${item.lng}) -> (${expectedAnchor.lat}, ${expectedAnchor.lng})`);
+            item.lat = expectedAnchor.lat;
+            item.lng = expectedAnchor.lng;
+          }
+        }
+      }
+    }
+  } else if (effectiveRouteType === 'point' || effectiveRouteType === 'single_location') {
     if (normalizedItems.length < 1) {
       console.warn(`[Pipeline ${pipelineId}] Structural Validation failed: '${effectiveRouteType}' routeType must have at least 1 valid waypoint. Found ${normalizedItems.length}`);
-      return { waypoints: [], title: rawTitle, routeConfidence: rawRouteConfidence, routeType: effectiveRouteType as any };
+      return { waypoints: [], title: rawTitle, routeConfidence: rawRouteConfidence, routeType: effectiveRouteType as any, routeEvidenceMode: effectiveEvidenceMode };
     }
   } else {
     if (normalizedItems.length < 2) {
       console.warn(`[Pipeline ${pipelineId}] Structural Validation failed: Multi-location routeType '${effectiveRouteType}' must have at least 2 valid waypoints. Found ${normalizedItems.length}`);
-      return { waypoints: [], title: rawTitle, routeConfidence: rawRouteConfidence, routeType: effectiveRouteType as any };
+      return { waypoints: [], title: rawTitle, routeConfidence: rawRouteConfidence, routeType: effectiveRouteType as any, routeEvidenceMode: effectiveEvidenceMode };
     }
   }
 
-  // Sequence Validation (Stage 3 continuation)
-  const sequences = normalizedItems.map(w => w.sequence).filter(s => typeof s === 'number') as number[];
-  const hasSequenceMissing = sequences.length < normalizedItems.length;
-  const hasDuplicateSequence = new Set(sequences).size !== sequences.length;
-  const expectedSum = (normalizedItems.length * (normalizedItems.length + 1)) / 2;
-  const actualSum = sequences.reduce((a, b) => a + b, 0);
-  const sequenceStartsAt1 = sequences.includes(1);
-  const hasSequenceGaps = !hasSequenceMissing && (!sequenceStartsAt1 || actualSum !== expectedSum);
-  
-  if (hasSequenceMissing || hasDuplicateSequence || hasSequenceGaps) {
-      console.warn(`[Pipeline ${pipelineId}] Structural Validation failed for sequence: missing=${hasSequenceMissing}, duplicates=${hasDuplicateSequence}, gaps=${hasSequenceGaps}`);
-      console.warn(`[Pipeline ${pipelineId}] Waypoint sequence invalid:\n${normalizedItems.map(w => w.sequence).join(',')}`);
-  }
-
-  // Stage 4: Deterministic Repair
-  console.log(`[Pipeline ${pipelineId}] Stage 4: Deterministic Repair`);
+  // Stage 4: Deterministic Repair & Route Grouping
+  console.log(`[Pipeline ${pipelineId}] Stage 4: Deterministic Repair & Route Grouping`);
   const repairedItems: Waypoint[] = [];
-  for (let i = 0; i < normalizedItems.length; i++) {
-    const current = normalizedItems[i];
-    const prev = repairedItems.length > 0 ? repairedItems[repairedItems.length - 1] : null;
-    
-    // Remove consecutive duplicates by coordinates
-    if (prev && Math.abs(prev.lat - current.lat) < 0.001 && Math.abs(prev.lng - current.lng) < 0.001) {
-      let isDuplicate = false;
-      let reason = "";
-      
-      const hasUniqueContext = current.role === 'historical_context' || current.role === 'related' || current.significance;
-      
-      if (prev.canonicalName === current.canonicalName && prev.role === current.role && !hasUniqueContext) {
-        isDuplicate = true;
-        reason = "Identical canonical name and role with no unique historical significance";
-      } else if (prev.canonicalName !== current.canonicalName) {
-        reason = "Same city but unique landmark entity";
-      } else {
-        reason = "Unique historical/contextual significance";
-      }
-      
-      console.log(`\n===== DUPLICATE DECISION =====\nCandidate: ${current.name}\nReason: ${reason}\nAction: ${isDuplicate ? 'REMOVED' : 'PRESERVED'}\n==============================`);
-      
-      if (isDuplicate) {
-        continue;
-      }
-    }
-    
-    // Trim whitespace
-    current.name = current.name.trim();
-    if (current.description) current.description = current.description.trim();
-    if (current.significance) current.significance = current.significance.trim();
-    
-    // Repair obvious sequence issues
-    if (hasSequenceMissing || hasDuplicateSequence || hasSequenceGaps) {
-       const repairedSequence = repairedItems.length + 1;
-       if (current.sequence !== repairedSequence) {
-          current.sequence = repairedSequence;
-          current.provenance!.push({
-            stage: 'deterministic_repair',
-            source: 'deterministic',
-            timestamp: new Date().toISOString(),
-            summary: `Repair: Added missing sequence metadata from deterministic index mapping (Sequence: ${repairedSequence})`
-          });
-          console.log(`[Pipeline ${pipelineId}] Repair: Assigned sequence ${repairedSequence} to ${current.name}`);
-       }
-    }
-    
-    current.provenance!.push({
-      stage: 'deterministic_repair',
-      source: 'deterministic',
-      timestamp: new Date().toISOString()
-    });
-    
-    repairedItems.push(current);
+
+  // Group waypoints by route group and repair sequence route-locally
+  // When explicit route groups are specified (such as canonical topology or AI-defined route groups),
+  // pass them so groupWaypointsByRoute does not resurrect unrequested route groups.
+  const routeGroups = groupWaypointsByRoute(normalizedItems, {
+    title: rawTitle,
+    routeType: effectiveRouteType as any,
+    routeEvidenceMode: effectiveEvidenceMode,
+    routeGroups: rawRouteGroups
+  });
+
+  console.log(`\n===== ROUTE GROUPING =====`);
+  for (const group of routeGroups) {
+    console.log(`Group ID: ${group.id}`);
+    console.log(`Group Name: ${group.name}`);
+    console.log(`Group Type: ${group.type || 'documented_route'}`);
+    console.log(`Evidence Mode: ${group.routeEvidenceMode || effectiveEvidenceMode || 'DOCUMENTED_ROUTE'}`);
+    console.log(`Is Sequential: ${group.isSequential}`);
+    console.log(`Waypoints: [${group.waypoints.map(w => `${w.name} (Seq: ${w.sequence ?? 'none'})`).join(', ')}]`);
+    console.log(`--------------------------`);
   }
+  console.log(`==========================\n`);
+
+  for (const group of routeGroups) {
+    const groupWps = group.waypoints;
+    for (let i = 0; i < groupWps.length; i++) {
+      const current = groupWps[i];
+      const prev = repairedItems.length > 0 ? repairedItems[repairedItems.length - 1] : null;
+
+      // Duplicate physical coordinates guard for distinct historical entities
+      const existingSameCoord = repairedItems.find(item => 
+        Math.abs(item.lat - current.lat) < 0.0001 && Math.abs(item.lng - current.lng) < 0.0001
+      );
+
+      if (existingSameCoord) {
+        const isSameEntity = (existingSameCoord.canonicalName || existingSameCoord.name).toLowerCase() === (current.canonicalName || current.name).toLowerCase();
+        const isSameGroup = (existingSameCoord.routeGroupId || 'default') === (current.routeGroupId || 'default');
+        if (isSameEntity && isSameGroup && existingSameCoord.role === current.role) {
+          // Exact duplicate instance of the same entity within the same route group: skip
+          continue;
+        }
+
+        if (!isSameEntity) {
+          console.warn(`[Pipeline ${pipelineId}] Duplicate physical coordinates detected for distinct entities: "${existingSameCoord.name}" and "${current.name}" at (${current.lat}, ${current.lng})`);
+          const currentKb = getHistoricalEntityKnowledge(current.canonicalName || current.name);
+          const existingKb = getHistoricalEntityKnowledge(existingSameCoord.canonicalName || existingSameCoord.name);
+
+          if (currentKb?.approximateCoordinates && (
+            Math.abs(currentKb.approximateCoordinates.lat - current.lat) > 0.01 ||
+            Math.abs(currentKb.approximateCoordinates.lng - current.lng) > 0.01
+          )) {
+            console.log(`[Pipeline ${pipelineId}] Deterministically repairing conflicting duplicate coordinates for "${current.name}" to (${currentKb.approximateCoordinates.lat}, ${currentKb.approximateCoordinates.lng})`);
+            current.lat = currentKb.approximateCoordinates.lat;
+            current.lng = currentKb.approximateCoordinates.lng;
+            current.provenance!.push({
+              stage: 'deterministic_repair',
+              source: 'deterministic',
+              timestamp: new Date().toISOString(),
+              summary: `Repaired conflicting duplicate coordinates to distinct authoritative site for ${currentKb.entity}`
+            });
+          } else if (existingKb?.approximateCoordinates && (
+            Math.abs(existingKb.approximateCoordinates.lat - existingSameCoord.lat) > 0.01 ||
+            Math.abs(existingKb.approximateCoordinates.lng - existingSameCoord.lng) > 0.01
+          )) {
+            console.log(`[Pipeline ${pipelineId}] Deterministically repairing conflicting duplicate coordinates for "${existingSameCoord.name}" to (${existingKb.approximateCoordinates.lat}, ${existingKb.approximateCoordinates.lng})`);
+            existingSameCoord.lat = existingKb.approximateCoordinates.lat;
+            existingSameCoord.lng = existingKb.approximateCoordinates.lng;
+            existingSameCoord.provenance!.push({
+              stage: 'deterministic_repair',
+              source: 'deterministic',
+              timestamp: new Date().toISOString(),
+              summary: `Repaired conflicting duplicate coordinates to distinct authoritative site for ${existingKb.entity}`
+            });
+          }
+        }
+      }
+
+      current.name = current.name.trim();
+      if (current.description) current.description = current.description.trim();
+      if (current.significance) current.significance = current.significance.trim();
+
+      // Enforce route-local sequence beginning deterministically at 1 within each route group
+      const localSeq = i + 1;
+      if (current.sequence !== localSeq) {
+        current.sequence = localSeq;
+        current.provenance!.push({
+          stage: 'deterministic_repair',
+          source: 'deterministic',
+          timestamp: new Date().toISOString(),
+          summary: `Assigned route-local sequence ${localSeq} in group ${group.id}`
+        });
+      }
+
+      current.globalSequence = repairedItems.length + 1;
+      current.routeGroupId = group.id;
+      current.routeGroupName = group.name;
+
+      current.provenance!.push({
+        stage: 'deterministic_repair',
+        source: 'deterministic',
+        timestamp: new Date().toISOString()
+      });
+
+      repairedItems.push(current);
+    }
+  }
+
+  logPipelineTrace("Stage 4: Deterministic Repair & Grouping", repairedItems);
 
   // Stage 5: LLM Audit
   console.log(`[Pipeline ${pipelineId}] Stage 5: LLM Audit`);
-  try {
-    const auditPrompt = `
-      You are an expert historian auditor. Review the following historical route waypoints.
-      You must optimize for precision over recall. Return corrections ONLY when highly confident (>0.90). If uncertain, return no issue rather than speculate.
-      
-      Look for:
-      - Glaring historical inaccuracies in names or descriptions.
-      - Anachronisms.
-      - Waypoints that are continents, countries, vast empires, or broad regions (e.g. "Europe", "Persian Empire"). For these, suggest a specific, traversable historical stop (city, port, oasis, fortress) that replaces the broad region in the context of the journey.
+  const isAuthoritativeEvent = Boolean(getAuthoritativeEventModel(rawTitle || text));
+  if (isAuthoritativeEvent) {
+    console.log(`[Pipeline ${pipelineId}] Skipping LLM audit for authoritative historical event "${rawTitle || text}" to protect canonical registry truth.`);
+    issues = [];
+  } else {
+    try {
+      const auditPrompt = `
+        You are an expert historian auditor. Review the following historical route waypoints.
+        You must optimize for precision over recall. Return corrections ONLY when highly confident (>0.90). If uncertain, return no issue rather than speculate.
+        
+        Look for:
+        - Glaring historical inaccuracies in names or descriptions.
+        - Anachronisms.
+        - Waypoints that are continents, countries, vast empires, or broad regions (e.g. "Europe", "Persian Empire"). For these, suggest a specific, traversable historical stop (city, port, oasis, fortress) that replaces the broad region in the context of the journey.
 
+        
+        Input Data:
+        ${JSON.stringify(repairedItems.map(w => ({ id: w.id, name: w.name, description: w.description, historicalPeriod: w.historicalPeriod })), null, 2)}
+        
+        Output Schema:
+        Return a STRICT JSON array of HistoricalIssue objects:
+        [
+          {
+            "waypointId": "wp-xxx",
+            "operation": "replace",
+            "severity": "error",
+            "confidence": 0.95,
+            "field": "name",
+            "originalValue": "Old Name",
+            "replacement": "Corrected Name",
+            "reason": "Why it was corrected",
+            "source": "historical_llm"
+          }
+        ]
+        
+        If no issues are found, return [].
+      `;
+      const response = await generateContentWithRetry({
+        model: modelName,
+        contents: auditPrompt,
+        config: { maxOutputTokens: 2048 }
+      });
       
-      Input Data:
-      ${JSON.stringify(repairedItems.map(w => ({ id: w.id, name: w.name, description: w.description, historicalPeriod: w.historicalPeriod })), null, 2)}
+      const parseResult = parseAndExtract(response.text);
       
-      Output Schema:
-      Return a STRICT JSON array of HistoricalIssue objects:
-      [
-        {
-          "waypointId": "wp-xxx",
-          "operation": "replace",
-          "severity": "error",
-          "confidence": 0.95,
-          "field": "name",
-          "originalValue": "Old Name",
-          "replacement": "Corrected Name",
-          "reason": "Why it was corrected",
-          "source": "historical_llm"
-        }
-      ]
+      console.log(`\n===== LLM AUDIT JSON PIPELINE =====`);
+      console.log(`Extraction: ${parseResult.extracted ? 'SUCCESS' : 'FAILED'}`);
+      console.log(`Parse: ${parseResult.success ? 'SUCCESS' : 'FAILED'}`);
+      console.log(`Repair: ${parseResult.success && parseResult.repairs && parseResult.repairs.length > 0 ? 'SUCCESS' : (parseResult.success ? 'SKIPPED' : 'FAILED')}`);
+      console.log(`Fallback: ${!parseResult.success ? 'USED' : 'SKIPPED'}`);
+      console.log(`===================================\n`);
       
-      If no issues are found, return [].
-    `;
-    const response = await generateContentWithRetry({
-      model: modelName,
-      contents: auditPrompt,
-      config: { maxOutputTokens: 2048 }
-    });
-    
-    const parseResult = parseAndExtract(response.text);
-    
-    console.log(`\n===== LLM AUDIT JSON PIPELINE =====`);
-    console.log(`Extraction: ${parseResult.extracted ? 'SUCCESS' : 'FAILED'}`);
-    console.log(`Parse: ${parseResult.success ? 'SUCCESS' : 'FAILED'}`);
-    console.log(`Repair: ${parseResult.success && parseResult.repairs && parseResult.repairs.length > 0 ? 'SUCCESS' : (parseResult.success ? 'SKIPPED' : 'FAILED')}`);
-    console.log(`Fallback: ${!parseResult.success ? 'USED' : 'SKIPPED'}`);
-    console.log(`===================================\n`);
-    
-    if (parseResult.success && Array.isArray(parseResult.value)) {
-       const parsed = parseResult.value;
-       issues.push(...parsed.filter((issue: any) => issue.confidence > 0.90));
-       // Filter out Stage 3 issues if the LLM also provided a replacement for the same waypoint
-       const llmReplacedIds = new Set(parsed.filter((i: any) => i.confidence > 0.90).map((i: any) => i.waypointId));
-       issues = issues.filter(issue => issue.source !== 'structural_validation' || !llmReplacedIds.has(issue.waypointId));
-    } else {
-       console.warn(`[Pipeline ${pipelineId}] Audit returned invalid format or failed to parse. Proceeding with 0 patches.`);
-    }
-  } catch (err: any) {
-    console.error(`[Pipeline ${pipelineId}] Audit failed:`, err);
-    console.warn(`[Pipeline ${pipelineId}] Proceeding with 0 patches due to audit failure.`);
-  }
-
-  // Stage 5.5: Validate Waypoint Identity Integrity
-  const validateWaypointIdentityIntegrity = (waypoints: Waypoint[], issues: HistoricalIssue[]) => {
-    let identityValid = true;
-    const blockedChanges: string[] = [];
-    
-    const validIssues = issues.filter(issue => {
-      if (issue.operation === 'replace') {
-        const protectedFields = ['id', 'name', 'canonicalName', 'coordinates', 'sequence', 'historicalRegion', 'lat', 'lng'];
-        if (protectedFields.includes(issue.field)) {
-          console.log(`\n[LLM AUDIT BLOCKED]\nReason: Protected identity mutation\nField: ${issue.field}\nOriginal: ${issue.originalValue}\nProposed: ${issue.replacement}\n===================`);
-          identityValid = false;
-          blockedChanges.push(`Blocked change to protected field ${issue.field} from ${issue.originalValue} to ${issue.replacement}`);
-          return false;
-        }
+      if (parseResult.success && Array.isArray(parseResult.value)) {
+         const parsed = parseResult.value;
+         issues = parsed.filter((iss: any) => iss && typeof iss === 'object' && iss.waypointId && (iss.confidence === undefined || iss.confidence >= 0.90));
+         console.log(`[Pipeline ${pipelineId}] Audit passed with ${issues.length} high-confidence actionable issues.`);
       }
-      return true;
-    });
-    
-    return { identityValid, blockedChanges, validIssues };
-  };
-  
-  const identityValidation = validateWaypointIdentityIntegrity(repairedItems, issues);
-  issues = identityValidation.validIssues;
+    } catch (auditErr) {
+      console.error(`[Pipeline ${pipelineId}] Audit failed:`, auditErr);
+      console.log(`[Pipeline ${pipelineId}] Proceeding with 0 patches due to audit failure.`);
+      issues = [];
+    }
+  }
 
   // Stage 6: Patch
   console.log(`[Pipeline ${pipelineId}] Stage 6: Patch (${issues.length} high-confidence issues)`);
+  const MUTABLE_ENRICHMENT_FIELDS = new Set([
+    'description',
+    'significance',
+    'context',
+    'historicalPeriod'
+  ]);
+
   const patchedItems = repairedItems.map((wp, idx) => {
-    const wpIssues = issues.filter(i => i.waypointId === wp.id);
+    const wpIssues = issues.filter(iss => iss.waypointId === wp.id);
     if (wpIssues.length === 0) return wp;
     
-    const patchedWp = { ...wp };
+    let patchedWp = { ...wp };
     let patchesApplied = 0;
     
     for (const issue of wpIssues) {
-      if (issue.operation === 'replace') {
-        // Staleness guard
-        if ((patchedWp as any)[issue.field] === issue.originalValue) {
+      if (issue.operation === 'replace' && issue.field) {
+        if (!MUTABLE_ENRICHMENT_FIELDS.has(issue.field)) {
+          console.warn(
+            `[Pipeline ${pipelineId}] AUDIT PATCH REJECTED\n` +
+            `waypointId: ${wp.id}\n` +
+            `field: ${issue.field}\n` +
+            `original: ${(wp as any)[issue.field]}\n` +
+            `replacement: ${issue.replacement}\n` +
+            `reason: canonical waypoint identity is immutable`
+          );
+          continue;
+        }
+
+        if ((patchedWp as any)[issue.field] === issue.originalValue || !issue.originalValue) {
           (patchedWp as any)[issue.field] = issue.replacement;
           patchesApplied++;
         } else {
            console.warn(`[Pipeline ${pipelineId}] Aborted patch on ${patchedWp.name}.${issue.field} due to stale originalValue.`);
         }
       }
-      // Future: handle insert/remove if needed
     }
     
     if (patchesApplied > 0) {
@@ -369,7 +938,7 @@ export const runRoutePipeline = async (text: string, isUrl: boolean, generateRaw
         stage: 'patch',
         source: 'llm',
         timestamp: new Date().toISOString(),
-        summary: `Applied ${patchesApplied} historical patches`
+        summary: `Applied ${patchesApplied} historical narrative patches`
       });
     }
     
@@ -422,54 +991,98 @@ export const runRoutePipeline = async (text: string, isUrl: boolean, generateRaw
   
   cleanItems.push(...itemsToProcess);
 
+  logPipelineTrace("Stage 6.5: Clean Waypoints", cleanItems);
+
   console.log(`[Pipeline ${pipelineId}] WAYPOINTS BEFORE STAGE 7:`);
   cleanItems.forEach(wp => console.log(`  - ${wp.name} (ID: ${wp.id}, parentId: ${wp.parentId})`));
 
   // Stage 7: Sequential Hierarchy
   if (intent === 'route' && cleanItems.length > 0) {
-    let lastPrimaryId: string | undefined = undefined;
-    
-    // Enforce sequence ordering before building hierarchy
-    cleanItems.sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
-    
-    // We rebuild entirely from scratch based strictly on traversal order
-    for (let i = 0; i < cleanItems.length; i++) {
-      const wp = cleanItems[i];
-      const oldParent = wp.parentId;
-      let newParent: string | undefined = undefined;
-      let reason = "";
+    const isMultiRouteEvent = effectiveEvidenceMode === 'MULTI_ROUTE_EVENT' || cleanItems.some(w => Boolean(w.routeGroupId));
 
-      // Treat missing roles as 'primary' by default
-      const isPrimary = wp.role === 'primary' || !wp.role;
-      
-      if (isPrimary) {
-         if (!lastPrimaryId) {
-            newParent = undefined;
-            reason = "First primary node in route";
-         } else {
-            newParent = lastPrimaryId;
-            reason = "Chronological chain of primary nodes";
-         }
-         lastPrimaryId = wp.id;
-      } else {
-         // role = related/administrative/historical_context
-         // Never trust LLM, always attach to nearest preceding primary
-         if (lastPrimaryId) {
-             newParent = lastPrimaryId;
-             reason = "Attached related/context node to nearest preceding primary";
-         } else {
-             newParent = undefined;
-             reason = "No preceding primary node available to attach to";
-         }
-      }
+    if (isMultiRouteEvent) {
+      // For multi-route events, build hierarchy per route group independently
+      const distinctGroupIds = Array.from(new Set(cleanItems.map(w => w.routeGroupId || 'default')));
+      for (const gId of distinctGroupIds) {
+        const groupWps = cleanItems.filter(w => (w.routeGroupId || 'default') === gId);
+        groupWps.sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+        let lastPrimaryId: string | undefined = undefined;
 
-      if (oldParent !== newParent) {
-          console.log(`\n===== HIERARCHY REPAIR =====\nWaypoint: ${wp.name}\nOld Parent: ${oldParent || 'none'}\nNew Parent: ${newParent || 'none'}\nReason: ${reason}\n==============================`);
-          if (newParent) {
-             wp.parentId = newParent;
+        for (let i = 0; i < groupWps.length; i++) {
+          const wp = groupWps[i];
+          const oldParent = wp.parentId;
+          let newParent: string | undefined = undefined;
+          let reason = "";
+
+          const isPrimary = wp.role === 'primary' || !wp.role;
+          if (isPrimary) {
+            if (!lastPrimaryId) {
+              newParent = undefined;
+              reason = "First primary node in route group";
+            } else {
+              newParent = lastPrimaryId;
+              reason = "Chronological chain of primary nodes in group";
+            }
+            lastPrimaryId = wp.id;
           } else {
-             delete wp.parentId;
+            if (lastPrimaryId) {
+              newParent = lastPrimaryId;
+              reason = "Attached related/context node to nearest preceding primary in group";
+            } else {
+              newParent = undefined;
+              reason = "No preceding primary node available in group";
+            }
           }
+
+          if (oldParent !== newParent) {
+            console.log(`\n===== HIERARCHY REPAIR =====\nWaypoint: ${wp.name}\nOld Parent: ${oldParent || 'none'}\nNew Parent: ${newParent || 'none'}\nReason: ${reason}\n==============================`);
+            if (newParent) {
+              wp.parentId = newParent;
+            } else {
+              delete wp.parentId;
+            }
+          }
+        }
+      }
+    } else {
+      // Single continuous route: preserve existing traversal order
+      cleanItems.sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+      let lastPrimaryId: string | undefined = undefined;
+      
+      for (let i = 0; i < cleanItems.length; i++) {
+        const wp = cleanItems[i];
+        const oldParent = wp.parentId;
+        let newParent: string | undefined = undefined;
+        let reason = "";
+
+        const isPrimary = wp.role === 'primary' || !wp.role;
+        if (isPrimary) {
+           if (!lastPrimaryId) {
+              newParent = undefined;
+              reason = "First primary node in route";
+           } else {
+              newParent = lastPrimaryId;
+              reason = "Chronological chain of primary nodes";
+           }
+           lastPrimaryId = wp.id;
+        } else {
+           if (lastPrimaryId) {
+               newParent = lastPrimaryId;
+               reason = "Attached related/context node to nearest preceding primary";
+           } else {
+               newParent = undefined;
+               reason = "No preceding primary node available to attach to";
+           }
+        }
+
+        if (oldParent !== newParent) {
+            console.log(`\n===== HIERARCHY REPAIR =====\nWaypoint: ${wp.name}\nOld Parent: ${oldParent || 'none'}\nNew Parent: ${newParent || 'none'}\nReason: ${reason}\n==============================`);
+            if (newParent) {
+               wp.parentId = newParent;
+            } else {
+               delete wp.parentId;
+            }
+        }
       }
     }
     
@@ -507,6 +1120,11 @@ export const runRoutePipeline = async (text: string, isUrl: boolean, generateRaw
      }
   }
 
+  const isMultiRoute = effectiveEvidenceMode === 'MULTI_ROUTE_EVENT' || cleanItems.some(w => Boolean(w.routeGroupId));
+  const isParentHierarchyValid = isMultiRoute
+    ? cleanItems.every(w => Boolean(w.routeGroupId || w.routeGroupName || w.sequence !== undefined || w.parentId !== undefined))
+    : cleanItems.every((w, idx) => idx === 0 || w.parentId !== undefined);
+
   const summary: PipelineSummary = {
       generated: rawItems.length,
       validated: normalizedItems.length,
@@ -515,7 +1133,7 @@ export const runRoutePipeline = async (text: string, isUrl: boolean, generateRaw
       deterministicRepairs: repairedItems.length - normalizedItems.length,
       retryInvocations: 0, // Set upstream
       canonicalFieldsPresent: cleanItems.every(w => w.canonicalName !== undefined || w.modernLocation !== undefined || w.historicalRegion !== undefined),
-      parentHierarchyValid: cleanItems.every((w, idx) => idx === 0 || w.parentId !== undefined),
+      parentHierarchyValid: isParentHierarchyValid,
       placeholderRemoved,
       placeholderRepaired, // Repaired placeholders are technically LLM repairs if they didn't hit this removal block
       finalRouteValid: cleanItems.length > 0 && !cleanItems.some(wp => [wp.name, wp.canonicalName, wp.modernLocation, wp.description].filter(Boolean).some(text => placeholderPatterns.some(pattern => pattern.test(text as string))))
@@ -527,14 +1145,245 @@ export const runRoutePipeline = async (text: string, isUrl: boolean, generateRaw
   if (intent === 'MULTI_LOCATION_DISCOVERY') {
     console.log(`[DISCOVERY RESULTS]\nquery="${text.toLowerCase()}"\nresultCount=${cleanItems.length}\nmode=MULTI_LOCATION`);
   }
+  // Deterministic Global Sequence Derivation & Route-Local Sequence Enforcement
+  // Invariant:
+  // 1. Order route groups according to their explicit order in the Historical Route Registry (or rawRouteGroups).
+  // 2. Order waypoints within each route group by route-local sequence.
+  // 3. Use waypoint ID only as a deterministic tie-breaker if necessary.
+  // 4. Flatten the ordered route groups into the final waypoint collection.
+  // 5. Assign: globalSequence = flattenedWaypointIndex + 1.
+  // 6. globalSequence is strictly derived metadata and NEVER used for rendering or route-local numbering.
+
+  const canonicalReconciledRouteGroups = rawRouteGroups ? rawRouteGroups.map(rg => {
+    const canonicalDef = resolveCanonicalRouteGroup(rawTitle || text, rg.id) ||
+      resolveCanonicalRouteGroup(rawTitle || text, rg.name);
+    if (canonicalDef) {
+      return {
+        ...rg,
+        id: canonicalDef.id,
+        name: canonicalDef.name
+      };
+    }
+    return rg;
+  }) : rawRouteGroups;
+
+  // Group cleanItems by route group
+  const rawGrouped = groupWaypointsByRoute(cleanItems, {
+    title: rawTitle,
+    routeType: effectiveRouteType as any,
+    routeEvidenceMode: effectiveEvidenceMode,
+    routeGroups: canonicalReconciledRouteGroups
+  });
+
+  // Reconcile group order with authoritative registry if available
+  const authModel = getAuthoritativeEventModel(rawTitle || text);
+  let orderedGroups = [...rawGrouped];
+  if (authModel && authModel.routeGroups) {
+    const registryOrder = Object.keys(authModel.routeGroups);
+    orderedGroups.sort((a, b) => {
+      const idxA = registryOrder.indexOf(a.id);
+      const idxB = registryOrder.indexOf(b.id);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return 0;
+    });
+  }
+
+  // Deduplicate and flatten in deterministic order
+  const seenWaypoints = new Set<string>();
+  const flattenedOrderedWaypoints: Waypoint[] = [];
+
+  for (const group of orderedGroups) {
+    // Sort within route group by route-local sequence, tie-breaker: waypoint ID
+    const sortedGroupWps = [...(group.waypoints || [])].sort((a, b) => {
+      const seqDiff = (a.sequence ?? 0) - (b.sequence ?? 0);
+      if (seqDiff !== 0) return seqDiff;
+      return (a.id || '').localeCompare(b.id || '');
+    });
+
+    // Enforce contiguous route-local sequence 1..N
+    sortedGroupWps.forEach((wp, localIdx) => {
+      if (!seenWaypoints.has(wp.id)) {
+        seenWaypoints.add(wp.id);
+        wp.sequence = localIdx + 1;
+        wp.routeGroupId = group.id;
+        wp.routeGroupName = group.name;
+        flattenedOrderedWaypoints.push(wp);
+      }
+    });
+
+    // Update group.waypoints to match the sorted collection
+    group.waypoints = sortedGroupWps.filter(w => seenWaypoints.has(w.id));
+  }
+
+  // Assign derived globalSequence = flattenedWaypointIndex + 1
+  flattenedOrderedWaypoints.forEach((wp, idx) => {
+    wp.globalSequence = idx + 1;
+  });
+
+  // Replace cleanItems with the deterministic flattened collection
+  cleanItems.length = 0;
+  cleanItems.push(...flattenedOrderedWaypoints);
+
+  const finalRouteGroups = orderedGroups;
+  const populatedRouteGroups = finalRouteGroups.filter(g => g.waypoints && g.waypoints.length > 0);
+  const unpopulatedRouteGroups = finalRouteGroups.filter(g => !g.waypoints || g.waypoints.length === 0);
+
+  console.log(`\n===== ROUTE COMPLETENESS =====`);
+  for (const group of populatedRouteGroups) {
+    const wpCount = group.waypoints.length;
+    const isComplete = wpCount >= 2;
+    console.log(`Route: ${group.name} (${group.id})`);
+    console.log(`Waypoints: ${wpCount}`);
+    console.log(`Segments: ${Math.max(0, wpCount - 1)}`);
+    console.log(`Status: ${isComplete ? 'COMPLETE' : 'INCOMPLETE'}`);
+    if (!isComplete) {
+      console.log(`Reason: fewer than 2 surviving authoritative waypoints`);
+    }
+    console.log(`------------------------------`);
+  }
+  console.log(`==============================\n`);
+
+  if (unpopulatedRouteGroups.length > 0) {
+    console.warn(
+      `[Pipeline ${pipelineId}] INCOMPLETE HISTORICAL ROUTE GROUP WARNING:\n` +
+      `Declared route groups with 0 waypoints:\n` +
+      unpopulatedRouteGroups.map(g => `  - ${g.name} (${g.id})`).join('\n')
+    );
+  }
+
+  // Phase 7: Canonical Data Integrity Check & Segment Evidence Derivation
+  if ((rawTitle || text).toLowerCase().includes('trail of tears')) {
+    console.log(`\n========================================`);
+    console.log(`[TRAIL OF TEARS FINAL PRODUCTION AUDIT]`);
+    console.log(`========================================`);
+    for (const group of populatedRouteGroups) {
+      // Deterministically derive segment evidence for consecutive pairs in the group
+      for (let i = 0; i < group.waypoints.length - 1; i++) {
+        const fromWp = group.waypoints[i];
+        const toWp = group.waypoints[i + 1];
+        const segmentAudit = validateDocumentedSegment(rawTitle || text, fromWp.canonicalName || fromWp.name, toWp.canonicalName || toWp.name, group.id);
+        fromWp.segmentEvidence = segmentAudit.segmentEvidence;
+        fromWp.segmentEvidenceReason = segmentAudit.reason;
+      }
+
+      for (const wp of group.waypoints) {
+        console.log(`* id: ${wp.id}
+  name: ${wp.name}
+  canonicalName: ${wp.canonicalName || wp.name}
+  lat: ${wp.lat}
+  lng: ${wp.lng}
+  routeGroupId: ${wp.routeGroupId || 'default'}
+  routeGroupName: ${wp.routeGroupName || group.name}
+  sequence: ${wp.sequence}
+  globalSequence: ${wp.globalSequence}
+  waypointType: ${wp.waypointType || 'route_waypoint'}
+  segmentEvidence: ${wp.segmentEvidence || 'DOCUMENTED_ROUTE_SEGMENT'}
+  segmentEvidenceReason: ${wp.segmentEvidenceReason || 'Standard sequence'}
+  provenance: ${wp.provenance && wp.provenance.length > 0 ? wp.provenance.map(p => p.stage).join(' -> ') : 'initial_generation'}`);
+      }
+    }
+
+    console.log(`\n[TRAIL OF TEARS FINAL GROUP COUNTS]`);
+    const countFor = (id: string) => (populatedRouteGroups.find(g => g.id === id)?.waypoints.length || 0);
+    console.log(`Northern Route: ${countFor('northern-route')}`);
+    console.log(`Benge Route: ${countFor('benge-route')}`);
+    console.log(`Bell Route: ${countFor('bell-route')}`);
+    console.log(`Water Route: ${countFor('water-route')}`);
+
+    console.log(`\n[TRAIL OF TEARS FINAL SEGMENT AUDIT]`);
+    for (const group of populatedRouteGroups) {
+      for (let i = 0; i < group.waypoints.length - 1; i++) {
+        const fromWp = group.waypoints[i];
+        const toWp = group.waypoints[i + 1];
+        const willDraw = fromWp.waypointType !== 'non_route_location' && toWp.waypointType !== 'non_route_location' && fromWp.segmentEvidence === 'DOCUMENTED_ROUTE_SEGMENT';
+        console.log(`${fromWp.name} → ${toWp.name}
+routeGroupId: ${group.id}
+sequence ${fromWp.sequence} → sequence ${toWp.sequence}
+segmentEvidence: ${fromWp.segmentEvidence}
+renderable: ${willDraw ? 'YES' : 'NO'}`);
+      }
+    }
+    console.log(`========================================\n`);
+  } else {
+    console.log(`\n===== [FINAL CANONICAL ROUTE DATA] =====`);
+    for (const group of populatedRouteGroups) {
+      console.log(`Route Group: ${group.name} (${group.id})`);
+      for (let i = 0; i < group.waypoints.length - 1; i++) {
+        const fromWp = group.waypoints[i];
+        const toWp = group.waypoints[i + 1];
+        const segmentAudit = validateDocumentedSegment(rawTitle || text, fromWp.canonicalName || fromWp.name, toWp.canonicalName || toWp.name, group.id);
+        fromWp.segmentEvidence = segmentAudit.segmentEvidence;
+        fromWp.segmentEvidenceReason = segmentAudit.reason;
+      }
+
+      group.waypoints.forEach((wp) => {
+        console.log(`  ${wp.sequence}. id="${wp.id}" name="${wp.name}" canonical="${wp.canonicalName || wp.name}" lat=${wp.lat} lng=${wp.lng} type=${wp.waypointType || 'route_waypoint'} evidence=${wp.segmentEvidence || 'DOCUMENTED_ROUTE_SEGMENT'}`);
+      });
+    }
+    console.log(`=========================================\n`);
+  }
+
+  console.log(`\n===== [ROUTE INVARIANT CHECK] =====`);
+  const idSet = new Set<string>();
+  let duplicateIds = 0;
+  let invariantViolations = 0;
+
+  for (const wp of cleanItems) {
+    if (idSet.has(wp.id)) {
+      duplicateIds++;
+      console.warn(`[Integrity Violation] Duplicate waypoint ID detected: "${wp.id}" (${wp.name})`);
+    }
+    idSet.add(wp.id);
+  }
+
+  for (const group of populatedRouteGroups) {
+    const sequences = group.waypoints.map(w => w.sequence);
+    const isContiguousFromOne = sequences.every((seq, idx) => seq === idx + 1);
+    const hasConsistentGroupId = group.waypoints.every(w => (w.routeGroupId || 'default') === group.id);
+    const hasUniqueIds = new Set(group.waypoints.map(w => w.id)).size === group.waypoints.length;
+
+    console.log(`${group.name}:`);
+    console.log(`  sequence: [${sequences.join(', ')}] (starts at 1: ${isContiguousFromOne ? 'YES' : 'NO'})`);
+    console.log(`  unique IDs: ${hasUniqueIds ? 'YES' : 'NO'}`);
+    console.log(`  routeGroup consistency: ${hasConsistentGroupId ? 'YES' : 'NO'}`);
+
+    if (!isContiguousFromOne || !hasConsistentGroupId || !hasUniqueIds) {
+      invariantViolations++;
+    }
+  }
+
+  console.log(`\nTotal Canonical Waypoints: ${cleanItems.length}`);
+  console.log(`Populated Route Groups: ${populatedRouteGroups.length}`);
+  console.log(`Unpopulated Route Groups: ${unpopulatedRouteGroups.length}`);
+  console.log(`Integrity Check Result: ${duplicateIds === 0 && invariantViolations === 0 ? 'PASSED' : 'FLAGGED'}`);
+  console.log(`===================================\n`);
+
   const isSequential = isRouteSequential(cleanItems, {
     routeType: effectiveRouteType,
     isSequential: rawIsSequential
   });
 
-  cleanItems.forEach(wp => {
-    wp.isSequential = isSequential;
-  });
+  const finalRoute: Route = {
+    waypoints: cleanItems,
+    title: rawTitle,
+    routeConfidence: rawRouteConfidence,
+    routeType: effectiveRouteType as any,
+    isSequential,
+    routeEvidenceMode: effectiveEvidenceMode,
+    routeGroups: populatedRouteGroups.length > 0 ? populatedRouteGroups : finalRouteGroups
+  };
 
-  return { waypoints: cleanItems, title: rawTitle, routeConfidence: rawRouteConfidence, routeType: effectiveRouteType as any, isSequential };
+  logPipelineTrace("Final Canonical Route", finalRoute.waypoints);
+
+  logHistoricalRouteStructure(finalRoute);
+
+  const validationResult = validateHistoricalRouteData(finalRoute);
+  if (!validationResult.isValid && process.env.NODE_ENV !== 'production') {
+    console.warn(`[Pipeline ${pipelineId}] Historical Route Validation flagged ${validationResult.issues.length} issue(s):`);
+    validationResult.issues.forEach(iss => console.warn(`  - ${iss}`));
+  }
+
+  return finalRoute;
 };

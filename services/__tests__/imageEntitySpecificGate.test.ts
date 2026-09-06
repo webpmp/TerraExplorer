@@ -139,7 +139,7 @@ describe('Image Entity-Specific Gate & Qualification System', () => {
       };
       const res = validateImageCandidate(candidate, entityWithAtlanticCoords);
       expect(res.decision).toBe('REJECT');
-      expect(res.reason).toContain('Geographic mismatch');
+      expect(res.reason).toBe('GEOGRAPHIC_CONFLICT');
     });
 
     it('8. No qualified image: When all candidates are generic or unrelated, images list remains empty', () => {
@@ -217,6 +217,77 @@ describe('Image Entity-Specific Gate & Qualification System', () => {
       };
       const validRes = validateImageCandidate(validCandidate, dallasEntity);
       expect(validRes.decision).toBe('ACCEPT');
+    });
+
+    it('10. Proper Geographic Entity: Antelope Canyon rejects Grand Canyon Antelopes sports team, Antelope Oregon, and Antelope Island', () => {
+      const antelopeCanyonEntity = {
+        name: 'Antelope Canyon',
+        canonicalName: 'Antelope Canyon',
+        entityType: 'canyon',
+        state: 'Arizona',
+        country: 'United States',
+        coordinates: { lat: 36.8619, lng: -111.3743 },
+        aliases: ['Upper Antelope Canyon', 'Lower Antelope Canyon', 'Tsé bighánílíní']
+      };
+
+      // 1. Accept: Authentic Antelope Canyon candidate
+      const authenticCandidate = {
+        url: 'https://upload.wikimedia.org/antelope_canyon.jpg',
+        title: 'Antelope Canyon',
+        description: 'Antelope Canyon slot canyon located in Page, Arizona, United States.'
+      };
+      const authRes = validateImageCandidate(authenticCandidate, antelopeCanyonEntity);
+      expect(authRes.decision).toBe('ACCEPT');
+      expect(authRes.reason).toBe('EXACT_OR_ALIAS_FEATURE_MATCH');
+
+      // 2. Reject: "Grand Canyon Antelopes" (collegiate sports team / logo)
+      const gcuCandidate = {
+        url: 'https://upload.wikimedia.org/gcu_antelopes.jpg',
+        title: 'Grand Canyon Antelopes',
+        description: 'Athletic teams representing Grand Canyon University in Phoenix, Arizona.'
+      };
+      const gcuRes = validateImageCandidate(gcuCandidate, antelopeCanyonEntity);
+      expect(gcuRes.decision).toBe('REJECT');
+      expect(gcuRes.reason).toBe('DIFFERENT_ENTITY');
+
+      // 3. Reject: "2020–21 Grand Canyon Antelopes men's basketball team"
+      const basketballCandidate = {
+        url: 'https://upload.wikimedia.org/gcu_basketball.jpg',
+        title: "2020–21 Grand Canyon Antelopes men's basketball team",
+        description: 'Men basketball team roster and season schedule.'
+      };
+      const bbRes = validateImageCandidate(basketballCandidate, antelopeCanyonEntity);
+      expect(bbRes.decision).toBe('REJECT');
+      expect(bbRes.reason).toBe('DIFFERENT_ENTITY');
+
+      // 4. Reject: "Grand Canyon Antelopes men's basketball logo"
+      const logoCandidate = {
+        url: 'https://upload.wikimedia.org/gcu_logo.jpg',
+        title: "Grand Canyon Antelopes men's basketball logo",
+        description: 'Official athletic logo and insignia.'
+      };
+      const logoRes = validateImageCandidate(logoCandidate, antelopeCanyonEntity);
+      expect(logoRes.decision).toBe('REJECT');
+      expect(logoRes.reason).toBe('DIFFERENT_ENTITY');
+
+      // 5. Reject: "Antelope, Oregon" (settlement/city)
+      const settlementCandidate = {
+        url: 'https://upload.wikimedia.org/antelope_oregon.jpg',
+        title: 'Antelope, Oregon',
+        description: 'Antelope is a city in Wasco County, Oregon, United States.'
+      };
+      const settlementRes = validateImageCandidate(settlementCandidate, antelopeCanyonEntity);
+      expect(settlementRes.decision).toBe('REJECT');
+
+      // 6. Reject: "Antelope Island" (conflicting natural feature type)
+      const islandCandidate = {
+        url: 'https://upload.wikimedia.org/antelope_island.jpg',
+        title: 'Antelope Island',
+        description: 'Antelope Island is the largest island in the Great Salt Lake, Utah.'
+      };
+      const islandRes = validateImageCandidate(islandCandidate, antelopeCanyonEntity);
+      expect(islandRes.decision).toBe('REJECT');
+      expect(islandRes.reason).toBe('DIFFERENT_ENTITY');
     });
   });
 });

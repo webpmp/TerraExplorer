@@ -1,6 +1,6 @@
 import { LocationInfo, QueryIntent, isValidCoordinates, Waypoint, CoordinateSource, GeographicIdentityStatus } from '../types';
 import { ResolvedEntity, EnrichmentResult } from '../domain';
-import { routeIntentAndExtractEntity, resolveLocationQuery, sanitizeLocationInfo, recoverCoordinatesFromAi, recoverLocationMetadata, getUserSettings, generateRoute, normalizeCoordinates } from './geminiService';
+import { routeIntentAndExtractEntity, resolveLocationQuery, sanitizeLocationInfo, recoverCoordinatesFromAi, recoverLocationMetadata, getUserSettings, generateRoute, normalizeCoordinates, isLMStudioNoModelError } from './geminiService';
 import { enrichLocationInfo } from './locationService';
 import { createIdentity, createResolvedSubject, createResolvedEntity } from './entityFactory';
 import { validateResolvedEntity, isGenericPlaceholderDescription } from './entityValidation';
@@ -14,6 +14,8 @@ import { validateEarthGeography } from './celestialCapabilities';
 import { getHistoricalEntityKnowledge, toCanonicalTitleCase } from './geographic/historicalCoordinateValidator';
 import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
 import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation } from './geographic/entityIdentityValidator';
+import { detectHistoricalRouteEvent } from './queryNormalizer';
+import { getAuthoritativeEventModel } from './geographic/historicalRouteRegistry';
 
 // --- PIPELINE TYPES ---
 
@@ -222,7 +224,9 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
           resolvedData.canonicalName = resolvedData.canonicalName || entityResult.entity;
         }
         (resolvedData as any).coordinateSource = incoming.source;
-        (resolvedData as any).identityStatus = (resolvedData as any).identityStatus || "unverified";
+        const incomingTrust: string = (recoveryCoords as any).coordinateTrust || 'provisional';
+        (resolvedData as any).coordinateTrust = incomingTrust;
+        (resolvedData as any).identityStatus = incomingTrust === 'verified' ? 'verified' : ((resolvedData as any).identityStatus || 'unverified');
         error = undefined;
         recoveryUsed = true;
         recoveredValid = true;
@@ -241,6 +245,7 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   // Normalize whatever coordinates we have at this point
   let finalSource: CoordinateSource = 'deterministic';
   let finalStatus: GeographicIdentityStatus = 'verified';
+  let finalTrust: 'verified' | 'provisional' | 'unverified' = 'verified';
 
   if (resolvedData && resolvedData.coordinates) {
      const inputCoords = JSON.stringify(resolvedData.coordinates);
@@ -254,22 +259,32 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
      const finalValid = isValidCoordinates(resolvedData.coordinates);
      coordinatesValid = finalValid;
      
-      finalSource = (resolvedData.coordinates as any)?.source || 
-                    (resolvedData as any)?.coordinateSource || 
-                    (recoveryUsed ? 'ai_recovery' : ((rawResolverResult as any)?.aiUsed ? 'ai' : 'deterministic'));
-      finalStatus = (resolvedData as any)?.identityStatus || 
-                    ((finalSource === 'ai' || finalSource === 'ai_recovery') ? 'unverified' : 'verified');
+       finalSource = (resolvedData.coordinates as any)?.source || 
+                     (resolvedData as any)?.coordinateSource || 
+                     (recoveryUsed ? 'ai_recovery' : ((rawResolverResult as any)?.aiUsed ? 'ai' : 'deterministic'));
+       
+       finalTrust = 
+         (finalSource === 'deterministic' || finalSource === 'geocoder') ? 'verified' :
+         ((resolvedData as any)?.coordinateTrust === 'verified' ? 'verified' : 
+         ((resolvedData as any)?.coordinateTrust === 'provisional' ? 'provisional' : 
+         ((resolvedData as any)?.coordinateTrust === 'unverified' ? 'unverified' :
+         ((finalSource === 'ai' || finalSource === 'ai_recovery') ? 'provisional' : 'verified'))));
 
-      resolvedData.coordinates.source = finalSource;
-      (resolvedData as any).coordinateSource = finalSource;
-      (resolvedData as any).identityStatus = finalStatus;
-      
-      const providerLabel = finalSource === 'geocoder' 
-        ? 'Nominatim' 
-        : (finalSource === 'deterministic' ? 'DeterministicDB' : (finalSource === 'ai_recovery' ? 'ai_recovery' : 'lmstudio'));
+       finalStatus = (resolvedData as any)?.identityStatus || 
+                     (finalTrust === 'verified' ? 'verified' : 'unverified');
 
-      console.log(`[FINAL COORDINATE VALIDATION]\nCoordinates: ${JSON.stringify(resolvedData.coordinates)}\nSource: ${finalSource}\nValid: ${finalValid}`);
-      console.log(`COORDINATE_FINAL\nname: ${resolvedData.name || entityResult.entity}\nlat: ${resolvedData.coordinates.lat}\nlng: ${resolvedData.coordinates.lng}\nsource: ${finalSource}\nstatus: ${finalStatus}\nprovider: ${providerLabel}`);
+       resolvedData.coordinates.source = finalSource;
+       (resolvedData.coordinates as any).coordinateTrust = finalTrust;
+       (resolvedData.coordinates as any).coordinateSource = finalSource;
+       (resolvedData.coordinates as any).coordinateTrust = finalTrust;
+       (resolvedData.coordinates as any).identityStatus = finalStatus;
+       
+       const providerLabel = finalSource === 'geocoder' 
+         ? 'Nominatim' 
+         : (finalSource === 'deterministic' ? 'DeterministicDB' : (finalSource === 'ai_recovery' ? 'ai_recovery' : 'lmstudio'));
+
+       console.log(`[FINAL COORDINATE VALIDATION]\nCoordinates: ${JSON.stringify(resolvedData.coordinates)}\nSource: ${finalSource}\nTrust: ${finalTrust}\nValid: ${finalValid}`);
+       console.log(`COORDINATE_FINAL\nname: ${resolvedData.name || entityResult.entity}\nlat: ${resolvedData.coordinates.lat}\nlng: ${resolvedData.coordinates.lng}\nsource: ${finalSource}\ntrust: ${finalTrust}\nstatus: ${finalStatus}\nprovider: ${providerLabel}`);
   }
 
   // 1. CANONICAL ENTITY LOCK
@@ -396,6 +411,7 @@ locationLabel="${locationLabel || 'none'}"`);
               source: finalSource
           },
           coordinateSource: finalSource,
+          coordinateTrust: finalTrust,
           identityStatus: finalStatus,
           providerSignals,
           adminContext,
@@ -508,6 +524,7 @@ locationLabel="${locationLabel || 'none'}"`);
              boundingBox: resolvedData.boundary as any
          },
          coordinateSource: finalSource,
+         coordinateTrust: (canonicalEntity as any).coordinateTrust || (resolvedData as any).coordinateTrust || finalTrust,
          identityStatus: finalStatus,
          isApproximate: (resolvedData as any).isApproximate ?? (canonicalEntity as any).isApproximate ?? (finalSource === 'historical_approximate'),
          exactLocationKnown: (resolvedData as any).exactLocationKnown ?? (canonicalEntity as any).exactLocationKnown ?? (finalSource !== 'historical_approximate'),
@@ -628,6 +645,7 @@ locationLabel="${locationLabel || 'none'}"`);
      (entity as any).isApproximate = (primaryLocation as any).isApproximate;
      (entity as any).exactLocationKnown = (primaryLocation as any).exactLocationKnown;
      (entity as any).coordinateSource = finalSource;
+     (entity as any).coordinateTrust = (resolvedData as any).coordinateTrust || (finalSource === 'deterministic' || finalSource === 'geocoder' ? 'verified' : 'unverified');
      
      if (recoveryUsed) {
          console.log(`=== RECOVERY MERGE RESULT ===`);
@@ -679,23 +697,41 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
     };
   }
   
-  // 2. Routing Guard: If intent is route / multi-location discovery, bypass coordinate resolution
+  // 2. Routing Guard: If intent is route / multi-location discovery, or matches authoritative historical route registry, bypass coordinate resolution
+  const histCheck = detectHistoricalRouteEvent(request.rawQuery);
+  const isHistoricalMatch = histCheck.isHistoricalRouteEvent || Boolean(getAuthoritativeEventModel(entityResult.entity));
+
+  console.log(`[PIPELINE ROUTING]\nentity: "${entityResult.entity}"\nhistoricalRegistryMatch: ${isHistoricalMatch}\nselectedPipeline: ${isHistoricalMatch || entityResult.intentResult.intent === 'route' || entityResult.intentResult.intent === 'EXPLORATORY' || entityResult.intentResult.intent === 'MULTI_LOCATION_DISCOVERY' || (entityResult as any).resolutionMode === 'MULTI_LOCATION_EXPLORATION' ? 'HISTORICAL_ROUTE' : 'SINGLE_LOCATION'}`);
+
   if (
+    isHistoricalMatch ||
     entityResult.intentResult.intent === 'route' || 
     entityResult.intentResult.intent === 'EXPLORATORY' || 
     entityResult.intentResult.intent === 'MULTI_LOCATION_DISCOVERY' ||
     (entityResult as any).resolutionMode === 'MULTI_LOCATION_EXPLORATION'
   ) {
      console.log(`[Pipeline] Routing Guard activated for intent: ${entityResult.intentResult.intent}`);
-      const route = await generateRoute(request.rawQuery, entityResult.intentResult.intent);
-      const waypoints = route.waypoints;
-      console.log(`[Pipeline] WAYPOINTS AFTER GENERATEROUTE (Main guard):`);
-      waypoints.forEach(wp => console.log(`  - ${wp.name} (ID: ${wp.id}, parentId: ${wp.parentId})`));
-      return {
-         mode: "route",
-         isValid: true,
-         waypoints: waypoints || []
-      };
+      try {
+        const route = await generateRoute(request.rawQuery, isHistoricalMatch ? 'route' : entityResult.intentResult.intent);
+        const waypoints = route.waypoints;
+        console.log(`[Pipeline] WAYPOINTS AFTER GENERATEROUTE (Main guard):`);
+        waypoints.forEach(wp => console.log(`  - ${wp.name} (ID: ${wp.id}, parentId: ${wp.parentId})`));
+        return {
+           mode: "route",
+           isValid: true,
+           waypoints: waypoints || []
+        };
+      } catch (error) {
+        if (isLMStudioNoModelError(error)) {
+          return {
+            mode: "route",
+            isValid: false,
+            error: "LM_STUDIO_NO_MODEL",
+            waypoints: []
+          };
+        }
+        throw error;
+      }
   }
 
   const locationResult = await ResolutionStage(entityResult);
@@ -717,15 +753,27 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
       console.log(`Correction: MULTI_LOCATION_EXPLORATION`);
       console.log(`Recovery: generateRoute()`);
       
-      const route = await generateRoute(request.rawQuery, 'route');
-      const waypoints = route.waypoints;
-      console.log(`[Pipeline] WAYPOINTS AFTER GENERATEROUTE (Intent fallback):`);
-      waypoints.forEach(wp => console.log(`  - ${wp.name} (ID: ${wp.id}, parentId: ${wp.parentId})`));
-      return {
-         mode: "route",
-         isValid: waypoints.length > 0,
-         waypoints
-      };
+      try {
+        const route = await generateRoute(request.rawQuery, 'route');
+        const waypoints = route.waypoints;
+        console.log(`[Pipeline] WAYPOINTS AFTER GENERATEROUTE (Intent fallback):`);
+        waypoints.forEach(wp => console.log(`  - ${wp.name} (ID: ${wp.id}, parentId: ${wp.parentId})`));
+        return {
+           mode: "route",
+           isValid: waypoints.length > 0,
+           waypoints
+        };
+      } catch (error) {
+        if (isLMStudioNoModelError(error)) {
+          return {
+            mode: "route",
+            isValid: false,
+            error: "LM_STUDIO_NO_MODEL",
+            waypoints: []
+          };
+        }
+        throw error;
+      }
   }
 
   if (locationResult.entity) {

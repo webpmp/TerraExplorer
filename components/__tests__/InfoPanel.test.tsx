@@ -824,7 +824,7 @@ describe('Lightbox Metadata Integration', () => {
       expect(html).not.toContain('Canonical Name');
     });
 
-    it('displays alternate names as clean inline text under the header title', () => {
+    it('does not render alternate names or "Also known as" in the header, keeping them in underlying data and body', () => {
       const html = renderToStaticMarkup(
         <InfoPanel
           info={sputnikLocation}
@@ -841,9 +841,207 @@ describe('Lightbox Metadata Integration', () => {
       expect(html).toContain('Launch of Sputnik');
       // Subtitle is site name
       expect(html).toContain('Site No. 1, Baikonur Cosmodrome');
-      // Alternate names displayed inline as clean text
-      expect(html).toContain('Also known as');
-      expect(html).toContain("Gagarin&#x27;s Start, Tyuratam, Barking Ranch");
+      // Category is HISTORICAL SITE
+      expect(html).toContain('HISTORICAL SITE');
+      // Coordinates are rendered
+      expect(html).toContain('45.92° N, 63.34° E');
+
+      // Alternate names and "Also known as" MUST NOT be in the header
+      expect(html).not.toContain('Also known as Gagarin');
+      expect(html).not.toContain("Also known as Gagarin&#x27;s Start, Tyuratam, Barking Ranch");
+
+      // Underlying data is preserved
+      expect(sputnikLocation.waypoint.alternateNames).toEqual(["Gagarin's Start", "Tyuratam", "Barking Ranch"]);
+      expect(sputnikLocation.waypoint.canonicalName).toBe('Site No. 1');
+    });
+
+    it('renders the header with canonical title, location, category, and coordinates for Discovery of Penicillin without aliases', () => {
+      const penicillinLocation = {
+        name: "St. Mary's Hospital, London",
+        type: 'Historical Site' as any,
+        entityType: 'historical_site',
+        locationString: "City of Westminster, United Kingdom",
+        coordinates: { lat: 51.51, lng: -0.13 },
+        routeContext: {
+          title: 'Discovery of Penicillin',
+          text: "St. Mary's Hospital was where Alexander Fleming discovered penicillin in 1928."
+        },
+        waypoint: {
+          id: 'wp-penicillin-1',
+          name: "St. Mary's Hospital, City of Westminster, United Kingdom",
+          canonicalName: "St. Mary's Hospital",
+          alternateNames: ["St. Mary's Hospital, London"],
+          lat: 51.51,
+          lng: -0.13,
+          description: "Alexander Fleming discovered penicillin at St. Mary's Hospital in London in 1928, revolutionizing modern medicine."
+        },
+        description: "Alexander Fleming discovered penicillin at St. Mary's Hospital in London in 1928, revolutionizing modern medicine.",
+        notable: [],
+        news: []
+      };
+
+      const skins = ['modern', 'retro-green', 'retro-amber', 'parchment'] as const;
+      for (const skin of skins) {
+        const html = renderToStaticMarkup(
+          <InfoPanel
+            info={penicillinLocation as any}
+            onClose={() => {}}
+            isLoading={false}
+            skin={skin}
+            isFavorite={false}
+            onSaveFavorite={() => {}}
+            onRemoveFavorite={() => {}}
+          />
+        );
+
+        // Header must contain canonical title, location subtitle, category, and coordinates
+        expect(html).toContain('Discovery of Penicillin');
+        expect(html).toContain("St. Mary&#x27;s Hospital, City of Westminster, United Kingdom");
+        expect(html).toContain('HISTORICAL SITE');
+        expect(html).toContain('51.51° N, 0.13° W');
+
+        // Header must NOT contain "Also known as" or the alias metadata line
+        expect(html).not.toContain('Also known as');
+        expect(html).not.toContain("Also known as St. Mary&#x27;s Hospital, London");
+      }
+
+      // Underlying data is preserved
+      expect(penicillinLocation.waypoint.alternateNames).toEqual(["St. Mary's Hospital, London"]);
+      expect(penicillinLocation.waypoint.canonicalName).toBe("St. Mary's Hospital");
+    });
+
+    it('does not render aliases in the header across all themes for an entity with multiple alternate names', () => {
+      const themes = ['modern', 'retro-green', 'retro-amber', 'parchment'] as const;
+      for (const skin of themes) {
+        const html = renderToStaticMarkup(
+          <InfoPanel
+            info={sputnikLocation}
+            onClose={() => {}}
+            isLoading={false}
+            skin={skin}
+            isFavorite={false}
+            onSaveFavorite={() => {}}
+            onRemoveFavorite={() => {}}
+          />
+        );
+
+        expect(html).toContain('Launch of Sputnik');
+        expect(html).toContain('Site No. 1, Baikonur Cosmodrome');
+        expect(html).not.toContain('Also known as');
+        expect(html).not.toContain("Also known as Gagarin&#x27;s Start, Tyuratam, Barking Ranch");
+      }
+    });
+
+    it('correctly renders entities with no alternate names', () => {
+      const simpleLocation = {
+        name: 'Eiffel Tower',
+        type: 'Monument' as any,
+        entityType: 'monument',
+        locationString: 'Paris, France',
+        coordinates: { lat: 48.8584, lng: 2.2945 },
+        waypoint: {
+          id: 'wp-eiffel',
+          name: 'Eiffel Tower',
+          lat: 48.8584,
+          lng: 2.2945,
+          alternateNames: []
+        },
+        description: 'A wrought-iron lattice tower on the Champ de Mars in Paris, France.',
+        notable: [],
+        news: []
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={simpleLocation as any}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('Eiffel Tower');
+      expect(html).toContain('Paris, France');
+      expect(html).not.toContain('Also known as');
+    });
+
+    it('does not render historical or former names as header metadata', () => {
+      const historicalNamedLocation = {
+        name: 'Saint Petersburg',
+        type: 'City' as any,
+        entityType: 'city',
+        locationString: 'Northwestern Federal District, Russia',
+        coordinates: { lat: 59.93, lng: 30.33 },
+        waypoint: {
+          id: 'wp-spb',
+          name: 'Saint Petersburg',
+          canonicalName: 'Saint Petersburg',
+          alternateNames: ['Petrograd', 'Leningrad'],
+          lat: 59.93,
+          lng: 30.33
+        },
+        description: 'Saint Petersburg is a Russian port city on the Baltic Sea.',
+        notable: [],
+        news: []
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={historicalNamedLocation as any}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('Saint Petersburg');
+      expect(html).not.toContain('Also known as');
+      expect(html).not.toContain('Also known as Petrograd, Leningrad');
+      expect(historicalNamedLocation.waypoint.alternateNames).toEqual(['Petrograd', 'Leningrad']);
+    });
+
+    it('ensures very long alternate names do not cause header expansion because they are not rendered in the header', () => {
+      const veryLongAlt = 'A'.repeat(500);
+      const longAltLocation = {
+        name: 'Ancient Megalith',
+        type: 'Archaeological Site' as any,
+        entityType: 'historical_site',
+        locationString: 'Salisbury, United Kingdom',
+        coordinates: { lat: 51.1788, lng: -1.8262 },
+        waypoint: {
+          id: 'wp-long-alt',
+          name: 'Ancient Megalith',
+          canonicalName: 'Ancient Megalith',
+          alternateNames: [veryLongAlt],
+          lat: 51.1788,
+          lng: -1.8262
+        },
+        description: 'Prehistoric monument in Wiltshire, England.',
+        notable: [],
+        news: []
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={longAltLocation as any}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('Ancient Megalith');
+      expect(html).not.toContain(veryLongAlt);
+      expect(html).not.toContain('Also known as');
     });
 
     it('consolidates narrative paragraphs and avoids redundant section headings', () => {
@@ -949,6 +1147,39 @@ describe('Lightbox Metadata Integration', () => {
         />
       );
       expect(parchmentHtml).toMatch(/class="[^"]*text-xs[^"]*font-bold[^"]*uppercase[^"]*tracking-widest[^"]*"[^>]*>\s*Waypoint 3 of 9/);
+    });
+
+    it('displays route-local "WAYPOINT X OF Y" and subordinate route name header for multi-route events', () => {
+      const multiRouteNav = {
+        current: 1,
+        total: 13,
+        routeGroupName: 'Northern Route',
+        routeGroupId: 'northern-route',
+        routeLocalCurrent: 1,
+        routeLocalTotal: 4,
+        onNext: () => {},
+        onPrev: () => {}
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={sputnikLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+          routeNav={multiRouteNav}
+        />
+      );
+
+      // Subordinate route name is clearly visible
+      expect(html).toContain('Northern Route');
+      // Prominent route-local waypoint counter
+      expect(html).toContain('Waypoint 1 of 4');
+      // Does NOT display the global "Waypoint 1 of 13"
+      expect(html).not.toContain('Waypoint 1 of 13');
     });
 
     it('removes the redundant title and short description block immediately below the header for single locations', () => {

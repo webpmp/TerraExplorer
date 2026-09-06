@@ -96,7 +96,8 @@ valid: ${coordinatesValid}`);
   const primaryLabel = entity.subject?.primaryLocation?.label;
   const identityStatus = (entity.subject?.primaryLocation as any)?.identityStatus || 
                          (entity.subject?.identity as any)?.identityStatus;
-  const coordinateSource = coords?.source || (entity.subject?.primaryLocation as any)?.coordinateSource;
+  const coordinateSource = coords?.source || (entity.subject?.primaryLocation as any)?.coordinateSource || (entity as any)?.coordinateSource;
+  const coordinateTrust = (coords as any)?.coordinateTrust || (entity.subject?.primaryLocation as any)?.coordinateTrust || (entity as any)?.coordinateTrust;
 
   if (canonicalName && entityType && primaryLabel && identityStatus !== 'failed') {
     identityValid = true;
@@ -104,6 +105,15 @@ valid: ${coordinatesValid}`);
     identityValid = false;
     valid = false;
     failureReason = failureReason === 'none' ? "Invalid identity (missing canonicalName, entityType, or label, or status failed)" : `${failureReason}, Invalid identity`;
+  }
+
+  // An unverified AI coordinate cannot by itself establish a valid canonical geographic identity
+  if ((coordinateSource === 'ai' || coordinateSource === 'ai_recovery') && coordinateTrust === 'unverified') {
+    identityValid = false;
+    valid = false;
+    failureReason = failureReason === 'none'
+      ? "Unverified AI coordinates cannot establish canonical geographic identity without corroboration"
+      : `${failureReason}, Unverified AI coordinates`;
   }
 
   // Level 2.5: Celestial Body Validation (Earth-Only support)

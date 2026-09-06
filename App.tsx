@@ -1599,7 +1599,7 @@ const App: React.FC = () => {
          return mergeLocationInfo(prev, data);
      }); // Inject the route context so it's always available as historical context
      if (wp.context) {
-         const routeLabel = wp.routeTitle || "From Route";
+         const routeLabel = wp.routeGroupName || wp.routeTitle || "Route Context";
          data.routeContext = {
              title: routeLabel,
              text: wp.context
@@ -2271,6 +2271,10 @@ const App: React.FC = () => {
           setIsDiscoveryLoading(false);
           console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
           loadWaypointData(waypointsWithSearch[0]);
+        } else if (pipelineResult.error === 'LM_STUDIO_NO_MODEL') {
+          setInteractionState('GLOBE_IDLE');
+          setSearchError("No model loaded. Please load a model in LM Studio or select another provider in Settings.");
+          setIsDiscoveryLoading(false);
         } else {
           console.log('[Camera] SEARCH_NO_RESULT rotation preserved');
           setInteractionState('GLOBE_IDLE');
@@ -2375,7 +2379,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         if (errorCode === "UNSUPPORTED_CELESTIAL_BODY") {
           userError = "TerraExplorer currently supports Earth geography only.";
         } else if (errorCode === "LM_STUDIO_NO_MODEL") {
-          userError = "No model loaded. Please load a model in LM Studio. Load a model in LM Studio or select another provider in Settings.";
+          userError = "No model loaded. Please load a model in LM Studio or select another provider in Settings.";
         } else if (errorCode === "LOCATION_SYSTEM_UNAVAILABLE") {
           userError = "Location system unavailable.";
         } else if (errorCode === "NOT_FOUND") {
@@ -2449,6 +2453,12 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         }
       } catch (err) {
         if (currentSearchId !== activeSearchRequestIdRef.current) return;
+        if (isLMStudioNoModelError(err)) {
+          setInteractionState('GLOBE_IDLE');
+          setSearchError("No model loaded. Please load a model in LM Studio or select another provider in Settings.");
+          setIsDiscoveryLoading(false);
+          return;
+        }
         console.error('[Route] PIPELINE_ERROR generating route:', err);
         console.log('[Camera] SEARCH_ERROR rotation preserved');
         setInteractionState('GLOBE_IDLE');
@@ -3082,12 +3092,27 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           currentFavoriteName={currentFavorite?.name}
           onFetchNews={handleFetchNews}
           onLoadMoreNews={handleLoadMoreNews}
-          routeNav={(routeWaypoints.length > 1 && currentWaypointIndex !== -1) ? {
-              current: currentWaypointIndex + 1,
-              total: routeWaypoints.length,
-              onNext: handleNextWaypoint,
-              onPrev: handlePrevWaypoint
-          } : undefined}
+          routeNav={(routeWaypoints.length > 1 && currentWaypointIndex !== -1) ? (() => {
+              const currentWp = routeWaypoints[currentWaypointIndex];
+              const groupWps = currentWp?.routeGroupId
+                ? routeWaypoints.filter(w => w.routeGroupId === currentWp.routeGroupId)
+                : [];
+              const groupTotal = groupWps.length;
+              const groupCurrent = typeof currentWp?.sequence === 'number'
+                ? currentWp.sequence
+                : (groupWps.length > 0 ? groupWps.findIndex(w => w.id === currentWp.id) + 1 : currentWaypointIndex + 1);
+
+              return {
+                current: currentWaypointIndex + 1,
+                total: routeWaypoints.length,
+                routeGroupName: currentWp?.routeGroupName || (currentWp?.routeGroupId ? `Route ${currentWp.routeGroupId}` : undefined),
+                routeGroupId: currentWp?.routeGroupId,
+                routeLocalCurrent: groupCurrent,
+                routeLocalTotal: groupTotal > 0 ? groupTotal : undefined,
+                onNext: handleNextWaypoint,
+                onPrev: handlePrevWaypoint
+              };
+          })() : undefined}
         />
       )}
 
