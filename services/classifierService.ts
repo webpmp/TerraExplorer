@@ -110,7 +110,7 @@ export const classifyGeographicEntityWithEvidence = async (
     ) || ['city', 'town', 'village', 'municipality'].includes(adminContext?.type);
 
     const isExplicitProtectedAreaName = q.match(/\b(special reserve|national reserve|nature reserve|wildlife reserve|game reserve|forest reserve|faunal reserve|biosphere reserve|ecological reserve|national park|state park|provincial park|tribal park|parque nacional|parc national|wildlife sanctuary|national monument)\b/i) !== null;
-    const isDescriptiveCollectionOrFeature = q.match(/\b(canals?|waterways?|beaches|waterfalls?|mountains?|canyons?|valleys?|islands?|skyline|waterfront)\b/i) !== null;
+    const isDescriptiveCollectionOrFeature = q.match(/\b(canals?|waterways?|beaches|waterfalls?|mountains?|canyons?|valleys?|islands?|skyline|waterfront|pyramids?|temples?|monuments?|ruins?|acropolis|amphitheater|castles?|forts?|palaces?|tombs?)\b/i) !== null;
 
     if (hasAuthoritativeSettlementTag && !isExplicitProtectedAreaName && !isDescriptiveCollectionOrFeature) {
         return { entityType: 'settlement', confidence: 'authoritative', evidence: `Authoritative provider settlement type: ${signals.join(', ')}` };
@@ -218,7 +218,7 @@ export const classifyGeographicEntityWithEvidence = async (
     }
 
     // 10. Archaeological Sites
-    if (q.match(/\b(pyramids?|ruins?|temple|acropolis|amphitheater|parthenon|colosseum|coliseo|stonehenge|machu picchu|chichen itza|petra|angkor wat|pantheon|forum)\b/i) ||
+    if (q.match(/\b(pyramids?|ruins?|temples?|acropolis|amphitheaters?|amphitheatre|parthenon|colosseum|coliseo|stonehenge|machu picchu|chichen itza|petra|angkor wat|pantheon|forum|necropolis)\b/i) ||
         signals.some(s => s.includes('archaeological') || s.includes('ruins') || s.includes('ancient') || s.includes('maya') || s.includes('monumento') || s === 'archaeological_site')) {
         return { entityType: 'archaeological_site', confidence: 'authoritative', evidence: `Name or provider tag matched archaeological site` };
     }
@@ -228,7 +228,7 @@ export const classifyGeographicEntityWithEvidence = async (
         return { entityType: 'museum', confidence: 'authoritative', evidence: `Name or provider tag matched museum` };
     }
 
-    if (q.match(/\b(monument|memorial|statue of liberty|eiffel tower|tower of london|big ben|taj mahal)\b/i) || signals.some(s => s === 'monument' || s.includes('monument'))) {
+    if (q.match(/\b(monument|memorial|statue of liberty|eiffel tower|tower of london|big ben|taj mahal|castles?|forts?|palaces?)\b/i) || signals.some(s => s === 'monument' || s.includes('monument'))) {
         return { entityType: 'monument', confidence: 'authoritative', evidence: `Name or provider tag matched monument` };
     }
 

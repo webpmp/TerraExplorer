@@ -2,6 +2,114 @@ import { ResolvedEntity } from '../domain';
 import { isValidCoordinates } from '../types';
 import { validateEarthGeography } from './celestialCapabilities';
 import { getHistoricalEntityKnowledge } from './geographic/historicalCoordinateValidator';
+import { isInvalidCanonicalName } from './geographic/entityIdentityValidator';
+import { isPlaceholderString } from '../components/InfoPanel';
+
+export type EnrichmentCompletenessStatus = 'COMPLETE' | 'PARTIAL' | 'FAILED';
+
+export interface EnrichmentCompletenessResult {
+  status: EnrichmentCompletenessStatus;
+  missingFields: string[];
+  newsStatus: 'accepted' | 'optional/empty';
+  recoveryRequired: boolean;
+  recoveryReason?: string;
+}
+
+/**
+ * Evaluates the completeness of location enrichment.
+ * Complete landmarks and entities require substantive description, populated notable facts,
+ * context notes, and climate information. News is optional.
+ */
+export function evaluateEnrichmentCompleteness(
+  data: any,
+  canonicalName?: string,
+  entityType?: string
+): EnrichmentCompletenessResult {
+  if (!data || typeof data !== 'object') {
+    return {
+      status: 'FAILED',
+      missingFields: ['description', 'notable', 'contextNotes', 'climate'],
+      newsStatus: 'optional/empty',
+      recoveryRequired: true,
+      recoveryReason: 'No enrichment data present'
+    };
+  }
+
+  const missing: string[] = [];
+
+  // 1. Description: Substantive and non-placeholder
+  const desc = typeof data.description === 'string' ? data.description.trim() : '';
+  const isDescMissingOrPlaceholder = !desc || isGenericPlaceholderDescription(desc, canonicalName || data.name);
+  if (isDescMissingOrPlaceholder) {
+    missing.push('description');
+  }
+
+  // 2. Notable: For landmarks, archaeological sites, POIs, settlements, etc.
+  const notable = Array.isArray(data.notable) ? data.notable : [];
+  if (notable.length === 0) {
+    missing.push('notable');
+  }
+
+  // 3. Context Notes
+  const contextNotes = Array.isArray(data.contextNotes) ? data.contextNotes : [];
+  if (contextNotes.length === 0) {
+    missing.push('contextNotes');
+  }
+
+  // 4. Climate
+  const hasClimate = data.climate && (
+    (typeof data.climate === 'string' && !isPlaceholderString(data.climate)) ||
+    (typeof data.climate === 'object' && (
+      (data.climate.name && !isPlaceholderString(data.climate.name)) ||
+      (data.climate.value && !isPlaceholderString(data.climate.value))
+    ))
+  );
+  if (!hasClimate) {
+    missing.push('climate');
+  }
+
+  // 5. News (Optional)
+  const news = Array.isArray(data.news) ? data.news : [];
+  const newsStatus = news.length > 0 ? 'accepted' : 'optional/empty';
+
+  let status: EnrichmentCompletenessStatus = 'COMPLETE';
+  let recoveryRequired = false;
+  let recoveryReason: string | undefined;
+
+  if (isDescMissingOrPlaceholder && missing.length >= 3) {
+    status = 'FAILED';
+    recoveryRequired = true;
+    recoveryReason = 'enrichment failed: substantive metadata missing';
+  } else if (missing.length > 0) {
+    status = 'PARTIAL';
+    recoveryRequired = true;
+    recoveryReason = 'enrichment incomplete despite verified canonical identity';
+  } else {
+    status = 'COMPLETE';
+    recoveryRequired = false;
+  }
+
+  return {
+    status,
+    missingFields: missing,
+    newsStatus,
+    recoveryRequired,
+    recoveryReason
+  };
+}
+
+export function logEnrichmentCompleteness(evalResult: EnrichmentCompletenessResult): void {
+  console.log('[ENRICHMENT COMPLETENESS]');
+  console.log(`Status: ${evalResult.status}`);
+  if (evalResult.missingFields.length > 0) {
+    console.log(`Missing/Insufficient: ${evalResult.missingFields.join(', ')}`);
+  }
+  console.log(`News: ${evalResult.newsStatus}`);
+  console.log(`Recovery Required: ${evalResult.recoveryRequired ? 'YES' : 'NO'}`);
+  if (evalResult.recoveryReason) {
+    console.log(`Recovery Reason: ${evalResult.recoveryReason}`);
+  }
+}
 
 export function isGenericPlaceholderDescription(description?: string | null, entityName?: string): boolean {
   if (!description || typeof description !== 'string') return true;
@@ -99,16 +207,20 @@ valid: ${coordinatesValid}`);
   const coordinateSource = coords?.source || (entity.subject?.primaryLocation as any)?.coordinateSource || (entity as any)?.coordinateSource;
   const coordinateTrust = (coords as any)?.coordinateTrust || (entity.subject?.primaryLocation as any)?.coordinateTrust || (entity as any)?.coordinateTrust;
 
-  if (canonicalName && entityType && primaryLabel && identityStatus !== 'failed') {
+  if (canonicalName && entityType && primaryLabel && identityStatus !== 'failed' && !isInvalidCanonicalName(canonicalName) && !isInvalidCanonicalName(primaryLabel)) {
     identityValid = true;
   } else {
     identityValid = false;
     valid = false;
-    failureReason = failureReason === 'none' ? "Invalid identity (missing canonicalName, entityType, or label, or status failed)" : `${failureReason}, Invalid identity`;
+    if (isInvalidCanonicalName(canonicalName) || isInvalidCanonicalName(primaryLabel)) {
+      failureReason = failureReason === 'none' ? "Invalid identity (canonical name cannot be a natural language question or command)" : `${failureReason}, Invalid identity question format`;
+    } else {
+      failureReason = failureReason === 'none' ? "Invalid identity (missing canonicalName, entityType, or label, or status failed)" : `${failureReason}, Invalid identity`;
+    }
   }
 
   // An unverified AI coordinate cannot by itself establish a valid canonical geographic identity
-  if ((coordinateSource === 'ai' || coordinateSource === 'ai_recovery') && coordinateTrust === 'unverified') {
+  if ((coordinateSource === 'ai' || coordinateSource === 'ai_recovery') && (coordinateTrust === 'unverified' || (coordinateTrust === 'provisional' && identityStatus === 'unverified'))) {
     identityValid = false;
     valid = false;
     failureReason = failureReason === 'none'

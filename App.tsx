@@ -11,7 +11,7 @@ import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import SettingsPanel from './components/SettingsPanel';
 import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint, GeoCoordinates, UserSettings, AIProvider, NewsProvider } from './types';
-import { getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, EnrichmentMetrics, cancelFeatureInfoRequests, isLMStudioNoModelError } from './services/geminiService';
+import { getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, EnrichmentMetrics, cancelFeatureInfoRequests, isLMStudioNoModelError, LM_STUDIO_NO_MODEL_MESSAGE, LM_STUDIO_NO_MODEL_INSTRUCTION } from './services/geminiService';
 import { getEstimatedClimate } from './services/geographic/climateEstimator';
 import { enrichLocationInfo, mergeLocationInfo, fetchAndValidateLocationNews } from './services/locationService';
 import { resolveGeographicMetadata } from './services/geographic/geographicResolver';
@@ -46,11 +46,11 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
   const R = 6371; // Radius of the earth in km
   const dLat = (lat2 - lat1) * (Math.PI / 180);
   const dLon = (lon2 - lon1) * (Math.PI / 180);
-  const a = 
+  const a =
     Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * 
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
     Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
   const d = R * c;
   return d;
 };
@@ -88,7 +88,7 @@ const CameraAnimator: React.FC<{
 
         camera.position.copy(newDir.multiplyScalar(newDist));
         cameraControlsRef.current.update(); // Update controls to reflect new position
-        
+
         const angle = currentDir.angleTo(targetDir);
         const distDiff = Math.abs(currentLen - targetLen);
         const timedOut = Date.now() - animStartTimeRef.current > 1500;
@@ -122,12 +122,12 @@ const AuthoritativeCameraEnforcer: React.FC<{
     if (!cameraControlsRef.current) return;
     if (isDocumentaryActive) return; // DocumentaryController has direct authoritative control over camera during transitions
     if (isCameraAnimatingRef.current) return; // Button / wheel zoom animation has exclusive camera ownership
-    
+
     const controls = cameraControlsRef.current;
     const camera = controls.object;
-    
+
     const cameraState = cameraStateRef.current;
-    
+
     // Single Source of Truth for Authoritative Distance
     let authoritativeDistance = 4.5;
     if (cameraState.activeRoute) {
@@ -139,18 +139,18 @@ const AuthoritativeCameraEnforcer: React.FC<{
     } else {
        authoritativeDistance = cameraState.themeSuggestedDistance;
     }
-    
+
     // Protect against NaN
     if (isNaN(authoritativeDistance) || authoritativeDistance <= 0) {
         authoritativeDistance = 4.5;
     }
-    
+
     // Maintain distance magnitude along camera's current view vector
     const currentDist = camera.position.length();
     if (currentDist > 0.001 && Math.abs(currentDist - authoritativeDistance) > 0.01) {
         camera.position.normalize().multiplyScalar(authoritativeDistance);
     }
-    
+
     if (targetCameraPosRef.current && targetCameraPosRef.current.lengthSq() > 0.0001) {
        targetCameraPosRef.current.normalize().multiplyScalar(authoritativeDistance);
     }
@@ -162,7 +162,7 @@ const AuthoritativeCameraEnforcer: React.FC<{
 // ensuring the user always sees the "day" side of the earth.
 const Sun: React.FC<{ skin: SkinType }> = ({ skin }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
-  
+
   useFrame(({ camera }) => {
     if (lightRef.current) {
       // Copy camera position to light position
@@ -171,19 +171,19 @@ const Sun: React.FC<{ skin: SkinType }> = ({ skin }) => {
   });
 
   return (
-    <directionalLight 
-      ref={lightRef} 
-      intensity={skin === 'modern' || skin === 'parchment' ? 2.5 : 3.0} 
-      castShadow 
+    <directionalLight
+      ref={lightRef}
+      intensity={skin === 'modern' || skin === 'parchment' ? 2.5 : 3.0}
+      castShadow
       color="#ffffff"
     />
   );
 };
 
 // Component to manage auto-rotation logic based on camera distance
-const RotationManager: React.FC<{ 
-  isDragging: boolean; 
-  autoRotate: boolean; 
+const RotationManager: React.FC<{
+  isDragging: boolean;
+  autoRotate: boolean;
   setAutoRotate: (v: boolean) => void;
   onZoomChange: (isZoomedOut: boolean) => void;
   disabled: boolean;
@@ -196,7 +196,7 @@ const RotationManager: React.FC<{
     const dist = camera.position.length();
     // Max distance is 8. Consider zoomed out when close to max.
     const isZoomedOut = dist > 7.0;
-    
+
     if (wasZoomedOutRef.current !== isZoomedOut) {
       onZoomChange(isZoomedOut);
       wasZoomedOutRef.current = isZoomedOut;
@@ -209,7 +209,7 @@ const RotationManager: React.FC<{
     }
 
     if (isDragging) return;
-    
+
     // Check if we are at max distance (zoomed all the way out)
     // If user zooms out to ~7.5 units (max is 8), resume rotation
     // We prioritize this over 'disabled' status if the user intentionally zooms out far enough
@@ -224,9 +224,9 @@ const RotationManager: React.FC<{
 };
 
 // Visibility Tracker: checks if the current selected location is visible to the camera
-const VisibilityTracker: React.FC<{ 
-  location: LocationInfo | null, 
-  onVisibilityChange: (visible: boolean) => void 
+const VisibilityTracker: React.FC<{
+  location: LocationInfo | null,
+  onVisibilityChange: (visible: boolean) => void
 }> = ({ location, onVisibilityChange }) => {
   const wasVisible = useRef<boolean | null>(null);
 
@@ -239,15 +239,15 @@ const VisibilityTracker: React.FC<{
     const vec = latLngToVector3(location.coordinates.lat, location.coordinates.lng);
     const cameraDir = camera.position.clone().normalize();
     const dot = vec.clone().normalize().dot(cameraDir);
-    
+
     // Horizon culling approximation
     // Point visible if dot > 1/dist approximately (for sphere R=1)
     const dist = camera.position.length();
     // Safety buffer of 0.05 to ensure it's not flickering on the exact edge
-    const limit = (1 / dist) - 0.05; 
-    
+    const limit = (1 / dist) - 0.05;
+
     const isVisible = dot > limit;
-    
+
     if (wasVisible.current !== isVisible) {
         wasVisible.current = isVisible;
         onVisibilityChange(isVisible);
@@ -267,7 +267,7 @@ const App: React.FC = () => {
   const [parchmentZoom, setParchmentZoom] = useState(1.0);
   const currentParchmentZoomRef = useRef<number>(1.0);
   const targetParchmentZoomRef = useRef<number>(1.0);
-  
+
   const activeScanIdRef = useRef<number>(0);
   const scanResolvedRef = useRef<boolean>(false);
   const scanStatusRef = useRef<string | null>(null);
@@ -275,7 +275,7 @@ const App: React.FC = () => {
   const [scanningArea, setScanningArea] = useState<GeoCoordinates | null>(null);
   const [isScanningArea, setIsScanningArea] = useState(false);
   const [scanningStatusText, setScanningStatusText] = useState<string | null>(null);
-  
+
   const activeMarkerRequestRef = useRef<number>(0);
   const activeSearchRequestIdRef = useRef<number>(0);
   const activeSelectionIdRef = useRef<string | null>(null);
@@ -297,7 +297,7 @@ const App: React.FC = () => {
   const [locationInfo, setLocationInfo] = useState<LocationInfo | null>(null);
   const [markers, setMarkers] = useState<MapMarker[]>([]);
   const [favorites, setFavorites] = useState<FavoriteLocation[]>([]);
-  
+
   // Favorites UI State
   const [isFavoritesPanelOpen, setIsFavoritesPanelOpen] = useState(false);
   const [visibleFavoriteIds, setVisibleFavoriteIds] = useState<string[]>([]);
@@ -305,6 +305,11 @@ const App: React.FC = () => {
 
   // Settings State
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'providers' | 'appearance' | 'audio'>('general');
+  const handleOpenSettingsTab = useCallback((tab: 'general' | 'providers' | 'appearance' | 'audio' = 'general') => {
+    setSettingsInitialTab(tab);
+    setIsSettingsOpen(true);
+  }, []);
   const [userSettings, setUserSettings] = useState<UserSettings>(() => {
     const saved = localStorage.getItem('terraExplorerSettings');
     if (saved) {
@@ -362,7 +367,7 @@ const App: React.FC = () => {
   const [lockedZoomDistance, setLockedZoomDistance] = useState<number | null>(null);
   const [isDocumentaryActive, setIsDocumentaryActive] = useState(false);
   const activeNarrationRef = useRef<{ id: string; spoken: boolean } | null>(null);
-  
+
 
   const currentCameraDistanceRef = useRef(4.5);
   const isCameraAnimatingRef = useRef(false);
@@ -431,7 +436,7 @@ const App: React.FC = () => {
       }
       controls.update();
     }
-    
+
     // Cancel any running manual zoom animation to avoid conflicting camera updates
     if (zoomAnimRef.current) {
       cancelAnimationFrame(zoomAnimRef.current);
@@ -577,7 +582,7 @@ const App: React.FC = () => {
 
   const reconcileCameraState = useCallback(() => {
      if (!cameraControlsRef.current) return;
-     
+
      const cameraState = cameraStateRef.current;
 
      // Only allow target rotation updates
@@ -593,7 +598,7 @@ const App: React.FC = () => {
         programmaticTransitionUntilRef.current = Date.now() + 1500;
 
         const { lat, lng } = cameraState.targetRotation;
-        
+
         let targetDistance = 4.5;
         if (cameraState.activeRoute) {
            targetDistance = cameraState.routeSuggestedDistance;
@@ -603,7 +608,7 @@ const App: React.FC = () => {
         } else {
            targetDistance = cameraState.themeSuggestedDistance;
         }
-        
+
         const localCameraVec = latLngToVector3(lat, lng, targetDistance);
         const worldCameraPos = localCameraVec.clone().applyMatrix4(earthRef.current.matrixWorld);
         targetCameraPosRef.current = worldCameraPos;
@@ -659,24 +664,24 @@ const App: React.FC = () => {
         setIsZoomLocked(false);
         setLockedZoomDistance(null);
      }
-     
+
      reconcileCameraState();
   }, [skin, reconcileCameraState]);
-  
+
   const handleCycleSkin = useCallback(() => {
     const skins: SkinType[] = ['modern', 'retro-green', 'retro-amber', 'parchment'];
     const nextIndex = (skins.indexOf(skin) + 1) % skins.length;
     handleSkinChange(skins[nextIndex]);
   }, [skin, handleSkinChange]);
-  
 
-  
+
+
   // Track focus state to manage suggestions pausing
   const [isFocused, setIsFocused] = useState(false);
-  
+
   type InteractionStateType = 'GLOBE_IDLE' | 'GLOBE_SEARCHING' | 'PINS_RENDERED' | 'PIN_SELECTED';
   const [interactionState, setInteractionState] = useState<InteractionStateType>('GLOBE_IDLE');
-  
+
   const cameraControlsRef = useRef<any>(null);
   const earthRef = useRef<THREE.Mesh>(null);
   const userModifiedZoomRef = useRef(false);
@@ -714,86 +719,86 @@ const App: React.FC = () => {
         lng: -4.1427,
         type: 'route',
         waypoints: [
-            { 
-                id: 'wp-shackleton-1', 
-                name: "Plymouth, England", 
-                lat: 50.3755, 
-                lng: -4.1427, 
-                context: "August 8, 1914: The Endurance departs for Buenos Aires.", 
+            {
+                id: 'wp-shackleton-1',
+                name: "Plymouth, England",
+                lat: 50.3755,
+                lng: -4.1427,
+                context: "August 8, 1914: The Endurance departs for Buenos Aires.",
                 description: "Plymouth served as the final departure point in Great Britain for Ernest Shackleton's Imperial Trans-Antarctic Expedition aboard the Endurance. Departing on the eve of World War I after Winston Churchill authorized the journey to proceed, the expedition aimed to achieve the first land crossing of Antarctica.",
-                routeTitle: "Endurance Expedition" 
+                routeTitle: "Endurance Expedition"
             },
-            { 
-                id: 'wp-shackleton-2', 
-                name: "Buenos Aires, Argentina", 
-                lat: -34.6037, 
-                lng: -58.3816, 
-                context: "October 9, 1914: The ship arrives to pick up supplies and crew.", 
+            {
+                id: 'wp-shackleton-2',
+                name: "Buenos Aires, Argentina",
+                lat: -34.6037,
+                lng: -58.3816,
+                context: "October 9, 1914: The ship arrives to pick up supplies and crew.",
                 description: "Buenos Aires was the primary South American staging ground for the Endurance. Here the expedition completed final outfitting, took on vital cold-weather supplies, and recruited photographer Frank Hurley and stowaway Perce Blackborow before heading into the Southern Ocean.",
-                routeTitle: "Endurance Expedition" 
+                routeTitle: "Endurance Expedition"
             },
-            { 
-                id: 'wp-shackleton-3', 
-                name: "Grytviken, South Georgia", 
-                lat: -54.2811, 
-                lng: -36.5092, 
-                context: "December 5, 1914: The expedition departs the whaling station for the Weddell Sea.", 
+            {
+                id: 'wp-shackleton-3',
+                name: "Grytviken, South Georgia",
+                lat: -54.2811,
+                lng: -36.5092,
+                context: "December 5, 1914: The expedition departs the whaling station for the Weddell Sea.",
                 description: "Grytviken was a remote Norwegian whaling station on South Georgia Island. Whalers warned Shackleton of unusually heavy pack ice further south in the Weddell Sea, advice that prompted a month-long delay while the crew waited for favorable sea ice conditions.",
-                routeTitle: "Endurance Expedition" 
+                routeTitle: "Endurance Expedition"
             },
-            { 
-                id: 'wp-shackleton-4', 
-                name: "Weddell Sea (Ice Trap)", 
-                lat: -76.5, 
-                lng: -35.0, 
-                context: "January 1915: The Endurance becomes frozen fast in the pack ice.", 
+            {
+                id: 'wp-shackleton-4',
+                name: "Weddell Sea (Ice Trap)",
+                lat: -76.5,
+                lng: -35.0,
+                context: "January 1915: The Endurance becomes frozen fast in the pack ice.",
                 description: "Deep in the Weddell Sea, the Endurance encountered impassable pack ice and was frozen solid into an ice floe just miles from the Antarctic mainland. For ten months the ship drifted helplessly northward with the ice floe in sub-zero polar conditions.",
-                routeTitle: "Endurance Expedition" 
+                routeTitle: "Endurance Expedition"
             },
-            { 
-                id: 'wp-shackleton-5', 
-                name: "Endurance Sinks", 
-                lat: -69.08, 
-                lng: -51.5, 
-                context: "November 21, 1915: Crushed by ice, the ship sinks, stranding the crew.", 
+            {
+                id: 'wp-shackleton-5',
+                name: "Endurance Sinks",
+                lat: -69.08,
+                lng: -51.5,
+                context: "November 21, 1915: Crushed by ice, the ship sinks, stranding the crew.",
                 description: "Under enormous pressure from shifting pack ice, the hull of the Endurance was crushed beyond repair. Shackleton ordered the crew to abandon ship, salvaging food, dog teams, and three wooden lifeboats before the ship slipped beneath the icy waters.",
-                routeTitle: "Endurance Expedition" 
+                routeTitle: "Endurance Expedition"
             },
-            { 
-                id: 'wp-shackleton-6', 
-                name: "Elephant Island", 
-                lat: -61.1417, 
-                lng: -55.2333, 
-                context: "April 1916: The crew reaches solid land for the first time in 497 days.", 
+            {
+                id: 'wp-shackleton-6',
+                name: "Elephant Island",
+                lat: -61.1417,
+                lng: -55.2333,
+                context: "April 1916: The crew reaches solid land for the first time in 497 days.",
                 description: "After perilous open-boat navigation through turbulent Antarctic seas, the 28 exhausted crew members landed on the desolate spit of Elephant Island. It marked their first footing on solid ground in over sixteen months, though rescue remained thousands of miles away.",
-                routeTitle: "Endurance Expedition" 
+                routeTitle: "Endurance Expedition"
             },
-            { 
-                id: 'wp-shackleton-7', 
-                name: "King Haakon Bay", 
-                lat: -54.1500, 
-                lng: -37.2333, 
-                context: "May 1916: Shackleton and five men land after the perilous voyage of the James Caird.", 
+            {
+                id: 'wp-shackleton-7',
+                name: "King Haakon Bay",
+                lat: -54.1500,
+                lng: -37.2333,
+                context: "May 1916: Shackleton and five men land after the perilous voyage of the James Caird.",
                 description: "In one of history's greatest feats of small-boat navigation, Shackleton and five companions sailed 800 miles across the treacherous Drake Passage in the 22-foot James Caird lifeboat, making a miraculous landing on the uninhabited southern coast of South Georgia.",
-                routeTitle: "Endurance Expedition" 
+                routeTitle: "Endurance Expedition"
             },
-            { 
-                id: 'wp-shackleton-8', 
-                name: "Stromness Whaling Station", 
-                lat: -54.1600, 
-                lng: -36.7110, 
-                context: "May 20, 1916: Shackleton, Worsley, and Crean reach safety after crossing the mountains.", 
+            {
+                id: 'wp-shackleton-8',
+                name: "Stromness Whaling Station",
+                lat: -54.1600,
+                lng: -36.7110,
+                context: "May 20, 1916: Shackleton, Worsley, and Crean reach safety after crossing the mountains.",
                 description: "Lacking climbing equipment, Shackleton, Frank Worsley, and Tom Crean trekked non-stop across South Georgia's uncharted glaciers and alpine ridges for 36 hours, finally reaching the managers at Stromness Whaling Station to organize rescue operations.",
-                routeTitle: "Endurance Expedition" 
+                routeTitle: "Endurance Expedition"
             },
-             { 
-                id: 'wp-shackleton-9', 
-                name: "Punta Arenas, Chile", 
-                lat: -53.1638, 
-                lng: -70.9171, 
-                context: "August 30, 1916: The tug Yelcho, commanded by Luis Pardo, finally rescues the remaining crew from Elephant Island.", 
+             {
+                id: 'wp-shackleton-9',
+                name: "Punta Arenas, Chile",
+                lat: -53.1638,
+                lng: -70.9171,
+                context: "August 30, 1916: The tug Yelcho, commanded by Luis Pardo, finally rescues the remaining crew from Elephant Island.",
                 description: "From Punta Arenas, Shackleton mounted four rescue attempts before securing the Chilean steam tug Yelcho under Captain Luis Pardo. They successfully breached the winter ice at Elephant Island, rescuing all 22 stranded crewmen without a single loss of life.",
-                routeTitle: "Endurance Expedition" 
+                routeTitle: "Endurance Expedition"
             }
         ]
     };
@@ -801,7 +806,7 @@ const App: React.FC = () => {
     const genghisRoute: FavoriteLocation = {
         id: 'default-genghis',
         name: "The Campaigns of Genghis Khan",
-        lat: 48.9, 
+        lat: 48.9,
         lng: 109.0,
         type: 'route',
         waypoints: [
@@ -1200,7 +1205,7 @@ const App: React.FC = () => {
     const desc = getNarrationDescription(info);
 
     console.log(`[SearchNarration] DESCRIPTION_RESOLVED name="${title}" descriptionType="${typeof desc}" descriptionLength=${desc.length}`);
-    
+
     // Strict check: must have title and a valid descriptive body (at least 3 characters)
     if (!title || !desc || desc.length < 3) {
       console.log(`[SearchNarration] REJECTED: no narration text (title="${title}", descLength=${desc.length})`);
@@ -1252,12 +1257,21 @@ const App: React.FC = () => {
     localStorage.setItem('terraExplorerSettings', JSON.stringify(newSettings));
 
     if (prevProvider !== newSettings.aiProvider) {
-      if (searchError?.includes('No model loaded') || searchError?.includes('LM Studio')) {
+      if (
+        searchError?.includes('No model loaded') ||
+        searchError?.includes('No AI model is currently loaded') ||
+        searchError?.includes('LM Studio') ||
+        searchError?.includes('Settings > Providers')
+      ) {
         setSearchError(null);
       }
       setLocationInfo((prev: any) => {
         if (!prev) return prev;
-        if (prev.errorType === 'LM_STUDIO_NO_MODEL' || prev.errorMessage?.includes('No model loaded')) {
+        if (
+          prev.errorType === 'LM_STUDIO_NO_MODEL' ||
+          prev.errorMessage?.includes('No model loaded') ||
+          prev.errorMessage?.includes('No AI model is currently loaded')
+        ) {
           const updated = { ...prev };
           delete updated.errorType;
           delete updated.errorMessage;
@@ -1412,7 +1426,7 @@ const App: React.FC = () => {
      activeSelectionIdRef.current = stableId;
      console.log(`[SearchNarration] ACTIVE_SELECTION_SET id="${stableId}"`);
      const enrichmentRequestId = ++activeMarkerRequestRef.current;
-     
+
      console.log(`[InfoPanel] OPEN`);
      console.log(`[InfoPanel] selection = ${stableId}`);
      console.log(`[InfoPanel] enrichment started`);
@@ -1421,7 +1435,7 @@ const App: React.FC = () => {
      setIsInfoPanelLoading(true);
      setIsNewsFetching(false);
      console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_STARTED');
-     
+
      const initialWaypointPayload: any = {
          id: stableId,
          name: wp.name,
@@ -1439,7 +1453,7 @@ const App: React.FC = () => {
          relatedEntities: [],
          sectionState: { description: wp.description ? "complete" : "loading", news: "idle" }
      };
-     
+
      console.log(`[SearchNarration] LOCATION_INFO_SET id="${stableId}" name="${wp.name}"`);
      setLocationInfo(initialWaypointPayload);
      setSelectedMarkerId(stableId);
@@ -1550,9 +1564,9 @@ const App: React.FC = () => {
      if (initialDesc && initialDesc.trim().length >= 3) {
         maybeTriggerNarration(initialWaypointPayload);
      }
-     
+
      console.log(`ENTITY_RESOLUTION_STARTED [req: ${enrichmentRequestId}] for ${wp.name}`);
-     
+
      const anchor: MapMarker = {
          id: wp.id,
          name: wp.name,
@@ -1561,13 +1575,13 @@ const App: React.FC = () => {
          type: wp.entityType || (wp as any).type || 'historical_waypoint',
          populationClass: 'small'
      };
-     
+
      const geoMarker = await resolveGeographicMetadata(anchor);
      if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
-     
+
      console.log(`ENTITY_RESOLUTION_COMPLETE [req: ${enrichmentRequestId}] for ${wp.name}`);
 
-     let data: any = { 
+     let data: any = {
          id: geoMarker.id || stableId,
          name: wp.name, // Protected
          coordinates: { lat: wp.lat, lng: wp.lng }, // Protected
@@ -1628,12 +1642,12 @@ const App: React.FC = () => {
                  const queryContext = wp.description || wp.context || wp.routeTitle;
                  const enrichedData = await getInfoFromFeature(geoMarker, queryContext);
                  if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
-                 
+
                  if (enrichedData) {
                      setLocationInfo((prev: any) => {
                          if (!prev || prev.waypoint?.id !== wp.id) return prev;
-                         const desc = overwriteNarrative 
-                              ? (enrichedData.description || wp.description || wp.significance || "") 
+                         const desc = overwriteNarrative
+                              ? (enrichedData.description || wp.description || wp.significance || "")
                               : (wp.description || enrichedData.description || wp.significance || "");
                          let nextState = mergeLocationInfo(prev, {
                              description: desc,
@@ -1691,16 +1705,16 @@ const App: React.FC = () => {
     const stableId = marker.id || `${marker.name}-${marker.lat}-${marker.lng}`;
     activeSelectionIdRef.current = stableId;
     const targetKey = stableId;
-    
+
     if (processingMarkerRef.current === targetKey || (selectedMarkerId === stableId && interactionState === 'PIN_SELECTED')) {
         return;
     }
-    
+
     processingMarkerRef.current = targetKey;
 
     try {
         const enrichmentRequestId = ++activeMarkerRequestRef.current;
-        
+
         console.log(`[InfoPanel] OPEN`);
         console.log(`[InfoPanel] selection = ${stableId}`);
         console.log(`[Marker Lifecycle] MARKER_SELECTED name="${marker.name}"`);
@@ -1712,7 +1726,7 @@ const App: React.FC = () => {
         setSelectedMarkerId(stableId);
         setSelectedMarkerCoordinates({ lat: marker.lat, lng: marker.lng });
         setIsFocused(true);
-        
+
         const fav = marker as FavoriteLocation;
         if (fav.type === 'route' && fav.waypoints) {
             setRouteWaypoints(fav.waypoints);
@@ -1833,7 +1847,7 @@ const App: React.FC = () => {
         // 2. Resolve geographic metadata asynchronously
         console.log(`[InfoPanel] enrichment started`);
         console.log(`[Entity] Resolving ${marker.name}`);
-        
+
         const anchor: MapMarker = {
              id: stableId,
              name: marker.name,
@@ -1842,7 +1856,7 @@ const App: React.FC = () => {
              type: ('type' in marker && marker.type ? marker.type : 'generic'),
              populationClass: 'small'
         };
-        
+
         const geoMarker = await resolveGeographicMetadata(anchor);
         if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
         console.log(`[Entity] ${marker.name} resolved`);
@@ -1880,7 +1894,7 @@ const App: React.FC = () => {
             try {
                 const data = await getInfoFromFeature(geoMarker);
                 if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
-                
+
                 if (data) {
                     console.log(`[InfoPanel] enrichment updated`);
                     console.log(`[Enrichment] ${geoMarker.name} complete`);
@@ -1945,27 +1959,27 @@ const App: React.FC = () => {
      setIsDiscoveryLoading(true);
      setLocationInfo(null); // Ensure NO overlay is opened
      setSearchError(null);
-     setAutoRotate(false); 
+     setAutoRotate(false);
      console.log(`[Marker Lifecycle] DISCOVERY_REPLACED oldCount=${markers.length} newCount=0`);
      setMarkers([]); // Clear transient markers
-     
+
      if (!activeRouteId) {
          setRouteWaypoints([]);
          setCurrentWaypointIndex(-1);
      } else {
          setCurrentWaypointIndex(-1);
      }
-     
+
      setSelectedMarkerId(null);
      setSelectedMarkerCoordinates(null);
      setIsFocused(false);
 
      if (cameraControlsRef.current) {
        const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 2.2;
-       
+
        cameraStateRef.current.routeSuggestedDistance = targetDist;
        cameraStateRef.current.targetRotation = { lat: location.lat, lng: location.lng };
-       
+
        requestAnimationFrame(() => {
           reconcileCameraState();
        });
@@ -1993,11 +2007,11 @@ const App: React.FC = () => {
             mapped: result.data.length, // No additional filtering here
             returned: result.data.length
         }));
-        console.log("[DEBUG] setMarkers called with length:", result.data.length); 
+        console.log("[DEBUG] setMarkers called with length:", result.data.length);
         setMarkers(result.data);
         console.log(`[Marker Lifecycle] DISCOVERY_RESULTS_SET count=${result.data.length}`);
         console.log("[Scan Lifecycle] MARKERS_RENDERED");
-        
+
         // Immediately terminate primary discovery spinner & clear scan status text
         setIsDiscoveryLoading(false);
         setScanStatus(null);
@@ -2017,7 +2031,7 @@ const App: React.FC = () => {
             setLocationInfo(null);
             setSelectedMarkerId(null);
             setInteractionState('GLOBE_IDLE');
-            
+
             if (result.status === 'PROVIDER_FAILURE') {
                 setSearchError("Unable to search this location right now.");
             } else {
@@ -2036,7 +2050,7 @@ const App: React.FC = () => {
      await new Promise(resolve => setTimeout(resolve, 500));
      if (currentScanId !== activeScanIdRef.current) return;
      setScanStatus(null);
-     
+
      // Do NOT reset interactionState if a PIN is currently selected or if selection exists!
      setInteractionState((prev) => {
         if (prev === 'PIN_SELECTED') return 'PIN_SELECTED';
@@ -2166,17 +2180,17 @@ const App: React.FC = () => {
                await resolveScan({ type: "results", data: finalMarkers });
             } else {
                 console.log("scan_results_empty");
-                await resolveScan({ 
-                  type: "empty", 
-                  status: result.status, 
-                  coords: { lat, lng }, 
+                await resolveScan({
+                  type: "empty",
+                  status: result.status,
+                  coords: { lat, lng },
                   diagnostics: result.diagnostics
                 });
              }
 
          } catch (err: any) {
             if (currentScanId !== activeScanIdRef.current) return;
-            
+
             await progressPromise;
             if (currentScanId !== activeScanIdRef.current) return;
 
@@ -2228,12 +2242,12 @@ const App: React.FC = () => {
     setLocationInfo(null);
     setSearchError(null);
     console.log(`[Marker Lifecycle] DISCOVERY_REPLACED oldCount=${markers.length} newCount=0`);
-    setMarkers([]); 
+    setMarkers([]);
     setScanningArea(null);
-    
-    setRouteWaypoints([]); 
+
+    setRouteWaypoints([]);
     setActiveRouteId(null);
-    
+
     setCurrentWaypointIndex(-1);
     setSelectedMarkerId(null);
     setIsFocused(true);
@@ -2257,11 +2271,11 @@ const App: React.FC = () => {
 
       setScanningStatusText(null);
       console.log(`[SearchNarration] PIPELINE_COMPLETED query="${cleanQuery}" isValid=${pipelineResult.isValid} mode=${pipelineResult.mode} hasFinalData=${!!(pipelineResult as any).finalData}`);
-      
+
       if (pipelineResult.mode === 'route') {
         if (pipelineResult.isValid && pipelineResult.waypoints && pipelineResult.waypoints.length > 0) {
           logWaypointSnapshot('App.tsx (Before Set State)', pipelineResult.waypoints[0]);
-          
+
           console.log('[Camera] DESTINATION_COMMITTED ownership transferred');
           setAutoRotate(false);
           setInteractionState('PIN_SELECTED');
@@ -2273,7 +2287,7 @@ const App: React.FC = () => {
           loadWaypointData(waypointsWithSearch[0]);
         } else if (pipelineResult.error === 'LM_STUDIO_NO_MODEL') {
           setInteractionState('GLOBE_IDLE');
-          setSearchError("No model loaded. Please load a model in LM Studio or select another provider in Settings.");
+          setSearchError(`${LM_STUDIO_NO_MODEL_MESSAGE} ${LM_STUDIO_NO_MODEL_INSTRUCTION}`);
           setIsDiscoveryLoading(false);
         } else {
           console.log('[Camera] SEARCH_NO_RESULT rotation preserved');
@@ -2290,7 +2304,7 @@ const App: React.FC = () => {
       if (hasValidCoords) {
         const finalData = (pipelineResult as any).finalData!;
         const { lat, lng } = finalData.coordinates;
-        
+
         const searchMarker: MapMarker = {
           id: `search-${Date.now()}`,
           name: finalData.name,
@@ -2348,10 +2362,10 @@ const App: React.FC = () => {
           setIsDocumentaryActive(false);
           const zoom = (pipelineResult as any).metadataResult?.coordinateResult?.suggestedZoom || 5;
           const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : Math.max(1.3, 4.5 - ((zoom / 10) * (4.5 - 1.2)));
-          
+
           cameraStateRef.current.routeSuggestedDistance = targetDist;
           cameraStateRef.current.targetRotation = { lat, lng };
-          
+
           requestAnimationFrame(() => {
              reconcileCameraState();
           });
@@ -2379,7 +2393,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         if (errorCode === "UNSUPPORTED_CELESTIAL_BODY") {
           userError = "TerraExplorer currently supports Earth geography only.";
         } else if (errorCode === "LM_STUDIO_NO_MODEL") {
-          userError = "No model loaded. Please load a model in LM Studio or select another provider in Settings.";
+          userError = `${LM_STUDIO_NO_MODEL_MESSAGE} ${LM_STUDIO_NO_MODEL_INSTRUCTION}`;
         } else if (errorCode === "LOCATION_SYSTEM_UNAVAILABLE") {
           userError = "Location system unavailable.";
         } else if (errorCode === "NOT_FOUND") {
@@ -2403,7 +2417,11 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       console.error('[Search] PIPELINE_ERROR during search execution:', err);
       console.log('[Camera] SEARCH_ERROR rotation preserved');
       setInteractionState('GLOBE_IDLE');
-      setSearchError("Unable to resolve location.");
+      if (isLMStudioNoModelError(err)) {
+        setSearchError(`${LM_STUDIO_NO_MODEL_MESSAGE} ${LM_STUDIO_NO_MODEL_INSTRUCTION}`);
+      } else {
+        setSearchError("Unable to resolve location.");
+      }
       setIsDiscoveryLoading(false);
       console.log('[Scan Lifecycle] DISCOVERY_FAILED');
     }
@@ -2416,30 +2434,30 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       console.log('[Scan Lifecycle] DISCOVERY_STARTED');
       setSearchError(null);
       setLocationInfo(null);
-      setMarkers([]); 
+      setMarkers([]);
       setScanningArea(null);
       setIsFocused(true);
-      
+
       // Clear current active route when generating new one
       setActiveRouteId(null);
-      
+
       const searchId = searchImageRegistry.createSearchSession(text);
       try {
         const route = await generateRoute(text);
         if (currentSearchId !== activeSearchRequestIdRef.current) return;
-        
+
         if (route.waypoints && route.waypoints.length > 0) {
             console.log('[Camera] DESTINATION_COMMITTED ownership transferred');
             setAutoRotate(false);
             setInteractionState('PIN_SELECTED');
             const waypointsWithSearch = route.waypoints.map(w => ({ ...w, searchId }));
             setRouteWaypoints(waypointsWithSearch);
-            
+
             console.log(`Route Generated: ${route.title}`);
             if (route.routeConfidence) {
                 console.log(`Confidence: ${route.routeConfidence.level} - ${route.routeConfidence.reasoning}`);
             }
-            
+
             setCurrentWaypointIndex(0);
             setIsDiscoveryLoading(false);
             console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
@@ -2455,7 +2473,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         if (currentSearchId !== activeSearchRequestIdRef.current) return;
         if (isLMStudioNoModelError(err)) {
           setInteractionState('GLOBE_IDLE');
-          setSearchError("No model loaded. Please load a model in LM Studio or select another provider in Settings.");
+          setSearchError(`${LM_STUDIO_NO_MODEL_MESSAGE} ${LM_STUDIO_NO_MODEL_INSTRUCTION}`);
           setIsDiscoveryLoading(false);
           return;
         }
@@ -2571,7 +2589,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         const currentDist = targetZoomRef.current ?? cameraControlsRef.current.getDistance();
         const zoomDelta = calculateClampedZoomDelta(e.deltaY, e.deltaMode, currentDist);
         targetZoomRef.current = clampZoom(currentDist + zoomDelta);
-        
+
         userModifiedZoomRef.current = true;
 
         if (!zoomAnimRef.current) {
@@ -2656,20 +2674,20 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         if (activeRouteId) {
             return favorites.find(f => f.id === activeRouteId);
         }
-        
+
         // Otherwise try to match
         const start = routeWaypoints[0];
-        return favorites.find(f => 
-            f.type === 'route' && 
-            f.waypoints && 
+        return favorites.find(f =>
+            f.type === 'route' &&
+            f.waypoints &&
             f.waypoints.length === routeWaypoints.length &&
             f.waypoints[0].name === start.name &&
             Math.abs(f.waypoints[0].lat - start.lat) < 0.001
         );
     } else if (locationInfo && locationInfo.coordinates) {
-        return favorites.find(f => 
-            (f.type === 'location' || !f.type) && 
-            f.name === locationInfo.name && 
+        return favorites.find(f =>
+            (f.type === 'location' || !f.type) &&
+            f.name === locationInfo.name &&
             Math.abs(f.lat - locationInfo.coordinates.lat) < 0.01 &&
             Math.abs(f.lng - locationInfo.coordinates.lng) < 0.01
         );
@@ -2715,7 +2733,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
   const handleUpdateFavorite = (updatedFav: FavoriteLocation) => {
       setFavorites(prev => prev.map(f => f.id === updatedFav.id ? updatedFav : f));
-      
+
       // If this route is currently active, update the map immediately
       if (activeRouteId === updatedFav.id && updatedFav.type === 'route' && updatedFav.waypoints) {
           setRouteWaypoints(updatedFav.waypoints);
@@ -2779,7 +2797,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
   const handleFavoriteFlyTo = (fav: FavoriteLocation) => {
       setAutoRotate(false); // Stop rotation to ensure camera stays centered on waypoint
-      
+
       // Logic similar to click
       if (fav.type === 'route') {
           if (activeRouteId !== fav.id) {
@@ -2859,7 +2877,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
   const earthFavorites = favorites.filter(f => visibleFavoriteIds.includes(f.id));
 
   const isParchment = skin === 'parchment';
-  
+
   const fovRadians = (45 * Math.PI) / 180;
   // Calculate baseline distance ignoring user zoom to keep the opening size fixed on zoom!
   const aspect = worldDimensions.width / worldDimensions.height;
@@ -2881,7 +2899,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
   };
 
   return (
-    <div 
+    <div
       className={`relative w-full h-screen bg-black overflow-hidden bg-cover bg-center bg-no-repeat`}
       style={isParchment ? { backgroundImage: 'url(https://raw.githubusercontent.com/webpmp/webpmp.github.io/master/terra-explorer-noglobe.png)' } : {}}
       onContextMenu={(e) => e.preventDefault()}
@@ -2901,10 +2919,10 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
            <pointLight position={[-10, 0, -5]} intensity={1.0} color="#0044ff" distance={20} />
         )}
         <Stars radius={300} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
-        
-        <Earth 
+
+        <Earth
           ref={earthRef}
-          onLocationClick={handleGlobeClick} 
+          onLocationClick={handleGlobeClick}
           onMarkerClick={handleMarkerClick}
           isInteracting={isInteracting || isDragging}
           setIsInteracting={setIsInteracting}
@@ -2922,15 +2940,15 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           onCameraChange={updateAuthoritativeCamera}
           onOSMViewportBoundsChange={handleOSMViewportBoundsChange}
         />
-        
-        <VisibilityTracker 
-            location={locationInfo} 
-            onVisibilityChange={handleVisibilityChange} 
+
+        <VisibilityTracker
+            location={locationInfo}
+            onVisibilityChange={handleVisibilityChange}
         />
 
-        <OrbitControls 
-          ref={cameraControlsRef} 
-          minDistance={isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.018} 
+        <OrbitControls
+          ref={cameraControlsRef}
+          minDistance={isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 1.018}
           maxDistance={isZoomLocked && lockedZoomDistance ? lockedZoomDistance : 8}
           enablePan={false}
           enableRotate={true}
@@ -2976,14 +2994,14 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           makeDefault
         />
 
-        <CameraAnimator 
-           targetPosRef={targetCameraPosRef} 
-           cameraControlsRef={cameraControlsRef} 
+        <CameraAnimator
+           targetPosRef={targetCameraPosRef}
+           cameraControlsRef={cameraControlsRef}
            cameraStateRef={cameraStateRef}
            activeScanIdRef={activeScanIdRef}
         />
 
-        <AuthoritativeCameraEnforcer 
+        <AuthoritativeCameraEnforcer
            skin={skin}
            cameraControlsRef={cameraControlsRef}
            targetCameraPosRef={targetCameraPosRef}
@@ -2995,11 +3013,11 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         />
 
 
-        
-            <RotationManager 
-              isDragging={isDragging} 
-              autoRotate={autoRotate} 
-              setAutoRotate={setAutoRotate} 
+
+            <RotationManager
+              isDragging={isDragging}
+              autoRotate={autoRotate}
+              setAutoRotate={setAutoRotate}
               onZoomChange={(zoomedOut) => {
                  setIsZoomedOut(zoomedOut);
                  if (zoomedOut) setIsFocused(false);
@@ -3013,7 +3031,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
       {/* Parchment Engraved Depth Bevel Shadow Ring */}
       {isParchment && (
-        <div 
+        <div
           className="absolute pointer-events-none rounded-full"
           style={{
             zIndex: 15,
@@ -3034,13 +3052,13 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
       {/* UI Overlay */}
       <div className={`absolute top-8 left-8 z-10 pointer-events-none ${skin === 'parchment' ? 'hidden' : ''}`}>
-        <img 
+        <img
           src={
-            skin === 'retro-green' ? logoImageGreen : 
-            skin === 'retro-amber' ? logoImageAmber : 
+            skin === 'retro-green' ? logoImageGreen :
+            skin === 'retro-amber' ? logoImageAmber :
             logoImageBlack
-          } 
-          alt="TerraExplorer Knowledge Engine" 
+          }
+          alt="TerraExplorer Knowledge Engine"
           className="drop-shadow-lg"
           style={{
             width: '240px',
@@ -3054,7 +3072,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
       <div className="absolute top-[281px] left-8 z-30 flex flex-col gap-4 bottom-8 pointer-events-none w-[24rem]">
         {isFavoritesPanelOpen && (
-          <FavoritesPanel 
+          <FavoritesPanel
               favorites={favorites}
               onClose={() => setIsFavoritesPanelOpen(false)}
               visibleFavoriteIds={visibleFavoriteIds}
@@ -3075,16 +3093,17 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
             onClose={() => setIsSettingsOpen(false)}
             skin={skin}
             onSkinChange={handleSkinChange}
+            initialTab={settingsInitialTab}
           />
         )}      </div>
 
       {interactionState === 'PIN_SELECTED' && (
-        <InfoPanel 
-          info={locationInfo} 
+        <InfoPanel
+          info={locationInfo}
           isLoading={isInfoPanelLoading}
           isNewsFetching={isNewsFetching}
           showNews={userSettings.showNews ?? true}
-          onClose={handleClosePanel} 
+          onClose={handleClosePanel}
           skin={skin}
           isFavorite={isCurrentLocationFavorite}
           onSaveFavorite={handleSaveFavorite}
@@ -3092,6 +3111,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           currentFavoriteName={currentFavorite?.name}
           onFetchNews={handleFetchNews}
           onLoadMoreNews={handleLoadMoreNews}
+          onOpenSettingsTab={handleOpenSettingsTab}
           routeNav={(routeWaypoints.length > 1 && currentWaypointIndex !== -1) ? (() => {
               const currentWp = routeWaypoints[currentWaypointIndex];
               const groupWps = currentWp?.routeGroupId
@@ -3116,10 +3136,10 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         />
       )}
 
-      <Controls 
-        onSearch={handleSearch} 
+      <Controls
+        onSearch={handleSearch}
         onTraceRoute={handleTraceRoute}
-        onZoomIn={handleUserZoomIn} 
+        onZoomIn={handleUserZoomIn}
         onZoomOut={handleZoomOut}
         isSearching={isDiscoveryLoading}
         searchError={searchError}
@@ -3147,6 +3167,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         onCancelScan={handleCancelScan}
         onCycleSkin={handleCycleSkin}
         onToggleSettings={() => setIsSettingsOpen(!isSettingsOpen)}
+        onOpenSettingsTab={handleOpenSettingsTab}
         isOSMDisplayed={isOSMActive}
       />
     </div>

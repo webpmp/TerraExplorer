@@ -26,6 +26,7 @@ interface ControlsProps {
   scanningStatusText?: string | null;
   onCancelScan?: () => void;
   onToggleSettings?: () => void;
+  onOpenSettingsTab?: (tab: 'providers' | 'general' | 'appearance' | 'audio') => void;
   isOSMDisplayed?: boolean;
   isOSMActive?: boolean;
 }
@@ -65,8 +66,8 @@ const historicalEvents = [
 ];
 
 const pointsOfInterest = [
-  "the Eiffel Tower", "Mount Everest", "the Great Barrier Reef", "Machu Picchu", 
-  "the Grand Canyon", "the Taj Mahal", "Stonehenge", "the Pyramids of Giza", 
+  "the Eiffel Tower", "Mount Everest", "the Great Barrier Reef", "Machu Picchu",
+  "the Grand Canyon", "the Taj Mahal", "Stonehenge", "the Pyramids of Giza",
   "the Colosseum", "Petra", "Angkor Wat", "the Statue of Liberty", "the Burj Khalifa",
   "Mount Fuji", "Victoria Falls", "the Acropolis", "Chichen Itza", "the Louvre",
   "the Golden Gate Bridge", "Niagara Falls", "the Galapagos Islands", "Serengeti National Park",
@@ -82,7 +83,7 @@ const pointsOfInterest = [
 ];
 
 const shipwrecks = [
-  "the Titanic", "Shackleton's Endurance", "the Vasa", "the Antikythera wreck", 
+  "the Titanic", "Shackleton's Endurance", "the Vasa", "the Antikythera wreck",
   "the Mary Rose", "the USS Arizona", "the Bismarck", "the Santa Maria", "the HMS Erebus",
   "the HMS Terror", "the Queen Anne's Revenge", "the Whydah Gally", "the Atocha",
   "the SS Thistlegorm", "the Yongala", "the Andrea Doria", "the Lusitania", "the Edmund Fitzgerald",
@@ -93,7 +94,7 @@ const shipwrecks = [
 ];
 
 const places = [
-  "Tokyo", "Cairo", "Reykjavik", "New York", "Paris", "Sydney", "Rio de Janeiro", 
+  "Tokyo", "Cairo", "Reykjavik", "New York", "Paris", "Sydney", "Rio de Janeiro",
   "Cape Town", "Moscow", "Beijing", "Mumbai", "Istanbul", "London", "Rome",
   "Buenos Aires", "Singapore", "Dubai", "Toronto", "Seoul", "Bangkok", "Mexico City",
   "Lima", "Nairobi", "Casablanca", "Athens", "Berlin", "Amsterdam", "Stockholm",
@@ -110,7 +111,7 @@ const generateSuggestion = () => {
   const r = Math.random();
   // 20% chance for generic, 80% chance for specific creative prompts
   if (r < 0.2) return "Search location...";
-  
+
   let candidate = "Search location...";
   if (r < 0.35) {
     const evt = historicalEvents[Math.floor(Math.random() * historicalEvents.length)];
@@ -138,16 +139,16 @@ const generateSuggestion = () => {
   return candidate;
 };
 
-const Controls: React.FC<ControlsProps> = ({ 
-  onZoomIn, 
-  onZoomOut, 
-  onSearch, 
+const Controls: React.FC<ControlsProps> = ({
+  onZoomIn,
+  onZoomOut,
+  onSearch,
   onTraceRoute,
-  isSearching, 
+  isSearching,
   searchError,
   onClearError,
-  skin, 
-  showFavorites, 
+  skin,
+  showFavorites,
   onToggleShowFavorites,
   paused,
   isTraceModalOpen,
@@ -159,6 +160,7 @@ const Controls: React.FC<ControlsProps> = ({
   scanningStatusText = null,
   onCancelScan,
   onToggleSettings,
+  onOpenSettingsTab,
   isOSMDisplayed,
   isOSMActive
 }) => {
@@ -202,11 +204,11 @@ const Controls: React.FC<ControlsProps> = ({
 
     const isTerminalState = (text: string) => {
       const upper = text.toUpperCase();
-      return upper.includes("COMPLETE") || 
-             upper.includes("NO INFORMATION FOUND") || 
-             upper.includes("FAILED") || 
-             upper.includes("CANCELLED") || 
-             upper.includes("TOO LONG") || 
+      return upper.includes("COMPLETE") ||
+             upper.includes("NO INFORMATION FOUND") ||
+             upper.includes("FAILED") ||
+             upper.includes("CANCELLED") ||
+             upper.includes("TOO LONG") ||
              upper.includes("CANNOT BE ACCESSED") ||
              upper.includes("TOO MUCH ACTIVITY");
     };
@@ -246,7 +248,7 @@ const Controls: React.FC<ControlsProps> = ({
       onSearch(cleanQuery);
     }
   };
-  
+
   const handleTraceSubmit = (e: React.FormEvent) => {
       e.preventDefault();
       narrationService.prime();
@@ -260,14 +262,14 @@ const Controls: React.FC<ControlsProps> = ({
   const themes = {
     'modern': {
       // Base button: neutral hover to avoid clashing with active states (darker hover when OSM is displayed for contrast against light map tiles)
-      btn: isOSM 
+      btn: isOSM
         ? "bg-black/60 backdrop-blur-md border border-white/20 text-white modern-osm-hover rounded-full"
         : "bg-black/60 backdrop-blur-md border border-white/20 text-white hover:bg-white/10 rounded-full",
       // Zoom Active (Cyan)
       btnActive: "bg-cyan-900/80 border-cyan-400 text-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.5)] hover:bg-cyan-800",
       // Favorite Active (Yellow/Gold for high contrast Star)
       favActive: "bg-yellow-500/20 border-yellow-400 text-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.5)] hover:bg-yellow-500/30",
-      
+
       inputWrapper: "bg-black/80 backdrop-blur-xl border border-white/20 rounded-full shadow-2xl focus-within:border-cyan-500/70",
       inputIcon: "text-gray-300",
       inputField: "text-white placeholder-gray-400 font-mono text-sm",
@@ -285,7 +287,7 @@ const Controls: React.FC<ControlsProps> = ({
       btnActive: "bg-green-400 text-black",
       // Favorite Active: Black bg, Green text/icon, Green border/glow
       favActive: "bg-black text-green-400 border-green-400 shadow-[0_0_15px_rgba(74,222,128,0.6)] hover:bg-black hover:text-green-400",
-      
+
       inputWrapper: "bg-black border-2 border-green-400 rounded-none shadow-none",
       inputIcon: "text-green-300",
       inputField: "text-green-300 placeholder-green-400/50 font-retro tracking-wider uppercase text-lg",
@@ -303,7 +305,7 @@ const Controls: React.FC<ControlsProps> = ({
       btnActive: "bg-amber-400 text-black",
       // Favorite Active: Black bg, Amber text/icon, Amber border/glow
       favActive: "bg-black text-amber-400 border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.6)] hover:bg-black hover:text-amber-400",
-      
+
       inputWrapper: "bg-black border-2 border-amber-400 rounded-none shadow-none",
       inputIcon: "text-amber-300",
       inputField: "text-amber-300 placeholder-amber-400/50 font-retro tracking-wider uppercase text-lg",
@@ -320,7 +322,7 @@ const Controls: React.FC<ControlsProps> = ({
       btn: "bg-[#f4ead5] border border-[#8b5a2b] text-[#5c3a21] hover:bg-[#e8d5b5] hover:text-[#3e2723] rounded shadow-[2px_2px_4px_rgba(0,0,0,0.2)] font-sans",
       btnActive: "bg-[#d2b48c] text-[#3e2723] border-[#5c3a21] shadow-[inset_1px_1px_3px_rgba(0,0,0,0.3)]",
       favActive: "bg-[#e8d5b5] text-[#b8860b] border-[#b8860b] shadow-[0_0_10px_rgba(184,134,11,0.3)] hover:bg-[#d2b48c] hover:text-[#8b6508]",
-      
+
       inputWrapper: "bg-[#f4ead5]/95 backdrop-blur-md border-0 rounded shadow-[inset_0_0_0_1px_rgba(140,110,75,0.35)]",
       inputIcon: "text-[#8b5a2b]",
       inputField: "text-[#522B07] placeholder-[#522B07] font-mono text-sm",
@@ -336,7 +338,7 @@ const Controls: React.FC<ControlsProps> = ({
   };
 
   const showSearchGlow = !!scanningStatusText || isSearching;
-  
+
   const glowClass = !showSearchGlow ? "" : (
      skin === 'modern' ? 'active-search-glow-modern' :
      skin === 'retro-green' ? 'active-search-glow-green' :
@@ -345,7 +347,7 @@ const Controls: React.FC<ControlsProps> = ({
   );
 
   const theme = themes[skin];
-  
+
   const handleInputFocus = () => {
     setIsFocused(true);
     if (searchError && onClearError) {
@@ -446,15 +448,15 @@ const Controls: React.FC<ControlsProps> = ({
                   <h2 className="text-xl font-bold uppercase tracking-wide">Trace Route</h2>
                   <p className="text-sm opacity-70">Paste an article, URL, or text block. The system will identify locations and create a connected journey.</p>
                   <form onSubmit={handleTraceSubmit} className="flex flex-col gap-4">
-                      <textarea 
+                      <textarea
                         value={traceText}
                         onChange={(e) => setTraceText(e.target.value)}
                         placeholder="Paste text here..."
                         className={`w-full h-32 p-3 bg-transparent border ${skin === 'modern' ? 'border-white/20 rounded-lg' : 'border-current rounded-none'} ${skin === 'parchment' ? 'placeholder-[#522B07]' : ''} outline-none resize-none focus:border-opacity-100 transition-colors`}
                         autoFocus
                       />
-                      <button 
-                        type="submit" 
+                      <button
+                        type="submit"
                         disabled={!traceText.trim()}
                         className={`py-3 font-bold uppercase tracking-widest transition-all ${theme.btn} ${!traceText.trim() ? 'opacity-50 cursor-not-allowed' : 'hover:scale-[1.02]'}`}
                       >
@@ -467,7 +469,7 @@ const Controls: React.FC<ControlsProps> = ({
 
       {/* Zoom & View Controls */}
       <div className="flex gap-2 pointer-events-auto">
-        <button 
+        <button
           onClick={() => onToggleTraceModal(true)}
           className={`p-3 transition-all active:scale-95 ${theme.btn}`}
           aria-label="Trace Route"
@@ -475,7 +477,7 @@ const Controls: React.FC<ControlsProps> = ({
         >
            <TraceRouteIcon />
         </button>
-        <button 
+        <button
           onClick={onToggleShowFavorites}
           className={`p-3 transition-all active:scale-95 ${theme.btn} ${showFavorites ? theme.favActive : ''}`}
           aria-label="Toggle Favorites"
@@ -484,21 +486,21 @@ const Controls: React.FC<ControlsProps> = ({
           <Star size={20} className={showFavorites ? "fill-current" : ""} />
         </button>
         <div className="w-px bg-white/20 mx-1 self-stretch"></div>
-        <button 
+        <button
           onClick={onZoomOut}
           className={`p-3 transition-all active:scale-95 ${theme.btn}`}
           aria-label="Zoom Out"
         >
           <ZoomOut size={20} />
         </button>
-        <button 
+        <button
           onClick={onZoomIn}
           className={`p-3 transition-all active:scale-95 ${theme.btn}`}
           aria-label="Zoom In"
         >
           <ZoomIn size={20} />
         </button>
-        <button 
+        <button
           onClick={onToggleZoomLock}
           className={`p-3 transition-all active:scale-95 ${theme.btn} ${isZoomLocked ? theme.favActive : ''}`}
           aria-label={isZoomLocked ? "Zoom locked" : "Zoom enabled"}
@@ -511,7 +513,7 @@ const Controls: React.FC<ControlsProps> = ({
         {onCycleSkin && (
           <>
             <div className={`w-px mx-1 self-stretch ${skin === 'parchment' ? 'bg-[#8b5a2b]/30' : skin === 'retro-green' ? 'bg-green-400/30' : skin === 'retro-amber' ? 'bg-amber-400/30' : 'bg-white/20'}`}></div>
-            <button 
+            <button
               onClick={onCycleSkin}
               className={`p-3 transition-all active:scale-95 ${theme.btn}`}
               aria-label="Switch Theme"
@@ -523,7 +525,7 @@ const Controls: React.FC<ControlsProps> = ({
         )}
 
         {onToggleSettings && (
-            <button 
+            <button
               onClick={onToggleSettings}
               className={`p-3 transition-all active:scale-95 ${theme.btn}`}
               aria-label="Settings"
@@ -574,7 +576,7 @@ const Controls: React.FC<ControlsProps> = ({
                 </button>
               )}
 
-              <button 
+              <button
                 type={scanningStatusText ? "button" : "submit"}
                 onClick={scanningStatusText ? onCancelScan : undefined}
                 disabled={isSearching && !scanningStatusText}
@@ -615,7 +617,7 @@ const Controls: React.FC<ControlsProps> = ({
               </button>
             )}
 
-            <button 
+            <button
               type={scanningStatusText ? "button" : "submit"}
               onClick={scanningStatusText ? onCancelScan : undefined}
               disabled={isSearching && !scanningStatusText}
@@ -628,27 +630,58 @@ const Controls: React.FC<ControlsProps> = ({
       </form>
 
       {/* Search Error / Status Message */}
-      {searchError && (
-        <div 
-          className={`w-full max-w-[532px] pointer-events-auto flex items-center justify-between px-3.5 py-1.5 -mt-2.5 text-xs transition-all animate-in fade-in duration-200 ${theme.statusRow}`}
-          role="status"
-          aria-live="polite"
-        >
-          <span className={`truncate text-xs ${theme.statusText}`}>
-            {searchError}
-          </span>
-          <button
-            type="button"
-            onClick={onClearError}
-            className={`ml-2 shrink-0 ${theme.statusDismiss}`}
-            aria-label="Dismiss error"
-            title="Dismiss"
+      {searchError && (() => {
+        const hasGuidance = searchError.includes('Settings > Providers') || searchError.includes('Settings &gt; Providers');
+        const mainMessage = hasGuidance
+          ? searchError.replace(/\s*\(?Settings\s*(>|&gt;)\s*Providers\)?\s*$/i, '').trim()
+          : searchError;
+        const handleOpenProviders = () => {
+          if (onOpenSettingsTab) {
+            onOpenSettingsTab('providers');
+          } else if (onToggleSettings) {
+            onToggleSettings();
+          }
+        };
+
+        return (
+          <div
+            className={`w-full max-w-[532px] pointer-events-auto flex items-center justify-between px-3.5 py-1.5 -mt-2.5 text-xs transition-all animate-in fade-in duration-200 ${theme.statusRow}`}
+            role="status"
+            aria-live="polite"
           >
-            <X size={14} />
-          </button>
-        </div>
-      )}
-      
+            <span className={`truncate text-xs ${theme.statusText} flex flex-wrap items-center gap-x-1.5`}>
+              <span>{mainMessage}</span>
+              {hasGuidance && (
+                <span className="opacity-90 inline-flex items-center">
+                  (
+                  {onOpenSettingsTab || onToggleSettings ? (
+                    <button
+                      type="button"
+                      onClick={handleOpenProviders}
+                      className="underline hover:opacity-100 transition-opacity font-semibold cursor-pointer"
+                    >
+                      Settings &gt; Providers
+                    </button>
+                  ) : (
+                    <span>Settings &gt; Providers</span>
+                  )}
+                  )
+                </span>
+              )}
+            </span>
+            <button
+              type="button"
+              onClick={onClearError}
+              className={`ml-2 shrink-0 ${theme.statusDismiss}`}
+              aria-label="Dismiss error"
+              title="Dismiss"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        );
+      })()}
+
       {/* Copyright & Map Attribution Text */}
       <div className={`text-[10px] md:text-xs text-center -mt-1 ${theme.copyright}`}>
         © {new Date().getFullYear()} TerraExplorer by Chris Adkins • All Rights Reserved<br />

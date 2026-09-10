@@ -8,12 +8,15 @@ import {
   isGeminiConfigured,
   ai,
   LMStudioNoModelError,
-  isLMStudioNoModelError
+  isLMStudioNoModelError,
+  LM_STUDIO_NO_MODEL_MESSAGE,
+  LM_STUDIO_NO_MODEL_INSTRUCTION
 } from '../geminiService';
 import { runSearchPipeline } from '../pipeline';
 import { mergeLocationInfo } from '../locationService';
 import InfoPanel from '../../components/InfoPanel';
-import { LocationInfo, LocationType, MapMarker } from '../../types';
+import Controls from '../../components/Controls';
+import { LocationInfo, LocationType, MapMarker, SkinType } from '../../types';
 
 describe('LM Studio Missing Model Error Handling & Gemini Fallback', () => {
   const originalFetch = global.fetch;
@@ -34,12 +37,12 @@ describe('LM Studio Missing Model Error Handling & Gemini Fallback', () => {
       newsProvider: 'gemini',
       showNews: true
     };
-    
+
     // Set localStorage mock
     const store: Record<string, string> = {
       terraExplorerSettings: JSON.stringify(settings)
     };
-    
+
     global.localStorage = {
       getItem: (key: string) => store[key] || null,
       setItem: (key: string, value: string) => { store[key] = value; },
@@ -59,7 +62,7 @@ describe('LM Studio Missing Model Error Handling & Gemini Fallback', () => {
 
   it('1 & 2. When Gemini is not configured, converts HTTP 400 "No models loaded" into LMStudioNoModelError', async () => {
     const rawLMStudioError = "No models loaded. Please load a model in the developer page or use the 'lms load' command.";
-    
+
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 400,
@@ -88,12 +91,30 @@ describe('LM Studio Missing Model Error Handling & Gemini Fallback', () => {
     expect(warnSpy).toHaveBeenCalledWith('[AI Provider] No fallback provider available');
   });
 
+  it('2b. isLMStudioNoModelError reliably detects error instances, errorTypes, error names, and message strings', () => {
+    expect(isLMStudioNoModelError(new LMStudioNoModelError())).toBe(true);
+    expect(isLMStudioNoModelError({ isLMStudioNoModelError: true })).toBe(true);
+    expect(isLMStudioNoModelError({ name: 'LMStudioNoModelError' })).toBe(true);
+    expect(isLMStudioNoModelError({ errorType: 'LM_STUDIO_NO_MODEL' })).toBe(true);
+    expect(isLMStudioNoModelError({ error: 'LM_STUDIO_NO_MODEL' })).toBe(true);
+    expect(isLMStudioNoModelError(new Error("No model loaded. Please load a model in LM Studio."))).toBe(true);
+    expect(isLMStudioNoModelError(new Error("No models loaded. Please load a model."))).toBe(true);
+    expect(isLMStudioNoModelError(new Error("No AI model is currently loaded. Please load a model and try again."))).toBe(true);
+    expect(isLMStudioNoModelError("LMStudioNoModelError: No model loaded")).toBe(true);
+
+    // Should return false for unrelated errors
+    expect(isLMStudioNoModelError(new Error("Network timeout"))).toBe(false);
+    expect(isLMStudioNoModelError(new Error("Unable to resolve location."))).toBe(false);
+    expect(isLMStudioNoModelError(null)).toBe(false);
+    expect(isLMStudioNoModelError(undefined)).toBe(false);
+  });
+
   it('3. When Gemini IS configured, automatically falls back to Gemini and logs fallback steps', async () => {
     process.env.GEMINI_API_KEY = 'test-gemini-key';
     expect(isGeminiConfigured()).toBe(true);
 
     const rawLMStudioError = "No models loaded. Please load a model in the developer page or use the 'lms load' command.";
-    
+
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 400,
@@ -126,7 +147,7 @@ describe('LM Studio Missing Model Error Handling & Gemini Fallback', () => {
 
   it('4. generateRoute re-throws LMStudioNoModelError when no fallback is configured, preventing empty route swallowing', async () => {
     const rawLMStudioError = "No models loaded. Please load a model in the developer page or use the 'lms load' command.";
-    
+
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 400,
@@ -139,9 +160,9 @@ describe('LM Studio Missing Model Error Handling & Gemini Fallback', () => {
     ).rejects.toThrow(LMStudioNoModelError);
   });
 
-  it('5. runSearchPipeline catches LMStudioNoModelError and returns error: "LM_STUDIO_NO_MODEL"', async () => {
+  it('5. runSearchPipeline catches LMStudioNoModelError and returns error: "LM_STUDIO_NO_MODEL" for route queries', async () => {
     const rawLMStudioError = "No models loaded. Please load a model in the developer page or use the 'lms load' command.";
-    
+
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 400,
@@ -160,9 +181,28 @@ describe('LM Studio Missing Model Error Handling & Gemini Fallback', () => {
     expect(pipelineResult.waypoints).toEqual([]);
   });
 
+  it('5b. runSearchPipeline returns error: "LM_STUDIO_NO_MODEL" for location queries when no model is loaded', async () => {
+    const rawLMStudioError = "No models loaded. Please load a model in the developer page or use the 'lms load' command.";
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      statusText: 'Bad Request',
+      text: async () => rawLMStudioError
+    } as unknown as Response);
+
+    const pipelineResult = await runSearchPipeline({
+      rawQuery: 'Fictional Unlisted Point XYZ',
+      selectedLocation: null
+    });
+
+    expect(pipelineResult.isValid).toBe(false);
+    expect((pipelineResult as any).error).toBe('LM_STUDIO_NO_MODEL');
+  });
+
   it('6. An unrelated LM Studio HTTP 400 error continues through the generic error path', async () => {
     const unrelatedError = "Invalid temperature parameter specified.";
-    
+
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 400,
@@ -210,7 +250,7 @@ describe('LM Studio Missing Model Error Handling & Gemini Fallback', () => {
 
   it('Propagates LMStudioNoModelError through getInfoFromFeature with clean user-facing error fields when no fallback', async () => {
     const rawLMStudioError = "No models loaded. Please load a model in the developer page or use the 'lms load' command.";
-    
+
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 400,
@@ -231,10 +271,10 @@ describe('LM Studio Missing Model Error Handling & Gemini Fallback', () => {
     expect(enriched).toBeDefined();
     expect(enriched?.name).toBe('Burj Khalifa');
     expect(enriched?.errorType).toBe('LM_STUDIO_NO_MODEL');
-    expect(enriched?.errorMessage).toBe('No model loaded. Please load a model in LM Studio.');
-    expect(enriched?.errorInstruction).toBe('Load a model in LM Studio or select another provider in Settings.');
+    expect(enriched?.errorMessage).toBe(LM_STUDIO_NO_MODEL_MESSAGE);
+    expect(enriched?.errorInstruction).toBe(LM_STUDIO_NO_MODEL_INSTRUCTION);
 
-    // 5. Verify raw LM Studio details are not in the user-facing properties
+    // Verify raw LM Studio details are not in the user-facing properties
     expect(enriched?.errorMessage).not.toContain('developer page');
     expect(enriched?.errorMessage).not.toContain('lms load');
     expect(enriched?.errorMessage).not.toContain('400');
@@ -242,7 +282,7 @@ describe('LM Studio Missing Model Error Handling & Gemini Fallback', () => {
     expect(enriched?.errorInstruction).not.toContain('lms load');
   });
 
-  it('3, 4 & 5. InfoPanel UI displays friendly error message and instruction, suppressing raw API details', () => {
+  it('InfoPanel UI displays friendly error message and separate parenthetical guidance, suppressing raw API details', () => {
     const locationWithMissingModel: LocationInfo = {
       name: 'Burj Khalifa',
       coordinates: { lat: 25.1972, lng: 55.2744 },
@@ -250,31 +290,35 @@ describe('LM Studio Missing Model Error Handling & Gemini Fallback', () => {
       entityType: 'point_of_interest',
       status: 'error',
       errorType: 'LM_STUDIO_NO_MODEL',
-      errorMessage: 'No model loaded. Please load a model in LM Studio.',
-      errorInstruction: 'Load a model in LM Studio or select another provider in Settings.',
+      errorMessage: LM_STUDIO_NO_MODEL_MESSAGE,
+      errorInstruction: LM_STUDIO_NO_MODEL_INSTRUCTION,
       description: '',
       news: []
     };
 
+    const onOpenSettingsTab = vi.fn();
     const markup = renderToStaticMarkup(
       React.createElement(InfoPanel, {
         info: locationWithMissingModel,
         isLoading: false,
         skin: 'modern',
-        onClose: () => {}
+        onClose: () => {},
+        onOpenSettingsTab
       })
     );
 
-    // 3. UI displays "No model loaded. Please load a model in LM Studio."
-    expect(markup).toContain('No model loaded. Please load a model in LM Studio.');
+    // UI displays primary error message
+    expect(markup).toContain('No AI model is currently loaded. Please load a model and try again.');
 
-    // 4. UI also instructs "Load a model in LM Studio or select another provider in Settings."
-    expect(markup).toContain('Load a model in LM Studio or select another provider in Settings.');
+    // UI displays separate parenthetical guidance
+    expect(markup).toContain('Settings &gt; Providers');
+    expect(markup).toContain('(');
+    expect(markup).toContain(')');
 
     // Location identity is preserved (Burj Khalifa is visible)
     expect(markup).toContain('Burj Khalifa');
 
-    // 5. Raw API implementation details are NOT displayed
+    // Raw API implementation details are NOT displayed
     expect(markup).not.toContain('developer page');
     expect(markup).not.toContain('lms load');
     expect(markup).not.toContain('HTTP 400');
@@ -282,14 +326,46 @@ describe('LM Studio Missing Model Error Handling & Gemini Fallback', () => {
     expect(markup).not.toContain('http://localhost:1234');
   });
 
-  it('8. Switching providers / receiving successful enrichment clears error state correctly in mergeLocationInfo', () => {
+  it('Controls UI displays friendly search error with separate parenthetical guidance for LM Studio no-model failure', () => {
+    const errorString = `${LM_STUDIO_NO_MODEL_MESSAGE} ${LM_STUDIO_NO_MODEL_INSTRUCTION}`;
+    const onOpenSettingsTab = vi.fn();
+    const markup = renderToStaticMarkup(
+      React.createElement(Controls, {
+        onZoomIn: vi.fn(),
+        onZoomOut: vi.fn(),
+        onSearch: vi.fn(),
+        onTraceRoute: vi.fn(),
+        isSearching: false,
+        searchError: errorString,
+        onClearError: vi.fn(),
+        skin: 'modern' as SkinType,
+        showFavorites: false,
+        onToggleShowFavorites: vi.fn(),
+        paused: false,
+        isTraceModalOpen: false,
+        onToggleTraceModal: vi.fn(),
+        isZoomLocked: false,
+        onToggleZoomLock: vi.fn(),
+        onOpenSettingsTab
+      })
+    );
+
+    // Primary message
+    expect(markup).toContain('No AI model is currently loaded. Please load a model and try again.');
+    // Parenthetical guidance
+    expect(markup).toContain('Settings &gt; Providers');
+    expect(markup).toContain('(');
+    expect(markup).toContain(')');
+  });
+
+  it('Switching providers / receiving successful enrichment clears error state correctly in mergeLocationInfo', () => {
     const errorState: LocationInfo = {
       name: 'Burj Khalifa',
       coordinates: { lat: 25.1972, lng: 55.2744 },
       type: LocationType.POI,
       errorType: 'LM_STUDIO_NO_MODEL',
-      errorMessage: 'No model loaded. Please load a model in LM Studio.',
-      errorInstruction: 'Load a model in LM Studio or select another provider in Settings.',
+      errorMessage: LM_STUDIO_NO_MODEL_MESSAGE,
+      errorInstruction: LM_STUDIO_NO_MODEL_INSTRUCTION,
       news: []
     };
 

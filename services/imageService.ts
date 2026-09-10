@@ -24,6 +24,7 @@ export type ImageSubjectShape =
 
 export type ImageValidationPolicy =
   | 'STRICT_ENTITY'
+  | 'LANDMARK_ENTITY'
   | 'GEOGRAPHIC_FEATURE'
   | 'LOCATION_REPRESENTATIVE'
   | 'HISTORICAL_WAYPOINT'
@@ -53,6 +54,59 @@ export interface ResolvedImageIntent {
   parentLocation?: string;
   source: 'USER_QUERY' | 'ROUTE_CONTEXT' | 'ENTITY_NAME' | 'FALLBACK_QUERY' | 'UNKNOWN';
   fallback?: 'ORIGINAL_QUERY' | 'NONE';
+}
+
+export function logImagePolicyRouting(params: {
+  entity: string;
+  entityType?: string;
+  historicalContext?: string;
+  routeContext?: string;
+  selectedPolicy: string;
+  reason: string;
+}): void {
+  console.log(`[IMAGE POLICY ROUTING]
+entity="${params.entity}"
+entityType="${params.entityType || 'unknown'}"
+historicalContext="${params.historicalContext || 'none'}"
+routeContext="${params.routeContext || 'none'}"
+selectedPolicy="${params.selectedPolicy}"
+reason="${params.reason}"`);
+}
+
+export function logImageCandidateValidation(params: {
+  candidate: string;
+  entityMatch: string;
+  entityMatchReason: string;
+  geographicMatch: string;
+  geographicMatchReason: string;
+  policy: string;
+  accepted: boolean;
+  rejectionReason: string;
+}): void {
+  console.log(`[IMAGE CANDIDATE VALIDATION]
+candidate="${params.candidate}"
+entityMatch=${params.entityMatch}
+entityMatchReason="${params.entityMatchReason}"
+geographicMatch=${params.geographicMatch}
+geographicMatchReason="${params.geographicMatchReason}"
+policy="${params.policy}"
+accepted=${params.accepted}
+rejectionReason="${params.rejectionReason}"`);
+}
+
+export function logImageFallback(params: {
+  initialCandidateCount: number;
+  initialAcceptedCount: number;
+  fallbackTriggered: boolean;
+  fallbackPolicy: string;
+  fallbackAcceptedCount: number;
+}): void {
+  console.log(`[IMAGE FALLBACK]
+initialCandidateCount=${params.initialCandidateCount}
+initialAcceptedCount=${params.initialAcceptedCount}
+fallbackTriggered=${params.fallbackTriggered}
+fallbackPolicy="${params.fallbackPolicy}"
+fallbackAcceptedCount=${params.fallbackAcceptedCount}`);
 }
 
 export function logImageIntent(intent: ResolvedImageIntent): void {
@@ -200,6 +254,15 @@ export function resolveImageIntent(input: string | {
     // Determine Subject Shape & Validation Policy Hierarchy:
     // A. HISTORICAL WAYPOINT (Completely isolated policy)
     if (isHistoricalWaypointEntity(rawTarget)) {
+      const histPolicy: ImageValidationPolicy = 'HISTORICAL_WAYPOINT';
+      logImagePolicyRouting({
+        entity: effectiveTarget,
+        entityType: typeof input === 'object' ? (input.entityType || input.type) : undefined,
+        historicalContext: contextString,
+        routeContext: routeTitleString || (typeof input === 'object' ? (input as any).routeGroupId : undefined),
+        selectedPolicy: histPolicy,
+        reason: 'Entity has explicit historical route context or explicit historical_waypoint classification'
+      });
       return {
         type: 'ENTITY_SPECIFIC',
         topic: undefined,
@@ -207,7 +270,7 @@ export function resolveImageIntent(input: string | {
         entityRequired: true,
         geographicConstraint: true,
         shape: 'SPECIFIC_ENTITY',
-        policy: 'HISTORICAL_WAYPOINT',
+        policy: histPolicy,
         source: queryString ? 'USER_QUERY' : 'ENTITY_NAME'
       };
     }
@@ -302,9 +365,23 @@ export function resolveImageIntent(input: string | {
       entityRequired = false;
     } else {
       shape = 'SPECIFIC_ENTITY';
-      policy = 'STRICT_ENTITY';
+      const isLandmark = /archaeological|historic_site|historic|archaeological_site|ruin|heritage|ancient|temple|pyramid/i.test(eType) ||
+        /archaeological/i.test(intentString) ||
+        /pyramids?|temples?|monuments?|ruins?|acropolis|colosseum|stonehenge|machu\s+picchu|sphinx/i.test(effectiveTarget);
+      policy = isLandmark ? 'LANDMARK_ENTITY' : 'STRICT_ENTITY';
       entityRequired = true;
     }
+
+    logImagePolicyRouting({
+      entity: effectiveTarget,
+      entityType: eType,
+      historicalContext: contextString,
+      routeContext: routeTitleString || (typeof input === 'object' ? (input as any).routeGroupId : undefined),
+      selectedPolicy: policy,
+      reason: policy === 'LANDMARK_ENTITY'
+        ? 'Standalone archaeological site, historical landmark, or point of interest without route sequence'
+        : (policy === 'STRICT_ENTITY' ? 'Specific named entity search' : 'Feature or location representative search')
+    });
 
     return {
       type: 'ENTITY_SPECIFIC',
@@ -670,6 +747,8 @@ export type ImageEvidenceType =
   | 'EXACT_ENTITY'
   | 'KNOWN_ALIAS'
   | 'DIRECT_ENTITY_SOURCE'
+  | 'COMPONENT'
+  | 'SUBFEATURE'
   | 'RELATED_ENTITY'
   | 'GENERIC_TOPIC'
   | 'UNRELATED'
@@ -935,6 +1014,161 @@ export function isDifferentNamedEntity(
   return false;
 }
 
+export type EntityMatchLevel = 'EXACT' | 'CANONICAL' | 'ALIAS' | 'COMPONENT' | 'SUBFEATURE' | 'PARTIAL' | 'HIGH' | 'MEDIUM' | 'NONE';
+
+export function deriveEntityAliases(
+  entityName: string,
+  canonicalName?: string,
+  additionalAliases?: string[]
+): {
+  exactAliases: string[];
+  canonicalAliases: string[];
+  alternateAliases: string[];
+  componentAliases: string[];
+} {
+  const exactSet = new Set<string>();
+  const canonicalSet = new Set<string>();
+  const alternateSet = new Set<string>();
+  const componentSet = new Set<string>();
+
+  const addExact = (s: string) => {
+    const clean = s.trim().toLowerCase();
+    if (clean.length >= 2) exactSet.add(clean);
+  };
+  const addCanonical = (s: string) => {
+    const clean = s.trim().toLowerCase();
+    if (clean.length >= 2) canonicalSet.add(clean);
+  };
+  const addAlternate = (s: string) => {
+    const clean = s.trim().toLowerCase();
+    if (clean.length >= 2) alternateSet.add(clean);
+  };
+  const addComponent = (s: string) => {
+    const clean = s.trim().toLowerCase();
+    if (clean.length >= 2) componentSet.add(clean);
+  };
+
+  const primaryNames = [entityName, canonicalName].filter(Boolean) as string[];
+  for (const name of primaryNames) {
+    addExact(name);
+    addCanonical(name);
+    const noArticle = name.replace(/^(?:the|a|an)\s+/i, '').trim();
+    if (noArticle) {
+      addExact(noArticle);
+      addCanonical(noArticle);
+
+      // 1. Symmetrical Inversion: "[Noun(s)] of [Location/Person]" <-> "[Location/Person] [Noun(s)]"
+      // e.g. "Pyramids of Giza" <-> "Giza Pyramids"
+      const ofMatch = noArticle.match(/^(.+?)\s+of\s+(?:the\s+)?(.+)$/i);
+      if (ofMatch) {
+        const noun = ofMatch[1].trim();
+        const loc = ofMatch[2].trim();
+        addCanonical(`${loc} ${noun}`);
+        addAlternate(`${loc} ${noun}`);
+
+        // Singular / Plural conversions
+        const singularNoun = noun.replace(/s$/i, '');
+        const pluralNoun = noun.endsWith('s') ? noun : `${noun}s`;
+        addCanonical(`${loc} ${singularNoun}`);
+        addCanonical(`${loc} ${pluralNoun}`);
+        addCanonical(`${noun} of ${loc}`);
+        addCanonical(`${singularNoun} of ${loc}`);
+        addCanonical(`${pluralNoun} of ${loc}`);
+
+        // Structural complex suffixes
+        addAlternate(`${loc} ${singularNoun} complex`);
+        addAlternate(`${loc} ${pluralNoun} complex`);
+      }
+
+      // 2. Inversion: "[Location] [Noun(s)]" -> "[Noun(s)] of [Location]"
+      // e.g. "Giza Pyramids" -> "Pyramids of Giza"
+      const locNounMatch = noArticle.match(/^([a-z0-9\s'-]+?)\s+(pyramids?|canals?|ruins?|temples?|tombs?|caves?|towers?|castles?|falls?|islands?)$/i);
+      if (locNounMatch) {
+        const loc = locNounMatch[1].trim();
+        const noun = locNounMatch[2].trim();
+        const singularNoun = noun.replace(/s$/i, '');
+        const pluralNoun = noun.endsWith('s') ? noun : `${noun}s`;
+        addCanonical(`${noun} of ${loc}`);
+        addCanonical(`${singularNoun} of ${loc}`);
+        addCanonical(`${pluralNoun} of ${loc}`);
+        addCanonical(`${loc} ${singularNoun}`);
+        addCanonical(`${loc} ${pluralNoun}`);
+        addAlternate(`${loc} ${singularNoun} complex`);
+        addAlternate(`${loc} ${pluralNoun} complex`);
+      }
+
+      // 3. Clean Base Landmark Suffix Truncation
+      const cleanBase = noArticle
+        .replace(/\s+(?:shipwreck|wreck location|discovery site|wreck site|wreck|ship|archaeological site|movie set|film set|set|site|monument|memorial|historic site|ruins|battlefield|complex|plateau|necropolis|park|national park|sanctuary)$/i, '')
+        .trim();
+
+      if (cleanBase && cleanBase.length >= 3 && cleanBase.toLowerCase() !== noArticle.toLowerCase()) {
+        addAlternate(cleanBase);
+      }
+    }
+  }
+
+  for (const alias of (additionalAliases || [])) {
+    if (alias) {
+      addAlternate(alias);
+      const noArticle = alias.replace(/^(?:the|a|an)\s+/i, '').trim();
+      if (noArticle) {
+        addAlternate(noArticle);
+        const ofMatch = noArticle.match(/^(.+?)\s+of\s+(?:the\s+)?(.+)$/i);
+        if (ofMatch) {
+          const noun = ofMatch[1].trim();
+          const loc = ofMatch[2].trim();
+          addAlternate(`${loc} ${noun}`);
+          const singularNoun = noun.replace(/s$/i, '');
+          const pluralNoun = noun.endsWith('s') ? noun : `${noun}s`;
+          addAlternate(`${loc} ${singularNoun}`);
+          addAlternate(`${loc} ${pluralNoun}`);
+          addAlternate(`${noun} of ${loc}`);
+          addAlternate(`${singularNoun} of ${loc}`);
+          addAlternate(`${pluralNoun} of ${loc}`);
+          addAlternate(`${loc} ${singularNoun} complex`);
+          addAlternate(`${loc} ${pluralNoun} complex`);
+        }
+      }
+    }
+  }
+
+  // 4. Curated Component Landmarks for complex world-renowned sites
+  const combined = [...primaryNames, ...(additionalAliases || [])].join(' ').toLowerCase();
+  if (combined.includes('giza') || (combined.includes('pyramid') && (combined.includes('khufu') || combined.includes('cheops') || combined.includes('egypt')))) {
+    addComponent('great pyramid of giza');
+    addComponent('great pyramid');
+    addComponent('pyramid of khufu');
+    addComponent('pyramid of cheops');
+    addComponent('pyramid of khafre');
+    addComponent('pyramid of chefren');
+    addComponent('pyramid of menkaure');
+    addComponent('great sphinx of giza');
+    addComponent('great sphinx');
+    addComponent('sphinx of giza');
+    addComponent('giza necropolis');
+    addComponent('giza plateau');
+  }
+
+  if (combined.includes('forbidden city')) {
+    addComponent('palace museum');
+    addComponent('gugong');
+    addComponent('故宫');
+    addComponent('紫禁城');
+    addComponent('imperial palace');
+    addComponent('beijing imperial palace');
+    addComponent('forbidden city meridian gate');
+    addComponent('meridian gate');
+  }
+
+  return {
+    exactAliases: Array.from(exactSet),
+    canonicalAliases: Array.from(canonicalSet),
+    alternateAliases: Array.from(alternateSet),
+    componentAliases: Array.from(componentSet)
+  };
+}
+
 export function classifyImageEvidence(
   candidate: ImageCandidate,
   entity: {
@@ -944,7 +1178,7 @@ export function classifyImageEvidence(
   }
 ): {
   evidenceType: ImageEvidenceType;
-  entityMatchLevel: 'EXACT' | 'HIGH' | 'MEDIUM' | 'NONE';
+  entityMatchLevel: EntityMatchLevel;
   matchedAlias?: string;
 } {
   const entityName = entity.name || '';
@@ -953,76 +1187,35 @@ export function classifyImageEvidence(
   const desc = candidate.description || candidate.caption || '';
   const fullText = `${title} ${desc}`.toLowerCase();
   const normFullText = normalizeDiacritics(fullText);
-  const titleLower = title.toLowerCase();
+  const titleLower = title.toLowerCase().trim();
+  const normTitle = normalizeDiacritics(titleLower);
 
-  const aliases = [
-    entityName.toLowerCase(),
-    canonicalName.toLowerCase(),
-    ...(entity.aliases || []).map(a => a.toLowerCase())
-  ].filter(Boolean);
-
-  if (entityName.toLowerCase().includes('forbidden city')) {
-    aliases.push('palace museum', 'gugong', '故宫', '紫禁城', 'imperial palace', 'beijing imperial palace', 'forbidden city', 'forbidden city meridian gate', 'meridian gate');
-  }
-
-  // Derive clean landmark / site / shipwreck aliases non-destructively
-  // e.g. "Queen Anne's Revenge Shipwreck" -> "Queen Anne's Revenge"
-  // "Blackbeard's Queen Anne's Revenge" -> "Queen Anne's Revenge", "Blackbeard's Queen Anne's Revenge"
-  const cleanBase = entityName.toLowerCase()
-    .replace(/^(?:shipwreck of (?:the )?|wreck of (?:the )?|the )/i, '')
-    .replace(/\s+(?:shipwreck|wreck location|discovery site|wreck site|wreck|ship|archaeological site|movie set|film set|set|site|monument|memorial|historic site|ruins|battlefield)$/i, '')
-    .trim();
-
-  if (cleanBase) {
-    aliases.push(
-      cleanBase,
-      `ss ${cleanBase}`,
-      `${cleanBase} ship`,
-      `${cleanBase} shipwreck`,
-      `${cleanBase} wreck`,
-      `${cleanBase} site`,
-      `${cleanBase} historic site`,
-      `${cleanBase} ruins`,
-      `${cleanBase} monument`,
-      `${cleanBase} memorial`,
-      `${cleanBase} castle`,
-      `${cleanBase} estate`,
-      `${cleanBase} fort`,
-      `${cleanBase} house`,
-      `${cleanBase} park`,
-      `${cleanBase} palace`,
-      `wreck of the ${cleanBase}`,
-      `wreck of ${cleanBase}`,
-      `shipwreck of ${cleanBase}`,
-      `shipwreck of the ${cleanBase}`
-    );
-
-    // If entity has possessive or associated person/vessel prefix (e.g. "Blackbeard's Queen Anne's Revenge")
-    // also recognize the base entity name and vice versa
-    const possessiveMatch = cleanBase.match(/^[a-z0-9\s'-]+(?:'s|')\s+(.+)$/i);
-    if (possessiveMatch && possessiveMatch[1]) {
-      const subEntity = possessiveMatch[1].trim();
-      if (subEntity.length >= 3) {
-        aliases.push(subEntity, `${subEntity} shipwreck`, `${subEntity} wreck`, `${subEntity} ship`);
-      }
-    }
-  }
-
-  const dedupedAliases = Array.from(new Set(aliases.filter(Boolean)));
-
-  // 1. Check EXACT_ENTITY
-  const exactMatch = dedupedAliases.find(a => 
-    titleLower === a || 
-    titleLower.startsWith(`${a} (`) || 
-    titleLower.startsWith(`${a},`) ||
-    titleLower === `${a} estate` ||
-    titleLower === `${a} castle` ||
-    titleLower === `${a} fort` ||
-    titleLower === `${a} house` ||
-    titleLower === `the ${a}`
+  const { exactAliases, canonicalAliases, alternateAliases, componentAliases } = deriveEntityAliases(
+    entityName,
+    canonicalName,
+    entity.aliases
   );
+
+  // Helper to match string against title or fullText
+  const matchExactCandidateTitle = (alias: string): boolean => {
+    if (alias.length < 2) return false;
+    if (titleLower === alias || normTitle === normalizeDiacritics(alias)) return true;
+    if (titleLower.startsWith(`${alias} (`) || titleLower.startsWith(`${alias},`)) return true;
+    if (titleLower === `the ${alias}` || normTitle === `the ${normalizeDiacritics(alias)}`) return true;
+    if (titleLower === `${alias} estate` || titleLower === `${alias} castle` || titleLower === `${alias} fort` || titleLower === `${alias} house`) return true;
+    return false;
+  };
+
+  const matchTextPhrase = (alias: string): boolean => {
+    if (alias.length < 3) return false;
+    const boundary = new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`, 'i');
+    return boundary.test(fullText) || boundary.test(normFullText);
+  };
+
+  // 1. Check title matches first: EXACT -> CANONICAL -> ALIAS -> COMPONENT
+  const exactMatch = exactAliases.find(a => matchExactCandidateTitle(a));
   if (exactMatch) {
-    console.log(`[IMAGE ENTITY ALIAS MATCH]\ncanonicalEntity="${entityName}"\nmatchedAlias="${exactMatch}"\ncandidateTitle="${title}"`);
+    console.log(`[IMAGE ENTITY EXACT MATCH]\\ncanonicalEntity="${entityName}"\\nmatchedExact="${exactMatch}"\\ncandidateTitle="${title}"`);
     return {
       evidenceType: 'EXACT_ENTITY',
       entityMatchLevel: 'EXACT',
@@ -1030,15 +1223,87 @@ export function classifyImageEvidence(
     };
   }
 
-  // 2. Check KNOWN_ALIAS
-  const aliasMatch = dedupedAliases.find(a => fullText.includes(a) || normFullText.includes(normalizeDiacritics(a)));
-  if (aliasMatch) {
-    console.log(`[IMAGE ENTITY ALIAS MATCH]\ncanonicalEntity="${entityName}"\nmatchedAlias="${aliasMatch}"\ncandidateTitle="${title}"`);
+  const canonicalTitleMatch = canonicalAliases.find(a => matchExactCandidateTitle(a));
+  if (canonicalTitleMatch) {
+    console.log(`[IMAGE ENTITY CANONICAL MATCH]\\ncanonicalEntity="${entityName}"\\nmatchedCanonical="${canonicalTitleMatch}"\\ncandidateTitle="${title}"`);
+    return {
+      evidenceType: 'EXACT_ENTITY',
+      entityMatchLevel: 'CANONICAL',
+      matchedAlias: canonicalTitleMatch
+    };
+  }
+
+  const aliasTitleMatch = alternateAliases.find(a => matchExactCandidateTitle(a));
+  if (aliasTitleMatch) {
+    console.log(`[IMAGE ENTITY ALIAS MATCH]\\ncanonicalEntity="${entityName}"\\nmatchedAlias="${aliasTitleMatch}"\\ncandidateTitle="${title}"`);
     return {
       evidenceType: 'KNOWN_ALIAS',
-      entityMatchLevel: 'HIGH',
-      matchedAlias: aliasMatch
+      entityMatchLevel: 'ALIAS',
+      matchedAlias: aliasTitleMatch
     };
+  }
+
+  const componentTitleMatch = componentAliases.find(a => matchExactCandidateTitle(a));
+  if (componentTitleMatch) {
+    console.log(`[IMAGE ENTITY COMPONENT MATCH]\\ncanonicalEntity="${entityName}"\\nmatchedComponent="${componentTitleMatch}"\\ncandidateTitle="${title}"`);
+    return {
+      evidenceType: 'COMPONENT',
+      entityMatchLevel: 'COMPONENT',
+      matchedAlias: componentTitleMatch
+    };
+  }
+
+  // 2. Check full text phrase matches: CANONICAL -> ALIAS -> COMPONENT
+  const canonicalPhraseMatch = canonicalAliases.find(a => matchTextPhrase(a));
+  if (canonicalPhraseMatch) {
+    console.log(`[IMAGE ENTITY CANONICAL MATCH]\\ncanonicalEntity="${entityName}"\\nmatchedCanonical="${canonicalPhraseMatch}"\\ncandidateTitle="${title}"`);
+    return {
+      evidenceType: 'EXACT_ENTITY',
+      entityMatchLevel: 'CANONICAL',
+      matchedAlias: canonicalPhraseMatch
+    };
+  }
+
+  const aliasPhraseMatch = alternateAliases.find(a => matchTextPhrase(a));
+  if (aliasPhraseMatch) {
+    console.log(`[IMAGE ENTITY ALIAS MATCH]\\ncanonicalEntity="${entityName}"\\nmatchedAlias="${aliasPhraseMatch}"\\ncandidateTitle="${title}"`);
+    return {
+      evidenceType: 'KNOWN_ALIAS',
+      entityMatchLevel: 'ALIAS',
+      matchedAlias: aliasPhraseMatch
+    };
+  }
+
+  const componentPhraseMatch = componentAliases.find(a => matchTextPhrase(a));
+  if (componentPhraseMatch) {
+    console.log(`[IMAGE ENTITY COMPONENT MATCH]\\ncanonicalEntity="${entityName}"\\nmatchedComponent="${componentPhraseMatch}"\\ncandidateTitle="${title}"`);
+    return {
+      evidenceType: 'COMPONENT',
+      entityMatchLevel: 'COMPONENT',
+      matchedAlias: componentPhraseMatch
+    };
+  }
+
+  // 4. Check PARTIAL match
+  // Identify key distinctive tokens (length >= 4) from entity name and canonical variants
+  const rawTokens = [entityName, canonicalName]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length >= 4 && !['the', 'and', 'from', 'near', 'with', 'site', 'view', 'location', 'historic', 'ancient'].includes(t));
+  const distinctTokens = Array.from(new Set(rawTokens));
+
+  if (distinctTokens.length > 0) {
+    const matchingTokens = distinctTokens.filter(t => fullText.includes(t));
+    if (matchingTokens.length >= Math.min(2, distinctTokens.length) || (distinctTokens.length === 1 && matchingTokens.length === 1)) {
+      return {
+        evidenceType: 'RELATED_ENTITY',
+        entityMatchLevel: 'PARTIAL',
+        matchedAlias: matchingTokens.join(' ')
+      };
+    }
   }
 
   return {
@@ -1175,8 +1440,13 @@ export function isHistoricalWaypointEntity(entity: {
   historicalContext?: string;
   historicalPeriod?: string;
   routeTitle?: string;
+  routeGroupId?: string;
+  historicalRouteId?: string;
+  routeEvidenceMode?: string;
+  isHistoricalWaypoint?: boolean;
   waypoint?: any;
   metadataMode?: string;
+  significance?: string;
 }): boolean {
   if (entity.intent === 'MULTI_LOCATION_DISCOVERY') return false;
 
@@ -1201,17 +1471,33 @@ export function isHistoricalWaypointEntity(entity: {
   }
 
   const eType = (entity.entityType || entity.type || '').toString().toLowerCase();
-  if (
-    eType.includes('historical_waypoint') ||
-    eType.includes('battlefield') ||
-    eType.includes('archaeological') ||
-    Boolean(entity.isHistoricalWaypoint) ||
-    Boolean(entity.waypoint)
-  ) {
+
+  const isExplicitHistoricalWaypointType =
+    eType === 'historical_waypoint' ||
+    Boolean(entity.isHistoricalWaypoint);
+
+  const hasExplicitHistoricalRouteContext =
+    Boolean(entity.routeGroupId) ||
+    Boolean(entity.routeTitle) ||
+    Boolean(entity.historicalRouteId) ||
+    Boolean(entity.routeEvidenceMode) ||
+    Boolean(entity.waypoint?.routeTitle) ||
+    Boolean(entity.waypoint?.routeGroupId);
+
+  const hasWaypointContext =
+    Boolean(entity.waypoint) ||
+    Boolean(entity.historicalContext) ||
+    Boolean(entity.significance) ||
+    eType.includes('battlefield');
+
+  if (isExplicitHistoricalWaypointType) {
     return true;
   }
-  if (entity.intent === 'HISTORICAL_EVENT' || entity.intent === 'exploration' || entity.intent === 'historical_event') return true;
-  if (Boolean(entity.historicalPeriod || (entity.routeTitle && !combined.includes('filming')))) return true;
+
+  if (hasExplicitHistoricalRouteContext && hasWaypointContext) {
+    return true;
+  }
+
   return false;
 }
 
@@ -1961,7 +2247,7 @@ decision=${decision}`);
   }
 
   // 7. Geographic Evidence evaluation
-  let geoEvidence: 'MATCHING' | 'CONFLICTING' | 'NONE' = 'NONE';
+  let geoEvidence: 'MATCHING' | 'CONFLICTING' | 'UNKNOWN' = 'UNKNOWN';
   let geoMismatchReason: string | undefined;
 
   if (candidate.coordinates && entity.coordinates && entity.coordinates.lat !== 0 && entity.coordinates.lng !== 0) {
@@ -1986,13 +2272,13 @@ decision=${decision}`);
       geoEvidence = 'CONFLICTING';
       geoMismatchReason = geoCheck.reason || 'Geographic mismatch';
     } else if (
-      geoEvidence !== 'MATCHING' && (
-        (entity.city && fullText.includes(entity.city.toLowerCase())) ||
-        (entity.state && fullText.includes(entity.state.toLowerCase())) ||
-        (entity.country && fullText.includes(entity.country.toLowerCase()))
-      )
+      (entity.city && fullText.includes(entity.city.toLowerCase())) ||
+      (entity.state && fullText.includes(entity.state.toLowerCase())) ||
+      (entity.country && fullText.includes(entity.country.toLowerCase()))
     ) {
       geoEvidence = 'MATCHING';
+    } else if (geoEvidence !== 'MATCHING') {
+      geoEvidence = 'UNKNOWN';
     }
   }
 
@@ -2006,6 +2292,10 @@ decision=${decision}`);
   );
 
   const hasStrongEntityMatch = (
+    entityMatchLevel === 'EXACT' ||
+    entityMatchLevel === 'CANONICAL' ||
+    entityMatchLevel === 'ALIAS' ||
+    entityMatchLevel === 'HIGH' ||
     evidenceType === 'EXACT_ENTITY' ||
     evidenceType === 'KNOWN_ALIAS' ||
     evidenceType === 'DIRECT_ENTITY_SOURCE' ||
@@ -2057,15 +2347,85 @@ decision=${decision}`);
         break;
       }
 
-      case 'STRICT_ENTITY': {
-        // Strict landmarks: only Tier 1 is acceptable
-        if (!hasStrongEntityMatch) {
+      case 'LANDMARK_ENTITY': {
+        if (hasStrongEntityMatch) {
+          if (geoEvidence === 'CONFLICTING' && !isUntrustedGeoConflict) {
+            decision = 'REJECT';
+            reason = 'GEOGRAPHIC_CONFLICT';
+          } else {
+            decision = 'ACCEPT';
+            tier = 1;
+            reason = (coordinateStatus === 'VERIFIED' && geoEvidence === 'MATCHING')
+              ? 'STRONG_ENTITY_MATCH_GEO_VERIFIED'
+              : 'STRONG_ENTITY_MATCH';
+          }
+        } else if (entityMatchLevel === 'COMPONENT' || entityMatchLevel === 'SUBFEATURE' || evidenceType === 'COMPONENT' || evidenceType === 'SUBFEATURE') {
+          if (geoEvidence === 'CONFLICTING' && !isUntrustedGeoConflict) {
+            decision = 'REJECT';
+            reason = 'GEOGRAPHIC_CONFLICT';
+          } else {
+            decision = 'ACCEPT';
+            tier = 2;
+            reason = 'COMPONENT_LANDMARK_MATCH';
+          }
+        } else if (entityMatchLevel === 'PARTIAL') {
+          if (geoEvidence === 'MATCHING') {
+            decision = 'ACCEPT';
+            tier = 2;
+            reason = 'PARTIAL_ENTITY_MATCH_WITH_GEO_CORROBORATION';
+          } else if (geoEvidence === 'CONFLICTING') {
+            decision = 'REJECT';
+            reason = 'GEOGRAPHIC_CONFLICT';
+          } else {
+            if (imageIntent.geographicConstraint === false) {
+              decision = 'ACCEPT';
+              tier = 3;
+              reason = 'PARTIAL_ENTITY_MATCH_FALLBACK';
+            } else {
+              decision = 'REJECT';
+              reason = 'NO_ENTITY_SPECIFIC_EVIDENCE';
+            }
+          }
+        } else {
           decision = 'REJECT';
           reason = 'NO_ENTITY_SPECIFIC_EVIDENCE';
+        }
+        break;
+      }
+
+      case 'STRICT_ENTITY': {
+        if (hasStrongEntityMatch) {
+          if (geoEvidence === 'CONFLICTING' && !isUntrustedGeoConflict) {
+            decision = 'REJECT';
+            reason = 'GEOGRAPHIC_CONFLICT';
+          } else {
+            decision = 'ACCEPT';
+            tier = 1;
+            reason = (coordinateStatus === 'VERIFIED' && geoEvidence === 'MATCHING')
+              ? 'STRONG_ENTITY_MATCH_GEO_VERIFIED'
+              : 'STRONG_ENTITY_MATCH';
+          }
+        } else if (entityMatchLevel === 'PARTIAL') {
+          if (geoEvidence === 'MATCHING') {
+            decision = 'ACCEPT';
+            tier = 2;
+            reason = 'PARTIAL_ENTITY_MATCH_WITH_GEO_CORROBORATION';
+          } else if (geoEvidence === 'CONFLICTING') {
+            decision = 'REJECT';
+            reason = 'GEOGRAPHIC_CONFLICT';
+          } else {
+            if (imageIntent.geographicConstraint === false) {
+              decision = 'ACCEPT';
+              tier = 3;
+              reason = 'PARTIAL_ENTITY_MATCH_FALLBACK';
+            } else {
+              decision = 'REJECT';
+              reason = 'NO_ENTITY_SPECIFIC_EVIDENCE';
+            }
+          }
         } else {
-          decision = 'ACCEPT';
-          tier = 1;
-          reason = coordinateStatus === 'VERIFIED' ? 'STRONG_ENTITY_MATCH_GEO_VERIFIED' : 'STRONG_ENTITY_MATCH';
+          decision = 'REJECT';
+          reason = 'NO_ENTITY_SPECIFIC_EVIDENCE';
         }
         break;
       }
@@ -2201,6 +2561,39 @@ GeographicConstraintApplied=${geographicConstraintApplied}
 FinalScore=${score}
 Decision=${decision}
 Reason=${reason}`);
+
+  const matchReasonStr = matchedAlias
+    ? (entityMatchLevel === 'COMPONENT' || entityMatchLevel === 'SUBFEATURE' || evidenceType === 'COMPONENT' || evidenceType === 'SUBFEATURE'
+      ? `Matched component/subfeature: ${matchedAlias}`
+      : `Matched alias: ${matchedAlias}`)
+    : (entityMatchLevel === 'EXACT'
+      ? 'Exact entity match'
+      : (entityMatchLevel === 'CANONICAL'
+        ? 'Canonical variant match'
+        : (entityMatchLevel === 'ALIAS'
+          ? 'Recognized alias match'
+          : (entityMatchLevel === 'COMPONENT' || entityMatchLevel === 'SUBFEATURE'
+            ? 'Recognized complex component/subfeature'
+            : (entityMatchLevel === 'PARTIAL'
+              ? 'Partial token overlap'
+              : 'No entity name or alias match')))));
+
+  const geoMatchReasonStr = geoMismatchReason || (geoEvidence === 'MATCHING'
+    ? 'Geographic metadata matches location'
+    : (geoEvidence === 'UNKNOWN'
+      ? 'Geographic metadata unknown'
+      : 'Geographic mismatch'));
+
+  logImageCandidateValidation({
+    candidate: title || 'Untitled',
+    entityMatch: entityMatchLevel,
+    entityMatchReason: matchReasonStr,
+    geographicMatch: geoEvidence,
+    geographicMatchReason: geoMatchReasonStr,
+    policy,
+    accepted: decision === 'ACCEPT',
+    rejectionReason: decision === 'REJECT' ? reason : 'none'
+  });
 
   return {
     score,
@@ -2465,6 +2858,8 @@ async function _fetchAndValidateImagesInternal(
   }
 
   const imageIntent = (info as any).imageIntent || resolveImageIntent(info);
+  const allRawCandidates: ImageCandidate[] = [];
+  const seenRawUrls = new Set<string>();
   const validatedCandidates: Array<{
     candidate: ImageCandidate;
     score: number;
@@ -2475,10 +2870,10 @@ async function _fetchAndValidateImagesInternal(
   const isHistorical = isHistoricalWaypointEntity(info) && imageIntent.type === 'ENTITY_SPECIFIC';
   const histContext = isHistorical ? extractHistoricalImageContext(info) : null;
 
-  const addCandidateIfValid = (candidate: ImageCandidate) => {
-    if (!candidate.url || typeof candidate.url !== 'string') return;
+  const processCandidate = (candidate: ImageCandidate, intentToUse: ResolvedImageIntent): boolean => {
+    if (!candidate.url || typeof candidate.url !== 'string') return false;
     const cleanUrl = candidate.url.trim();
-    if (!cleanUrl || seenUrls.has(cleanUrl)) return;
+    if (!cleanUrl || seenUrls.has(cleanUrl)) return false;
 
     const validation = validateImageCandidate(candidate, {
       name: info.name,
@@ -2500,8 +2895,8 @@ async function _fetchAndValidateImagesInternal(
       aliases: (info as any).aliases || (info as any).alternateNames,
       query: (info as any).rawQuery || (info as any).query,
       rawQuery: (info as any).rawQuery,
-      imageIntent
-    }, imageIntent);
+      imageIntent: intentToUse
+    }, intentToUse);
 
     if (validation.decision === 'ACCEPT') {
       seenUrls.add(cleanUrl);
@@ -2515,13 +2910,24 @@ async function _fetchAndValidateImagesInternal(
         tier: validation.tier,
         category
       });
+      return true;
     }
+    return false;
+  };
+
+  const addCandidate = (candidate: ImageCandidate) => {
+    if (!candidate.url || typeof candidate.url !== 'string') return;
+    const cleanUrl = candidate.url.trim();
+    if (!cleanUrl || seenRawUrls.has(cleanUrl)) return;
+    seenRawUrls.add(cleanUrl);
+    allRawCandidates.push(candidate);
+    processCandidate(candidate, imageIntent);
   };
 
   // 1. Validate primary image or direct image fields on info
   if (info.primaryImage) {
     if (typeof info.primaryImage === 'string') {
-      addCandidateIfValid({
+      addCandidate({
         url: info.primaryImage,
         caption: info.imageCaption,
         attribution: (info as any).imageAttribution || (info as any).imageCredit || (info as any).imageSource || (info as any).attribution,
@@ -2529,7 +2935,7 @@ async function _fetchAndValidateImagesInternal(
       });
     } else if (typeof info.primaryImage === 'object') {
       const p = info.primaryImage as any;
-      addCandidateIfValid({
+      addCandidate({
         url: p.url || p.imageUrl || p.src,
         caption: p.caption || p.description || p.title || info.imageCaption,
         attribution: p.attribution || p.credit || p.source || p.author || (info as any).imageAttribution || (info as any).attribution,
@@ -2542,14 +2948,14 @@ async function _fetchAndValidateImagesInternal(
   if ((info as any).image) {
     const imgObj = (info as any).image;
     if (typeof imgObj === 'string') {
-      addCandidateIfValid({
+      addCandidate({
         url: imgObj,
         caption: info.imageCaption,
         attribution: (info as any).imageAttribution || (info as any).attribution,
         title: info.name
       });
     } else if (typeof imgObj === 'object') {
-      addCandidateIfValid({
+      addCandidate({
         url: imgObj.imageUrl || imgObj.url || imgObj.src,
         caption: imgObj.caption || imgObj.description || imgObj.title || info.imageCaption,
         attribution: imgObj.attribution || imgObj.credit || imgObj.source || imgObj.provenance?.provider || (info as any).imageAttribution || (info as any).attribution,
@@ -2562,7 +2968,7 @@ async function _fetchAndValidateImagesInternal(
   if (Array.isArray(info.images)) {
     for (const img of info.images) {
       if (typeof img === 'string') {
-        addCandidateIfValid({
+        addCandidate({
           url: img,
           caption: info.imageCaption,
           attribution: (info as any).imageAttribution || (info as any).imageCredit || (info as any).imageSource || (info as any).attribution,
@@ -2570,7 +2976,7 @@ async function _fetchAndValidateImagesInternal(
         });
       } else if (typeof img === 'object' && img !== null) {
         const obj = img as any;
-        addCandidateIfValid({
+        addCandidate({
           url: obj.url || obj.imageUrl || obj.src,
           caption: obj.caption || obj.title || obj.description || info.imageCaption,
           attribution: obj.attribution || obj.credit || obj.source || obj.author || (info as any).imageAttribution || (info as any).attribution,
@@ -2632,7 +3038,7 @@ async function _fetchAndValidateImagesInternal(
               ? { lat: page.coordinates[0].lat, lng: page.coordinates[0].lon }
               : undefined;
 
-            addCandidateIfValid({
+            addCandidate({
               url: page.thumbnail.source,
               title: page.title,
               description: page.description,
@@ -2652,6 +3058,42 @@ async function _fetchAndValidateImagesInternal(
       break;
     }
   }
+
+  // 3. Controlled Fallback Pass when initial validation yields 0 accepted images for ENTITY_SPECIFIC
+  const initialCandidateCount = allRawCandidates.length;
+  const initialAcceptedCount = validatedCandidates.length;
+  let fallbackTriggered = false;
+  let fallbackPolicy = 'none';
+  let fallbackAcceptedCount = 0;
+
+  if (initialAcceptedCount === 0 && initialCandidateCount > 0 && imageIntent.type === 'ENTITY_SPECIFIC') {
+    fallbackTriggered = true;
+    if (imageIntent.policy === 'HISTORICAL_WAYPOINT') {
+      fallbackPolicy = 'HISTORICAL_WAYPOINT';
+    } else {
+      fallbackPolicy = 'LANDMARK_ENTITY';
+      const fallbackIntent: ResolvedImageIntent = {
+        ...imageIntent,
+        policy: 'LANDMARK_ENTITY',
+        geographicConstraint: false
+      };
+      for (const candidate of allRawCandidates) {
+        if (seenUrls.has(candidate.url.trim())) continue;
+        const accepted = processCandidate(candidate, fallbackIntent);
+        if (accepted) {
+          fallbackAcceptedCount++;
+        }
+      }
+    }
+  }
+
+  logImageFallback({
+    initialCandidateCount,
+    initialAcceptedCount,
+    fallbackTriggered,
+    fallbackPolicy,
+    fallbackAcceptedCount
+  });
 
   // 3. Selection, Uniqueness Filtering, Diversity, and Caption Enhancement
   const foundImages: GalleryImage[] = [];

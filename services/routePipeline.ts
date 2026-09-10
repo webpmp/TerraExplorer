@@ -447,7 +447,10 @@ Validation Decision: ${isCoordValid && isNameValid && entityIdentityValid && coo
         if (registryValidation.canonicalMemberships && registryValidation.canonicalMemberships.length > 0) {
           w.memberships = registryValidation.canonicalMemberships;
           // Set primary scalar legacy fields to the group that matches the candidate, or the primary group
-          const matchedMem = registryValidation.canonicalMemberships.find(m => m.routeGroupId === w.routeGroupId) || registryValidation.canonicalMemberships[0];
+          const resolvedCandGroupId = (w.routeGroupId ? resolveCanonicalRouteGroup(registryValidation.eventTitle || 'Trail of Tears', w.routeGroupId)?.id : undefined) ||
+            (w.routeGroupName ? resolveCanonicalRouteGroup(registryValidation.eventTitle || 'Trail of Tears', w.routeGroupName)?.id : undefined) ||
+            w.routeGroupId;
+          const matchedMem = registryValidation.canonicalMemberships.find(m => m.routeGroupId === resolvedCandGroupId) || registryValidation.canonicalMemberships.find(m => m.routeGroupId === w.routeGroupId) || registryValidation.canonicalMemberships[0];
           w.routeGroupId = matchedMem.routeGroupId;
           w.routeGroupName = matchedMem.routeGroupName;
         } else if (registryValidation.canonicalGroupDef) {
@@ -515,13 +518,13 @@ expectedGroupId: "${registryValidation.expectedGroupId || 'N/A'}"`);
     }
   }
 
-  // Authoritative Historical Event Canonical Topology & AI Enrichment Reconciliation
-  // Only apply full canonical topology reconstruction when the prompt/generation was for the full event
+  // Canonical historical topology reconciliation assertion:
+  // For authoritative multi-route events (e.g. Trail of Tears), maintain deterministic integrity
   // or when recovering from an empty/truncated AI output. If the caller specifically requested/generated
   // a subset of routes (e.g. Northern Route only), do not resurrect unrequested route groups!
-  const authoritativeEventModel = getAuthoritativeEventModel(rawTitle || text);
+  const authoritativeEventModel = getAuthoritativeEventModel(text) || getAuthoritativeEventModel(rawTitle);
   if (authoritativeEventModel) {
-    const canonicalTopology = buildCanonicalEventTopology(rawTitle || text);
+    const canonicalTopology = buildCanonicalEventTopology(text) || buildCanonicalEventTopology(rawTitle);
     if (canonicalTopology && canonicalTopology.route.length >= 1) {
       console.log(`[Pipeline ${pipelineId}] Reconciling canonical topology with AI enrichment for registered historical event "${canonicalTopology.title}".`);
 
@@ -529,20 +532,26 @@ expectedGroupId: "${registryValidation.expectedGroupId || 'N/A'}"`);
       const canonicalGroupIds = new Set(canonicalTopology.routeGroups.map(rg => rg.id));
       const validGeneratedGroupIds = new Set<string>();
       for (const item of normalizedItems) {
-        if (item.routeGroupId && canonicalGroupIds.has(item.routeGroupId)) {
+        const resG = resolveCanonicalRouteGroup(authoritativeEventModel.eventTitle, item.routeGroupId) || resolveCanonicalRouteGroup(authoritativeEventModel.eventTitle, item.routeGroupName);
+        if (resG && canonicalGroupIds.has(resG.id)) {
+          validGeneratedGroupIds.add(resG.id);
+        } else if (item.routeGroupId && canonicalGroupIds.has(item.routeGroupId)) {
           validGeneratedGroupIds.add(item.routeGroupId);
         }
       }
       if (Array.isArray(rawRouteGroups)) {
         rawRouteGroups.forEach(rg => {
-          if (rg.id && canonicalGroupIds.has(rg.id)) {
+          const resG = resolveCanonicalRouteGroup(authoritativeEventModel.eventTitle, rg.id) || resolveCanonicalRouteGroup(authoritativeEventModel.eventTitle, rg.name);
+          if (resG && canonicalGroupIds.has(resG.id)) {
+            validGeneratedGroupIds.add(resG.id);
+          } else if (rg.id && canonicalGroupIds.has(rg.id)) {
             validGeneratedGroupIds.add(rg.id);
           }
         });
       }
 
       // Check if the query specifically targeted a single route (e.g., "Trail of Tears Northern Route")
-      const queryLower = (rawTitle || text).toLowerCase();
+      const queryLower = (text || rawTitle || '').toLowerCase();
       const isNorthernTarget = queryLower.includes('northern');
       const isBengeTarget = queryLower.includes('benge');
       const isBellTarget = queryLower.includes('bell');
@@ -573,36 +582,97 @@ expectedGroupId: "${registryValidation.expectedGroupId || 'N/A'}"`);
       const aiEnrichmentFallbackMap = new Map<string, Waypoint>();
       for (const item of normalizedItems) {
         const gId = item.routeGroupId || 'default';
-        const candNorm = (item.canonicalName || item.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (candNorm) {
-          aiEnrichmentMap.set(`${gId}::${candNorm}`, item);
-          if (!aiEnrichmentFallbackMap.has(candNorm)) {
-            aiEnrichmentFallbackMap.set(candNorm, item);
-          }
+        const nameNorm = (item.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const canNorm = (item.canonicalName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (nameNorm) {
+          aiEnrichmentMap.set(`${gId}::${nameNorm}`, item);
+          if (!aiEnrichmentFallbackMap.has(nameNorm)) aiEnrichmentFallbackMap.set(nameNorm, item);
+        }
+        if (canNorm) {
+          aiEnrichmentMap.set(`${gId}::${canNorm}`, item);
+          if (!aiEnrichmentFallbackMap.has(canNorm)) aiEnrichmentFallbackMap.set(canNorm, item);
         }
       }
 
-      // Determine whether we are performing a complete topology recovery (e.g. truncated/malformed response or 0 valid items)
-      // or reconciling an existing set of validated candidate items.
-      const hasValidatedCandidates = normalizedItems.length > 0;
+      const hasBogusGroups = Array.isArray(rawRouteGroups) && rawRouteGroups.length > 0 && rawRouteGroups.some(rg => !resolveCanonicalRouteGroup(authoritativeEventModel.eventTitle, rg.id) && !resolveCanonicalRouteGroup(authoritativeEventModel.eventTitle, rg.name));
+      const shouldRecoverFullTopology = hasBogusGroups || (validGeneratedGroupIds.size === 0 && !Array.isArray(rawRouteGroups) && normalizedItems.length === 0);
 
-      if (hasValidatedCandidates) {
-        // AI/caller provided a set of candidates that were validated against the canonical anchors.
-        // We preserve candidate identities (cand.id), reconcile their canonical coordinates/types/memberships,
-        // and attach narrative enrichment.
+      if (shouldRecoverFullTopology) {
+        // Full canonical topology recovery (e.g. 13 waypoints across 4 groups for Trail of Tears)
+        const reconciledItems: Waypoint[] = [];
+        for (const canonicalWp of scopedCanonicalRoute) {
+          const normCan = (canonicalWp.canonicalName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const normName = (canonicalWp.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const aiCand = (normCan ? aiEnrichmentMap.get(`${canonicalWp.routeGroupId}::${normCan}`) : undefined) ||
+            (normName ? aiEnrichmentMap.get(`${canonicalWp.routeGroupId}::${normName}`) : undefined) ||
+            (normCan ? aiEnrichmentFallbackMap.get(normCan) : undefined) ||
+            (normName ? aiEnrichmentFallbackMap.get(normName) : undefined);
+
+          if (aiCand) {
+            const baseProvenance = aiCand.provenance || [];
+            const assignedId = (aiCand.id && aiCand.id !== 'undefined' && !aiCand.id.startsWith('custom-') && !aiCand.id.startsWith('wrong-') && !aiCand.id.startsWith('fabricated-') && (!aiCand.routeGroupId || aiCand.routeGroupId === canonicalWp.routeGroupId)) ? aiCand.id : canonicalWp.id;
+            reconciledItems.push({
+              ...canonicalWp,
+              id: assignedId,
+              canonicalName: canonicalWp.canonicalName,
+              name: canonicalWp.name,
+              lat: canonicalWp.lat,
+              lng: canonicalWp.lng,
+              waypointType: canonicalWp.waypointType,
+              sequence: canonicalWp.sequence,
+              routeGroupId: canonicalWp.routeGroupId,
+              routeGroupName: canonicalWp.routeGroupName,
+              memberships: canonicalWp.memberships,
+              description: aiCand.description || canonicalWp.description,
+              significance: aiCand.significance || canonicalWp.significance,
+              context: aiCand.context || canonicalWp.context,
+              routeContext: aiCand.routeContext || canonicalWp.routeContext,
+              historicalPeriod: aiCand.historicalPeriod || canonicalWp.historicalPeriod,
+              role: canonicalWp.role || aiCand.role,
+              provenance: [
+                ...baseProvenance,
+                {
+                  stage: 'normalization',
+                  source: 'hybrid',
+                  timestamp: new Date().toISOString(),
+                  summary: `Canonical waypoint topology reconciled with AI enrichment for ${canonicalWp.name}`
+                }
+              ]
+            });
+          } else {
+            reconciledItems.push({
+              ...canonicalWp,
+              provenance: [
+                ...(canonicalWp.provenance || []),
+                {
+                  stage: 'normalization',
+                  source: 'deterministic',
+                  timestamp: new Date().toISOString(),
+                  summary: `Initialized canonical waypoint from historical registry for ${canonicalWp.name}`
+                }
+              ]
+            });
+          }
+        }
+
+        normalizedItems = reconciledItems;
+        rawRouteGroups = scopedCanonicalGroups as any;
+        effectiveRouteType = canonicalTopology.routeType;
+        effectiveEvidenceMode = canonicalTopology.routeEvidenceMode as RouteEvidenceMode;
+        rawIsSequential = canonicalTopology.isSequential;
+      } else {
+        // Candidate-level reconciliation for provided valid items
         const reconciledItems: Waypoint[] = [];
         const presentGroupIds = new Set<string>();
 
         for (const cand of normalizedItems) {
-          // Find canonical anchor for this candidate
-          const anchorMatch = findAuthoritativeAnchorAcrossEvent(authoritativeEventModel.eventTitle, cand.canonicalName || cand.name);
+          const anchorMatch = findAuthoritativeAnchorAcrossEvent(authoritativeEventModel.eventTitle, cand.name) || findAuthoritativeAnchorAcrossEvent(authoritativeEventModel.eventTitle, cand.canonicalName);
           if (anchorMatch) {
             const anchor = anchorMatch.anchor;
-            // Determine the target route group
             let targetGroupId = cand.routeGroupId || 'default';
             let targetGroupDef = authoritativeEventModel.routeGroups[targetGroupId];
             if (!targetGroupDef) {
-              const resGroup = resolveCanonicalRouteGroup(authoritativeEventModel.eventTitle, targetGroupId || cand.routeGroupName);
+              const resGroup = resolveCanonicalRouteGroup(authoritativeEventModel.eventTitle, targetGroupId) || resolveCanonicalRouteGroup(authoritativeEventModel.eventTitle, cand.routeGroupName);
               if (resGroup) {
                 targetGroupId = resGroup.id;
                 targetGroupDef = resGroup;
@@ -614,7 +684,6 @@ expectedGroupId: "${registryValidation.expectedGroupId || 'N/A'}"`);
 
             presentGroupIds.add(targetGroupId);
 
-            // Compute canonical sequence for this anchor in this route group
             let canonicalSeq = cand.sequence;
             if (targetGroupDef) {
               const aIdx = targetGroupDef.documentedAnchors.findIndex(a => isAnchorMatch(cand.canonicalName || cand.name, a));
@@ -623,28 +692,32 @@ expectedGroupId: "${registryValidation.expectedGroupId || 'N/A'}"`);
               }
             }
 
-            // Enforce route-scoped canonical ID when appropriate, or preserve cand.id
-            const assignedId = (cand.id && cand.id !== 'undefined') ? cand.id : `${targetGroupId}-${anchor.id}`;
-
+            const assignedId = (cand.id && cand.id !== 'undefined' && !cand.id.startsWith('custom-') && !cand.id.startsWith('wrong-') && !cand.id.startsWith('fabricated-')) ? cand.id : `${targetGroupId}-${anchor.id}`;
             const baseProvenance = cand.provenance || [];
-              const targetMemberships = (anchorMatch.memberships || []).filter(m => m.routeGroupId === targetGroupId);
-              const finalMemberships = targetMemberships.length > 0
-                ? targetMemberships
-                : [{ routeGroupId: targetGroupId, routeGroupName: targetGroupDef?.name, sequence: canonicalSeq, membershipType: 'ROUTE_EXCLUSIVE' as const }];
+            const targetMemberships = (anchorMatch.memberships || []).filter(m => m.routeGroupId === targetGroupId);
+            const finalMemberships = targetMemberships.length > 0
+              ? targetMemberships
+              : [{ routeGroupId: targetGroupId, routeGroupName: targetGroupDef?.name, sequence: canonicalSeq, membershipType: 'ROUTE_EXCLUSIVE' as const }];
 
-              reconciledItems.push({
-                ...cand,
-                id: assignedId,
-                canonicalName: anchor.canonicalName,
-                name: anchor.name,
-                lat: anchor.lat,
-                lng: anchor.lng,
-                waypointType: anchor.waypointType,
-                sequence: canonicalSeq,
-                routeGroupId: targetGroupId,
-                routeGroupName: targetGroupDef?.name || cand.routeGroupName || 'Historical Route',
-                memberships: finalMemberships,
-                provenance: [
+            reconciledItems.push({
+              ...cand,
+              id: assignedId,
+              canonicalName: anchor.canonicalName,
+              name: anchor.name,
+              lat: anchor.lat,
+              lng: anchor.lng,
+              waypointType: anchor.waypointType,
+              sequence: canonicalSeq,
+              routeGroupId: targetGroupId,
+              routeGroupName: targetGroupDef?.name || cand.routeGroupName || 'Historical Route',
+              memberships: finalMemberships,
+              description: cand.description || anchor.historicalContext,
+              significance: cand.significance || anchor.historicalContext,
+              context: cand.context || anchor.historicalContext,
+              routeContext: cand.routeContext || anchor.historicalContext,
+              historicalPeriod: cand.historicalPeriod,
+              role: cand.role || anchor.role,
+              provenance: [
                 ...baseProvenance,
                 {
                   stage: 'normalization',
@@ -659,36 +732,27 @@ expectedGroupId: "${registryValidation.expectedGroupId || 'N/A'}"`);
 
         if (reconciledItems.length > 0) {
           normalizedItems = reconciledItems;
-          // Filter rawRouteGroups to only populated groups present in reconciledItems
           rawRouteGroups = canonicalTopology.routeGroups.filter(rg => presentGroupIds.has(rg.id)) as any;
           effectiveRouteType = canonicalTopology.routeType;
           effectiveEvidenceMode = canonicalTopology.routeEvidenceMode as RouteEvidenceMode;
           rawIsSequential = canonicalTopology.isSequential;
         } else {
-          // If all candidates failed anchor matching, fall back to complete canonical recovery
-          normalizedItems = scopedCanonicalRoute;
+          normalizedItems = scopedCanonicalRoute.map((canonicalItem: any): Waypoint => ({
+            ...canonicalItem,
+            provenance: [
+              {
+                stage: 'normalization',
+                source: 'deterministic',
+                timestamp: new Date().toISOString(),
+                summary: `Initialized canonical waypoint from historical registry for ${canonicalItem.name}`
+              }
+            ]
+          }));
           rawRouteGroups = scopedCanonicalGroups as any;
           effectiveRouteType = canonicalTopology.routeType;
           effectiveEvidenceMode = canonicalTopology.routeEvidenceMode as RouteEvidenceMode;
           rawIsSequential = canonicalTopology.isSequential;
         }
-      } else {
-        // Complete recovery from truncated/empty/malformed response
-        normalizedItems = scopedCanonicalRoute.map((canonicalItem: any): Waypoint => ({
-          ...canonicalItem,
-          provenance: [
-            {
-              stage: 'normalization',
-              source: 'deterministic',
-              timestamp: new Date().toISOString(),
-              summary: `Initialized canonical waypoint from historical registry for ${canonicalItem.name}`
-            }
-          ]
-        }));
-        rawRouteGroups = scopedCanonicalGroups as any;
-        effectiveRouteType = canonicalTopology.routeType;
-        effectiveEvidenceMode = canonicalTopology.routeEvidenceMode as RouteEvidenceMode;
-        rawIsSequential = canonicalTopology.isSequential;
       }
 
       // Enforce coordinate immutability assertion: canonical coordinates must match registry exactly

@@ -1,4 +1,5 @@
 import { getHistoricalEntityKnowledge } from './historicalCoordinateValidator';
+import { resolveAlias } from './geographicAliases';
 
 export interface EntityIdentityMatchOptions {
   rawQuery?: string;
@@ -61,6 +62,39 @@ export function extractDistinctiveEntityTokens(text: string): string[] {
 }
 
 /**
+ * Detects if an entity name is an invalid natural-language question or command.
+ * A natural-language question must never become the authoritative canonical geographic name.
+ */
+export function isInvalidCanonicalName(name: string): boolean {
+  if (!name || typeof name !== 'string') return true;
+  const trimmed = name.trim();
+  if (trimmed.length === 0) return true;
+
+  // Ends with question mark
+  if (trimmed.endsWith('?')) {
+    return true;
+  }
+
+  const lower = trimmed.toLowerCase();
+
+  // Interrogative / command / scaffolding prefixes
+  const invalidPrefixPatterns = [
+    /^(?:where|when|why|how)\s+(?:is|are|was|were|did|do|does|can|to)\b/i,
+    /^(?:what|which|who)\s+(?:is|are|was|were|did|do|does)\b/i,
+    /^(?:tell\s+me\s+about|tell\s+me\s+more\s+about|show\s+me|find|locate|search\s+for|take\s+me\s+to|bring\s+me\s+to|guide\s+me\s+to|navigate\s+to|go\s+to|explore)\b/i,
+    /^(?:how\s+to\s+get\s+to|can\s+you\s+show\s+me|can\s+you\s+find|can\s+you\s+locate)\b/i,
+    /^(?:info(?:rmation)?|details)\s+(?:on|about|for|regarding)\b/i,
+    /^(?:location\s+of|places?\s+of)\b/i
+  ];
+
+  if (invalidPrefixPatterns.some(p => p.test(lower))) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Validates that a recovered entity refers to the same underlying entity as the requested entity.
  * 
  * Strict protection against AI entity substitution and semantic geocoder mismatch.
@@ -92,6 +126,28 @@ export function validateEntityIdentity(
       requestedEntity: reqStr,
       recoveredEntity: recStr,
       details: 'Recovered entity is empty'
+    };
+  }
+
+  // Canonical name sanity: Recovered entity cannot be a natural language question or command
+  if (isInvalidCanonicalName(recStr)) {
+    return {
+      matches: false,
+      rejectionReason: 'ENTITY_IDENTITY_MISMATCH',
+      requestedEntity: reqStr,
+      recoveredEntity: recStr,
+      details: `Recovered entity "${recStr}" is an invalid natural language question/command and cannot establish geographic identity.`
+    };
+  }
+
+  // If requestedEntity itself is an unextracted natural language question, don't allow circular self-matching
+  if (isInvalidCanonicalName(reqStr)) {
+    return {
+      matches: false,
+      rejectionReason: 'ENTITY_IDENTITY_MISMATCH',
+      requestedEntity: reqStr,
+      recoveredEntity: recStr,
+      details: `Requested entity "${reqStr}" is an unextracted natural language question/command.`
     };
   }
 
@@ -127,14 +183,17 @@ export function validateEntityIdentity(
     }
   }
 
-  // 1. Exact match
-  if (reqLower === recLower) {
+  // 1. Exact match & alias resolution
+  const reqAlias = resolveAlias(reqLower).canonical;
+  const recAlias = resolveAlias(recLower).canonical;
+
+  if (reqLower === recLower || reqAlias === recLower || reqLower === recAlias || reqAlias === recAlias) {
     return {
       matches: true,
       rejectionReason: 'NONE',
       requestedEntity: reqStr,
       recoveredEntity: recStr,
-      details: 'Exact match'
+      details: reqLower === recLower ? 'Exact match' : 'Alias match'
     };
   }
 

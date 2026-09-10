@@ -5,19 +5,20 @@ import { LocationInfo, SkinType, isValidCoordinates, LocationType } from '../typ
 import { formatUserFacingCategory, formatClimateName } from '../utils/categoryFormatting';
 import { fetchAndValidateImages } from '../services/imageService';
 import { fetchAndValidateLocationNews } from '../services/locationService';
-import { 
+import { isLMStudioNoModelError, LM_STUDIO_NO_MODEL_MESSAGE, LM_STUDIO_NO_MODEL_INSTRUCTION } from '../services/geminiService';
+import {
   X, Users, Info, Crown, Map, Pin, ExternalLink, Loader2,
   BookOpen, Rocket, Trophy, Music, FlaskConical, Palette, Clapperboard, Image as ImageIcon,
   Copy, Check, ChevronDown, ChevronUp, Plus, Trash2, Edit2, Save, StickyNote, ChevronLeft, ChevronRight,
   MapPin, Route as RouteIcon
 } from 'lucide-react';
 import StackedImageCarousel from './StackedImageCarousel';
-import { 
-  classifyContext, 
-  isPureGeographicLabel, 
-  sanitizeContextMarkdown, 
-  ContextCategory, 
-  CONTEXT_CATEGORY_HEADINGS 
+import {
+  classifyContext,
+  isPureGeographicLabel,
+  sanitizeContextMarkdown,
+  ContextCategory,
+  CONTEXT_CATEGORY_HEADINGS
 } from '../utils/contextClassification';
 export { classifyContext, isPureGeographicLabel, sanitizeContextMarkdown };
 
@@ -74,12 +75,12 @@ export const cleanMetadataString = (val: unknown): string | undefined => {
 export const formatImageAttribution = (attr: string | undefined): string | undefined => {
   const cleaned = cleanMetadataString(attr);
   if (!cleaned) return undefined;
-  
+
   // If it already contains a prefix like "Photo:", "Credit:", "Source:", "Image:", preserve it
   if (/^(photo|credit|source|image|by|courtesy of)\s*[:\-]/i.test(cleaned)) {
     return cleaned;
   }
-  
+
   return `Photo: ${cleaned}`;
 };
 
@@ -94,7 +95,7 @@ export const normalizeDisplayText = (value: any): string => {
     else if (typeof value.name === 'string') str = value.name;
     else if (typeof value.description === 'string') str = value.description;
   }
-  
+
   if (!str) return '';
 
   return str
@@ -305,7 +306,7 @@ const cleanVal = (v: any): string | undefined => {
  */
 export const extractHeaderSettlement = (info: any): string | undefined => {
   if (!info) return undefined;
-  
+
   const rawCity = cleanVal(info.city || info.address?.city || info.context?.city || info.waypoint?.city);
   if (rawCity) return rawCity;
 
@@ -733,6 +734,7 @@ interface InfoPanelProps {
   isError?: boolean;
   errorMessage?: string;
   onRetry?: () => void;
+  onOpenSettingsTab?: (tab: 'providers' | 'general' | 'appearance' | 'audio') => void;
 }
 
 interface Note {
@@ -753,7 +755,7 @@ const isValidData = (val: string | null | undefined, isDescription: boolean = fa
 // Helper to determine authoritative, accurately-labeled population title (never "Modern", never duplicate "Population")
 export const getPopulationLabel = (popItem: any): string => {
   if (!popItem) return "Current Estimate";
-  
+
   if (popItem.label && typeof popItem.label === 'string') {
     const trimmed = popItem.label.trim();
     const lower = trimmed.toLowerCase();
@@ -762,21 +764,21 @@ export const getPopulationLabel = (popItem: any): string => {
     }
   }
 
-  const censusYear = popItem.censusYear || 
-    (typeof popItem.timeframe === 'string' && /census/i.test(popItem.timeframe) ? popItem.timeframe.match(/\b(\d{4})\b/)?.[1] : null) || 
+  const censusYear = popItem.censusYear ||
+    (typeof popItem.timeframe === 'string' && /census/i.test(popItem.timeframe) ? popItem.timeframe.match(/\b(\d{4})\b/)?.[1] : null) ||
     (typeof popItem.source === 'string' && /census/i.test(popItem.source) ? popItem.source.match(/\b(\d{4})\b/)?.[1] : null) ||
     (typeof popItem.label === 'string' && /census/i.test(popItem.label) ? popItem.label.match(/\b(\d{4})\b/)?.[1] : null);
-  
+
   if (censusYear) {
     return `${censusYear} Census`;
   }
 
-  const year = popItem.year || 
+  const year = popItem.year ||
     (typeof popItem.timeframe === 'string' ? popItem.timeframe.match(/^\s*(\d{4})\s*$/)?.[1] : null) ||
     (typeof popItem.label === 'string' && /\b(\d{4})\b/.test(popItem.label) ? popItem.label.match(/\b(\d{4})\b/)?.[1] : null);
 
   if (year) {
-    const isCensus = (typeof popItem.source === 'string' && /census/i.test(popItem.source)) || 
+    const isCensus = (typeof popItem.source === 'string' && /census/i.test(popItem.source)) ||
                      (typeof popItem.timeframe === 'string' && /census/i.test(popItem.timeframe));
     return isCensus ? `${year} Census` : `${year} Estimate`;
   }
@@ -795,7 +797,7 @@ export const getPopulationLabel = (popItem: any): string => {
 const getSafeTextString = (item: any): string => {
   if (item === null || item === undefined) return "";
   if (typeof item === 'string' || typeof item === 'number') return String(item);
-  
+
   if (typeof item === 'object') {
     if (item.name && item.significance) {
       return `${item.name}: ${item.significance}`;
@@ -803,7 +805,7 @@ const getSafeTextString = (item: any): string => {
     if (item.name) return String(item.name);
     if (item.text) return String(item.text);
     if (item.description) return String(item.description);
-    
+
     try {
       const values = Object.values(item).filter(v => typeof v === 'string');
       if (values.length > 0) return values.join(': ');
@@ -819,7 +821,7 @@ const getSafeTextString = (item: any): string => {
 const renderSafeText = (item: any): React.ReactNode => {
   if (item === null || item === undefined) return null;
   if (typeof item === 'string' || typeof item === 'number') return String(item);
-  
+
   if (typeof item === 'object') {
     if (item.name && item.significance) {
       return (
@@ -831,7 +833,7 @@ const renderSafeText = (item: any): React.ReactNode => {
     if (item.name) return String(item.name);
     if (item.text) return String(item.text);
     if (item.description) return String(item.description);
-    
+
     try {
       const values = Object.values(item).filter(v => typeof v === 'string');
       if (values.length > 0) return values.join(': ');
@@ -855,8 +857,8 @@ export const CopyButton: React.FC<{ text: string; className?: string; skin: Skin
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const themeClass = isRetro 
-    ? "hover:text-black hover:bg-current border border-transparent hover:border-current rounded-none" 
+  const themeClass = isRetro
+    ? "hover:text-black hover:bg-current border border-transparent hover:border-current rounded-none"
     : isParchment
     ? "hover:bg-[#d2b48c]/50 hover:text-[#3e2723] border border-transparent rounded-sm"
     : "hover:bg-white/10 rounded-full";
@@ -880,10 +882,10 @@ export const SectionHeader: React.FC<{
   isParchment?: boolean;
   className?: string;
 }> = ({ title, icon, theme = {}, isRetro = false, isParchment = false, className = "" }) => {
-  const headerColorClass = isRetro 
-    ? 'text-current' 
-    : isParchment 
-      ? 'text-[#8b5a2b]' 
+  const headerColorClass = isRetro
+    ? 'text-current'
+    : isParchment
+      ? 'text-[#8b5a2b]'
       : 'text-cyan-300';
 
   const ruleColorClass = isRetro
@@ -912,14 +914,14 @@ export const getCleanDescriptionLines = (info: any) => {
     const descText = typeof info.description === 'string'
       ? info.description
       : (info.description?.text || (Array.isArray(info.description?.paragraphs) ? info.description.paragraphs.join('\n\n') : ''));
-    
+
     if (isPlaceholderString(descText)) return [];
 
     const coordinates = info.coordinates || info.waypoint?.coordinates || (typeof info.lat === 'number' && typeof info.lng === 'number' ? { lat: info.lat, lng: info.lng } : null);
     const normalizedText = normalizeDescription(descText, { coordinates });
     const sanitizedMarkdown = sanitizeContextMarkdown(normalizedText);
     const rawLines = sanitizedMarkdown.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0 && !isPlaceholderString(l));
-    
+
     const isNotableHeading = (text: string) => {
       const clean = text.replace(/^#{1,3}\s*/, '').replace(/[:*_\s]+$/, '').trim().toLowerCase();
       return (
@@ -993,26 +995,26 @@ export const getCleanDescriptionLines = (info: any) => {
         const firstLineClean = firstLineRaw.replace(/^#+\s*/, '').trim();
         const firstLineLower = firstLineClean.toLowerCase();
         const infoNameClean = (info.canonicalName || info.name || '').trim().toLowerCase();
-        
+
         // Check if first line is a standalone title/detail heading
         const isGenericHeader = firstLineLower === 'overview' || firstLineLower === 'description';
         const isExactNameHeader = firstLineLower === infoNameClean;
-        
+
         // Check if first line is a short standalone detail heading (e.g. "HMS Santa Maria", "RMS Titanic", "Mayflower")
         const isHeadingShape = (firstLineRaw.startsWith('#') || (firstLineClean.split(' ').length <= 8 && firstLineClean.length < 80 && !firstLineClean.match(/[.!?]$/)));
-        
+
         let isRedundantIntro = false;
         if (lines.length > 1 && isHeadingShape) {
             const nextLineClean = lines[1].replace(/^#+\s*/, '').trim();
             const nextLineLower = nextLineClean.toLowerCase();
-            
+
             // If the next line immediately repeats the first line's subject (e.g. "HMS Santa Maria is...", "RMS Titanic was...", "The Mayflower carried...")
-            const startsWithSubject = nextLineLower.startsWith(firstLineLower) || 
+            const startsWithSubject = nextLineLower.startsWith(firstLineLower) ||
                                       nextLineLower.replace(/^(the|a|an)\s+/, '').startsWith(firstLineLower.replace(/^(the|a|an)\s+/, ''));
-            
+
             const containsSubjectEarly = (firstLineLower.length >= 4 && nextLineLower.substring(0, Math.min(nextLineLower.length, firstLineLower.length + 30)).includes(firstLineLower));
-            
-            const isVariantOfName = (firstLineLower.includes(infoNameClean) || (infoNameClean.length >= 4 && infoNameClean.includes(firstLineLower))) && 
+
+            const isVariantOfName = (firstLineLower.includes(infoNameClean) || (infoNameClean.length >= 4 && infoNameClean.includes(firstLineLower))) &&
                                     (nextLineLower.includes(infoNameClean) || nextLineLower.includes(firstLineLower));
 
             if (startsWithSubject || containsSubjectEarly || isVariantOfName) {
@@ -1024,27 +1026,28 @@ export const getCleanDescriptionLines = (info: any) => {
             lines.shift();
         }
     }
-    
+
     return lines;
 };
 
-const InfoPanel: React.FC<InfoPanelProps> = ({ 
-  info: rawInfo, 
-  onClose, 
-  isLoading, 
-  isNewsFetching, 
+const InfoPanel: React.FC<InfoPanelProps> = ({
+  info: rawInfo,
+  onClose,
+  isLoading,
+  isNewsFetching,
   showNews = true,
-  skin, 
-  isFavorite, 
-  onSaveFavorite, 
-  onRemoveFavorite, 
-  currentFavoriteName, 
+  skin,
+  isFavorite,
+  onSaveFavorite,
+  onRemoveFavorite,
+  currentFavoriteName,
   onFetchNews,
-  onLoadMoreNews, 
+  onLoadMoreNews,
   routeNav,
   isError,
   errorMessage,
-  onRetry
+  onRetry,
+  onOpenSettingsTab
 }: InfoPanelProps) => {
   const isMultiLocation = Boolean(routeNav?.total && routeNav.total > 1);
   const isSingleLocation = !isMultiLocation;
@@ -1053,7 +1056,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     if (!rawInfo) return null;
 
     const wp = rawInfo.waypoint || {};
-    
+
     // 1. Name
     const name = wp.name || rawInfo.name || "Unknown Location";
 
@@ -1066,7 +1069,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
            let text = "";
            const h = val.heading || val.heading1 || val.title;
            const t = val.text || val.text1 || val.description || val.summary || val.value || val.body;
-           
+
            if (h) {
                text += `${normalizeDisplayText(h)}\n\n`;
            }
@@ -1092,7 +1095,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     const routeContextText = (rawInfo.routeContext?.text ? extractText(rawInfo.routeContext.text) : null) ||
       (wp.routeContext?.text ? extractText(wp.routeContext.text) : null) ||
       (wp.routeContextText ? extractText(wp.routeContextText) : null);
-    
+
     let combinedDescParts: string[] = [];
 
     // Determine the primary narrative description:
@@ -1183,13 +1186,13 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         }
       }
     }
-    
+
     let desc = combinedDescParts.join('\n\n');
 
     // 3. Context Notes
     const contextNotes: any[] = [];
     let contextNotesSource = "None";
-    
+
     const normalizeContextNotes = (notes: any) => {
         if (!notes) return [];
         if (Array.isArray(notes)) {
@@ -1211,7 +1214,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
     // 4. Coordinates
     const coordinates = wp.coordinates || rawInfo.coordinates;
-    
+
     // 5. Population and Climate
     let population = null;
     const rawEntityType = (wp.entityType || rawInfo.entityType || rawInfo.type || '').toString().toLowerCase();
@@ -1220,7 +1223,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     if (rawInfo.population && isSettlement && rawInfo.population.status !== 'lookup_failed' && rawInfo.population.status !== 'not_applicable') {
         let currentItem: any = null;
         let historicalItem: any = null;
-        
+
         if (typeof rawInfo.population === "string" || typeof rawInfo.population === "number") {
             const rawStr = String(rawInfo.population).trim();
             if (!isPlaceholderString(rawStr)) {
@@ -1235,7 +1238,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             }
         } else if (typeof rawInfo.population === "object" && rawInfo.population !== null) {
             const pObj = rawInfo.population;
-            
+
             // Current / recent population
             if (pObj.current) {
                 if (typeof pObj.current === "object") {
@@ -1314,7 +1317,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                 }
             }
         }
-        
+
         if (currentItem || historicalItem) {
             population = {
                 current: currentItem,
@@ -1323,7 +1326,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         }
     }
     const populationSource = population ? "Enriched Geographic Metadata (rawInfo.population)" : "None";
-    
+
     let climate = null;
     if (rawInfo.climate) {
         let cName = "";
@@ -1334,7 +1337,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             cName = rawInfo.climate.name || rawInfo.climate.value || "";
             cDesc = rawInfo.climate.description || "";
         }
-        
+
         if (!isPlaceholderString(cName)) {
             climate = {
                 name: cName,
@@ -1359,7 +1362,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     } else if (typeof rawInfo.news === 'string') {
       news = [{ title: "Latest News", summary: rawInfo.news }];
     }
-    
+
     news = news.map(n => ({
        title: n.title || n.headline || "News Update",
        summary: n.summary || n.description || n.snippet || "",
@@ -1380,7 +1383,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     }
 
     const relatedEntities = (rawInfo.relatedEntities && rawInfo.relatedEntities.length > 0) ? rawInfo.relatedEntities : [];
-    
+
     return {
       ...rawInfo,
       name,
@@ -1424,7 +1427,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     if (!info) return '';
     const rawType = (info.entityType || (info.waypoint as any)?.entityType || info.type || '').toString().toLowerCase();
     const isHistorical = rawType.includes('historical') || rawType.includes('historic') || rawType === 'battlefield' || (info.waypoint && isSingleLocation);
-    
+
     if (isSingleLocation && isHistorical) {
       return 'Historical Site';
     }
@@ -1439,7 +1442,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     if (!info) return { displayTitle: '', displaySubtitle: null, displayAltNames: null };
     return normalizeHeaderGeographicHierarchy(info, undefined, isSingleLocation);
   }, [info, isSingleLocation]);
-  
+
   const [newsState, setNewsState] = useState<'idle' | 'loading' | 'loaded' | 'empty' | 'error'>(() => {
     if (rawInfo?.news && Array.isArray(rawInfo.news) && rawInfo.news.length > 0) {
       return 'loaded';
@@ -1468,7 +1471,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const [newNote, setNewNote] = useState("");
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editNoteText, setEditNoteText] = useState("");
-  
+
   const locationInitializedRef = useRef<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1592,9 +1595,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     }
 
     const locationKey = `notes_${info.name}_${(info.coordinates?.lat || 0).toFixed(4)}_${(info.coordinates?.lng || 0).toFixed(4)}`;
-    
+
     const isNewLocation = locationInitializedRef.current !== locationKey;
-    
+
     if (isNewLocation) {
         locationInitializedRef.current = locationKey;
         const savedNotes = localStorage.getItem(locationKey);
@@ -1635,13 +1638,13 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const handleAddNote = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newNote.trim()) return;
-    
+
     const note: Note = {
         id: Date.now().toString(),
         text: newNote.trim(),
         timestamp: Date.now()
     };
-    
+
     const updated = [...notes, note];
     saveNotesToStorage(updated);
     setNewNote("");
@@ -1704,7 +1707,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         setShowFavoriteDialog(false);
         return;
     }
-    
+
     if (isFavorite && currentFavoriteName) {
         setFavoriteNameInput(currentFavoriteName);
     } else {
@@ -1879,11 +1882,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     return parts.map((part, i) => {
       if (part.match(/^https?:\/\//)) {
         return (
-          <a 
-            key={i} 
-            href={part} 
-            target="_blank" 
-            rel="noopener noreferrer" 
+          <a
+            key={i}
+            href={part}
+            target="_blank"
+            rel="noopener noreferrer"
             className={`underline decoration-1 underline-offset-2 break-all ${isRetro ? 'hover:text-current font-bold' : isParchment ? 'text-[#8b5a2b] hover:text-[#5c3a21] font-bold' : 'text-cyan-400 hover:text-cyan-300'}`}
             onClick={(e) => e.stopPropagation()}
           >
@@ -1942,11 +1945,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           <div className="space-y-4">
             {renderRouteContext && (
               <div className="mb-2">
-                <SectionHeader 
-                  title={info.routeContext.title} 
-                  theme={theme} 
-                  isRetro={isRetro} 
-                  isParchment={isParchment} 
+                <SectionHeader
+                  title={info.routeContext.title}
+                  theme={theme}
+                  isRetro={isRetro}
+                  isParchment={isParchment}
                 />
                 <p className={`${bodyTextStyle} mb-3 border-b ${isRetro ? 'border-current/30' : isParchment ? 'border-[#8b5a2b]/30' : 'border-white/10'} pb-3`}>
                   {info.routeContext.text}
@@ -1979,36 +1982,36 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                     };
 
                     const redundantHeadings = [
-                      'significance', 'historical region', 'historical milestone', 
+                      'significance', 'historical region', 'historical milestone',
                       'strategic location', 'cultural symbol', 'description', 'overview',
                       'notable facts', 'notable fact', 'notable', 'fun facts', 'fun fact',
                       'quick facts', 'quick fact', 'key facts', 'key fact', 'fast facts', 'interesting facts'
                     ];
 
                     lines.forEach((line: string, i: number) => {
-                      let text = line.replace(/\*\*(.*?)\*\*/g, '$1').replace(/__(.*?)__/g, '$1'); 
-                      
+                      let text = line.replace(/\*\*(.*?)\*\*/g, '$1').replace(/__(.*?)__/g, '$1');
+
                       if (text.match(/^[-*]\s/)) {
                         currentList.push(text.replace(/^[-*]\s/, ''));
                         return;
                       }
-                      
+
                       flushList(i);
-                      
+
                       const isMarkdownHeading = text.startsWith('## ') || text.startsWith('# ');
                       const cleanedText = text.replace(/^#{1,3}\s/, '');
                       const isRedundantHeading = redundantHeadings.includes(cleanedText.toLowerCase().trim());
-                      
+
                       if (isRedundantHeading) {
                         // Skip redundant fragment headings - keep content dense and unified
                         return;
                       }
 
                       const isHeuristicHeading = cleanedText.split(' ').length <= 8 && cleanedText.length < 60 && !cleanedText.match(/[.!?:;]$/) && !cleanedText.match(/^[a-z]/) && lines[i+1] && !lines[i+1].match(/^[-*]\s/);
-                      
+
                       if (isMarkdownHeading || isHeuristicHeading) {
                         blocks.push(
-                          <h3 key={`h-${i}`} 
+                          <h3 key={`h-${i}`}
                             className={`mt-3 mb-1.5 ${semanticTitleStyle}`}>
                             {cleanedText}
                           </h3>
@@ -2026,7 +2029,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                         }
                       }
                     });
-                    
+
                     flushList(lines.length);
                     return blocks;
                   })()}
@@ -2106,8 +2109,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
         return (
           <div className="space-y-2">
-            <SectionHeader 
-              title="Notable Facts" 
+            <SectionHeader
+              title="Notable Facts"
               theme={theme}
               isRetro={isRetro}
               isParchment={isParchment}
@@ -2176,18 +2179,18 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       render: () => {
         const hasPop = info.population && ((info.population.historical && !isPlaceholderString(info.population.historical.formattedValue)) || (info.population.current && !isPlaceholderString(info.population.current.formattedValue)));
         const hasClimate = info.climate && !isPlaceholderString(info.climate.name);
-        
+
         if (!hasPop && !hasClimate) return null;
-        
+
         return (
          <div className="space-y-4">
            {hasClimate && (
              <div className="space-y-1">
-                 <SectionHeader 
-                     title="Climate" 
-                     theme={theme} 
-                     isRetro={isRetro} 
-                     isParchment={isParchment} 
+                 <SectionHeader
+                     title="Climate"
+                     theme={theme}
+                     isRetro={isRetro}
+                     isParchment={isParchment}
                  />
                  <p className={semanticTitleStyle} style={{ textTransform: 'none' }}>
                    {formatClimateName(info.climate.name)}
@@ -2200,11 +2203,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
            {hasPop && (
              <div className="space-y-1">
-                 <SectionHeader 
-                     title="Population" 
-                     theme={theme} 
-                     isRetro={isRetro} 
-                     isParchment={isParchment} 
+                 <SectionHeader
+                     title="Population"
+                     theme={theme}
+                     isRetro={isRetro}
+                     isParchment={isParchment}
                  />
                  {info.population.historical && !isPlaceholderString(info.population.historical.formattedValue) && (
                    <div className="mb-1">
@@ -2246,11 +2249,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       render: () => {
         if (showNews === false) return null;
         const effectiveNews = newsList.length > 0 ? newsList : (info?.news || []);
-        
+
         if (newsState === 'idle') {
           return (
-            <button 
-              onClick={handleLoadInitialNews} 
+            <button
+              onClick={handleLoadInitialNews}
               className={`w-full py-2.5 transition-colors ${theme.loadMoreBtn}`}
             >
               Load News
@@ -2260,11 +2263,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
         return (
         <div className="space-y-3">
-          <SectionHeader 
-              title="News" 
-              theme={theme} 
-              isRetro={isRetro} 
-              isParchment={isParchment} 
+          <SectionHeader
+              title="News"
+              theme={theme}
+              isRetro={isRetro}
+              isParchment={isParchment}
           />
 
           {newsState === 'loading' && (
@@ -2284,8 +2287,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
               <p className={`${bodyTextStyle} text-red-400 opacity-90`}>
                 Unable to load news.
               </p>
-              <button 
-                onClick={handleLoadInitialNews} 
+              <button
+                onClick={handleLoadInitialNews}
                 className={`w-full py-2.5 transition-colors ${theme.loadMoreBtn}`}
               >
                 Try Again
@@ -2298,10 +2301,10 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
               <div className="space-y-4">
                 {effectiveNews.map((item: any, idx: number) => (
                    <div key={idx} className="space-y-1">
-                      <a 
-                        href={item.url} 
-                        target="_blank" 
-                        rel="noopener noreferrer" 
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className={`block ${semanticTitleStyle} hover:underline decoration-1 underline-offset-2`}
                       >
                         {normalizeDisplayText(item.title)}
@@ -2320,11 +2323,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                           </>
                         )}
                         <span>·</span>
-                        <a 
-                          href={item.url} 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
-                          className="inline-flex items-center gap-0.5 hover:opacity-100 opacity-80 transition-opacity" 
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-0.5 hover:opacity-100 opacity-80 transition-opacity"
                           title="Open news link"
                         >
                            <span>Read</span>
@@ -2334,8 +2337,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                    </div>
                 ))}
               </div>
-              <button 
-                onClick={handleLoadMore} 
+              <button
+                onClick={handleLoadMore}
                 disabled={isMoreNewsLoading}
                 className={`w-full py-2.5 mt-2 transition-colors ${theme.loadMoreBtn}`}
               >
@@ -2352,12 +2355,12 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       if (!info.relatedEntities || info.relatedEntities.length === 0) return null;
       return (
         <div className="space-y-3">
-            <SectionHeader 
-                title="Related Places" 
+            <SectionHeader
+                title="Related Places"
                 icon={<MapPin size={16} />}
-                theme={theme} 
-                isRetro={isRetro} 
-                isParchment={isParchment} 
+                theme={theme}
+                isRetro={isRetro}
+                isParchment={isParchment}
             />
             <div className="flex flex-wrap gap-2">
               {info.relatedEntities.map((place: any, i: number) => {
@@ -2392,11 +2395,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       return txt.trim();
   }, [info, schema]);
 
-  const isLMStudioNoModel = (info as any)?.errorType === 'LM_STUDIO_NO_MODEL' || 
-                            (rawInfo as any)?.errorType === 'LM_STUDIO_NO_MODEL' || 
-                            (info as any)?.errorMessage?.includes("No model loaded") ||
-                            (rawInfo as any)?.errorMessage?.includes("No model loaded") ||
-                            errorMessage?.includes("No model loaded");
+  const isLMStudioNoModel = (info as any)?.errorType === 'LM_STUDIO_NO_MODEL' ||
+                            (rawInfo as any)?.errorType === 'LM_STUDIO_NO_MODEL' ||
+                            isLMStudioNoModelError(info) ||
+                            isLMStudioNoModelError(rawInfo) ||
+                            isLMStudioNoModelError(errorMessage);
 
   const showContentSkeleton = isLoading && (!info?.description) && !isLMStudioNoModel && !isError;
   const contextItems = info?.contextNotes;
@@ -2407,14 +2410,14 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
   return (
     <>
-      <div 
+      <div
         className="absolute top-[282px] right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-342px)] flex flex-col gap-3 animate-in slide-in-from-right-12 fade-in duration-500 pointer-events-none"
         data-testid="info-panel"
         data-infopanel="true"
         onWheel={(e) => e.stopPropagation()}
       >
         {/* Main Info Box */}
-        <div 
+        <div
           className={`${theme.container} flex flex-col shrink min-h-0 overflow-hidden pointer-events-auto`}
           data-infopanel="true"
           onWheel={(e) => e.stopPropagation()}
@@ -2425,17 +2428,17 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             <button onClick={onClose} className={`absolute top-3 right-3 p-1 z-50 pointer-events-auto transition-colors ${theme.closeBtn}`} aria-label="Close panel">
               <X size={20} />
             </button>
-            
+
             {/* 2. Save Location and Copy text buttons */}
             <div className="flex justify-center w-full -mt-[10px] mb-[26px] relative z-10 gap-2">
-              <button 
-                onClick={handleFavoriteClick} 
-                className={`p-2 transition-colors ${theme.actionBtn}`} 
+              <button
+                onClick={handleFavoriteClick}
+                className={`p-2 transition-colors ${theme.actionBtn}`}
                 title={isFavorite ? "Edit Favorite" : (routeNav ? "Save Route" : "Save Location")}
               >
                 <Pin size={24} className={isFavorite ? "fill-current" : ""} />
               </button>
-              
+
               {/* Favorite Dialog Popover */}
               {showFavoriteDialog && (
                  <div className={`absolute top-full mt-2 w-64 p-3 z-50 flex flex-col gap-3 left-1/2 -translate-x-1/2 ${theme.popover}`}>
@@ -2443,8 +2446,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                       {isFavorite ? 'Edit Favorite' : (routeNav ? 'Save Route' : 'Save Location')}
                     </h3>
                     <form onSubmit={submitFavorite} className="flex flex-col gap-2">
-                       <input 
-                         type="text" 
+                       <input
+                         type="text"
                          value={favoriteNameInput}
                          onChange={(e) => setFavoriteNameInput(e.target.value)}
                          placeholder="Enter name..."
@@ -2453,8 +2456,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                        />
                        <div className="flex gap-2 justify-end">
                           {isFavorite && (
-                              <button 
-                                type="button" 
+                              <button
+                                type="button"
                                 onClick={() => { onRemoveFavorite(); setShowFavoriteDialog(false); }}
                                 className="p-1.5 hover:text-red-400 transition-colors"
                                 title="Remove"
@@ -2462,15 +2465,15 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                                   <Trash2 size={16} />
                               </button>
                           )}
-                          <button 
-                            type="button" 
+                          <button
+                            type="button"
                             onClick={() => setShowFavoriteDialog(false)}
                             className="px-2 py-1 text-xs opacity-70 hover:opacity-100 hover:bg-white/10 rounded"
                           >
                               Cancel
                           </button>
-                          <button 
-                            type="submit" 
+                          <button
+                            type="submit"
                             disabled={!favoriteNameInput.trim()}
                             className={`px-3 py-1 text-xs font-bold uppercase transition-colors disabled:opacity-50 ${isRetro ? 'bg-current text-black hover:opacity-80' : 'bg-cyan-600 hover:bg-cyan-500 text-white rounded'}`}
                           >
@@ -2481,7 +2484,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                  </div>
               )}
             </div>
-            
+
             {/* 3. Location title & geographic hierarchy */}
             <div className="flex flex-col gap-2 items-center text-center">
               <div className="flex flex-col items-center justify-center gap-1">
@@ -2531,9 +2534,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             </div>
           )}
 
-          
+
           {/* Scrollable Content */}
-          <div 
+          <div
             ref={scrollRef}
             onScroll={updateScrollFade}
             className={`flex-1 overflow-y-auto ${theme.panelBg} relative pointer-events-auto info-panel-scrollable`}
@@ -2547,13 +2550,27 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                       <X size={20} />
                   </div>
                   <p className={`font-medium ${theme.headerTitle}`}>
-                    {isLMStudioNoModel 
-                      ? "No model loaded. Please load a model in LM Studio." 
+                    {isLMStudioNoModel
+                      ? LM_STUDIO_NO_MODEL_MESSAGE
                       : (errorMessage || (rawInfo as any)?.errorMessage || "Unable to retrieve location details")}
                   </p>
                   {isLMStudioNoModel ? (
                     <p className={`text-xs ${theme.subtext} max-w-xs mt-1 leading-relaxed`}>
-                      Load a model in LM Studio or select another provider in Settings.
+                      {onOpenSettingsTab ? (
+                        <span>
+                          (
+                          <button
+                            type="button"
+                            onClick={() => onOpenSettingsTab('providers')}
+                            className="underline hover:opacity-100 transition-opacity font-semibold cursor-pointer"
+                          >
+                            Settings &gt; Providers
+                          </button>
+                          )
+                        </span>
+                      ) : (
+                        <span>{LM_STUDIO_NO_MODEL_INSTRUCTION}</span>
+                      )}
                     </p>
                   ) : ((rawInfo as any)?.errorInstruction ? (
                     <p className={`text-xs ${theme.subtext} max-w-xs mt-1 leading-relaxed`}>
@@ -2586,15 +2603,15 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             ) : null}
           </div>
         </div>
-        
+
         {/* My Notes Section */}
         {hasNotes ? (
-          <div 
+          <div
             className={`pointer-events-auto shrink-0 transition-all duration-300 ${theme.container} ${!isNotesExpanded ? 'hover:brightness-110 cursor-pointer' : ''}`}
             data-infopanel="true"
             onWheel={(e) => e.stopPropagation()}
           >
-               <div 
+               <div
                  className={`px-5 py-3 flex items-center justify-between cursor-pointer ${isNotesExpanded ? 'border-b ' + (isRetro ? 'border-green-400/50' : isParchment ? 'border-[#8b5a2b]/30' : 'border-white/10') : ''}`}
                  onClick={() => setIsNotesExpanded(!isNotesExpanded)}
                >
@@ -2607,29 +2624,29 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                   </div>
                   {isNotesExpanded ? <ChevronDown size={18} className={theme.subtext} /> : <ChevronUp size={18} className={theme.subtext} />}
                </div>
-  
+
                {isNotesExpanded && (
                    <div className="p-4 bg-opacity-50 animate-in slide-in-from-top-2 duration-300">
                        {/* Add Note Input */}
                        <form onSubmit={handleAddNote} className="mb-4 flex gap-2">
-                           <input 
-                              type="text" 
+                           <input
+                              type="text"
                               value={newNote}
                               onChange={(e) => setNewNote(e.target.value)}
                               placeholder="Add a personal note..."
                               className={`flex-1 px-3 py-2 outline-none text-sm transition-colors ${theme.notesInput}`}
                            />
-                           <button 
-                              type="submit" 
+                           <button
+                              type="submit"
                               disabled={!newNote.trim()}
                               className={`p-2 transition-colors disabled:opacity-50 ${theme.actionBtn}`}
                            >
                               <Plus size={18} />
                            </button>
                        </form>
-  
+
                        {/* Notes List */}
-                       <div 
+                       <div
                          className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar"
                          onWheel={(e) => e.stopPropagation()}
                        >
@@ -2637,7 +2654,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                              <div key={note.id} className={`p-3 group relative ${theme.noteCard}`}>
                                  {editingNoteId === note.id ? (
                                      <div className="flex flex-col gap-2">
-                                         <textarea 
+                                         <textarea
                                             value={editNoteText}
                                             onChange={(e) => setEditNoteText(e.target.value)}
                                             className={`w-full p-2 text-sm bg-transparent border-b ${isRetro ? 'border-green-400 text-green-300' : isParchment ? 'border-[#8b5a2b] text-[#522B07] caret-[#522B07]' : 'border-cyan-400 text-white'} outline-none resize-none`}

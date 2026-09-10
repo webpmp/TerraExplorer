@@ -318,7 +318,7 @@ export function groupWaypointsByRoute(
             ...wp,
             routeGroupId: m.routeGroupId,
             routeGroupName: m.routeGroupName || wp.routeGroupName,
-            sequence: typeof m.sequence === 'number' ? m.sequence : wp.sequence
+            sequence: (m.routeGroupId === wp.routeGroupId && typeof wp.sequence === 'number') ? wp.sequence : (typeof m.sequence === 'number' ? m.sequence : wp.sequence)
           });
         });
       } else {
