@@ -634,6 +634,174 @@ export const HISTORICAL_KNOWLEDGE_BASE: Record<string, HistoricalEntityKnowledge
       confidence: "high"
     },
     boundingBox: { minLat: 34.2, maxLat: 34.5, minLng: -86.5, maxLng: -86.1 }
+  },
+
+  // ─── Pyramids of Giza ─────────────────────────────────────────────────────
+  // All aliases resolve to the same authoritative deterministic entry.
+  // Coordinates: center of the Giza Plateau / pyramid complex (29.9792°N, 31.1342°E).
+  // Used for direct lookups, alias-resolved queries ("pyramids of gaza"), and
+  // any recovery path to prevent AI-hallucinated coordinates from being accepted.
+  "pyramids of giza": {
+    entity: "The Pyramids of Giza",
+    entityType: "archaeological_site",
+    expectedRegion: "Giza Plateau, Giza Governorate, Egypt",
+    approximateRegion: "Giza Plateau, Giza, Egypt",
+    country: "Egypt",
+    state: "Giza Governorate",
+    nearbyCity: "Giza",
+    region: "Giza Plateau",
+    historicalContext: "The Pyramids of Giza are a complex of ancient monuments on the Giza Plateau, on the outskirts of Cairo, Egypt. The complex includes the Great Pyramid of Giza (built for Pharaoh Khufu, c. 2560 BCE), the Pyramid of Khafre, the Pyramid of Menkaure, the Great Sphinx, and several smaller pyramids and cemeteries. One of the Seven Wonders of the Ancient World and the only one still largely intact.",
+    sourceRationale: "Extensively documented archaeological site at coordinates 29.9792°N, 31.1342°E on the Giza Plateau, on the western outskirts of Cairo, Giza Governorate, Egypt. Precise location confirmed by satellite imagery, geodetic surveys, and the Egyptian Ministry of Antiquities.",
+    confidence: "high",
+    allowedCountries: ["Egypt"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 29.9792,
+      lng: 31.1342,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 29.8, maxLat: 30.2, minLng: 30.9, maxLng: 31.5 }
+  },
+  // Common misspelling: "gaza" instead of "giza"
+  "pyramids of gaza": {
+    entity: "The Pyramids of Giza",
+    entityType: "archaeological_site",
+    expectedRegion: "Giza Plateau, Giza Governorate, Egypt",
+    approximateRegion: "Giza Plateau, Giza, Egypt",
+    country: "Egypt",
+    state: "Giza Governorate",
+    nearbyCity: "Giza",
+    region: "Giza Plateau",
+    historicalContext: "The Pyramids of Giza are a complex of ancient monuments on the Giza Plateau, on the outskirts of Cairo, Egypt. The complex includes the Great Pyramid of Giza (built for Pharaoh Khufu, c. 2560 BCE), the Pyramid of Khafre, the Pyramid of Menkaure, the Great Sphinx, and several smaller pyramids and cemeteries. One of the Seven Wonders of the Ancient World and the only one still largely intact.",
+    sourceRationale: "Query contains a common phonetic misspelling ('gaza' for 'giza'). The intended entity is the Pyramids of Giza at 29.9792°N, 31.1342°E on the Giza Plateau, Giza Governorate, Egypt.",
+    confidence: "high",
+    allowedCountries: ["Egypt"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 29.9792,
+      lng: 31.1342,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 29.8, maxLat: 30.2, minLng: 30.9, maxLng: 31.5 }
+  },
+  "great pyramid of giza": {
+    entity: "The Pyramids of Giza",
+    entityType: "archaeological_site",
+    expectedRegion: "Giza Plateau, Giza Governorate, Egypt",
+    approximateRegion: "Giza Plateau, Giza, Egypt",
+    country: "Egypt",
+    state: "Giza Governorate",
+    nearbyCity: "Giza",
+    region: "Giza Plateau",
+    historicalContext: "The Great Pyramid of Giza is the oldest and largest of the three pyramids in the Giza pyramid complex, built as a tomb for Pharaoh Khufu (c. 2560 BCE). It is the oldest of the Seven Wonders of the Ancient World and the only one still largely intact.",
+    sourceRationale: "The Great Pyramid of Giza (Pyramid of Khufu/Cheops) stands on the Giza Plateau at approximately 29.9792°N, 31.1342°E, Giza Governorate, Egypt.",
+    confidence: "high",
+    allowedCountries: ["Egypt"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 29.9792,
+      lng: 31.1342,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 29.8, maxLat: 30.2, minLng: 30.9, maxLng: 31.5 }
+  },
+  "giza pyramid complex": {
+    entity: "The Pyramids of Giza",
+    entityType: "archaeological_site",
+    expectedRegion: "Giza Plateau, Giza Governorate, Egypt",
+    approximateRegion: "Giza Plateau, Giza, Egypt",
+    country: "Egypt",
+    state: "Giza Governorate",
+    nearbyCity: "Giza",
+    region: "Giza Plateau",
+    historicalContext: "The Giza pyramid complex (also called the Giza necropolis) is an archaeological site on the Giza Plateau, on the outskirts of Cairo, Egypt. The complex includes the Great Pyramid of Giza, the Pyramid of Khafre, the Pyramid of Menkaure, and the Great Sphinx of Giza.",
+    sourceRationale: "The Giza pyramid complex is located on the Giza Plateau at approximately 29.9792°N, 31.1342°E, Giza Governorate, Egypt.",
+    confidence: "high",
+    allowedCountries: ["Egypt"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 29.9792,
+      lng: 31.1342,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 29.8, maxLat: 30.2, minLng: 30.9, maxLng: 31.5 }
+  },
+  "giza pyramids": {
+    entity: "The Pyramids of Giza",
+    entityType: "archaeological_site",
+    expectedRegion: "Giza Plateau, Giza Governorate, Egypt",
+    approximateRegion: "Giza Plateau, Giza, Egypt",
+    country: "Egypt",
+    state: "Giza Governorate",
+    nearbyCity: "Giza",
+    region: "Giza Plateau",
+    historicalContext: "The Pyramids of Giza are ancient Egyptian royal burial monuments built during the Fourth Dynasty of the Old Kingdom (c. 2613–2494 BCE), located on the Giza Plateau on the western outskirts of Cairo.",
+    sourceRationale: "Giza Pyramids are located on the Giza Plateau at approximately 29.9792°N, 31.1342°E, Giza Governorate, Egypt.",
+    confidence: "high",
+    allowedCountries: ["Egypt"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 29.9792,
+      lng: 31.1342,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 29.8, maxLat: 30.2, minLng: 30.9, maxLng: 31.5 }
+  },
+  "giza necropolis": {
+    entity: "The Pyramids of Giza",
+    entityType: "archaeological_site",
+    expectedRegion: "Giza Plateau, Giza Governorate, Egypt",
+    approximateRegion: "Giza Plateau, Giza, Egypt",
+    country: "Egypt",
+    state: "Giza Governorate",
+    nearbyCity: "Giza",
+    region: "Giza Plateau",
+    historicalContext: "The Giza necropolis is an archaeological complex located on the Giza Plateau, Giza Governorate, Egypt, encompassing the three major pyramids, the Great Sphinx, workers' villages, an industrial complex, and cemeteries.",
+    sourceRationale: "The Giza necropolis is located at approximately 29.9792°N, 31.1342°E on the Giza Plateau, Giza Governorate, Egypt.",
+    confidence: "high",
+    allowedCountries: ["Egypt"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 29.9792,
+      lng: 31.1342,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 29.8, maxLat: 30.2, minLng: 30.9, maxLng: 31.5 }
+  },
+  "pyramids at giza": {
+    entity: "The Pyramids of Giza",
+    entityType: "archaeological_site",
+    expectedRegion: "Giza Plateau, Giza Governorate, Egypt",
+    approximateRegion: "Giza Plateau, Giza, Egypt",
+    country: "Egypt",
+    state: "Giza Governorate",
+    nearbyCity: "Giza",
+    region: "Giza Plateau",
+    historicalContext: "The Pyramids of Giza are a complex of ancient monuments on the Giza Plateau, on the outskirts of Cairo, Egypt. Built during the Fourth Dynasty of the Old Kingdom, they are among the most recognized symbols of ancient Egyptian civilization.",
+    sourceRationale: "The pyramids at Giza are located on the Giza Plateau at approximately 29.9792°N, 31.1342°E, Giza Governorate, Egypt.",
+    confidence: "high",
+    allowedCountries: ["Egypt"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 29.9792,
+      lng: 31.1342,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 29.8, maxLat: 30.2, minLng: 30.9, maxLng: 31.5 }
   }
 };
 

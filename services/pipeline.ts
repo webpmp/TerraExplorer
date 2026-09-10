@@ -3,7 +3,7 @@ import { ResolvedEntity, EnrichmentResult } from '../domain';
 import { routeIntentAndExtractEntity, resolveLocationQuery, sanitizeLocationInfo, recoverCoordinatesFromAi, recoverLocationMetadata, getUserSettings, generateRoute, normalizeCoordinates, isLMStudioNoModelError } from './geminiService';
 import { enrichLocationInfo } from './locationService';
 import { createIdentity, createResolvedSubject, createResolvedEntity } from './entityFactory';
-import { validateResolvedEntity, isGenericPlaceholderDescription } from './entityValidation';
+import { validateResolvedEntity, isGenericPlaceholderDescription, evaluateEnrichmentCompleteness, logEnrichmentCompleteness } from './entityValidation';
 import { mergeCoordinates } from './coordinateAuthority';
 import { CanonicalGeographicEntity } from '../domain';
 import { classifyGeographicEntity } from './classifierService';
@@ -13,9 +13,10 @@ import { isPlaceholderString } from '../components/InfoPanel';
 import { validateEarthGeography } from './celestialCapabilities';
 import { getHistoricalEntityKnowledge, toCanonicalTitleCase } from './geographic/historicalCoordinateValidator';
 import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
-import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation } from './geographic/entityIdentityValidator';
+import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation, isInvalidCanonicalName } from './geographic/entityIdentityValidator';
 import { detectHistoricalRouteEvent } from './queryNormalizer';
 import { getAuthoritativeEventModel } from './geographic/historicalRouteRegistry';
+import { resolveAlias } from './geographic/geographicAliases';
 
 // --- PIPELINE TYPES ---
 
@@ -33,6 +34,7 @@ export interface NormalizedQuery {
 export interface IntentResult {
   normalized: NormalizedQuery;
   intent: QueryIntent;
+  queryShape?: string;
 }
 
 export interface EntityResolutionResult {
@@ -43,41 +45,34 @@ export interface EntityResolutionResult {
 export interface CoordinateResolutionResult {
   entityResult: EntityResolutionResult;
   aiUsed: boolean;
-  deterministicMatch: boolean;
-  resolvedData: Partial<LocationInfo> | undefined;
-  suggestedZoom: number | undefined;
-  error: string | undefined;
-}
-
-export interface MetadataResult {
-  coordinateResult: CoordinateResolutionResult;
-  enrichedData: Partial<LocationInfo> | undefined;
+  recoveryUsed: boolean;
+  source: CoordinateSource;
+  error?: string;
+  data: LocationInfo;
 }
 
 export interface FinalLocationResult {
-  mode: "location" | "route";
-  entity?: ResolvedEntity;
-  finalData?: Partial<LocationInfo>;
-  isValid: boolean;
-  waypoints?: Waypoint[];
+  data: LocationInfo;
+  source: CoordinateSource;
   error?: string;
+  suggestedZoom?: number;
+  entityResult?: EntityResolutionResult;
 }
 
-// --- PIPELINE ADAPTERS ---
+// --- PIPELINE STAGES ---
 
-export const IntentStage = (request: SearchRequest | string): EntityResolutionResult => {
+export const SearchStage = (request: SearchRequest | string): EntityResolutionResult => {
   const reqObj: SearchRequest = typeof request === 'string' ? { rawQuery: request } : request;
+  const extracted = routeIntentAndExtractEntity(reqObj.rawQuery);
+  const intent = reqObj.intent || extracted.intent;
+  const entity = reqObj.entity || extracted.entity;
+  const queryShape = (extracted as any).queryShape || 'DIRECT';
+
   console.log("=== PIPELINE STAGE: SEARCH REQUEST ===");
   console.log(`Raw Query: "${reqObj.rawQuery}"`);
-  
-  let intent = reqObj.intent;
-  let entity = reqObj.entity;
-  
-  if (!intent || !entity) {
-    const extracted = routeIntentAndExtractEntity(reqObj.rawQuery);
-    intent = intent || extracted.intent;
-    entity = entity || extracted.entity;
-  }
+  console.log(`Classified Intent: ${intent}`);
+  console.log(`Query Shape: ${queryShape}`);
+  console.log(`Extracted Search Entity: "${entity}"`);
   
   const normalized: NormalizedQuery = {
     request: reqObj,
@@ -88,7 +83,8 @@ export const IntentStage = (request: SearchRequest | string): EntityResolutionRe
 
   const intentResult: IntentResult = {
     normalized,
-    intent
+    intent,
+    queryShape
   };
   console.log("=== PIPELINE STAGE: INTENT ===");
   console.log(`Classified Intent: ${intentResult.intent}`);
@@ -103,33 +99,67 @@ export const IntentStage = (request: SearchRequest | string): EntityResolutionRe
   return entityResult;
 };
 
+export const IntentStage = SearchStage;
+
 export const ResolutionStage = async (entityResult: EntityResolutionResult): Promise<FinalLocationResult> => {
   console.log("=== PIPELINE STAGE: COORDINATE RESOLUTION ===");
-  
+
+  // ─── STEP -1: ENTITY ALIAS RESOLUTION ────────────────────────────────────
+  // Canonicalize malformed / misspelled entity names BEFORE any geographic
+  // operation (geocoder, knowledge-base, AI recovery, enrichment, image search).
+  // Example: "The pyramids of gaza" → alias → "pyramids of giza"
+  //          → toCanonicalTitleCase → "The Pyramids of Giza"
+  //
+  // The original user query is preserved separately and must never overwrite
+  // the resolved canonical entity identity downstream.
+  const originalQueryEntity = entityResult.entity; // preserved for debugging
+  const entityLower = originalQueryEntity.toLowerCase().trim();
+  const entityNoArticle = entityLower.replace(/^the\s+/i, '');
+
+  // Try alias lookup first with article ("the pyramids of gaza"),
+  // then without article ("pyramids of gaza") as fallback.
+  const aliasWithArticle = resolveAlias(entityLower);
+  const aliasWithoutArticle = resolveAlias(entityNoArticle);
+  const aliasResult = aliasWithArticle.aliasApplied ? aliasWithArticle : aliasWithoutArticle;
+
+  // resolvedEntityLookup: lowercase alias key used for KB and geocoder queries
+  // resolvedEntityName: canonical title-cased display name (checked against KB)
+  const resolvedEntityLookup: string = aliasResult.aliasApplied ? aliasResult.canonical : entityNoArticle;
+  const resolvedEntityName: string = aliasResult.aliasApplied
+    ? (toCanonicalTitleCase(aliasResult.canonical) || aliasResult.canonical)
+    : originalQueryEntity;
+
+  if (aliasResult.aliasApplied) {
+    console.log(`[ENTITY ALIAS RESOLUTION]\noriginalQuery="${originalQueryEntity}"\nresolvedEntity="${resolvedEntityName}"\naliasKey="${aliasResult.aliasMatched}"\naliasApplied=true`);
+  } else {
+    console.log(`[ENTITY ALIAS RESOLUTION]\noriginalQuery="${originalQueryEntity}"\nalias=none\naliasApplied=false`);
+  }
+
   const rawResolverResult = await resolveLocationQuery(
-    entityResult.entity, 
+    resolvedEntityName,
     entityResult.intentResult.intent,
     entityResult.intentResult.normalized.request.rawQuery
   );
-  
+
   let error = rawResolverResult.error;
   let resolvedData = rawResolverResult.locationInfo;
   const suggestedZoom = rawResolverResult.suggestedZoom;
   let recoveryUsed = false;
-  
+
   console.log(`=== COORDINATE RECOVERY TRACE ===`);
   console.log(`Query: ${entityResult.intentResult.normalized.request.rawQuery}`);
-  console.log(`Entity: ${resolvedData?.name || entityResult.entity}`);
+  console.log(`Entity (original): ${originalQueryEntity}`);
+  console.log(`Entity (resolved): ${resolvedEntityName}`);
   console.log(`Intent: ${entityResult.intentResult.intent}`);
   console.log(`Initial Resolver Error: ${error || 'None'}`);
-  
+
   const allowedErrors = ["NO_GEOGRAPHIC_DATA", "LOCATION_SYSTEM_UNAVAILABLE", "UNABLE_TO_RESOLVE", "TEMP_FAILURE", "HISTORICAL_LOCATION_UNCONFIRMED"];
   const nonGeographicIntents = ['EXPLORATORY', 'HISTORICAL_EVENT', 'BROAD_CULTURAL_QUERY', 'MULTI_LOCATION_DISCOVERY'];
   const isGeographicIntent = !nonGeographicIntents.includes(entityResult.intentResult.intent);
 
   // Step 0: Validate entity identity of the initial resolver result
   if (resolvedData && resolvedData.name) {
-    const initialIdentityCheck = validateEntityIdentity(entityResult.entity, resolvedData.name, {
+    const initialIdentityCheck = validateEntityIdentity(resolvedEntityName, resolvedData.name, {
       rawQuery: entityResult.intentResult.normalized.request.rawQuery,
       intent: entityResult.intentResult.intent,
       candidateEntityType: (resolvedData as any).entityType,
@@ -138,7 +168,7 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
     });
 
     logEntityIdentityValidation({
-      requestedEntity: entityResult.entity,
+      requestedEntity: resolvedEntityName,
       candidateName: resolvedData.name,
       candidateEntityType: (resolvedData as any).entityType,
       intent: entityResult.intentResult.intent,
@@ -149,19 +179,20 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
 
     if (!initialIdentityCheck.matches) {
       logCoordinateRecoveryIdentityCheck({
-        requestedEntity: entityResult.entity,
+        requestedEntity: resolvedEntityName,
         recoveredEntity: resolvedData.name,
         entityIdentityMatch: false,
         coordinateValidity: Boolean(resolvedData.coordinates),
         recoveryAccepted: false,
         rejectionReason: initialIdentityCheck.rejectionReason || 'ENTITY_IDENTITY_MISMATCH'
       });
-      console.warn(`[ENTITY IDENTITY MISMATCH] Resolver returned "${resolvedData.name}" which differs from requested "${entityResult.entity}". Discarding coordinates and reverting to requested entity.`);
-      resolvedData.name = entityResult.entity;
-      resolvedData.canonicalName = entityResult.entity;
+      console.warn(`[ENTITY IDENTITY MISMATCH] Resolver returned "${resolvedData.name}" which differs from resolved entity "${resolvedEntityName}" (original query: "${originalQueryEntity}"). Discarding coordinates.`);
+      resolvedData.name = resolvedEntityName;
+      resolvedData.canonicalName = resolvedEntityName;
       resolvedData.coordinates = undefined;
       error = "NO_GEOGRAPHIC_DATA";
     } else {
+      (resolvedData as any).identityStatus = (resolvedData as any).identityStatus || 'verified';
       if (resolvedData.name && resolvedData.name !== 'Unknown') {
         resolvedData.canonicalName = resolvedData.canonicalName || resolvedData.name;
       }
@@ -169,36 +200,51 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   }
 
   let coordinatesValid = resolvedData?.coordinates && isValidCoordinates(normalizeCoordinates(resolvedData.coordinates) || normalizeCoordinates(resolvedData));
-  
-  if (!coordinatesValid && error && allowedErrors.includes(error) && entityResult.entity && isGeographicIntent) {
+
+  if (!coordinatesValid && error && allowedErrors.includes(error) && resolvedEntityName && isGeographicIntent) {
     if (!resolvedData || typeof resolvedData !== 'object' || Array.isArray(resolvedData)) {
-      resolvedData = { name: entityResult.entity };
+      resolvedData = { name: resolvedEntityName };
     }
 
-    const isHistoricalDiscovery = entityResult.intentResult.intent === 'DISCOVERY_OBJECT_LOCATION' || entityResult.intentResult.intent === 'HISTORICAL_EVENT';
-    const histKnowledge = isHistoricalDiscovery ? (getHistoricalEntityKnowledge(entityResult.entity) || getHistoricalEntityKnowledge(resolvedData?.name)) : null;
+    // ── Knowledge-base lookup ──────────────────────────────────────────────
+    // The KB is the authoritative source for known entities regardless of
+    // query intent. A "DIRECT" search for "The pyramids of giza" must find
+    // the KB entry just as reliably as a "DISCOVERY_OBJECT_LOCATION" intent.
+    // Using resolvedEntityLookup (alias-corrected lowercase) and resolvedEntityName
+    // so "pyramids of giza" hits the KB even if Nominatim failed.
+    const histKnowledge =
+      getHistoricalEntityKnowledge(resolvedEntityLookup) ||
+      getHistoricalEntityKnowledge(resolvedEntityName) ||
+      getHistoricalEntityKnowledge(resolvedData?.name || '');
 
     if (histKnowledge?.approximateCoordinates) {
+      const coordSource = histKnowledge.approximateCoordinates.source || 'deterministic';
       resolvedData.name = histKnowledge.entity;
       resolvedData.canonicalName = histKnowledge.entity;
       resolvedData.coordinates = { ...histKnowledge.approximateCoordinates };
       (resolvedData as any).entityType = histKnowledge.entityType === 'shipwreck' ? 'shipwreck_site' : histKnowledge.entityType;
-      (resolvedData as any).coordinateSource = histKnowledge.approximateCoordinates.source || 'deterministic';
+      (resolvedData as any).coordinateSource = coordSource;
+      (resolvedData as any).coordinateTrust = coordSource === 'deterministic' ? 'verified' : 'provisional';
       (resolvedData as any).identityStatus = 'verified';
       (resolvedData as any).isApproximate = !histKnowledge.exactLocationConfirmed;
       (resolvedData as any).exactLocationKnown = histKnowledge.exactLocationKnown ?? true;
       (resolvedData as any).confirmedWreckLocation = histKnowledge.confirmedWreckLocation ?? true;
+      if (histKnowledge.country) (resolvedData as any).country = histKnowledge.country;
+      if (histKnowledge.state) (resolvedData as any).state = histKnowledge.state;
+      if (histKnowledge.nearbyCity || (histKnowledge as any).city) {
+        (resolvedData as any).city = histKnowledge.nearbyCity || (histKnowledge as any).city;
+      }
       resolvedData.description = resolvedData.description || histKnowledge.historicalContext || histKnowledge.sourceRationale || "";
       error = undefined;
       coordinatesValid = true;
-      console.log(`[HISTORICAL KNOWLEDGE APPLIED] Prioritized authoritative historical knowledge for "${entityResult.entity}": ${JSON.stringify(resolvedData.coordinates)}`);
+      console.log(`[HISTORICAL KNOWLEDGE RESOLUTION]\nentity="${histKnowledge.entity}"\nsource=${coordSource}\ncoordinates=${resolvedData.coordinates.lat},${resolvedData.coordinates.lng}\nconfidence=${histKnowledge.confidence}\ncountry=${histKnowledge.country || 'unknown'}\noriginalQuery="${originalQueryEntity}"`);
     } else {
       const recoveryCoords = await recoverCoordinatesFromAi(
         entityResult.intentResult.normalized.request.rawQuery,
         entityResult.intentResult.intent,
-        entityResult.entity
+        resolvedEntityName
       );
-      
+
       let recoveredValid = false;
       let source: CoordinateSource = "ai_recovery";
       if (recoveryCoords && isValidCoordinates(recoveryCoords)) {
@@ -207,38 +253,52 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
            lng: recoveryCoords.lng,
            source: (recoveryCoords as any).source || 'ai_recovery'
         } as any;
-        
+
         const existing = resolvedData.coordinates ? {
            lat: resolvedData.coordinates.lat,
            lng: resolvedData.coordinates.lng,
            source: (resolvedData as any).coordinateSource || (resolvedData.coordinates as any).source || 'ai_recovery'
         } as any : null;
-        
+
         resolvedData.coordinates = mergeCoordinates(existing, incoming);
         const recoveredName = (recoveryCoords as any).recoveredEntity || (recoveryCoords as any).resolvedEntity || (recoveryCoords as any).name || (recoveryCoords as any).canonicalName;
         if (recoveredName) {
           resolvedData.name = recoveredName;
           resolvedData.canonicalName = recoveredName;
         } else {
-          resolvedData.name = entityResult.entity;
-          resolvedData.canonicalName = resolvedData.canonicalName || entityResult.entity;
+          resolvedData.name = resolvedEntityName;
+          resolvedData.canonicalName = resolvedData.canonicalName || resolvedEntityName;
         }
         (resolvedData as any).coordinateSource = incoming.source;
         const incomingTrust: string = (recoveryCoords as any).coordinateTrust || 'provisional';
         (resolvedData as any).coordinateTrust = incomingTrust;
-        (resolvedData as any).identityStatus = incomingTrust === 'verified' ? 'verified' : ((resolvedData as any).identityStatus || 'unverified');
+        const recoveredIdentityMatches = validateEntityIdentity(resolvedEntityName, resolvedData.name, {
+          rawQuery: entityResult.intentResult.normalized.request.rawQuery,
+          intent: entityResult.intentResult.intent,
+          candidateEntityType: (resolvedData as any).entityType,
+          candidateCanonicalName: resolvedData.name,
+          coordinatesValid: true
+        }).matches;
+
+        // identityStatus tracks ENTITY identity (whether the name matches).
+        // It is intentionally kept separate from coordinateTrust which tracks
+        // GEOGRAPHIC reliability. An LLM naming the entity correctly does NOT
+        // prove its coordinates are correct — see trust gate below.
+        (resolvedData as any).identityStatus = incomingTrust === 'verified'
+          ? 'verified'
+          : (recoveredIdentityMatches ? ((resolvedData as any).identityStatus || 'verified') : 'unverified');
         error = undefined;
         recoveryUsed = true;
         recoveredValid = true;
         source = incoming.source;
       } else {
-        resolvedData.name = entityResult.entity;
-        resolvedData.canonicalName = resolvedData.canonicalName || entityResult.entity;
+        resolvedData.name = resolvedEntityName;
+        resolvedData.canonicalName = resolvedData.canonicalName || resolvedEntityName;
         resolvedData.coordinates = undefined;
         error = "NO_GEOGRAPHIC_DATA";
       }
-      
-      console.log(`[COORDINATE RECOVERY]\nRecovery success: ${recoveredValid ? 'Yes' : 'No'}\nRecovered coordinates: ${recoveryCoords ? JSON.stringify(recoveryCoords) : 'None'}\nSource: ${source}`);
+
+      console.log(`[COORDINATE RECOVERY]\nRecovery success: ${recoveredValid ? 'Yes' : 'No'}\nRecovered coordinates: ${recoveryCoords ? JSON.stringify(recoveryCoords) : 'None'}\nSource: ${source}\nresolvedEntity="${resolvedEntityName}"\noriginalQuery="${originalQueryEntity}"`);
     }
   }
 
@@ -285,6 +345,63 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
 
        console.log(`[FINAL COORDINATE VALIDATION]\nCoordinates: ${JSON.stringify(resolvedData.coordinates)}\nSource: ${finalSource}\nTrust: ${finalTrust}\nValid: ${finalValid}`);
        console.log(`COORDINATE_FINAL\nname: ${resolvedData.name || entityResult.entity}\nlat: ${resolvedData.coordinates.lat}\nlng: ${resolvedData.coordinates.lng}\nsource: ${finalSource}\ntrust: ${finalTrust}\nstatus: ${finalStatus}\nprovider: ${providerLabel}`);
+
+       // AI Coordinate Trust Gate
+       // ─────────────────────────────────────────────────────────────────────
+       // Identity verification and coordinate verification are SEPARATE concepts.
+       //
+       // identityStatus = 'verified' means the AI correctly NAMED the entity.
+       // coordinateTrust = 'provisional' means the coordinates are AI-generated
+       //   with no authoritative geographic corroboration.
+       //
+       // Policy:
+       //   (A) Known KB entity with provisional AI coordinates → REJECT.
+       //       The KB provides authoritative deterministic coordinates; an AI
+       //       override of those coordinates must be refused.  The Pyramids of
+       //       Gaza bug: AI named Giza correctly but returned Mediterranean
+       //       coordinates — and would have passed the old "provisional +
+       //       verified identity" gate.  For KB-known entities the KB path
+       //       should already have run (so AI recovery is unreachable), but this
+       //       gate is a secondary safety net.
+       //
+       //   (B) Unknown entity, identity unverified, trust provisional → REJECT.
+       //       Neither the entity name nor the coordinates are trustworthy.
+       //
+       //   (C) Unknown entity, identity verified, trust provisional → PASS.
+       //       For entities not in the KB (El Faro, Dead Sea, Easter Island …),
+       //       AI recovery with a verified entity match is the only available
+       //       source. Allow it — the existing identity and bounding-box checks
+       //       provide sufficient guard.
+       const isAiSource = finalSource === 'ai' || finalSource === 'ai_recovery';
+       const entityInKb = !!(
+         getHistoricalEntityKnowledge(resolvedEntityLookup) ||
+         getHistoricalEntityKnowledge(resolvedData.name || '') ||
+         getHistoricalEntityKnowledge(resolvedEntityName)
+       );
+       // Reject provisional when entity is in the KB (has deterministic coords),
+       // OR when identity is also unverified (both name AND coordinates unknown).
+       const isUnverifiedAi = isAiSource && (
+         finalTrust === 'unverified' ||
+         (finalTrust === 'provisional' && entityInKb) ||
+         (finalTrust === 'provisional' && finalStatus === 'unverified')
+       );
+
+       if (isUnverifiedAi) {
+         const rejectedProposal = {
+           proposedCoordinates: { ...resolvedData.coordinates },
+           source: finalSource,
+           trust: finalTrust,
+           identityStatus: finalStatus,
+           rejectionReason: entityInKb ? 'KB_ENTITY_REQUIRES_DETERMINISTIC_COORDINATES' : 'UNVERIFIED_AI_COORDINATES'
+         };
+         (resolvedData as any).rejectedAiProposal = rejectedProposal;
+         console.log(`[COORDINATE TRUST GATE]\nResult: REJECT\nProposed Coordinates: ${JSON.stringify(resolvedData.coordinates)}\nSource: ${finalSource}\nTrust: ${finalTrust}\nIdentityStatus: ${finalStatus}\nEntity: "${resolvedData.name || resolvedEntityName}"\nOriginalQuery: "${originalQueryEntity}"\nEntityInKB: ${entityInKb}\nRejection Reason: ${entityInKb ? 'AI_COORDINATES_REJECTED_FOR_KB_KNOWN_ENTITY' : 'AI_COORDINATES_REQUIRE_CORROBORATION'}`);
+         coordinatesValid = false;
+         resolvedData.coordinates = undefined;
+         error = "UNRESOLVED_ENTITY";
+       } else {
+         console.log(`[COORDINATE TRUST GATE]\nResult: PASS\nCoordinates: ${JSON.stringify(resolvedData.coordinates)}\nSource: ${finalSource}\nTrust: ${finalTrust}\nIdentityStatus: ${finalStatus}\nEntity: "${resolvedData.name || resolvedEntityName}"\nEntityInKB: ${entityInKb}`);
+       }
   }
 
   // 1. CANONICAL ENTITY LOCK
@@ -296,14 +413,28 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   let locationLabel = '';
 
   if (coordinatesValid && resolvedData && resolvedData.coordinates) {
-      const isHistoricalDiscovery = entityResult.intentResult.intent === 'DISCOVERY_OBJECT_LOCATION' || entityResult.intentResult.intent === 'HISTORICAL_EVENT';
-      const histKnowledge = isHistoricalDiscovery ? (getHistoricalEntityKnowledge(resolvedData.name) || getHistoricalEntityKnowledge(entityResult.entity)) : null;
-      
-      const resolvedCanonical = resolvedData.canonicalName || (resolvedData.name && resolvedData.name !== 'Unknown' ? resolvedData.name : null);
-      const queryCanonical = entityResult.entity && entityResult.entity !== 'Unknown' ? entityResult.entity : null;
-      const canonicalName = histKnowledge?.entity || resolvedCanonical || queryCanonical || (resolvedData.name || 'Unknown');
+      // KB check without intent gate — the KB entity name is authoritative
+      // for any intent when it matches the resolved entity.
+      const histKnowledge =
+        getHistoricalEntityKnowledge(resolvedEntityLookup) ||
+        getHistoricalEntityKnowledge(resolvedData.name || '') ||
+        getHistoricalEntityKnowledge(resolvedEntityName);
 
-      // Lock resolvedData.name and canonicalName
+      const resolvedCanonical = resolvedData.canonicalName || (resolvedData.name && resolvedData.name !== 'Unknown' ? resolvedData.name : null);
+      const queryCanonical = resolvedEntityName && resolvedEntityName !== 'Unknown' ? resolvedEntityName : null;
+      let canonicalName = histKnowledge?.entity || resolvedCanonical || queryCanonical || (resolvedData.name || 'Unknown');
+
+      if (isInvalidCanonicalName(canonicalName)) {
+        if (resolvedCanonical && !isInvalidCanonicalName(resolvedCanonical)) {
+          canonicalName = resolvedCanonical;
+        } else if (queryCanonical && !isInvalidCanonicalName(queryCanonical)) {
+          canonicalName = queryCanonical;
+        } else {
+          canonicalName = 'Unknown';
+        }
+      }
+
+      // Lock resolvedData.name and canonicalName — original query must never overwrite
       resolvedData.name = canonicalName;
       resolvedData.canonicalName = canonicalName;
 
@@ -377,8 +508,7 @@ locationLabel="${locationLabel || 'none'}"`);
       
       const providerSignals = [
           ...((resolvedData as any).discoverySignals || []),
-          histKnowledge?.entityType,
-          isHistoricalDiscovery ? 'shipwreck_site' : undefined,
+          histKnowledge?.entityType === 'shipwreck' ? 'shipwreck_site' : histKnowledge?.entityType,
           resolvedData.entityType,
           resolvedData.type
       ].filter(Boolean);
@@ -421,6 +551,8 @@ locationLabel="${locationLabel || 'none'}"`);
           wikipedia: (resolvedData as any).wikipedia
       };
 
+      console.log(`[RESOLUTION SUMMARY]\nRaw Query: "${entityResult.intentResult.normalized.request.rawQuery}"\nClassified Intent: ${entityResult.intentResult.intent}\nQuery Shape: ${entityResult.intentResult.queryShape || 'DIRECT'}\nExtracted Search Entity: "${entityResult.entity}"\nResolution Input: "${entityResult.entity}"\nCanonical Entity: "${canonicalName}"\nEntity Type: "${entityType}"\nCoordinate Source: "${finalSource}"\nCoordinate Trust: "${finalTrust}"\nIdentity Status: "${finalStatus}"\nCoordinate Trust Gate: ${coordinatesValid ? 'PASS' : 'REJECT'}`);
+
       console.log(`[ENRICHMENT IDENTITY]\noriginalQuery="${entityResult.intentResult.normalized.request.rawQuery}"\nnormalizedQuery="${entityResult.intentResult.normalized.normalizedQuery}"\ncanonicalName="${canonicalEntity.canonicalName}"\nentityType="${canonicalEntity.entityType}"\nstate="${(resolvedData as any).state || 'none'}"\ncountry="${(resolvedData as any).country || 'none'}"\ncoordinates=${canonicalEntity.coordinates.lat.toFixed(4)},${canonicalEntity.coordinates.lng.toFixed(4)}\nidentityStatus="${canonicalEntity.identityStatus}"`);
       console.log(`[CANONICAL ENTITY]\nRequested entity: ${entityResult.intentResult.normalized.request.rawQuery}\nResolved name: ${canonicalEntity.canonicalName}\nCanonical name: ${canonicalEntity.canonicalName}\nEntity type: ${canonicalEntity.entityType}\nCoordinates: ${canonicalEntity.coordinates.lat}, ${canonicalEntity.coordinates.lng}\nCoordinate source: ${canonicalEntity.coordinateSource || canonicalEntity.coordinates.source}\nIdentity status: ${canonicalEntity.identityStatus}\nProvider classifications: ${providerSignals.join(',') || 'none'}\nFinal classification: ${canonicalEntity.entityType}\nClassification confidence: 1.0\nAdministrative context: ${JSON.stringify(adminContext)}`);
 
@@ -456,10 +588,16 @@ locationLabel="${locationLabel || 'none'}"`);
       }
   }
 
-  // 3. METADATA RECOVERY (Short-circuit if description exists)
+  // 3. METADATA RECOVERY & ENRICHMENT COMPLETENESS
   const isPlaceholder = isGenericPlaceholderDescription(resolvedData?.description, canonicalEntity?.canonicalName);
-  // 3. METADATA RECOVERY (Short-circuit only if substantive description exists)
-  if (coordinatesValid && canonicalEntity && (!resolvedData?.description || isPlaceholder)) {
+  const initialCompleteness = evaluateEnrichmentCompleteness(
+    resolvedData,
+    canonicalEntity?.canonicalName,
+    canonicalEntity?.entityType
+  );
+  logEnrichmentCompleteness(initialCompleteness);
+
+  if (coordinatesValid && canonicalEntity && initialCompleteness.recoveryRequired) {
       try {
         const metadataRecovery = await recoverLocationMetadata(canonicalEntity.canonicalName, canonicalEntity.coordinates, {
           ...canonicalEntity,
@@ -486,8 +624,17 @@ locationLabel="${locationLabel || 'none'}"`);
            delete (metadataRecovery as any).entityType;
            delete (metadataRecovery as any).name; // NEVER overwrite name
            
-           // Attach the recovered metadata directly to resolvedData for now
+           // Attach the recovered metadata directly to resolvedData
            (resolvedData as any)._recoveredMetadata = metadataRecovery;
+           if (metadataRecovery.notable && Array.isArray(metadataRecovery.notable) && metadataRecovery.notable.length > 0) {
+             (resolvedData as any).notable = metadataRecovery.notable;
+           }
+           if (metadataRecovery.contextNotes && Array.isArray(metadataRecovery.contextNotes) && metadataRecovery.contextNotes.length > 0) {
+             (resolvedData as any).contextNotes = metadataRecovery.contextNotes;
+           }
+           if (metadataRecovery.description && isPlaceholder) {
+             resolvedData.description = metadataRecovery.description;
+           }
         } else {
            console.warn(`=== RECOVER METADATA WARN ===\nMetadata recovery returned empty.`);
            const histKnowledge = getHistoricalEntityKnowledge(canonicalEntity.canonicalName);
@@ -498,8 +645,6 @@ locationLabel="${locationLabel || 'none'}"`);
       } catch (err) {
         console.error("Failed to generate metadata for recovered coordinates:", err);
       }
-  } else {
-      console.log(`Metadata Recovery Attempted: No (Substantive description exists)`);
   }
 
   // Construct the ResolvedEntity Domain Object
@@ -568,36 +713,41 @@ locationLabel="${locationLabel || 'none'}"`);
 
      const authoritativePopulation = (resolvedData as any).population;
 
-      // Merge deterministic/initial metadata with recovered metadata
-      const initialNotable = Array.isArray((resolvedData as any).notable) ? (resolvedData as any).notable : [];
-      const recoveredNotable = Array.isArray(recoveredMetadata?.notable) ? recoveredMetadata.notable : [];
-      const mergedNotable = deduplicateNotableFacts([...initialNotable, ...recoveredNotable]);
+       // Merge deterministic/initial metadata with recovered metadata
+       const initialNotable = Array.isArray((resolvedData as any).notable) ? (resolvedData as any).notable : [];
+       const recoveredNotable = Array.isArray(recoveredMetadata?.notable) ? recoveredMetadata.notable : [];
+       const mergedNotable = deduplicateNotableFacts([...initialNotable, ...recoveredNotable]);
 
-      const histKnowledgeForMeta = getHistoricalEntityKnowledge(canonicalEntity.canonicalName) || getHistoricalEntityKnowledge(entityResult.entity);
-      const histContext = histKnowledgeForMeta?.historicalContext || (resolvedData as any).historicalContext || recoveredMetadata?.historicalContext;
+       const initialContextNotes = Array.isArray((resolvedData as any).contextNotes) ? (resolvedData as any).contextNotes : [];
+       const recoveredContextNotes = Array.isArray(recoveredMetadata?.contextNotes) ? recoveredMetadata.contextNotes : [];
+       const mergedContextNotes = Array.from(new Set([...initialContextNotes, ...recoveredContextNotes].filter(Boolean)));
 
-      const finalMetadata: any = {
-          description: resolvedData.description,
-          climate: finalClimate,
-          population: authoritativePopulation,
-          notable: mergedNotable,
-          news: resolvedData.news || [],
-          contextNotes: (resolvedData as any).contextNotes || [],
-          historicalContext: histContext,
-          intent: entityResult.intentResult.intent,
-          ...recoveredMetadata
-      };
+       const histKnowledgeForMeta = getHistoricalEntityKnowledge(canonicalEntity.canonicalName) || getHistoricalEntityKnowledge(entityResult.entity);
+       const histContext = histKnowledgeForMeta?.historicalContext || (resolvedData as any).historicalContext || recoveredMetadata?.historicalContext;
 
-      // Ensure authoritative climate, population, notable facts, and historical context are preserved
-      finalMetadata.climate = finalClimate;
-      finalMetadata.population = authoritativePopulation;
-      finalMetadata.notable = mergedNotable;
-      if (histContext) finalMetadata.historicalContext = histContext;
-      finalMetadata.intent = entityResult.intentResult.intent;
+       const finalMetadata: any = {
+           description: (isPlaceholder && recoveredMetadata?.description) ? recoveredMetadata.description : (resolvedData.description || recoveredMetadata?.description),
+           climate: finalClimate,
+           population: authoritativePopulation,
+           notable: mergedNotable,
+           news: resolvedData.news || [],
+           contextNotes: mergedContextNotes,
+           historicalContext: histContext,
+           intent: entityResult.intentResult.intent,
+           ...recoveredMetadata
+       };
 
-     if (isPlaceholder && recoveredMetadata?.description) {
-         finalMetadata.description = recoveredMetadata.description;
-     }
+       // Ensure authoritative climate, population, notable facts, context notes, and historical context are preserved
+       finalMetadata.climate = finalClimate;
+       finalMetadata.population = authoritativePopulation;
+       finalMetadata.notable = mergedNotable;
+       finalMetadata.contextNotes = mergedContextNotes;
+       if (histContext) finalMetadata.historicalContext = histContext;
+       finalMetadata.intent = entityResult.intentResult.intent;
+
+       if (isPlaceholder && recoveredMetadata?.description) {
+           finalMetadata.description = recoveredMetadata.description;
+       }
 
      // Validate population for settlements vs non-settlements
      const eTypeLower = (canonicalEntity.entityType || '').toLowerCase();
@@ -646,6 +796,13 @@ locationLabel="${locationLabel || 'none'}"`);
      (entity as any).exactLocationKnown = (primaryLocation as any).exactLocationKnown;
      (entity as any).coordinateSource = finalSource;
      (entity as any).coordinateTrust = (resolvedData as any).coordinateTrust || (finalSource === 'deterministic' || finalSource === 'geocoder' ? 'verified' : 'unverified');
+
+     const finalCompleteness = evaluateEnrichmentCompleteness(
+         entity.metadata,
+         canonicalEntity.canonicalName,
+         canonicalEntity.entityType
+     );
+     logEnrichmentCompleteness(finalCompleteness);
      
      if (recoveryUsed) {
          console.log(`=== RECOVERY MERGE RESULT ===`);
@@ -734,7 +891,19 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
       }
   }
 
-  const locationResult = await ResolutionStage(entityResult);
+  let locationResult: FinalLocationResult;
+  try {
+    locationResult = await ResolutionStage(entityResult);
+  } catch (error) {
+    if (isLMStudioNoModelError(error)) {
+      return {
+        mode: "location",
+        isValid: false,
+        error: "LM_STUDIO_NO_MODEL"
+      };
+    }
+    throw error;
+  }
   
   // 3. Fallback Intent Correction
   const entityType = locationResult.entity?.subject?.identity?.entityType;

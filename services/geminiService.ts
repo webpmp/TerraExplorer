@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { reverseGeocode, ReverseGeocodeContext, resolveGeographicMetadata, resolveGeographicEntity, GeographicSource, resolvePrimaryGeographicEntity } from "./geographic/geographicResolver";
 import { DETERMINISTIC_LOCATION_DB } from './geographic/geographicData';
+import { resolveAlias } from './geographic/geographicAliases';
 import { getEstimatedClimate, getClimateDescription, isClimateGeographicallyValid, isClimateConflicting } from './geographic/climateEstimator';
 import { providerRegistry } from './geographic/providers/providerRegistry';
 import { applySelection } from './geographic/selection';
@@ -150,8 +151,12 @@ export const generateContentWithRetry = async (params: any, retries = 3): Promis
   return callGeminiWithRetry(params, retries);
 };
 
+export const LM_STUDIO_NO_MODEL_MESSAGE = "No AI model is currently loaded. Please load a model and try again.";
+export const LM_STUDIO_NO_MODEL_INSTRUCTION = "(Settings > Providers)";
+
 export class LMStudioNoModelError extends Error {
   readonly isLMStudioNoModelError = true;
+  readonly errorType = "LM_STUDIO_NO_MODEL";
   constructor(message: string = "No model loaded. Please load a model in LM Studio.") {
     super(message);
     this.name = "LMStudioNoModelError";
@@ -161,13 +166,35 @@ export class LMStudioNoModelError extends Error {
 
 export const isLMStudioNoModelError = (error: any): boolean => {
   if (!error) return false;
-  return (
+  if (
     error instanceof LMStudioNoModelError ||
     error.isLMStudioNoModelError === true ||
     error.name === 'LMStudioNoModelError' ||
-    (typeof error.message === 'string' && error.message.includes("No model loaded. Please load a model in LM Studio."))
-  );
+    error.errorType === 'LM_STUDIO_NO_MODEL' ||
+    error.error === 'LM_STUDIO_NO_MODEL'
+  ) {
+    return true;
+  }
+  const msg = typeof error === 'string'
+    ? error
+    : (typeof error?.message === 'string' ? error.message : (typeof error?.errorMessage === 'string' ? error.errorMessage : ''));
+  if (msg) {
+    const lower = msg.toLowerCase();
+    return (
+      lower.includes("no model loaded") ||
+      lower.includes("no models loaded") ||
+      lower.includes("no ai model is currently loaded") ||
+      msg.includes("LMStudioNoModelError")
+    );
+  }
+  return false;
 };
+
+export const formatLMStudioNoModelError = () => ({
+  errorType: "LM_STUDIO_NO_MODEL" as const,
+  errorMessage: LM_STUDIO_NO_MODEL_MESSAGE,
+  errorInstruction: LM_STUDIO_NO_MODEL_INSTRUCTION
+});
 
 const generateLocalLMStudioContent = async (params: any, baseUrl: string, model: string = "local-model"): Promise<any> => {
   try {
@@ -276,9 +303,16 @@ const mainInfoSchemaConfig = {
       required: ["lat", "lng"]
     },
     population: { type: Type.NUMBER },
-    description: { 
+    description: {
       type: Type.STRING,
-      description: "2-4 concise paragraphs providing contextual and narrative information about this place. Do NOT repeat raw coordinates (latitude/longitude) in the description prose as coordinates are already shown in the UI header."
+      description: "2-4 concise paragraphs providing contextual and narrative information about this place. " +
+        "Begin the description naturally with the entity itself — do NOT open with coordinate references, pipeline metadata, or uncertainty language. " +
+        "FORBIDDEN opening phrases: 'Located at the exact coordinates', 'At coordinates', 'these ancient structures', " +
+        "'an unknown location', 'unknown country', 'has eluded proper identification', 'identity has not been confirmed', " +
+        "'lost civilization', 'mysterious', 'pipeline', 'AI recovery', 'cannot be confirmed'. " +
+        "Do NOT repeat raw coordinates (latitude/longitude) in the description prose — coordinates are shown in the UI header. " +
+        "Do NOT describe the entity as unidentified or speculate about its location when the canonical identity is established. " +
+        "Write as a knowledgeable author describing a real, known place."
     },
     climate: { 
       type: Type.OBJECT,
@@ -468,9 +502,14 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
     // Step 1: Model-independent location normalization
     normalizedQuery = normalizeLocationEntity(query);
     const lookupKey = (normalizedQuery || query).toLowerCase().trim();
+    const aliasResolved = resolveAlias(lookupKey).canonical;
+    const rawAliasResolved = resolveAlias(query.toLowerCase().trim()).canonical;
 
     // Step 2: Deterministic geographic resolution before AI provider call
-    let deterministicRes = DETERMINISTIC_LOCATION_DB[lookupKey] || DETERMINISTIC_LOCATION_DB[query.toLowerCase().trim()];
+    let deterministicRes = DETERMINISTIC_LOCATION_DB[lookupKey] || 
+                           DETERMINISTIC_LOCATION_DB[aliasResolved] || 
+                           DETERMINISTIC_LOCATION_DB[query.toLowerCase().trim()] ||
+                           DETERMINISTIC_LOCATION_DB[rawAliasResolved];
     let aiUsed = false;
     let rawAiText = "";
 
@@ -891,8 +930,8 @@ Final Coordinates: ${JSON.stringify(finalLocationInfo.coordinates)}
         locationInfo: {
           name: normalizedQuery || query,
           errorType: "LM_STUDIO_NO_MODEL",
-          errorMessage: "No model loaded. Please load a model in LM Studio.",
-          errorInstruction: "Load a model in LM Studio or select another provider in Settings."
+          errorMessage: LM_STUDIO_NO_MODEL_MESSAGE,
+          errorInstruction: LM_STUDIO_NO_MODEL_INSTRUCTION
         }
       };
     }
@@ -1585,7 +1624,7 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
     return sanitizeLocationInfo({
         name: name,
         type: LocationType.POI,
-        description: isNoModel ? "No model loaded. Please load a model in LM Studio." : "",
+        description: isNoModel ? LM_STUDIO_NO_MODEL_MESSAGE : "",
         coordinates: { lat, lng },
         funFacts: [],
         notable: [],
@@ -1593,12 +1632,12 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
         errorType: isNoModel ? "LM_STUDIO_NO_MODEL" : undefined,
         sectionState: { description: "failed" },
         errorMessage: isNoModel
-            ? "No model loaded. Please load a model in LM Studio."
+            ? LM_STUDIO_NO_MODEL_MESSAGE
             : (error.message?.includes('429') || error.message?.includes('Quota') 
                 ? "API Quota Exceeded. Please try again later."
                 : "Could not retrieve information at this time."),
         errorInstruction: isNoModel
-            ? "Load a model in LM Studio or select another provider in Settings."
+            ? LM_STUDIO_NO_MODEL_INSTRUCTION
             : undefined
     } as unknown as LocationInfo);
   }
@@ -2742,6 +2781,48 @@ export const generateRoute = async (
       }
     }
 
+    const regModel = getAuthoritativeEventModel(originalText);
+    if (regModel) {
+      const canonicalTopology = buildCanonicalEventTopology(originalText);
+      const queryLower = (originalText || '').toLowerCase();
+      const isSpecificTarget = queryLower.includes('northern') || queryLower.includes('benge') || queryLower.includes('bell') || queryLower.includes('water');
+      if (canonicalTopology && !isSpecificTarget && mappedItems.length > 0 && mappedItems.length < 4) {
+        const aiMap = new Map<string, any>();
+        for (const item of mappedItems) {
+          const nameKey = (item.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const canKey = (item.canonicalName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (nameKey) aiMap.set(nameKey, item);
+          if (canKey) aiMap.set(canKey, item);
+        }
+        const enrichedWaypoints = canonicalTopology.route.map(canWp => {
+          const canKey = (canWp.canonicalName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const nameKey = (canWp.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const aiItem = (canKey ? aiMap.get(canKey) : undefined) || (nameKey ? aiMap.get(nameKey) : undefined);
+          if (aiItem) {
+            return {
+              ...canWp,
+              id: (aiItem.id && aiItem.id !== 'undefined' && !aiItem.id.startsWith('custom-') && !aiItem.id.startsWith('wrong-') && !aiItem.id.startsWith('fabricated-') && (!aiItem.routeGroupId || aiItem.routeGroupId === canWp.routeGroupId)) ? aiItem.id : canWp.id,
+              description: aiItem.description || canWp.description,
+              significance: aiItem.significance || canWp.significance,
+              context: aiItem.context || canWp.context,
+              routeContext: aiItem.routeContext || canWp.routeContext,
+              historicalPeriod: aiItem.historicalPeriod || canWp.historicalPeriod
+            };
+          }
+          return canWp;
+        });
+        return {
+          waypoints: enrichedWaypoints,
+          title: canonicalTopology.title,
+          routeConfidence: { level: 'high', reasoning: 'Authoritative historical route registry topology' },
+          routeType: canonicalTopology.routeType,
+          isSequential: canonicalTopology.isSequential,
+          routeEvidenceMode: canonicalTopology.routeEvidenceMode as any,
+          routeGroups: canonicalTopology.routeGroups
+        };
+      }
+    }
+
     return {
       waypoints: mappedItems,
       title,
@@ -2769,6 +2850,7 @@ export const generateRoute = async (
 export interface ExtractedQuery {
   intent: QueryIntent;
   entity: string;
+  queryShape?: 'NATURAL_LANGUAGE_QUESTION' | 'DIRECT' | 'HISTORICAL_ROUTE' | 'MULTI_LOCATION' | 'EXPLORATORY' | 'HISTORICAL_EVENT' | 'DISCOVERY_OBJECT_LOCATION' | string;
   subject?: string;
   discoveryTarget?: string;
   resolutionMode?: 'SINGLE_POINT' | 'MULTI_LOCATION_EXPLORATION';
@@ -2786,7 +2868,8 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
       intent: 'route' as any,
       entity: historicalDetection.canonicalEntity,
       subject: historicalDetection.canonicalEntity,
-      resolutionMode: 'MULTI_LOCATION_EXPLORATION'
+      resolutionMode: 'MULTI_LOCATION_EXPLORATION',
+      queryShape: 'HISTORICAL_ROUTE'
     };
   }
 
@@ -2877,7 +2960,8 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
         subject: cleanedSubject,
         discoveryTarget: target,
         entity: cleanedSubject,
-        resolutionMode: 'MULTI_LOCATION_EXPLORATION'
+        resolutionMode: 'MULTI_LOCATION_EXPLORATION',
+        queryShape: 'MULTI_LOCATION'
       };
     }
   }
@@ -2892,7 +2976,8 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
       return { 
         intent: 'route' as any, 
         entity: clean,
-        resolutionMode: 'MULTI_LOCATION_EXPLORATION'
+        resolutionMode: 'MULTI_LOCATION_EXPLORATION',
+        queryShape: 'HISTORICAL_ROUTE'
       };
     }
   }
@@ -2914,7 +2999,8 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
       const finalEntity = toCanonicalTitleCase(cleanedEntity || entityStr);
       return {
         intent: 'DISCOVERY_OBJECT_LOCATION',
-        entity: finalEntity
+        entity: finalEntity,
+        queryShape: 'DISCOVERY_OBJECT_LOCATION'
       };
     }
   }
@@ -2942,7 +3028,8 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
       return {
         intent: 'HISTORICAL_EVENT',
         entity: finalEntity,
-        resolutionMode: 'MULTI_LOCATION_EXPLORATION'
+        resolutionMode: 'MULTI_LOCATION_EXPLORATION',
+        queryShape: 'HISTORICAL_EVENT'
       };
     }
   }
@@ -2965,40 +3052,54 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
       return { 
         intent: 'EXPLORATORY', 
         entity: clean,
-        resolutionMode: 'MULTI_LOCATION_EXPLORATION'
+        resolutionMode: 'MULTI_LOCATION_EXPLORATION',
+        queryShape: 'EXPLORATORY'
       };
     }
   }
 
   // 6. Check for Natural language location queries (Single Point)
   const nlPatterns = [
-    /^\s*where\s+is\s+located\s+(.+)$/i,
-    /^\s*where\s+is\s+(.+?)(?:\s+located|\s+found)?\s*\??\s*$/i,
-    /^\s*where\s+was\s+(.+?)(?:\s+found|\s+located)?\s*\??\s*$/i,
-    /^\s*location\s+of\s+(.+?)\s*$/i,
-    /^\s*tell\s+me\s+(?:about|more\s+about)\s+(.+?)\s*$/i,
-    /^\s*show\s+me\s+(.+?)\s*$/i,
-    /^\s*find\s+(.+?)\s*$/i,
-    /^\s*locate\s+(.+?)\s*$/i,
-    /^\s*go\s+to\s+(.+?)\s*$/i,
-    /^\s*take\s+me\s+to\s+(.+?)\s*$/i,
-    /^\s*info(?:rmation)?\s+on\s+(.+?)\s*$/i,
+    // "where is / are / was / were (located / found / situated) X" or "where is / are / was / were X located / found / situated"
+    /^\s*where\s+(?:is|are|was|were)\s+(?:located\s+|found\s+|situated\s+)?(.+?)(?:\s+located|\s+found|\s+situated)?\s*\??\s*$/i,
+    // "what is / are / was / were X"
+    /^\s*what\s+(?:is|are|was|were)\s+(.+?)\s*\??\s*$/i,
+    // "tell me about / tell me more about X"
+    /^\s*tell\s+me\s+(?:about|more\s+about)\s+(.+?)\s*\??\s*$/i,
+    // "show me / can you show me X"
+    /^\s*(?:can\s+you\s+)?show\s+me\s+(.+?)\s*\??\s*$/i,
+    // "find / can you find X"
+    /^\s*(?:can\s+you\s+)?find\s+(.+?)\s*\??\s*$/i,
+    // "locate / can you locate X"
+    /^\s*(?:can\s+you\s+)?locate\s+(.+?)\s*\??\s*$/i,
+    // "go to / take me to / bring me to / guide me to / navigate to X"
+    /^\s*(?:take\s+me\s+to|bring\s+me\s+to|guide\s+me\s+to|navigate\s+to|go\s+to)\s+(.+?)\s*\??\s*$/i,
+    // "how to get to X"
+    /^\s*how\s+to\s+get\s+to\s+(.+?)\s*\??\s*$/i,
+    // "search for X"
+    /^\s*search\s+for\s+(.+?)\s*\??\s*$/i,
+    // "location of / places of X"
+    /^\s*(?:location\s+of|places?\s+of)\s+(.+?)\s*\??\s*$/i,
+    // "info on / information about / information on / details about / details on X"
+    /^\s*(?:info(?:rmation)?|details)\s+(?:on|about|for|regarding)\s+(.+?)\s*\??\s*$/i,
   ];
 
   for (const pattern of nlPatterns) {
     const match = clean.match(pattern);
     if (match && match[1]) {
-      const entityStr = match[1].replace(/[?.,!]+$/, "").trim();
-      const cleanedEntity = entityStr.replace(/^the\s+/i, "");
+      let entityStr = match[1].replace(/[?.,!;:]+$/, "").trim();
+      entityStr = entityStr.replace(/\s+(?:located|found|situated)$/i, "").trim();
+      const cleanedEntity = entityStr.replace(/^(?:the|a|an)\s+/i, "").replace(/[?.,!;:]+$/, "").trim();
       return { 
         intent: 'NATURAL_LOCATION', 
-        entity: cleanedEntity || entityStr
+        entity: cleanedEntity || entityStr,
+        queryShape: 'NATURAL_LANGUAGE_QUESTION'
       };
     }
   }
 
   // 7. Fallback to Direct lookup
-  return { intent: 'DIRECT', entity: clean };
+  return { intent: 'DIRECT', entity: clean, queryShape: 'DIRECT' };
 };
 
 export const extractEntityFromQuery = (query: string): string => {

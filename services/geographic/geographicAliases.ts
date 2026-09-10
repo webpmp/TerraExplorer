@@ -31,7 +31,23 @@ const ALIAS_DB: Record<string, string> = {
     // Regional Names
     "mesopotamia": "iraq",
     "holy land": "israel",
-    "gaul": "france"
+    "gaul": "france",
+
+    // Landmarks and Archaeological Sites
+    "pyramids of gaza": "pyramids of giza",
+    "the pyramids of gaza": "pyramids of giza",
+    "pyramids of gazza": "pyramids of giza",
+    "the pyramids of gazza": "pyramids of giza",
+    "pyramids of gazah": "pyramids of giza",
+    "piramids of giza": "pyramids of giza",
+    "piramids of gaza": "pyramids of giza",
+    "gaza pyramids": "pyramids of giza",
+    "giza pyramids": "pyramids of giza",
+    "great pyramid of giza": "pyramids of giza",
+    "giza pyramid complex": "pyramids of giza",
+    "mt everest": "mount everest",
+    "the eiffel tower": "eiffel tower",
+    "the grand canyon": "grand canyon"
 };
 
 export function resolveAlias(normalizedQuery: string): AliasResolution {
