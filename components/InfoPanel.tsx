@@ -20,8 +20,41 @@ import {
   ContextCategory,
   CONTEXT_CATEGORY_HEADINGS
 } from '../utils/contextClassification';
+import { generateDefaultRouteName } from '../services/queryNormalizer';
 export { classifyContext, isPureGeographicLabel, sanitizeContextMarkdown };
 
+
+export const AntiqueBookIcon: React.FC<{ size?: number; className?: string }> = ({ size = 16, className = '' }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={`lucide lucide-open-book-perfect-fill ${className}`}
+    aria-hidden="true"
+  >
+    {/* Main Left Page Face (Light Parchment) */}
+    <path d="M12 21a3 3 0 0 0-3-3H2V3h6a4 4 0 0 1 4 4z" fill="#E6D5C3"></path>
+    {/* Main Right Page Face (Light Parchment) */}
+    <path d="M12 21a3 3 0 0 1 3-3h7V3h-6a4 4 0 0 0-4 4z" fill="#E6D5C3"></path>
+    {/* Bottom Left Thick Page Edge (Dark Chocolate Brown) */}
+    <path d="M2 18v3h7a3 3 0 0 0 3-3H2z" fill="#5C3A21"></path>
+    {/* Bottom Right Thick Page Edge (Dark Chocolate Brown) */}
+    <path d="M22 18v3h-7a3 3 0 0 1-3-3h10z" fill="#5C3A21"></path>
+    {/* Outer Structural Lines (Black/CurrentColor Outlines) */}
+    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+    <path d="M2 18a3 3 0 0 1 3-3h3"></path>
+    <path d="M22 18a3 3 0 0 0-3-3h-3"></path>
+    {/* Hanging Ribbon Bookmark (Deep Red/Amber for extra contrast) */}
+    <path d="M10 7v9l2-1.5 2 1.5V7" fill="#A0522D"></path>
+  </svg>
+);
 
 export interface GalleryImage {
   url: string;
@@ -570,17 +603,29 @@ export const normalizeHeaderGeographicHierarchy = (
     return { displayTitle: '', displaySubtitle: null, displayAltNames: null };
   }
 
-  const queryOrRouteTitle = info.routeContext?.title || info.waypoint?.routeTitle;
-  let rawTitle = cleanMetadataString(rawTitleOverride || (info as any).displayName || info.canonicalName || info.name || info.waypoint?.name || '') || '';
+  const isGenericTitle = (str?: string): boolean => {
+    if (!str || typeof str !== 'string') return true;
+    const trimmed = str.trim().toLowerCase();
+    return !trimmed ||
+      trimmed === 'route context' ||
+      trimmed === 'route' ||
+      trimmed === 'default' ||
+      trimmed === 'location' ||
+      trimmed === 'saved route' ||
+      trimmed === 'unknown' ||
+      trimmed === 'unknown waypoint' ||
+      trimmed === 'searching...' ||
+      trimmed === 'location info';
+  };
+
+  const rawCandidate = info.canonicalName || (info as any).displayName || info.waypoint?.canonicalName || info.name || info.waypoint?.name || '';
+  let rawTitle = cleanMetadataString(rawTitleOverride || rawCandidate) || '';
+  if (isGenericTitle(rawTitle) && rawCandidate && !isGenericTitle(rawCandidate)) {
+    rawTitle = cleanMetadataString(rawCandidate) || '';
+  }
   if (rawTitle && rawTitle === rawTitle.toLowerCase()) {
     rawTitle = rawTitle.replace(/\b([a-z])/g, (_, l) => l.toUpperCase());
   }
-
-  const isRouteEventQuery = Boolean(
-    isSingleLocation &&
-    queryOrRouteTitle &&
-    !isRedundantWithTitle(rawTitle, queryOrRouteTitle)
-  );
 
   // Step A: Parse candidate place name & title geographic qualifiers
   let primaryNameCandidate = rawTitle;
@@ -602,9 +647,7 @@ export const normalizeHeaderGeographicHierarchy = (
 
   // Step D: Establish final title
   let finalTitle = rawTitle;
-  if (isRouteEventQuery) {
-    finalTitle = queryOrRouteTitle;
-  } else if (titleGeoSuffixes.length > 0) {
+  if (titleGeoSuffixes.length > 0) {
     const allSuffixesAreGeo = titleGeoSuffixes.every(suffix => {
       const isKnownAbbr = !!US_STATE_ABBRS[suffix.toLowerCase()] || !!COMMON_GEO_ABBRS[suffix.toLowerCase()] || !!COMMON_COUNTRY_ABBRS[suffix.toLowerCase()];
       const matchesStructured = [
@@ -623,17 +666,7 @@ export const normalizeHeaderGeographicHierarchy = (
     }
   }
 
-  let finalSubtitle: string | null = null;
-  if (isRouteEventQuery) {
-    const geo = getHeaderLocation(info, primaryNameCandidate);
-    const parts = [
-      primaryNameCandidate,
-      geo && !isRedundantWithTitle(geo, primaryNameCandidate) ? geo : null
-    ].filter(Boolean);
-    finalSubtitle = parts.length > 0 ? parts.join(', ') : null;
-  } else {
-    finalSubtitle = getHeaderLocation(info, finalTitle);
-  }
+  const finalSubtitle = getHeaderLocation(info, finalTitle);
 
   // Alternate names
   const altNamesList: string[] = [];
@@ -1468,9 +1501,25 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
   const [notes, setNotes] = useState<Note[]>([]);
   const [isNotesExpanded, setIsNotesExpanded] = useState(false);
-  const [newNote, setNewNote] = useState("");
+  const [isAddingNote, setIsAddingNote] = useState(false);
+  const [newNoteText, setNewNoteText] = useState("");
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editNoteText, setEditNoteText] = useState("");
+
+  const newNoteTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const editNoteTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (isAddingNote) {
+      newNoteTextareaRef.current?.focus();
+    }
+  }, [isAddingNote]);
+
+  useEffect(() => {
+    if (editingNoteId) {
+      editNoteTextareaRef.current?.focus();
+    }
+  }, [editingNoteId]);
 
   const locationInitializedRef = useRef<string | null>(null);
 
@@ -1635,72 +1684,70 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     setNotes(updatedNotes);
   };
 
-  const handleAddNote = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newNote.trim()) return;
+  const handleStartAddNote = () => {
+    setEditingNoteId(null);
+    setEditNoteText("");
+    setNewNoteText("");
+    setIsNotesExpanded(true);
+    setIsAddingNote(true);
+  };
+
+  const handleSaveNewNote = () => {
+    if (!newNoteText.trim()) return;
 
     const note: Note = {
-        id: Date.now().toString(),
-        text: newNote.trim(),
-        timestamp: Date.now()
+      id: Date.now().toString(),
+      text: newNoteText.trim(),
+      timestamp: Date.now()
     };
 
     const updated = [...notes, note];
     saveNotesToStorage(updated);
-    setNewNote("");
+    setNewNoteText("");
+    setIsAddingNote(false);
+  };
+
+  const handleCancelNewNote = () => {
+    setNewNoteText("");
+    setIsAddingNote(false);
+    if (notes.length === 0) {
+      setIsNotesExpanded(false);
+    }
   };
 
   const handleDeleteNote = (id: string) => {
     const updated = notes.filter(n => n.id !== id);
     saveNotesToStorage(updated);
+    if (editingNoteId === id) {
+      setEditingNoteId(null);
+      setEditNoteText("");
+    }
   };
 
   const startEditing = (note: Note) => {
+    setIsAddingNote(false);
+    setNewNoteText("");
     setEditingNoteId(note.id);
     setEditNoteText(note.text);
   };
 
-  const cancelEdit = (id: string) => {
-    const note = notes.find(n => n.id === id);
-    if (note && note.text.trim() === "") {
-       handleDeleteNote(id);
-    }
+  const cancelEdit = () => {
     setEditingNoteId(null);
     setEditNoteText("");
   };
 
   const saveEdit = (id: string) => {
     if (editNoteText.trim() === "") {
-       handleDeleteNote(id);
+      handleDeleteNote(id);
     } else {
-       const updated = notes.map(n => n.id === id ? { ...n, text: editNoteText } : n);
-       saveNotesToStorage(updated);
+      const updated = notes.map(n => n.id === id ? { ...n, text: editNoteText.trim() } : n);
+      saveNotesToStorage(updated);
     }
     setEditingNoteId(null);
     setEditNoteText("");
   };
 
-  const handleInitialAddNote = () => {
-    const emptyNote = notes.find(n => n.text.trim() === '');
-    if (emptyNote) {
-        setIsNotesExpanded(true);
-        setEditingNoteId(emptyNote.id);
-        setEditNoteText('');
-        return;
-    }
-    const newEmptyNote: Note = {
-        id: Date.now().toString(),
-        text: '',
-        timestamp: Date.now()
-    };
-    const updated = [...notes, newEmptyNote];
-    saveNotesToStorage(updated);
-    setIsNotesExpanded(true);
-    setEditingNoteId(newEmptyNote.id);
-    setEditNoteText('');
-  };
-
-  const hasNotes = notes && notes.length > 0;
+  const hasNotes = (notes && notes.length > 0) || isAddingNote;
 
   const handleFavoriteClick = () => {
     if (showFavoriteDialog) {
@@ -1711,8 +1758,14 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     if (isFavorite && currentFavoriteName) {
         setFavoriteNameInput(currentFavoriteName);
     } else {
-        if (routeNav && info?.routeContext?.title) {
-            setFavoriteNameInput(info.routeContext.title);
+        if (routeNav) {
+            const defaultName = generateDefaultRouteName({
+                routeTitle: (info as any)?.routeTitle || info?.routeContext?.title,
+                routeGroupName: routeNav.routeGroupName,
+                locationName: info?.name,
+                canonicalName: (info as any)?.canonicalName
+            });
+            setFavoriteNameInput(defaultName);
         } else {
             setFavoriteNameInput(info?.name || "");
         }
@@ -1822,7 +1875,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       popover: "bg-black border-2 border-amber-400 rounded-none shadow-[0_0_10px_rgba(251,191,36,0.4)]"
     },
     'parchment': {
-      container: "bg-[#f4ead5] border border-[#8b5a2b] shadow-[4px_4px_10px_rgba(0,0,0,0.3)] text-[#3e2723] font-sans",
+      container: "shadow-[4px_4px_10px_rgba(0,0,0,0.3)] text-[#3e2723] font-sans",
       panelBg: "bg-transparent",
       header: "bg-[#e8d5b5]/30",
       headerTitle: "text-[#8b5a2b] uppercase tracking-wider brand-font",
@@ -1830,18 +1883,18 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       tag: "text-[#3e2723] bg-[#d2b48c] rounded-sm font-bold shadow-sm",
       subtext: "text-[#8b5a2b]",
       bodyText: "text-[#5c3a21]",
-      card: "bg-[#f4ead5] border border-[#8b5a2b]/60 shadow-[inset_1px_1px_4px_rgba(255,255,255,0.4)] rounded-sm hover:bg-[#e8d5b5] transition-colors block relative group",
+      card: "bg-[#f4ead5] shadow-[inset_1px_1px_4px_rgba(255,255,255,0.4)] rounded-sm hover:bg-[#e8d5b5] transition-colors block relative group",
       icon: "text-[#8b5a2b]",
-      tabActive: "text-[#3e2723] border border-[#8b5a2b] border-b-transparent",
-      tabInactive: "text-[#8b5a2b] border border-transparent border-b-[#8b5a2b] hover:bg-[#e8d5b5]/50 hover:text-[#5c3a21]",
+      tabActive: "text-[#3e2723] font-bold bg-[#e8d5b5]/40",
+      tabInactive: "text-[#8b5a2b] hover:bg-[#e8d5b5]/50 hover:text-[#5c3a21]",
       listDot: "bg-[#8b5a2b] rounded-sm",
-      closeBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] border border-transparent rounded",
-      actionBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] border border-transparent rounded",
-      loadMoreBtn: "bg-[#e8d5b5]/50 border border-[#8b5a2b] hover:bg-[#d2b48c] text-[#5c3a21] rounded-sm text-sm tracking-widest uppercase font-bold",
-      notesInput: "bg-[#f4ead5] border border-[#8b5a2b] text-[#522B07] placeholder-[#522B07] shadow-[inset_1px_1px_3px_rgba(0,0,0,0.1)] rounded-sm focus:border-[#5c3a21] caret-[#522B07]",
-      noteCard: "bg-[#f4ead5] border border-[#8b5a2b]/50 rounded-sm shadow-[inset_1px_1px_2px_rgba(255,255,255,0.4)]",
-      navBtn: "bg-[#e8d5b5] border border-[#8b5a2b]/40 hover:bg-[#d2b48c] hover:text-[#3e2723] text-[#5c3a21]",
-      popover: "bg-[#f4ead5] border-2 border-[#8b5a2b] rounded-sm shadow-[0_4px_15px_rgba(0,0,0,0.4)]"
+      closeBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] rounded",
+      actionBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] rounded",
+      loadMoreBtn: "bg-[#e8d5b5]/50 hover:bg-[#d2b48c] text-[#5c3a21] rounded-sm text-sm tracking-widest uppercase font-bold",
+      notesInput: "bg-[#f4ead5]/40 border border-[#8b5a2b]/30 text-[#522B07] placeholder-[#8b5a2b]/60 focus:border-[#8b5a2b]/70 shadow-[inset_0_1px_2px_rgba(139,90,43,0.1)] rounded-sm outline-none caret-[#522B07]",
+      noteCard: "bg-[#f4ead5]/40 border border-[#8b5a2b]/20 rounded-sm shadow-sm",
+      navBtn: "bg-transparent hover:text-[#3e2723] text-[#5c3a21] hover:opacity-80 transition-opacity",
+      popover: "bg-[#f4ead5] rounded-sm shadow-[0_4px_15px_rgba(0,0,0,0.4)]"
     }
   };
 
@@ -1860,6 +1913,46 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const semanticTitleStyle = isRetro ? 'font-bold text-xl text-current leading-snug' : isParchment ? 'font-bold text-sm text-[#8b5a2b] leading-snug' : 'font-bold text-sm text-white/95 leading-snug';
   const bodyTextStyle = `font-normal ${bodySize} ${theme.bodyText} opacity-90 leading-relaxed`;
   const metaStyle = isRetro ? (skin === 'retro-amber' ? 'text-xs text-amber-300/70 font-mono' : 'text-xs text-green-300/70 font-mono') : isParchment ? 'text-xs text-[#8b5a2b]/75 font-sans' : 'text-xs text-white/60 font-sans';
+
+  const notesTextareaClass = isParchment
+    ? 'bg-[#f4ead5]/40 border border-[#8b5a2b]/30 focus:border-[#8b5a2b]/70 shadow-[inset_0_1px_2px_rgba(139,90,43,0.1)] rounded-sm text-[#522B07] placeholder-[#8b5a2b]/60 caret-[#522B07]'
+    : skin === 'retro-green'
+    ? 'bg-black border border-green-400 focus:bg-green-900/20 text-green-300 placeholder-green-400/50 rounded-none font-retro'
+    : skin === 'retro-amber'
+    ? 'bg-black border border-amber-400 focus:bg-amber-900/20 text-amber-300 placeholder-amber-400/50 rounded-none font-retro'
+    : 'bg-black/40 border border-white/20 focus:border-cyan-400 text-white placeholder-gray-400 rounded-lg';
+
+  const noteSaveBtnThemeClass = isParchment
+    ? 'text-[#8b5a2b] hover:text-[#3e2723]'
+    : skin === 'retro-amber'
+    ? 'text-amber-400 hover:text-amber-200'
+    : isRetro
+    ? 'text-green-400 hover:text-green-200'
+    : 'text-cyan-400 hover:text-cyan-200';
+
+  const noteCancelBtnThemeClass = isParchment
+    ? 'text-[#8b5a2b] hover:text-[#3e2723]'
+    : skin === 'retro-amber'
+    ? 'text-amber-400 hover:text-red-400'
+    : isRetro
+    ? 'text-green-400 hover:text-red-400'
+    : 'text-gray-400 hover:text-red-400';
+
+  const noteEditBtnThemeClass = isParchment
+    ? 'text-[#8b5a2b] hover:text-[#3e2723]'
+    : skin === 'retro-amber'
+    ? 'hover:text-amber-200'
+    : isRetro
+    ? 'hover:text-green-200'
+    : 'hover:text-cyan-200';
+
+  const noteDeleteBtnThemeClass = isParchment
+    ? 'text-[#8b5a2b] hover:text-red-700'
+    : skin === 'retro-amber'
+    ? 'hover:text-red-400 text-amber-400/70'
+    : isRetro
+    ? 'hover:text-red-400 text-green-400/70'
+    : 'text-gray-400 hover:text-red-400';
 
   const handleFetchNews = useCallback(() => {
     if (!onFetchNews) return;
@@ -2418,11 +2511,16 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       >
         {/* Main Info Box */}
         <div
-          className={`${theme.container} flex flex-col shrink min-h-0 overflow-hidden pointer-events-auto`}
+          className={`${theme.container} relative flex flex-col shrink min-h-0 overflow-hidden pointer-events-auto ${isParchment ? '[isolation:isolate]' : ''}`}
           data-infopanel="true"
           onWheel={(e) => e.stopPropagation()}
         >
+          {/* Parchment paper-effect background layer — parchment theme only */}
+          {isParchment && (
+            <div className="parchment-background" aria-hidden="true" />
+          )}
           {/* Header */}
+
           <div className={`relative p-5 shrink-0 flex flex-col items-center ${skin === 'modern' ? 'border-b border-white/10' : ''} ${theme.header}`}>
             {/* 1. Close X button */}
             <button onClick={onClose} className={`absolute top-3 right-3 p-1 z-50 pointer-events-auto transition-colors ${theme.closeBtn}`} aria-label="Close panel">
@@ -2442,7 +2540,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
               {/* Favorite Dialog Popover */}
               {showFavoriteDialog && (
                  <div className={`absolute top-full mt-2 w-64 p-3 z-50 flex flex-col gap-3 left-1/2 -translate-x-1/2 ${theme.popover}`}>
-                    <h3 className={`text-xs text-left font-bold uppercase opacity-80 ${isRetro ? 'text-current' : 'text-white'}`}>
+                    <h3 className={`text-xs text-left font-bold uppercase tracking-wider ${isRetro ? 'text-current' : isParchment ? 'text-[#8b5a2b]' : 'text-cyan-300'}`}>
                       {isFavorite ? 'Edit Favorite' : (routeNav ? 'Save Route' : 'Save Location')}
                     </h3>
                     <form onSubmit={submitFavorite} className="flex flex-col gap-2">
@@ -2451,7 +2549,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                          value={favoriteNameInput}
                          onChange={(e) => setFavoriteNameInput(e.target.value)}
                          placeholder="Enter name..."
-                         className={`w-full p-2 text-sm bg-transparent border outline-none ${theme.notesInput}`}
+                         className={`w-full p-2 text-sm bg-transparent border outline-none ${theme.notesInput} ${isParchment ? 'border-[#8b5a2b]/30 focus:border-[#8b5a2b]' : ''}`}
                          autoFocus
                        />
                        <div className="flex gap-2 justify-end">
@@ -2461,6 +2559,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                                 onClick={() => { onRemoveFavorite(); setShowFavoriteDialog(false); }}
                                 className="p-1.5 hover:text-red-400 transition-colors"
                                 title="Remove"
+                                aria-label="Remove favorite"
                               >
                                   <Trash2 size={16} />
                               </button>
@@ -2468,14 +2567,26 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                           <button
                             type="button"
                             onClick={() => setShowFavoriteDialog(false)}
-                            className="px-2 py-1 text-xs opacity-70 hover:opacity-100 hover:bg-white/10 rounded"
+                            className={`px-2 py-1 text-xs opacity-70 hover:opacity-100 rounded transition-colors ${
+                              isParchment 
+                                ? 'text-[#5c3a21] hover:bg-[#e8d5b5]/50' 
+                                : isRetro 
+                                ? 'hover:bg-white/10' 
+                                : 'hover:bg-white/10 text-gray-300 hover:text-white'
+                            }`}
                           >
                               Cancel
                           </button>
                           <button
                             type="submit"
                             disabled={!favoriteNameInput.trim()}
-                            className={`px-3 py-1 text-xs font-bold uppercase transition-colors disabled:opacity-50 ${isRetro ? 'bg-current text-black hover:opacity-80' : 'bg-cyan-600 hover:bg-cyan-500 text-white rounded'}`}
+                            className={`px-3 py-1 text-xs font-bold uppercase transition-colors disabled:opacity-50 ${
+                              isParchment
+                                ? 'bg-[#8b5a2b] text-[#f4ead5] hover:bg-[#5c3a21] rounded-sm shadow-sm'
+                                : isRetro
+                                ? (skin === 'retro-amber' ? 'bg-amber-400 text-black hover:bg-amber-300' : 'bg-green-400 text-black hover:bg-green-300')
+                                : 'bg-cyan-600 hover:bg-cyan-500 text-white rounded'
+                            }`}
                           >
                               Save
                           </button>
@@ -2512,8 +2623,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
           {/* Route Navigation */}
           {isMultiLocation && routeNav && (
-             <div className={`p-3 border-b flex items-center justify-between ${isRetro ? 'border-current opacity-80' : isParchment ? 'border-[#8b5a2b]/30 bg-[#e8d5b5]/20' : 'border-white/10 bg-white/5'}`}>
-                <button onClick={routeNav.onPrev} className={`p-1.5 rounded-full ${theme.navBtn}`}>
+             <div className={`relative z-[1] p-3 flex items-center justify-between ${isRetro ? 'border-b border-current opacity-80' : isParchment ? 'bg-transparent' : 'border-b border-white/10 bg-white/5'}`}>
+                <button onClick={routeNav.onPrev} className={`p-1.5 rounded-full ${theme.navBtn} pointer-events-auto`} aria-label="Previous waypoint">
                     <ChevronLeft size={16} />
                 </button>
                 <div className="flex flex-col items-center text-center px-2">
@@ -2528,7 +2639,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                           : `Waypoint ${routeNav.current} of ${routeNav.total}`}
                     </span>
                 </div>
-                <button onClick={routeNav.onNext} className={`p-1.5 rounded-full ${theme.navBtn}`}>
+                <button onClick={routeNav.onNext} className={`p-1.5 rounded-full ${theme.navBtn} pointer-events-auto`} aria-label="Next waypoint">
                     <ChevronRight size={16} />
                 </button>
             </div>
@@ -2539,7 +2650,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           <div
             ref={scrollRef}
             onScroll={updateScrollFade}
-            className={`flex-1 overflow-y-auto ${theme.panelBg} relative pointer-events-auto info-panel-scrollable`}
+            className={`flex-1 overflow-y-auto ${theme.panelBg} relative pointer-events-auto info-panel-scrollable ${isParchment ? 'parchment-scrollbar' : ''}`}
             style={maskStyle}
             data-infopanel="true"
             onWheel={(e) => e.stopPropagation()}
@@ -2607,47 +2718,113 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         {/* My Notes Section */}
         {hasNotes ? (
           <div
-            className={`pointer-events-auto shrink-0 transition-all duration-300 ${theme.container} ${!isNotesExpanded ? 'hover:brightness-110 cursor-pointer' : ''}`}
+            className={`pointer-events-auto shrink-0 transition-all duration-300 relative overflow-hidden ${theme.container} ${!isNotesExpanded ? 'hover:brightness-110 cursor-pointer' : ''} ${isParchment ? '[isolation:isolate]' : ''}`}
             data-infopanel="true"
             onWheel={(e) => e.stopPropagation()}
           >
-               <div
-                 className={`px-5 py-3 flex items-center justify-between cursor-pointer ${isNotesExpanded ? 'border-b ' + (isRetro ? 'border-green-400/50' : isParchment ? 'border-[#8b5a2b]/30' : 'border-white/10') : ''}`}
-                 onClick={() => setIsNotesExpanded(!isNotesExpanded)}
-               >
+               {isParchment && (
+                 <div className="parchment-background" aria-hidden="true" />
+               )}
+               <div className="relative z-[1]">
+                 <div
+                   className={`px-5 py-3 flex items-center justify-between cursor-pointer ${
+                     isNotesExpanded
+                       ? skin === 'retro-green'
+                         ? 'border-b border-green-400/50'
+                         : skin === 'retro-amber'
+                         ? 'border-b border-amber-400/50'
+                         : isParchment
+                         ? 'border-b border-[#8b5a2b]/20'
+                         : 'border-b border-white/10'
+                       : ''
+                   }`}
+                   onClick={() => setIsNotesExpanded(!isNotesExpanded)}
+                 >
                   <div className="flex items-center gap-2">
                       <StickyNote size={16} className={theme.icon} />
-                      <span className={`font-bold uppercase ${isRetro ? 'text-lg' : 'text-sm'} ${theme.headerTitle}`}>My Notes</span>
-                      <span className={`text-xs px-1.5 py-0.5 rounded-full ${isRetro ? 'bg-green-400 text-black' : isParchment ? 'bg-[#d2b48c] text-[#3e2723] border border-[#8b5a2b]' : 'bg-cyan-900 text-cyan-300'}`}>
+                      <span className={`font-bold uppercase ${isRetro ? 'text-lg font-retro' : 'text-sm'} ${theme.headerTitle}`}>My Notes</span>
+                      <span
+                        className={`text-xs px-1.5 py-0.5 rounded-full ${
+                          skin === 'retro-green'
+                            ? 'bg-green-400 text-black font-bold'
+                            : skin === 'retro-amber'
+                            ? 'bg-amber-400 text-black font-bold'
+                            : isParchment
+                            ? 'bg-[#d2b48c] text-[#3e2723]'
+                            : 'bg-cyan-900/60 text-cyan-300 border border-cyan-400/40'
+                        }`}
+                      >
                           {notes.length}
                       </span>
                   </div>
-                  {isNotesExpanded ? <ChevronDown size={18} className={theme.subtext} /> : <ChevronUp size={18} className={theme.subtext} />}
+                  <div className="flex items-center gap-2">
+                    {isNotesExpanded && !isAddingNote && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleStartAddNote();
+                        }}
+                        className={`p-1 transition-colors ${
+                          isParchment
+                            ? 'text-[#8b5a2b] hover:text-[#3e2723] hover:bg-[#e8d5b5]/50 rounded'
+                            : skin === 'retro-amber'
+                            ? 'text-amber-400 hover:text-amber-200 hover:bg-amber-400/20'
+                            : isRetro
+                            ? 'text-green-400 hover:text-green-200 hover:bg-green-400/20'
+                            : 'text-cyan-400 hover:text-cyan-200 hover:bg-white/10 rounded-full'
+                        }`}
+                        title="Add Note"
+                        aria-label="Add Note"
+                      >
+                        <Plus size={16} />
+                      </button>
+                    )}
+                    {isNotesExpanded ? <ChevronDown size={18} className={theme.subtext} /> : <ChevronUp size={18} className={theme.subtext} />}
+                  </div>
                </div>
 
                {isNotesExpanded && (
                    <div className="p-4 bg-opacity-50 animate-in slide-in-from-top-2 duration-300">
-                       {/* Add Note Input */}
-                       <form onSubmit={handleAddNote} className="mb-4 flex gap-2">
-                           <input
-                              type="text"
-                              value={newNote}
-                              onChange={(e) => setNewNote(e.target.value)}
-                              placeholder="Add a personal note..."
-                              className={`flex-1 px-3 py-2 outline-none text-sm transition-colors ${theme.notesInput}`}
+                       {/* Add Note Single Large Textarea */}
+                       {isAddingNote && (
+                         <div className="mb-3">
+                           <textarea
+                             ref={newNoteTextareaRef}
+                             value={newNoteText}
+                             onChange={(e) => setNewNoteText(e.target.value)}
+                             placeholder="Write a note..."
+                             className={`w-full p-2.5 text-sm transition-colors outline-none resize-none ${notesTextareaClass}`}
+                             rows={3}
+                             autoFocus
                            />
-                           <button
-                              type="submit"
-                              disabled={!newNote.trim()}
-                              className={`p-2 transition-colors disabled:opacity-50 ${theme.actionBtn}`}
-                           >
-                              <Plus size={18} />
-                           </button>
-                       </form>
+                           <div className="flex justify-end gap-2 mt-1.5">
+                             <button
+                               type="button"
+                               onClick={handleCancelNewNote}
+                               className={`p-1.5 transition-colors ${noteCancelBtnThemeClass}`}
+                               title="Cancel"
+                               aria-label="Cancel"
+                             >
+                               <X size={14} />
+                             </button>
+                             <button
+                               type="button"
+                               onClick={handleSaveNewNote}
+                               disabled={!newNoteText.trim()}
+                               className={`p-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${noteSaveBtnThemeClass}`}
+                               title="Save note"
+                               aria-label="Save note"
+                             >
+                               {isParchment ? <AntiqueBookIcon size={14} /> : <Save size={14} />}
+                             </button>
+                           </div>
+                         </div>
+                       )}
 
                        {/* Notes List */}
                        <div
-                         className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar"
+                         className={`space-y-2 max-h-48 overflow-y-auto ${isParchment ? 'parchment-scrollbar' : 'custom-scrollbar'}`}
                          onWheel={(e) => e.stopPropagation()}
                        >
                          {notes.map((note) => (
@@ -2655,15 +2832,34 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                                  {editingNoteId === note.id ? (
                                      <div className="flex flex-col gap-2">
                                          <textarea
+                                            ref={editNoteTextareaRef}
                                             value={editNoteText}
                                             onChange={(e) => setEditNoteText(e.target.value)}
-                                            className={`w-full p-2 text-sm bg-transparent border-b ${isRetro ? 'border-green-400 text-green-300' : isParchment ? 'border-[#8b5a2b] text-[#522B07] caret-[#522B07]' : 'border-cyan-400 text-white'} outline-none resize-none`}
-                                            rows={2}
+                                            placeholder="Write a note..."
+                                            className={`w-full p-2.5 text-sm transition-colors outline-none resize-none ${notesTextareaClass}`}
+                                            rows={3}
                                             autoFocus
                                          />
                                          <div className="flex justify-end gap-2">
-                                             <button onClick={() => cancelEdit(note.id)} className="p-1 hover:text-red-400"><X size={14}/></button>
-                                             <button onClick={() => saveEdit(note.id)} className="p-1 hover:text-green-400"><Save size={14}/></button>
+                                             <button
+                                               type="button"
+                                               onClick={cancelEdit}
+                                               className={`p-1.5 transition-colors ${noteCancelBtnThemeClass}`}
+                                               title="Cancel edit"
+                                               aria-label="Cancel edit"
+                                             >
+                                               <X size={14} />
+                                             </button>
+                                             <button
+                                               type="button"
+                                               onClick={() => saveEdit(note.id)}
+                                               disabled={!editNoteText.trim()}
+                                               className={`p-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${noteSaveBtnThemeClass}`}
+                                               title="Save note"
+                                               aria-label="Save note"
+                                             >
+                                                 {isParchment ? <AntiqueBookIcon size={14} /> : <Save size={14} />}
+                                             </button>
                                          </div>
                                      </div>
                                  ) : (
@@ -2675,22 +2871,54 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                                             {new Date(note.timestamp).toLocaleDateString()}
                                         </p>
                                         <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button onClick={() => startEditing(note)} className={`p-1 ${isRetro ? 'hover:text-green-200' : 'hover:text-cyan-200'}`}><Edit2 size={12} /></button>
-                                            <button onClick={() => handleDeleteNote(note.id)} className={`p-1 hover:text-red-400`}><Trash2 size={12} /></button>
+                                            <button 
+                                              type="button"
+                                              onClick={() => startEditing(note)} 
+                                              className={`p-1 transition-colors ${noteEditBtnThemeClass}`}
+                                              title="Edit note"
+                                              aria-label="Edit note"
+                                            >
+                                              <Edit2 size={12} />
+                                            </button>
+                                            <button 
+                                              type="button"
+                                              onClick={() => handleDeleteNote(note.id)} 
+                                              className={`p-1 transition-colors ${noteDeleteBtnThemeClass}`} 
+                                              title="Delete note" 
+                                              aria-label="Delete note"
+                                            >
+                                              <Trash2 size={12} />
+                                            </button>
                                         </div>
                                     </>
                                  )}
                              </div>
                          ))}
                        </div>
+
+                       {/* Add Note Button below list if not adding */}
+                       {!isAddingNote && notes.length > 0 && (
+                         <button
+                           type="button"
+                           onClick={handleStartAddNote}
+                           className={`w-full py-2 mt-2 flex items-center justify-center gap-1.5 text-xs font-bold uppercase tracking-wider transition-colors ${theme.actionBtn}`}
+                         >
+                           <Plus size={14} /> Add Note
+                         </button>
+                       )}
                    </div>
                )}
+               </div>
           </div>
         ) : (
-          <div className={`p-4 shrink-0 flex justify-center items-center pointer-events-auto transition-all ${theme.container}`}>
+          <div className={`relative p-4 shrink-0 flex justify-center items-center pointer-events-auto transition-all overflow-hidden ${theme.container} ${isParchment ? '[isolation:isolate]' : ''}`}>
+             {isParchment && (
+               <div className="parchment-background" aria-hidden="true" />
+             )}
              <button
-                onClick={handleInitialAddNote}
-                className={`flex w-full justify-center items-center gap-2 px-6 py-3 font-bold uppercase tracking-wider text-sm transition-colors ${theme.actionBtn} hover:brightness-110`}
+                type="button"
+                onClick={handleStartAddNote}
+                className={`relative z-[1] flex w-full justify-center items-center gap-2 px-6 py-3 font-bold uppercase tracking-wider text-sm transition-colors ${theme.actionBtn} hover:brightness-110`}
              >
                 <StickyNote size={16} />
                 Add Note

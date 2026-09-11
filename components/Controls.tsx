@@ -323,17 +323,17 @@ const Controls: React.FC<ControlsProps> = ({
       btnActive: "bg-[#d2b48c] text-[#3e2723] border-[#5c3a21] shadow-[inset_1px_1px_3px_rgba(0,0,0,0.3)]",
       favActive: "bg-[#e8d5b5] text-[#b8860b] border-[#b8860b] shadow-[0_0_10px_rgba(184,134,11,0.3)] hover:bg-[#d2b48c] hover:text-[#8b6508]",
 
-      inputWrapper: "bg-[#f4ead5]/95 backdrop-blur-md border-0 rounded shadow-[inset_0_0_0_1px_rgba(140,110,75,0.35)]",
+      inputWrapper: "backdrop-blur-md border-0 rounded-none shadow-none",
       inputIcon: "text-[#8b5a2b]",
       inputField: "text-[#522B07] placeholder-[#522B07] font-mono text-sm",
-      submitBtn: "bg-[#e8d5b5] text-[#5c3a21] hover:bg-[#d2b48c]/80 rounded-[0_3px_3px_0] font-sans font-bold uppercase",
+      submitBtn: "bg-[#e8d5b5] text-[#5c3a21] hover:bg-[#d2b48c]/80 rounded-none font-sans font-bold uppercase",
       resetBtn: "text-[#8b5a2b] hover:text-[#3e2723] mr-2 p-1",
       glow: "hidden",
       statusRow: "bg-[#f4ead5]/95 border border-[#8b5a2b]/40 text-[#5c3a21] font-sans shadow-sm rounded",
       statusText: "text-[#522B07] font-sans",
       statusDismiss: "text-[#8b5a2b]/70 hover:text-[#3e2723] transition-colors p-0.5",
       copyright: "text-white/50 font-sans",
-      modal: "bg-[#f4ead5] border-2 border-[#8b5a2b] text-[#3e2723] font-sans shadow-[0_4px_20px_rgba(0,0,0,0.4)] rounded-sm"
+      modal: "text-[#3e2723] font-sans shadow-[0_4px_20px_rgba(0,0,0,0.4)]"
     }
   };
 
@@ -441,28 +441,43 @@ const Controls: React.FC<ControlsProps> = ({
       {/* Trace Route Modal */}
       {isTraceModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm pointer-events-auto">
-              <div className={`w-full max-w-lg p-6 relative flex flex-col gap-4 ${theme.modal}`}>
-                  <button onClick={() => onToggleTraceModal(false)} className={`absolute top-4 right-4 p-1 hover:opacity-70`}>
-                      <X size={20} />
-                  </button>
-                  <h2 className="text-xl font-bold uppercase tracking-wide">Trace Route</h2>
-                  <p className="text-sm opacity-70">Paste an article, URL, or text block. The system will identify locations and create a connected journey.</p>
-                  <form onSubmit={handleTraceSubmit} className="flex flex-col gap-4">
-                      <textarea
-                        value={traceText}
-                        onChange={(e) => setTraceText(e.target.value)}
-                        placeholder="Paste text here..."
-                        className={`w-full h-32 p-3 bg-transparent border ${skin === 'modern' ? 'border-white/20 rounded-lg' : 'border-current rounded-none'} ${skin === 'parchment' ? 'placeholder-[#522B07]' : ''} outline-none resize-none focus:border-opacity-100 transition-colors`}
-                        autoFocus
-                      />
-                      <button
-                        type="submit"
-                        disabled={!traceText.trim()}
-                        className={`py-3 font-bold uppercase tracking-widest transition-all ${theme.btn} ${!traceText.trim() ? 'opacity-50 cursor-not-allowed' : 'hover:scale-[1.02]'}`}
-                      >
-                          Generate Route
-                      </button>
-                  </form>
+              <div className={`relative w-full max-w-lg p-6 flex flex-col gap-4 overflow-hidden ${theme.modal} ${skin === 'parchment' ? '[isolation:isolate]' : ''}`}>
+                  {skin === 'parchment' && (
+                    <div className="parchment-background" aria-hidden="true" />
+                  )}
+                  <div className="relative z-[1] flex flex-col gap-4">
+                    <button onClick={() => onToggleTraceModal(false)} className={`absolute top-0 right-0 p-1 hover:opacity-70`}>
+                        <X size={20} />
+                    </button>
+                    <h2 className="text-xl font-bold uppercase tracking-wide">Trace Route</h2>
+                    <p className="text-sm opacity-70">Paste an article, URL, or text block. The system will identify locations and create a connected journey.</p>
+                    <form onSubmit={handleTraceSubmit} className="flex flex-col gap-4">
+                        <textarea
+                          value={traceText}
+                          onChange={(e) => setTraceText(e.target.value)}
+                          placeholder="Paste text here..."
+                          className={`w-full h-32 p-3 ${
+                            skin === 'modern'
+                              ? 'bg-transparent border border-white/20 rounded-lg'
+                              : skin === 'parchment'
+                              ? 'bg-transparent placeholder-[#522B07] border-0 rounded-none'
+                              : 'bg-transparent border border-current rounded-none'
+                          } outline-none resize-none focus:border-opacity-100 transition-colors`}
+                          autoFocus
+                        />
+                        <button
+                          type="submit"
+                          disabled={!traceText.trim()}
+                          className={`py-3 font-bold uppercase tracking-widest transition-all ${
+                            skin === 'parchment'
+                              ? 'bg-[#e8d5b5] text-[#5c3a21] hover:bg-[#d2b48c] hover:text-[#3e2723] shadow-[2px_2px_4px_rgba(0,0,0,0.2)] font-sans rounded-none'
+                              : theme.btn
+                          } ${!traceText.trim() ? 'opacity-50 cursor-not-allowed' : 'hover:scale-[1.02]'}`}
+                        >
+                            Generate Route
+                        </button>
+                    </form>
+                  </div>
               </div>
           </div>
       )}
@@ -485,7 +500,13 @@ const Controls: React.FC<ControlsProps> = ({
         >
           <Star size={20} className={showFavorites ? "fill-current" : ""} />
         </button>
-        <div className="w-px bg-white/20 mx-1 self-stretch"></div>
+        <div className={`w-px mx-1 self-stretch ${
+          skin === 'parchment'
+            ? (isOSM ? 'bg-[#8b5a2b]/30' : 'bg-white/20')
+            : skin === 'modern'
+            ? (isOSM ? 'bg-black/60' : 'bg-white/20')
+            : 'bg-white/20'
+        }`}></div>
         <button
           onClick={onZoomOut}
           className={`p-3 transition-all active:scale-95 ${theme.btn}`}
@@ -512,7 +533,17 @@ const Controls: React.FC<ControlsProps> = ({
 
         {onCycleSkin && (
           <>
-            <div className={`w-px mx-1 self-stretch ${skin === 'parchment' ? 'bg-[#8b5a2b]/30' : skin === 'retro-green' ? 'bg-green-400/30' : skin === 'retro-amber' ? 'bg-amber-400/30' : 'bg-white/20'}`}></div>
+            <div className={`w-px mx-1 self-stretch ${
+              skin === 'parchment'
+                ? (isOSM ? 'bg-[#8b5a2b]/30' : 'bg-white/20')
+                : skin === 'modern'
+                ? (isOSM ? 'bg-black/60' : 'bg-white/20')
+                : skin === 'retro-green'
+                ? 'bg-green-400/30'
+                : skin === 'retro-amber'
+                ? 'bg-amber-400/30'
+                : 'bg-white/20'
+            }`}></div>
             <button
               onClick={onCycleSkin}
               className={`p-3 transition-all active:scale-95 ${theme.btn}`}
@@ -540,50 +571,53 @@ const Controls: React.FC<ControlsProps> = ({
       <form onSubmit={handleSubmit} className="w-full max-w-[532px] pointer-events-auto relative group">
         <div className={theme.glow}></div>
         {skin === 'parchment' ? (
-          <div className="relative w-full">
+          <div className="relative w-full [isolation:isolate]">
             {/* Outer wrapper: renders glow with no clipping, z-0, extending beyond input boundaries */}
             {showSearchGlow && (
-              <div className="absolute inset-[-3px] z-0 rounded pointer-events-none active-search-glow-parchment" />
+              <div className="absolute inset-[-3px] z-0 pointer-events-none active-search-glow-parchment" />
             )}
-            {/* Inner container: actual input field, z-10 */}
-            <div className={`relative z-10 flex items-center transition-all ${theme.inputWrapper}`}>
-              <Search className={`ml-4 ${theme.inputIcon}`} size={20} />
-              <input
-                type="text"
-                value={query}
-                onChange={(e) => {
-                  if (searchError && onClearError) onClearError();
-                  setQuery(e.target.value);
-                }}
-                onFocus={handleInputFocus}
-                onBlur={() => setIsFocused(false)}
-                placeholder={displayPlaceholder}
-                disabled={!!scanningStatusText}
-                className={`w-full bg-transparent border-none px-4 py-4 focus:ring-0 outline-none ${theme.inputField}`}
-              />
-
-              {query && !scanningStatusText && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setQuery("");
+            {/* Inner container: parchment background behind crisp content */}
+            <div className={`relative flex items-center transition-all overflow-hidden ${theme.inputWrapper}`}>
+              <div className="parchment-background" aria-hidden="true" />
+              <div className="relative z-[1] flex items-center w-full">
+                <Search className={`ml-4 shrink-0 ${theme.inputIcon}`} size={20} />
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => {
                     if (searchError && onClearError) onClearError();
+                    setQuery(e.target.value);
                   }}
-                  className={theme.resetBtn}
-                  aria-label="Clear Search"
-                >
-                  <X size={16} />
-                </button>
-              )}
+                  onFocus={handleInputFocus}
+                  onBlur={() => setIsFocused(false)}
+                  placeholder={displayPlaceholder}
+                  disabled={!!scanningStatusText}
+                  className={`w-full bg-transparent border-none px-4 py-4 focus:ring-0 outline-none ${theme.inputField}`}
+                />
 
-              <button
-                type={scanningStatusText ? "button" : "submit"}
-                onClick={scanningStatusText ? onCancelScan : undefined}
-                disabled={isSearching && !scanningStatusText}
-                className={`mr-2 px-4 py-2 transition-colors disabled:opacity-50 ${theme.submitBtn}`}
-              >
-                {scanningStatusText ? "CANCEL" : isSearching ? <Loader2 size={18} className="animate-spin" /> : "EXPLORE"}
-              </button>
+                {query && !scanningStatusText && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuery("");
+                      if (searchError && onClearError) onClearError();
+                    }}
+                    className={theme.resetBtn}
+                    aria-label="Clear Search"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+
+                <button
+                  type={scanningStatusText ? "button" : "submit"}
+                  onClick={scanningStatusText ? onCancelScan : undefined}
+                  disabled={isSearching && !scanningStatusText}
+                  className={`mr-2 px-4 py-2 transition-colors disabled:opacity-50 ${theme.submitBtn}`}
+                >
+                  {scanningStatusText ? "CANCEL" : isSearching ? <Loader2 size={18} className="animate-spin" /> : "EXPLORE"}
+                </button>
+              </div>
             </div>
           </div>
         ) : (

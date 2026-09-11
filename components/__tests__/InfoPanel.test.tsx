@@ -837,14 +837,16 @@ describe('Lightbox Metadata Integration', () => {
         />
       );
 
-      // Title is query/event title
-      expect(html).toContain('Launch of Sputnik');
-      // Subtitle is site name
-      expect(html).toContain('Site No. 1, Baikonur Cosmodrome');
+      // Title is canonical entity name
+      expect(html).toContain('Site No. 1</h2>');
+      // Subtitle is location
+      expect(html).toContain('Baikonur Cosmodrome, Kazakhstan');
       // Category is HISTORICAL SITE
       expect(html).toContain('HISTORICAL SITE');
       // Coordinates are rendered
       expect(html).toContain('45.92° N, 63.34° E');
+      // Route context is in overview section
+      expect(html).toContain('Launch of Sputnik');
 
       // Alternate names and "Also known as" MUST NOT be in the header
       expect(html).not.toContain('Also known as Gagarin');
@@ -895,10 +897,11 @@ describe('Lightbox Metadata Integration', () => {
         );
 
         // Header must contain canonical title, location subtitle, category, and coordinates
-        expect(html).toContain('Discovery of Penicillin');
-        expect(html).toContain("St. Mary&#x27;s Hospital, City of Westminster, United Kingdom");
+        expect(html).toContain("St. Mary&#x27;s Hospital</h2>");
+        expect(html).toContain("City of Westminster, United Kingdom");
         expect(html).toContain('HISTORICAL SITE');
         expect(html).toContain('51.51° N, 0.13° W');
+        expect(html).toContain('Discovery of Penicillin');
 
         // Header must NOT contain "Also known as" or the alias metadata line
         expect(html).not.toContain('Also known as');
@@ -925,8 +928,9 @@ describe('Lightbox Metadata Integration', () => {
           />
         );
 
+        expect(html).toContain('Site No. 1</h2>');
+        expect(html).toContain('Baikonur Cosmodrome, Kazakhstan');
         expect(html).toContain('Launch of Sputnik');
-        expect(html).toContain('Site No. 1, Baikonur Cosmodrome');
         expect(html).not.toContain('Also known as');
         expect(html).not.toContain("Also known as Gagarin&#x27;s Start, Tyuratam, Barking Ranch");
       }
@@ -1195,17 +1199,12 @@ describe('Lightbox Metadata Integration', () => {
         />
       );
 
-      // Main header renders the title and site name
+      // Main header renders canonical entity title and location
+      expect(html).toContain('Site No. 1</h2>');
+      expect(html).toContain('Baikonur Cosmodrome, Kazakhstan');
+
+      // The body begins directly with the substantive narrative and includes route context
       expect(html).toContain('Launch of Sputnik');
-      expect(html).toContain('Site No. 1, Baikonur Cosmodrome');
-
-      // The body MUST NOT contain duplicate h3 route context title or duplicate short text
-      // Note: `info.routeContext.text` was "Site No. 1, also known as the Baikonur Cosmodrome, was the launch site for Sputnik 1, the world’s first artificial satellite."
-      expect(html).not.toContain('<h3 class="text-xs font-bold uppercase tracking-widest mb-1 text-cyan-400">Launch of Sputnik</h3>');
-      expect(html).not.toContain('<h3 class="text-xs font-bold uppercase tracking-widest mb-1 text-current">Launch of Sputnik</h3>');
-      expect(html).not.toContain('<h3 class="text-xs font-bold uppercase tracking-widest mb-1 text-[#8b5a2b]">Launch of Sputnik</h3>');
-
-      // The body begins directly with the substantive narrative
       expect(html).toContain('Sputnik 1 was launched by the Soviet Union on October 4, 1957');
     });
 
@@ -2770,6 +2769,84 @@ describe('Lightbox Metadata Integration', () => {
         country: 'France'
       };
       expect(getHeaderLocation(franceNoContinent, 'France')).toBeNull();
+    });
+  });
+
+  describe('InfoPanel Entity Identity vs Route Context Title Mapping Regression Suite', () => {
+    it('uses canonicalName/entity identity as main title and retains route context in body for Battle of Stalingrad single-location route', () => {
+      const stalingradWaypointInfo = {
+        name: 'Stalingrad (modern-day Volgograd)',
+        canonicalName: 'Stalingrad',
+        entityType: 'historical_site',
+        type: 'Historical Site' as any,
+        locationString: 'Volgograd, Russia',
+        coordinates: { lat: 48.1736, lng: 44.5028 },
+        routeTitle: 'Battle of Stalingrad',
+        routeContext: {
+          title: 'Battle of Stalingrad',
+          text: 'The Battle of Stalingrad was a major battle on the Eastern Front of World War II.'
+        },
+        waypoint: {
+          id: 'battle-of-stalingrad-start',
+          name: 'Stalingrad (modern-day Volgograd)',
+          canonicalName: 'Stalingrad',
+          modernLocation: 'Volgograd, Russia',
+          lat: 48.1736,
+          lng: 44.5028,
+          sequence: 1,
+          routeTitle: 'Battle of Stalingrad',
+          waypointType: 'historical_site'
+        },
+        description: 'Major World War II battle fought in and around Stalingrad on the Volga River.',
+        notable: [],
+        news: []
+      };
+
+      const result = normalizeHeaderGeographicHierarchy(stalingradWaypointInfo, undefined, true);
+      // Main title must NEVER be "Route Context" or "Battle of Stalingrad" when canonicalName is available
+      expect(result.displayTitle).toBe('Stalingrad');
+      expect(result.displayTitle).not.toBe('Route Context');
+
+      const skins = ['modern', 'retro-green', 'retro-amber', 'parchment'] as const;
+      for (const skin of skins) {
+        const html = renderToStaticMarkup(
+          <InfoPanel
+            info={stalingradWaypointInfo as any}
+            onClose={() => {}}
+            isLoading={false}
+            skin={skin}
+            isFavorite={false}
+            onSaveFavorite={() => {}}
+            onRemoveFavorite={() => {}}
+          />
+        );
+
+        // Header must render canonical entity title
+        expect(html).toContain('Stalingrad</h2>');
+        expect(html).not.toContain('Route Context</h2>');
+
+        // Route context must be available in overview section
+        expect(html).toContain('Battle of Stalingrad');
+      }
+    });
+
+    it('never allows "Route Context", "Route", or generic strings as displayTitle even if explicitly in routeContext.title', () => {
+      const fallbackWaypointInfo = {
+        name: 'Stalingrad (modern-day Volgograd)',
+        canonicalName: 'Stalingrad',
+        routeContext: {
+          title: 'Route Context',
+          text: 'Some context text'
+        },
+        waypoint: {
+          name: 'Stalingrad (modern-day Volgograd)',
+          canonicalName: 'Stalingrad'
+        }
+      };
+
+      const result = normalizeHeaderGeographicHierarchy(fallbackWaypointInfo, undefined, true);
+      expect(result.displayTitle).toBe('Stalingrad');
+      expect(result.displayTitle).not.toBe('Route Context');
     });
   });
 });

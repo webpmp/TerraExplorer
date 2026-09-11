@@ -509,14 +509,33 @@ expectedGroupId: "${registryValidation.expectedGroupId || 'N/A'}"`);
   let effectiveRouteType = rawRouteType;
   let effectiveEvidenceMode = rawRouteEvidenceMode;
 
+  const normalizedRawType = String(rawRouteType || '').trim().toLowerCase();
+  const effectiveIntent = intent || (/\b(battle|siege|war|treaty|assassination|revolution|conflict|expedition|event)\b/i.test(text || rawTitle || '') ? 'HISTORICAL_EVENT' : undefined);
+
   if (normalizedItems.length === 1) {
-    if (rawRouteType === 'regional_event' || (rawRouteType && rawRouteType !== 'single_location' && rawRouteType !== 'point' && intent === 'HISTORICAL_EVENT')) {
+    if (
+      normalizedRawType === 'regional_event' ||
+      normalizedRawType === 'single_location' ||
+      normalizedRawType === 'point' ||
+      (normalizedRawType && effectiveIntent === 'HISTORICAL_EVENT')
+    ) {
       effectiveRouteType = 'single_location';
-      console.log(`[ROUTE TYPE RECONCILIATION]\nGenerated routeType: ${rawRouteType}\nValid waypoint count: ${normalizedItems.length}\nIntent: ${intent || 'UNKNOWN'}\nAction: NORMALIZE_SINGLE_LOCATION_ROUTE\nNormalized routeType: ${effectiveRouteType}`);
-    } else if (rawRouteType && rawRouteType !== 'single_location' && rawRouteType !== 'point') {
-      console.log(`[ROUTE TYPE RECONCILIATION]\nGenerated routeType: ${rawRouteType}\nValid waypoint count: ${normalizedItems.length}\nIntent: ${intent || 'UNKNOWN'}\nAction: CANNOT_NORMALIZE`);
+      console.log(`[ROUTE TYPE RECONCILIATION]
+Generated routeType: ${rawRouteType}
+Valid waypoint count: ${normalizedItems.length}
+Intent: ${effectiveIntent || 'UNKNOWN'}
+Action: NORMALIZE_SINGLE_HISTORICAL_LOCATION
+Reason: Single validated historical event location is sufficient; no additional waypoint evidence required.`);
+    } else if (rawRouteType && normalizedRawType !== 'single_location' && normalizedRawType !== 'point') {
+      console.log(`[ROUTE TYPE RECONCILIATION]
+Generated routeType: ${rawRouteType}
+Valid waypoint count: ${normalizedItems.length}
+Intent: ${effectiveIntent || 'UNKNOWN'}
+Action: CANNOT_NORMALIZE`);
     }
   }
+
+  const normalizedEffectiveType = String(effectiveRouteType || '').trim().toLowerCase();
 
   // Canonical historical topology reconciliation assertion:
   // For authoritative multi-route events (e.g. Trail of Tears), maintain deterministic integrity
@@ -768,7 +787,7 @@ expectedGroupId: "${registryValidation.expectedGroupId || 'N/A'}"`);
         }
       }
     }
-  } else if (effectiveRouteType === 'point' || effectiveRouteType === 'single_location') {
+  } else if (normalizedEffectiveType === 'point' || normalizedEffectiveType === 'single_location') {
     if (normalizedItems.length < 1) {
       console.warn(`[Pipeline ${pipelineId}] Structural Validation failed: '${effectiveRouteType}' routeType must have at least 1 valid waypoint. Found ${normalizedItems.length}`);
       return { waypoints: [], title: rawTitle, routeConfidence: rawRouteConfidence, routeType: effectiveRouteType as any, routeEvidenceMode: effectiveEvidenceMode };

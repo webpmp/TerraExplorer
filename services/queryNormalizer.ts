@@ -74,3 +74,88 @@ export function detectHistoricalRouteEvent(query: string): NormalizedEntityResul
 
   return result;
 }
+
+/**
+ * Generates a clean, human-readable default name for a route when opening the Save Route overlay.
+ * Follows the priority hierarchy:
+ * 1. Existing meaningful route/search title (if not generic/fallback like "Route Context").
+ * 2. Search/query-derived historical subject (normalizing question scaffolding and command syntax).
+ * 3. Current route/location subject or route group name.
+ * 4. Fallback location-based name.
+ */
+export function generateDefaultRouteName(context: {
+  routeTitle?: string;
+  routeGroupName?: string;
+  query?: string;
+  locationName?: string;
+  canonicalName?: string;
+}): string {
+  const isGeneric = (str?: string): boolean => {
+    if (!str || typeof str !== 'string') return true;
+    const trimmed = str.trim().toLowerCase();
+    return !trimmed ||
+      trimmed === 'route context' ||
+      trimmed === 'route' ||
+      trimmed === 'default' ||
+      trimmed === 'location' ||
+      trimmed === 'saved route' ||
+      trimmed === 'unknown' ||
+      trimmed === 'unknown waypoint' ||
+      trimmed === 'searching...';
+  };
+
+  const formatTitleString = (str: string): string => {
+    const minorWords = new Set(['a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor', 'on', 'at', 'to', 'from', 'by', 'of', 'in', 'with', 'through']);
+    const parts = str.trim().split(/\s+/);
+    return parts.map((w, idx) => {
+      const lower = w.toLowerCase();
+      if (idx > 0 && minorWords.has(lower)) {
+        return lower;
+      }
+      return toCanonicalTitleCase(w);
+    }).join(' ');
+  };
+
+  // 1. Existing meaningful routeTitle
+  if (context.routeTitle && !isGeneric(context.routeTitle)) {
+    return context.routeTitle.trim();
+  }
+
+  // 2. Query/search derived subject
+  if (context.query && context.query.trim()) {
+    const raw = context.query.trim();
+
+    // Check historical route registry first
+    const hist = detectHistoricalRouteEvent(raw);
+    if (hist.isHistoricalRouteEvent && hist.canonicalEntity && !isGeneric(hist.canonicalEntity)) {
+      return hist.canonicalEntity;
+    }
+
+    // Clean search scaffolding
+    let candidate = normalizeQueryScaffolding(raw);
+
+    // Clean route-specific leading verbs
+    candidate = candidate.replace(/^(?:follow|trace|explore)\s+(?:the\s+)?/i, '');
+
+    if (candidate && !isGeneric(candidate)) {
+      return formatTitleString(candidate);
+    }
+  }
+
+  // 3. Current route group name
+  if (context.routeGroupName && !isGeneric(context.routeGroupName)) {
+    return formatTitleString(context.routeGroupName.trim());
+  }
+
+  // 4. Location / canonical entity fallback
+  if (context.canonicalName && !isGeneric(context.canonicalName)) {
+    return context.canonicalName.trim();
+  }
+
+  if (context.locationName && !isGeneric(context.locationName)) {
+    return context.locationName.trim();
+  }
+
+  return 'Saved Route';
+}
+

@@ -14,6 +14,124 @@
   color: #8b5a2b;
 }
 
+
 .modern-osm-hover:hover {
   background-color: rgba(0, 0, 0, 0.25);
 }
+
+/* ─── Parchment panel stacking architecture ────────────────────────────────── */
+
+.parchment-panel {
+  position: relative;
+  isolation: isolate;
+}
+
+.parchment-content {
+  position: relative;
+  z-index: 1;
+}
+
+/* ─── Parchment scrollbar hiding — preserves scrolling behavior while hiding scrollbar track & thumb ─ */
+
+.parchment-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.parchment-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+
+/* ─── Parchment paper-effect background layer — shared across all parchment panels ─ */
+
+.parchment-background {
+  position: absolute;
+  inset: 0;
+  background-color: #f3e8cd;
+  background-image:
+    /* Fine paper grain */
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Cfilter id='paperNoise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='table' tableValues='0 0.08'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23paperNoise)' opacity='0.65'/%3E%3C/svg%3E"),
+    /* Darker parchment perimeter */
+    radial-gradient(
+      ellipse at center,
+      rgba(255, 250, 230, 0.08) 35%,
+      rgba(125, 75, 25, 0.12) 65%,
+      rgba(95, 55, 20, 0.28) 100%
+    );
+  box-shadow:
+    inset 0 0 50px rgba(95, 55, 20, 0.30),
+    inset 0 0 14px rgba(75, 45, 15, 0.22);
+  filter: url(#tattered-deckle-edge);
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/*
+  EDGE DUST
+  Multiple warm parchment/sepia shades.
+  Different particle sizes and shapes.
+*/
+.parchment-background::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    /* TOP EDGE */
+    radial-gradient(ellipse 2px 1px at 4% 4%, rgba(88, 61, 32, 0.38) 0%, transparent 100%),
+    radial-gradient(circle 1.2px at 10% 7%, rgba(125, 91, 52, 0.32) 0%, transparent 100%),
+    radial-gradient(ellipse 3px 1.5px at 18% 3%, rgba(102, 70, 37, 0.30) 0%, transparent 100%),
+    radial-gradient(circle 1.8px at 27% 6%, rgba(139, 103, 61, 0.34) 0%, transparent 100%),
+    radial-gradient(ellipse 1px 2.5px at 36% 3%, rgba(78, 54, 29, 0.30) 0%, transparent 100%),
+    radial-gradient(ellipse 4px 1.5px at 46% 5%, rgba(116, 80, 42, 0.28) 0%, transparent 100%),
+    radial-gradient(circle 2.2px at 57% 3%, rgba(94, 65, 34, 0.34) 0%, transparent 100%),
+    radial-gradient(ellipse 2px 3px at 67% 6%, rgba(136, 99, 56, 0.30) 0%, transparent 100%),
+    radial-gradient(circle 1px at 78% 3%, rgba(72, 50, 27, 0.34) 0%, transparent 100%),
+    radial-gradient(ellipse 3px 1px at 89% 5%, rgba(121, 86, 47, 0.30) 0%, transparent 100%),
+    radial-gradient(circle 1.6px at 97% 4%, rgba(101, 69, 35, 0.36) 0%, transparent 100%),
+    /* BOTTOM EDGE */
+    radial-gradient(circle 2.5px at 5% 96%, rgba(111, 77, 40, 0.34) 0%, transparent 100%),
+    radial-gradient(ellipse 3px 1px at 14% 98%, rgba(82, 57, 30, 0.30) 0%, transparent 100%),
+    radial-gradient(ellipse 1px 3px at 24% 95%, rgba(137, 101, 59, 0.32) 0%, transparent 100%),
+    radial-gradient(circle 1.2px at 35% 97%, rgba(102, 70, 36, 0.36) 0%, transparent 100%),
+    radial-gradient(ellipse 4px 1.5px at 46% 95%, rgba(120, 84, 45, 0.28) 0%, transparent 100%),
+    radial-gradient(circle 2.5px at 57% 98%, rgba(78, 54, 29, 0.34) 0%, transparent 100%),
+    radial-gradient(ellipse 2px 1px at 68% 96%, rgba(143, 106, 63, 0.30) 0%, transparent 100%),
+    radial-gradient(ellipse 1px 3px at 78% 98%, rgba(94, 65, 34, 0.34) 0%, transparent 100%),
+    radial-gradient(circle 1.8px at 89% 95%, rgba(126, 91, 49, 0.32) 0%, transparent 100%),
+    radial-gradient(ellipse 3px 1.5px at 97% 97%, rgba(87, 60, 31, 0.36) 0%, transparent 100%),
+    /* LEFT EDGE */
+    radial-gradient(circle 1.2px at 3% 15%, rgba(134, 98, 57, 0.30) 0%, transparent 100%),
+    radial-gradient(ellipse 2px 3px at 5% 27%, rgba(90, 62, 32, 0.34) 0%, transparent 100%),
+    radial-gradient(ellipse 3px 1px at 2% 40%, rgba(118, 82, 43, 0.32) 0%, transparent 100%),
+    radial-gradient(circle 1.7px at 4% 53%, rgba(143, 106, 63, 0.28) 0%, transparent 100%),
+    radial-gradient(ellipse 1px 3px at 2% 66%, rgba(82, 57, 30, 0.36) 0%, transparent 100%),
+    radial-gradient(circle 2.2px at 5% 81%, rgba(109, 75, 39, 0.32) 0%, transparent 100%),
+    /* RIGHT EDGE */
+    radial-gradient(ellipse 2px 1px at 97% 18%, rgba(96, 66, 34, 0.36) 0%, transparent 100%),
+    radial-gradient(circle 1.5px at 95% 31%, rgba(137, 101, 59, 0.30) 0%, transparent 100%),
+    radial-gradient(ellipse 3px 2px at 98% 44%, rgba(113, 78, 41, 0.34) 0%, transparent 100%),
+    radial-gradient(circle 1px at 96% 57%, rgba(77, 53, 28, 0.36) 0%, transparent 100%),
+    radial-gradient(ellipse 2px 3px at 98% 71%, rgba(128, 93, 51, 0.32) 0%, transparent 100%),
+    radial-gradient(ellipse 4px 1px at 95% 84%, rgba(101, 69, 36, 0.30) 0%, transparent 100%);
+  opacity: 0.95;
+  pointer-events: none;
+}
+
+/*
+  Larger, softer discoloration.
+*/
+.parchment-background::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(ellipse 12px 5px at 7% 12%, rgba(105, 73, 38, 0.10) 0%, transparent 100%),
+    radial-gradient(ellipse 6px 11px at 94% 24%, rgba(139, 101, 58, 0.075) 0%, transparent 100%),
+    radial-gradient(ellipse 17px 5px at 12% 91%, rgba(82, 57, 30, 0.085) 0%, transparent 100%),
+    radial-gradient(ellipse 6px 15px at 88% 88%, rgba(119, 83, 44, 0.09) 0%, transparent 100%),
+    radial-gradient(ellipse 11px 4px at 52% 3%, rgba(151, 111, 66, 0.075) 0%, transparent 100%);
+  pointer-events: none;
+}
+

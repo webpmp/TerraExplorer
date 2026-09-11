@@ -10,6 +10,7 @@ interface SettingsPanelProps {
   skin: SkinType;
   onSkinChange?: (skin: SkinType) => void;
   initialTab?: SettingsTab;
+  dimmed?: boolean;
 }
 
 type SettingsTab = 'general' | 'providers' | 'appearance' | 'audio';
@@ -148,46 +149,57 @@ export const testNewsConnectionService = async (
   const newsApiKey = apiKeys?.newsApiKey || env?.VITE_NEWS_API_KEY || '';
   const newsDataKey = apiKeys?.newsDataApiKey || env?.VITE_NEWS_DATA_API_KEY || '';
 
-  let hasKey = false;
+  const query = 'archaeology discovery';
   let url = '';
-  let host = '';
 
-    if (provider === 'nyt') {
-      hasKey = !!nytKey;
-      if (hasKey) {
-        url = `https://api.nytimes.com/svc/search/v2/articlesearch.json?q=test&api-key=${nytKey}`;
-        host = 'api.nytimes.com/svc/search/v2/articlesearch.json';
-      }
-    } else if (provider === 'newsapi') {
-      hasKey = !!newsApiKey;
-      if (hasKey) {
-        url = `https://newsapi.org/v2/everything?q=news&pageSize=10&apiKey=${newsApiKey}`;
-        host = 'newsapi.org/v2/everything';
-      }
-    } else if (provider === 'newsdata') {
-      hasKey = !!newsDataKey;
-      if (hasKey) {
-        url = `https://newsdata.io/api/1/news?apikey=${newsDataKey}&q=test&language=en`;
-        host = 'newsdata.io/api/1/news';
-      }
+  if (provider === 'gemini') {
+    return {
+      outcome: 'SUCCESS',
+      message: 'Gemini News Search is configured.'
+    };
+  }
+
+  if (provider === 'nyt') {
+    if (!nytKey) {
+      return {
+        outcome: 'FAILED',
+        message: 'NYT API Key is missing.'
+      };
     }
-
-  console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=START\nAPIKeyConfigured=${hasKey}\nAPIKeySource=environment`);
+    url = `https://api.nytimes.com/svc/search/v2/articlesearch.json?q=${encodeURIComponent(query)}&api-key=${encodeURIComponent(nytKey)}`;
+  } else if (provider === 'newsapi') {
+    if (!newsApiKey) {
+      return {
+        outcome: 'FAILED',
+        message: 'NewsAPI Key is missing.'
+      };
+    }
+    url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(query)}&pageSize=1&apiKey=${encodeURIComponent(newsApiKey)}`;
+  } else if (provider === 'newsdata') {
+    if (!newsDataKey) {
+      return {
+        outcome: 'FAILED',
+        message: 'NewsData.io Key is missing.'
+      };
+    }
+    url = `https://newsdata.io/api/1/news?apikey=${encodeURIComponent(newsDataKey)}&q=${encodeURIComponent(query)}&size=1`;
+  } else {
+    return {
+      outcome: 'FAILED',
+      message: `Unknown news provider: ${provider}`
+    };
+  }
 
   let testOutcome: 'SUCCESS' | 'FAILED' = 'FAILED';
 
   try {
-    if (!hasKey) {
-      throw new Error(`API key not configured for ${providerLabel}`);
-    }
-
-    console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=REQUEST\nEndpoint=${host}`);
+    console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=START\nEndpoint=${url.replace(/api[-_]?key=[^&]+/i, 'apiKey=REDACTED')}`);
 
     const res = await fetch(url);
     if (res.ok) {
       let usableArticlesCount = 0;
       try {
-        const data = await res.json();
+        const data = await res.clone().json();
 
         if (Array.isArray(data.articles)) {
           // NewsAPI
@@ -249,7 +261,7 @@ export const testNewsConnectionService = async (
   }
 };
 
-const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSettings, onClose, skin, onSkinChange, initialTab = 'general' }) => {
+const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSettings, onClose, skin, onSkinChange, initialTab = 'general', dimmed = false }) => {
   const isParchment = skin === 'parchment';
   const isRetro = skin === 'retro-green' || skin === 'retro-amber';
 
@@ -435,14 +447,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
       divider: "border-amber-400/30"
     },
     'parchment': {
-      container: "bg-[#f4ead5] border border-[#8b5a2b] shadow-[4px_4px_10px_rgba(0,0,0,0.3)] text-[#3e2723] font-sans",
-      header: "bg-[#e8d5b5]/30 border-b border-[#8b5a2b]",
+      container: "text-[#3e2723] font-sans",
+      header: "",
       headerTitle: "text-[#5c3a21] font-bold uppercase tracking-wider brand-font",
       closeBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] rounded p-1 transition-colors",
-      tabBar: "border-b border-[#8b5a2b] bg-[#e8d5b5]/20",
-      tabActive: "text-[#3e2723] font-bold border-b-2 border-[#8b5a2b] bg-[#e8d5b5]/40",
-      tabInactive: "text-[#8b5a2b]/70 hover:text-[#5c3a21] hover:bg-[#e8d5b5]/20 border-b-2 border-transparent",
-      divider: "border-[#8b5a2b]/30"
+      tabBar: "bg-transparent",
+      tabActive: "text-[#3e2723] font-bold",
+      tabInactive: "text-[#8b5a2b]/70 hover:text-[#5c3a21]",
+      divider: "border-transparent"
     }
   };
 
@@ -450,7 +462,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
 
   const containerClasses = `
     relative w-96 flex flex-col shrink min-h-0 h-[700px] pointer-events-auto transition-all duration-300 overflow-hidden
-    ${theme.container}
+    ${theme.container} ${isParchment ? '[isolation:isolate]' : ''}
   `;
 
   const headerClasses = `
@@ -460,7 +472,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
 
   const contentClasses = `
     flex-1 overflow-y-auto p-6 space-y-6
-    ${isRetro ? 'scrollbar-none' : ''}
+    ${isRetro ? 'scrollbar-none' : isParchment ? 'parchment-scrollbar' : 'custom-scrollbar'}
   `;
 
   const sectionTitleClasses = `
@@ -503,7 +515,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
 
   return (
     <div className={containerClasses}>
-      <div className={headerClasses}>
+      {isParchment && (
+        <div className="parchment-background" aria-hidden="true" />
+      )}
+      <div className="relative z-[1] flex flex-col flex-1 shrink min-h-0 overflow-hidden">
+        <div className={headerClasses}>
         <div className="flex items-center gap-3">
           <SettingsIcon size={20} className={isRetro && skin === 'retro-amber' ? 'text-[#ffb000]' : isRetro ? 'text-[#33ff33]' : 'text-current'} />
           <h2 className={`text-lg font-bold ${theme.headerTitle}`}>
@@ -1259,6 +1275,7 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
             </div>
           </div>
         )}
+      </div>
       </div>
     </div>
   );

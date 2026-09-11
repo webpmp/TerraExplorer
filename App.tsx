@@ -3029,6 +3029,44 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         </Canvas>
       </div>
 
+      {/* Shared parchment SVG filter — rendered once, referenced by all parchment panels */}
+      {isParchment && (
+        <svg
+          width="0"
+          height="0"
+          style={{ position: 'absolute', overflow: 'hidden' }}
+          aria-hidden="true"
+        >
+          <filter
+            id="tattered-deckle-edge"
+            x="-8%"
+            y="-8%"
+            width="116%"
+            height="116%"
+          >
+            <feTurbulence
+              type="fractalNoise"
+              baseFrequency="0.035"
+              numOctaves={5}
+              seed={17}
+              result="edgeNoise"
+            />
+            <feGaussianBlur
+              in="edgeNoise"
+              stdDeviation={0.35}
+              result="softNoise"
+            />
+            <feDisplacementMap
+              in="SourceGraphic"
+              in2="softNoise"
+              scale={10}
+              xChannelSelector="R"
+              yChannelSelector="G"
+            />
+          </filter>
+        </svg>
+      )}
+
       {/* Parchment Engraved Depth Bevel Shadow Ring */}
       {isParchment && (
         <div
@@ -3070,7 +3108,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
 
 
-      <div className="absolute top-[281px] left-8 z-30 flex flex-col gap-4 bottom-8 pointer-events-none w-[24rem]">
+      <div className="absolute top-[281px] left-8 z-20 flex flex-col gap-4 bottom-8 pointer-events-none w-[24rem]">
         {isFavoritesPanelOpen && (
           <FavoritesPanel
               favorites={favorites}
@@ -3082,7 +3120,6 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
               onDelete={handleRemoveFavorite}
               onFlyTo={handleFavoriteFlyTo}
               skin={skin}
-              dimmed={isTraceModalOpen}
           />
         )}
 

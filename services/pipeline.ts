@@ -613,6 +613,17 @@ locationLabel="${locationLabel || 'none'}"`);
            console.log(`=== RECOVERY ENRICHMENT TRACE ===`);
            console.log(`Metadata Present: true`);
            console.log(`Enrichment Executed: true`);
+
+           const validFields = (metadataRecovery as any)._validFields || Object.keys(metadataRecovery).filter(k => !k.startsWith('_'));
+           const rejectedFields = (metadataRecovery as any)._rejectedFields || [];
+           console.log(`[RECOVERY MERGE FILTER]\nAccepted fields: ${validFields.length > 0 ? validFields.join(', ') : 'None'}\nRejected fields excluded: ${rejectedFields.length > 0 ? rejectedFields.join(', ') : 'None'}`);
+
+           if (rejectedFields.includes('climate')) {
+             delete (resolvedData as any).climate;
+           }
+           if (rejectedFields.includes('population')) {
+             delete (resolvedData as any).population;
+           }
            
            if (authoritativeHierarchy && metadataRecovery.locationString && metadataRecovery.locationString !== authoritativeHierarchy) {
                console.log(`[GEOGRAPHIC CONTEXT PRESERVED]\nauthoritative="${authoritativeHierarchy}"\naiLocationString="${metadataRecovery.locationString}"\naction="authoritative_context_retained"`);
@@ -689,7 +700,23 @@ locationLabel="${locationLabel || 'none'}"`);
      const recoveredMetadata = (resolvedData as any)._recoveredMetadata as Partial<EnrichmentResult> | undefined;
      
      // Authority hierarchy: deterministic geographic data > validated provider data > LLM-generated metadata
-     const initialClimate = (resolvedData as any).climate;
+     let initialClimate = (resolvedData as any).climate;
+     if (initialClimate) {
+         const initialConflict = isClimateConflicting(
+             initialClimate,
+             undefined,
+             canonicalEntity.coordinates.lat,
+             canonicalEntity.coordinates.lng,
+             (resolvedData as any).state || (resolvedData as any).region,
+             (resolvedData as any).country,
+             canonicalEntity.entityType
+         );
+         if (initialConflict.isConflict) {
+             console.warn(`[CLIMATE CONTRADICTION REJECTION] Discarded conflicting initial climate "${initialClimate.name || initialClimate.value}" (${initialConflict.reason}).`);
+             initialClimate = undefined;
+         }
+     }
+
      const recoveredClimate = recoveredMetadata?.climate;
      let finalClimate = initialClimate;
 
@@ -725,6 +752,13 @@ locationLabel="${locationLabel || 'none'}"`);
        const histKnowledgeForMeta = getHistoricalEntityKnowledge(canonicalEntity.canonicalName) || getHistoricalEntityKnowledge(entityResult.entity);
        const histContext = histKnowledgeForMeta?.historicalContext || (resolvedData as any).historicalContext || recoveredMetadata?.historicalContext;
 
+       // Create a sanitized shallow copy of recoveredMetadata omitting internal tracking fields and rejected keys
+       const sanitizedRecovered: any = { ...recoveredMetadata };
+       delete sanitizedRecovered._validFields;
+       delete sanitizedRecovered._rejectedFields;
+       delete sanitizedRecovered.climate;
+       delete sanitizedRecovered.population;
+
        const finalMetadata: any = {
            description: (isPlaceholder && recoveredMetadata?.description) ? recoveredMetadata.description : (resolvedData.description || recoveredMetadata?.description),
            climate: finalClimate,
@@ -734,7 +768,7 @@ locationLabel="${locationLabel || 'none'}"`);
            contextNotes: mergedContextNotes,
            historicalContext: histContext,
            intent: entityResult.intentResult.intent,
-           ...recoveredMetadata
+           ...sanitizedRecovered
        };
 
        // Ensure authoritative climate, population, notable facts, context notes, and historical context are preserved

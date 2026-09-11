@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, MapPin, Route as RouteIcon, Eye, EyeOff, Trash2, Navigation, Edit, Plus, Save, ChevronUp, ChevronDown } from 'lucide-react';
 import { FavoriteLocation, SkinType, Waypoint } from '../types';
+import { AntiqueBookIcon } from './InfoPanel';
 
 interface FavoritesPanelProps {
   favorites: FavoriteLocation[];
@@ -81,11 +82,11 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
       input: "bg-black border border-amber-400 text-amber-300 rounded-none p-2 text-sm focus:bg-amber-900/20 outline-none font-retro"
     },
     'parchment': {
-      container: "bg-[#f4ead5] border border-[#8b5a2b] shadow-[4px_4px_10px_rgba(0,0,0,0.3)] text-[#3e2723] font-sans",
-      header: "bg-[#e8d5b5]/30 border-b border-[#8b5a2b]",
+      container: "text-[#3e2723] font-sans",
+      header: "",
       headerTitle: "text-[#5c3a21] font-bold uppercase tracking-wider brand-font",
-      item: "bg-[#f4ead5] border border-[#8b5a2b]/60 hover:bg-[#e8d5b5] rounded-sm transition-colors",
-      itemActive: "bg-[#d2b48c]/30 border-[#5c3a21]",
+      item: "hover:bg-[#8b5a2b]/5 rounded-sm transition-colors",
+      itemActive: "bg-[#8b5a2b]/10",
       text: "text-[#5c3a21]",
       textActive: "text-[#3e2723] font-bold",
       icon: "text-[#8b5a2b]",
@@ -93,8 +94,8 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
       deleteBtn: "hover:bg-[#8b0000]/20 hover:text-[#8b0000] text-[#8b5a2b] rounded-sm p-1.5 transition-colors",
       closeBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] rounded p-1",
       emptyState: "text-[#8b5a2b]/70",
-      modal: "bg-[#f4ead5] border-2 border-[#8b5a2b] text-[#3e2723] font-sans shadow-[0_4px_15px_rgba(0,0,0,0.4)] rounded-sm",
-      input: "bg-[#f4ead5] border border-[#8b5a2b] text-[#522B07] placeholder-[#522B07] shadow-[inset_1px_1px_3px_rgba(0,0,0,0.1)] rounded-sm p-2 text-sm focus:border-[#5c3a21] outline-none"
+      modal: "text-[#3e2723] font-sans shadow-[0_4px_15px_rgba(0,0,0,0.4)] rounded-sm",
+      input: "bg-[#f4ead5] text-[#522B07] placeholder-[#522B07] shadow-[inset_1px_1px_3px_rgba(0,0,0,0.1)] rounded-sm p-2 text-sm outline-none"
     }
   };
 
@@ -287,57 +288,66 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
 
   return (
     <>
-      <div className={`relative w-88 md:w-96 max-h-1/2 flex flex-col shrink min-h-0 animate-in slide-in-from-left-8 fade-in duration-300 transition-opacity duration-300 pointer-events-auto ${dimmed ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}>
-          <div className={`${theme.container} flex flex-col shrink min-h-0 overflow-hidden`}>
-              <div className={`p-4 flex items-center justify-between shrink-0 ${theme.header}`}>
-                  <h2 className={`text-lg font-bold ${theme.headerTitle}`}>EXPLORATIONS</h2>
-                  <button onClick={onClose} className={`${theme.closeBtn} z-50 pointer-events-auto`} aria-label="Close explorations">
-                      <X size={18} />
-                  </button>
-              </div>
+      <div className="relative w-88 md:w-96 max-h-1/2 flex flex-col shrink min-h-0 animate-in slide-in-from-left-8 fade-in duration-300 transition-opacity duration-300 pointer-events-auto">
+          <div className={`${theme.container} relative flex flex-col shrink min-h-0 overflow-hidden ${skin === 'parchment' ? 'isolation-auto [isolation:isolate]' : ''}`}>
+              {skin === 'parchment' && (
+                <div className="parchment-background" aria-hidden="true" />
+              )}
+              <div className="relative z-[1] flex flex-col shrink min-h-0 overflow-hidden flex-1">
+                <div className={`p-4 flex items-center justify-between shrink-0 ${theme.header}`}>
+                    <h2 className={`text-lg font-bold ${theme.headerTitle}`}>EXPLORATIONS</h2>
+                    <button onClick={onClose} className={`${theme.closeBtn} z-50 pointer-events-auto`} aria-label="Close explorations">
+                        <X size={18} />
+                    </button>
+                </div>
 
-              <div className="p-4 overflow-y-auto custom-scrollbar flex-1">
-                  {favorites.length === 0 ? (
-                      <div className={`text-center py-8 ${theme.emptyState}`}>
-                          <MapPin size={32} className="mx-auto mb-2 opacity-50" />
-                          <p className="text-sm">No saved locations yet.</p>
-                          <p className="text-xs opacity-60 mt-1">Star locations or trace routes to save them here.</p>
-                      </div>
-                  ) : (
-                      <>
-                          {routeFavs.length > 0 && (
-                              <div className="mb-6">
-                                  <h3 className={`text-xs font-bold uppercase mb-2 opacity-70 ${theme.text}`}>Routes</h3>
-                                  {routeFavs.map(renderItem)}
-                              </div>
-                          )}
-                          
-                          {locationFavs.length > 0 && (
-                              <div>
-                                  <h3 className={`text-xs font-bold uppercase mb-2 opacity-70 ${theme.text}`}>Points of Interest</h3>
-                                  {locationFavs.map(renderItem)}
-                              </div>
-                          )}
-                      </>
-                  )}
-              </div>
-              
-              <div className={`p-3 text-[10px] opacity-50 text-center border-t ${isRetro ? 'border-current' : 'border-white/10'}`}>
-                  {activeRouteId ? `Route Active (${favorites.find(f => f.id === activeRouteId)?.waypoints?.length || 0} waypoints)` : "No Active Route"} • {visibleFavoriteIds.length} POIs Visible
+                <div className={`p-4 overflow-y-auto ${skin === 'parchment' ? 'parchment-scrollbar' : 'custom-scrollbar'} flex-1`}>
+                    {favorites.length === 0 ? (
+                        <div className={`text-center py-8 ${theme.emptyState}`}>
+                            <MapPin size={32} className="mx-auto mb-2 opacity-50" />
+                            <p className="text-sm">No saved locations yet.</p>
+                            <p className="text-xs opacity-60 mt-1">Star locations or trace routes to save them here.</p>
+                        </div>
+                    ) : (
+                        <>
+                            {routeFavs.length > 0 && (
+                                <div className="mb-6">
+                                    <h3 className={`text-xs font-bold uppercase mb-2 opacity-70 ${theme.text}`}>Routes</h3>
+                                    {routeFavs.map(renderItem)}
+                                </div>
+                            )}
+                            
+                            {locationFavs.length > 0 && (
+                                <div>
+                                    <h3 className={`text-xs font-bold uppercase mb-2 opacity-70 ${theme.text}`}>Points of Interest</h3>
+                                    {locationFavs.map(renderItem)}
+                                </div>
+                            )}
+                        </>
+                    )}
+                </div>
+                
+                <div className={`p-3 text-[10px] opacity-50 text-center ${skin === 'parchment' ? '' : isRetro ? 'border-t border-current' : 'border-t border-white/10'}`}>
+                    {activeRouteId ? `Route Active (${favorites.find(f => f.id === activeRouteId)?.waypoints?.length || 0} waypoints)` : "No Active Route"} • {visibleFavoriteIds.length} POIs Visible
+                </div>
               </div>
           </div>
       </div>
 
       {/* Route Editor Modal */}
       {editingRoute && (
-         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-            <div className={`w-full max-w-2xl max-h-[85vh] flex flex-col ${theme.modal}`}>
-               <div className={`p-4 flex items-center justify-between border-b ${isRetro ? 'border-current' : 'border-white/10'}`}>
-                   <h3 className={`text-xl font-bold uppercase ${theme.headerTitle}`}>Edit Route</h3>
-                   <button onClick={() => setEditingRoute(null)} className={theme.closeBtn}><X size={20} /></button>
-               </div>
+         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm pointer-events-auto">
+            <div className={`relative w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden ${theme.modal} ${skin === 'parchment' ? '[isolation:isolate]' : ''}`}>
+               {skin === 'parchment' && (
+                 <div className="parchment-background" aria-hidden="true" />
+               )}
+               <div className="relative z-[1] flex flex-col flex-1 overflow-hidden">
+                 <div className={`p-4 flex items-center justify-between ${skin === 'parchment' ? '' : isRetro ? 'border-b border-current' : 'border-b border-white/10'}`}>
+                     <h3 className={`text-xl font-bold uppercase ${theme.headerTitle}`}>Edit Route</h3>
+                     <button onClick={() => setEditingRoute(null)} className={theme.closeBtn}><X size={20} /></button>
+                 </div>
                
-               <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
+               <div className={`p-6 overflow-y-auto ${skin === 'parchment' ? 'parchment-scrollbar' : 'custom-scrollbar'} flex-1`}>
                    <div className="mb-6">
                        <label className={`block text-xs uppercase font-bold mb-2 opacity-70 ${theme.text}`}>Route Name</label>
                        <input 
@@ -433,14 +443,15 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
                    </div>
                </div>
 
-               <div className={`p-4 border-t flex justify-end gap-3 ${isRetro ? 'border-current' : 'border-white/10 bg-white/5'}`}>
+                <div className={`p-4 flex justify-end gap-3 ${skin === 'parchment' ? '' : isRetro ? 'border-t border-current' : 'border-t border-white/10 bg-white/5'}`}>
                    <button onClick={() => setEditingRoute(null)} className="px-4 py-2 text-sm opacity-70 hover:opacity-100">Cancel</button>
-                   <button 
-                       onClick={saveEditedRoute} 
-                       className={`px-6 py-2 font-bold uppercase flex items-center gap-2 ${skin === 'parchment' ? 'bg-[#d2b48c] text-[#3e2723] hover:bg-[#e8d5b5] border border-[#8b5a2b]' : isRetro ? 'bg-green-400 text-black hover:opacity-90' : 'bg-cyan-600 hover:bg-cyan-500 rounded-lg shadow-lg shadow-cyan-900/50'}`}
-                   >
-                       <Save size={16} /> Save Changes
-                   </button>
+                    <button 
+                        onClick={saveEditedRoute} 
+                        className={`px-6 py-2 font-bold uppercase flex items-center gap-2 ${skin === 'parchment' ? 'bg-[#d2b48c] text-[#3e2723] hover:bg-[#e8d5b5]' : isRetro ? 'bg-green-400 text-black hover:opacity-90' : 'bg-cyan-600 hover:bg-cyan-500 rounded-lg shadow-lg shadow-cyan-900/50'}`}
+                    >
+                        {skin === 'parchment' ? <AntiqueBookIcon size={16} /> : <Save size={16} />} Save Changes
+                    </button>
+                </div>
                </div>
             </div>
          </div>

@@ -104,8 +104,8 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
         expect(html).toContain('border-amber-400');
         expect(html).toContain('text-amber-300');
       } else if (skin === 'parchment') {
-        expect(html).toContain('border-[#8b5a2b]');
         expect(html).toContain('text-[#3e2723]');
+        expect(html).toContain('bg-[#e8d5b5]/40');
       }
     });
   });

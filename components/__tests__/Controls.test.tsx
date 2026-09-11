@@ -162,10 +162,10 @@ describe('Controls Modern Theme OSM Button Hover Contrast', () => {
     expect(html).not.toContain('hover:bg-white/10 rounded-full');
   });
 
-  test('non-modern themes (retro-green, retro-amber, parchment) are completely unaffected by isOSMDisplayed', () => {
-    const nonModernSkins: SkinType[] = ['retro-green', 'retro-amber', 'parchment'];
+  test('retro themes (retro-green, retro-amber) are completely unaffected by isOSMDisplayed', () => {
+    const retroSkins: SkinType[] = ['retro-green', 'retro-amber'];
 
-    nonModernSkins.forEach((skin) => {
+    retroSkins.forEach((skin) => {
       const htmlGlobe = renderToStaticMarkup(
         <Controls {...baseProps} skin={skin} isOSMDisplayed={false} />
       );
@@ -173,7 +173,7 @@ describe('Controls Modern Theme OSM Button Hover Contrast', () => {
         <Controls {...baseProps} skin={skin} isOSMDisplayed={true} />
       );
 
-      // HTML should be identical between globe and OSM for retro and parchment skins
+      // HTML should be identical between globe and OSM for retro skins
       expect(htmlOSM).toBe(htmlGlobe);
       expect(htmlOSM).not.toContain('modern-osm-hover rounded-full');
 
@@ -181,8 +181,6 @@ describe('Controls Modern Theme OSM Button Hover Contrast', () => {
         expect(htmlOSM).toContain('hover:bg-green-400 hover:text-black');
       } else if (skin === 'retro-amber') {
         expect(htmlOSM).toContain('hover:bg-amber-400 hover:text-black');
-      } else if (skin === 'parchment') {
-        expect(htmlOSM).toContain('hover:bg-[#e8d5b5] hover:text-[#3e2723]');
       }
     });
   });
@@ -194,6 +192,102 @@ describe('Controls Modern Theme OSM Button Hover Contrast', () => {
 
     expect(html).toContain('.modern-osm-hover:hover');
     expect(html).toContain('background-color: rgba(0, 0, 0, 0.25)');
+  });
+});
+
+describe('Controls Vertical Separator Lines', () => {
+  const baseProps = {
+    onZoomIn: vi.fn(),
+    onZoomOut: vi.fn(),
+    onSearch: vi.fn(),
+    onTraceRoute: vi.fn(),
+    isSearching: false,
+    skin: 'modern' as SkinType,
+    showFavorites: false,
+    onToggleShowFavorites: vi.fn(),
+    paused: false,
+    isTraceModalOpen: false,
+    onToggleTraceModal: vi.fn(),
+    isZoomLocked: false,
+    onToggleZoomLock: vi.fn(),
+    onCycleSkin: vi.fn(),
+    onToggleSettings: vi.fn(),
+  };
+
+  test('Parchment theme in Globe view uses two matching light separators (bg-white/20)', () => {
+    const html = renderToStaticMarkup(
+      <Controls {...baseProps} skin="parchment" isOSMDisplayed={false} />
+    );
+
+    // Both separators should be bg-white/20
+    const separatorMatches = html.match(/class="w-px mx-1 self-stretch bg-white\/20"/g);
+    expect(separatorMatches).not.toBeNull();
+    expect(separatorMatches?.length).toBe(2);
+
+    // Should NOT contain the brown separator
+    expect(html).not.toContain('bg-[#8b5a2b]/30');
+  });
+
+  test('Parchment theme in OSM view uses two matching dark brown separators (bg-[#8b5a2b]/30)', () => {
+    const html = renderToStaticMarkup(
+      <Controls {...baseProps} skin="parchment" isOSMDisplayed={true} />
+    );
+
+    // Both separators should be bg-[#8b5a2b]/30
+    const separatorMatches = html.match(/class="w-px mx-1 self-stretch bg-\[#8b5a2b\]\/30"/g);
+    expect(separatorMatches).not.toBeNull();
+    expect(separatorMatches?.length).toBe(2);
+
+    // Should NOT contain the white separator in the controls bar
+    expect(html).not.toContain('class="w-px mx-1 self-stretch bg-white/20"');
+  });
+
+  test('Modern theme in Globe view uses existing light separators (bg-white/20)', () => {
+    const html = renderToStaticMarkup(
+      <Controls {...baseProps} skin="modern" isOSMDisplayed={false} />
+    );
+
+    const separatorMatches = html.match(/class="w-px mx-1 self-stretch bg-white\/20"/g);
+    expect(separatorMatches).not.toBeNull();
+    expect(separatorMatches?.length).toBe(2);
+    expect(html).not.toContain('class="w-px mx-1 self-stretch bg-black/60"');
+  });
+
+  test('Modern theme in OSM view uses matching gray separators (bg-black/60)', () => {
+    const html = renderToStaticMarkup(
+      <Controls {...baseProps} skin="modern" isOSMDisplayed={true} />
+    );
+
+    const separatorMatches = html.match(/class="w-px mx-1 self-stretch bg-black\/60"/g);
+    expect(separatorMatches).not.toBeNull();
+    expect(separatorMatches?.length).toBe(2);
+    expect(html).not.toContain('class="w-px mx-1 self-stretch bg-white/20"');
+  });
+
+  test('Retro Green theme keeps existing separator colors in both Globe and OSM views', () => {
+    const htmlGlobe = renderToStaticMarkup(
+      <Controls {...baseProps} skin="retro-green" isOSMDisplayed={false} />
+    );
+    const htmlOSM = renderToStaticMarkup(
+      <Controls {...baseProps} skin="retro-green" isOSMDisplayed={true} />
+    );
+
+    expect(htmlGlobe).toContain('class="w-px mx-1 self-stretch bg-white/20"');
+    expect(htmlGlobe).toContain('class="w-px mx-1 self-stretch bg-green-400/30"');
+    expect(htmlOSM).toBe(htmlGlobe);
+  });
+
+  test('Retro Amber theme keeps existing separator colors in both Globe and OSM views', () => {
+    const htmlGlobe = renderToStaticMarkup(
+      <Controls {...baseProps} skin="retro-amber" isOSMDisplayed={false} />
+    );
+    const htmlOSM = renderToStaticMarkup(
+      <Controls {...baseProps} skin="retro-amber" isOSMDisplayed={true} />
+    );
+
+    expect(htmlGlobe).toContain('class="w-px mx-1 self-stretch bg-white/20"');
+    expect(htmlGlobe).toContain('class="w-px mx-1 self-stretch bg-amber-400/30"');
+    expect(htmlOSM).toBe(htmlGlobe);
   });
 });
 

@@ -692,14 +692,15 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
 
       
       const isHistoricalDiscovery = ['DISCOVERY_LOCATION', 'DISCOVERY_OBJECT_LOCATION', 'historical_site', 'shipwreck', 'archaeological site', 'excavation site'].includes(intent || '');
-      let historicalCoords = null;
+      let historicalCoords: GeoCoordinates | null = null;
+      let historicalLocationStr = '';
       if (isHistoricalDiscovery) {
           const histPrompt = `You are resolving a historical discovery location.
 
 Entity:
 ${targetSearchTerm} (Query: "${rawQuery || query}")
 
-Return the physical discovery / recovery location (e.g. Terror Bay, Nunavut for HMS Terror; Wilmot and Crampton Bay, Nunavut for HMS Erebus; North Atlantic floor for Titanic; Stockholm Harbor for Vasa), not a namesake location.
+Return the physical discovery / recovery / shipwreck location, not a namesake location.
 
 Ignore:
 - towns
@@ -728,6 +729,7 @@ Return only JSON:
                   const val = histParsed.value as any;
                   if (val.lat !== undefined && val.lng !== undefined) {
                       historicalCoords = { lat: val.lat, lng: val.lng };
+                      historicalLocationStr = val.location || '';
                       console.log(`[HISTORICAL LOCATION RESOLUTION]\n{\n  "entity": "${targetSearchTerm}",\n  "resolved location": "${val.location}",\n  "coordinates": ${JSON.stringify(historicalCoords)},\n  "confidence": "${val.confidence}"\n}`);
                   }
               }
@@ -764,6 +766,9 @@ Return only JSON:
 
       if (historicalCoords) {
          data.coordinates = historicalCoords;
+         if (historicalLocationStr && !data.locationString) {
+           data.locationString = historicalLocationStr;
+         }
       }
 
       if (data.name) {
@@ -781,10 +786,22 @@ Return only JSON:
         });
 
         if (!entityCheck.matches) {
-          console.warn(`[AI RESOLUTION REJECTED] AI substituted different entity "${data.name}" for requested "${targetSearchTerm}". Reverting to requested entity without fabricated coordinates.`);
-          data.name = targetSearchTerm;
-          data.coordinates = undefined;
-          return { error: "NO_GEOGRAPHIC_DATA", locationInfo: { name: targetSearchTerm }, aiUsed: true };
+          if (historicalCoords) {
+            console.warn(`[AI RESOLUTION ENTITY SUBSTITUTED] AI substituted different entity "${data.name}" for requested "${targetSearchTerm}". Resetting name to requested entity and retaining pre-resolved historical coordinates.`);
+            data.name = targetSearchTerm;
+            data.canonicalName = targetSearchTerm;
+            data.coordinates = historicalCoords;
+            if (historicalLocationStr) {
+              data.locationString = historicalLocationStr;
+            }
+            data.coordinateSource = "ai" as CoordinateSource;
+            data.identityStatus = "verified" as GeographicIdentityStatus;
+          } else {
+            console.warn(`[AI RESOLUTION REJECTED] AI substituted different entity "${data.name}" for requested "${targetSearchTerm}". Reverting to requested entity without fabricated coordinates.`);
+            data.name = targetSearchTerm;
+            data.coordinates = undefined;
+            return { error: "NO_GEOGRAPHIC_DATA", locationInfo: { name: targetSearchTerm }, aiUsed: true };
+          }
         } else {
           data.canonicalName = data.name;
         }
@@ -1336,11 +1353,13 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
     if (data.climate && typeof data.climate === 'object' && data.climate.name && data.climate.name !== 'Unavailable') {
       const lat = data.coordinates?.lat;
       const lng = data.coordinates?.lng;
+      const eType = data.entityType || data.type;
       if (lat !== undefined && lng !== undefined && !isNaN(Number(lat)) && !isNaN(Number(lng))) {
-        const isValid = isClimateGeographicallyValid(data.climate.koppenCode, Number(lat), Number(lng), data.state || data.region, data.country);
-        if (!isValid) {
+        const conflict = isClimateConflicting(data.climate, undefined, Number(lat), Number(lng), data.state || data.region, data.country, eType);
+        const isValid = !conflict.isConflict && isClimateGeographicallyValid(data.climate.koppenCode, Number(lat), Number(lng), data.state || data.region, data.country);
+        if (!isValid || conflict.isConflict) {
           console.warn(`[Climate Validation] Discarded geographically incorrect climate "${data.climate.name}" (${data.climate.koppenCode}) for location ${lat}, ${lng} (${data.state || data.region}, ${data.country}). Correcting to regional baseline.`);
-          const est = getEstimatedClimate(Number(lat), Number(lng), data.state || data.region, data.country, data.entityType || data.type);
+          const est = getEstimatedClimate(Number(lat), Number(lng), data.state || data.region, data.country, eType);
           data.climate = {
             name: est.climateName.toLowerCase().includes('climate') ? est.climateName : `${est.climateName} Climate`,
             description: getClimateDescription(est.koppenCode, est.climateName),
@@ -2835,7 +2854,7 @@ export const generateRoute = async (
   };
 
   try {
-    const route = await runRoutePipeline(text, isUrl, generateRawRoute, intent);
+    const route = await runRoutePipeline(text, isUrl, generateRawRoute, effectiveIntent);
     return route;
   } catch (error) {
     if (isLMStudioNoModelError(error)) {
@@ -3710,6 +3729,9 @@ export const recoverLocationMetadata = async (
     }
     
     console.log(`[METADATA RECOVERY]\nValid fields: ${validFields.length > 0 ? validFields.join(', ') : 'None'}\nRejected fields: ${rejectedFields.length > 0 ? rejectedFields.join(', ') : 'None'}`);
+    
+    (metadata as any)._validFields = validFields;
+    (metadata as any)._rejectedFields = rejectedFields;
     
     console.log(`Final Metadata Keys:\n${Object.keys(metadata).join(', ')}`);
     console.log(`================================`);
