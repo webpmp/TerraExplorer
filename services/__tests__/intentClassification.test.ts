@@ -3,11 +3,11 @@ import { routeIntentAndExtractEntity } from '../geminiService';
 
 describe('Intent Classification Regression Tests', () => {
   const testCases = [
-    // Historical Event Queries
-    { query: "Where did the eruption of Vesuvius take place?", expectedIntent: "HISTORICAL_EVENT", expectedEntity: "eruption of Vesuvius", expectedMode: "MULTI_LOCATION_EXPLORATION" },
-    { query: "Where did the Boston Massacre take place?", expectedIntent: "HISTORICAL_EVENT", expectedEntity: "Boston Massacre", expectedMode: "MULTI_LOCATION_EXPLORATION" },
-    { query: "Where did Woodstock take place?", expectedIntent: "HISTORICAL_EVENT", expectedEntity: "Woodstock", expectedMode: "MULTI_LOCATION_EXPLORATION" },
-    { query: "Where did the Viking Age take place?", expectedIntent: "HISTORICAL_EVENT", expectedEntity: "Viking Age", expectedMode: "MULTI_LOCATION_EXPLORATION" },
+    // Historical Event Queries (Location of Event -> SINGLE_POINT)
+    { query: "Where did the eruption of Vesuvius take place?", expectedIntent: "HISTORICAL_EVENT", expectedEntity: "eruption of Vesuvius", expectedMode: "SINGLE_POINT" },
+    { query: "Where did the Boston Massacre take place?", expectedIntent: "HISTORICAL_EVENT", expectedEntity: "Boston Massacre", expectedMode: "SINGLE_POINT" },
+    { query: "Where did Woodstock take place?", expectedIntent: "HISTORICAL_EVENT", expectedEntity: "Woodstock", expectedMode: "SINGLE_POINT" },
+    { query: "Where did the Viking Age take place?", expectedIntent: "HISTORICAL_EVENT", expectedEntity: "Viking Age", expectedMode: "SINGLE_POINT" },
 
     // Geographic Queries
     { query: "Where is Boston?", expectedIntent: "NATURAL_LOCATION", expectedEntity: "Boston", expectedMode: undefined },

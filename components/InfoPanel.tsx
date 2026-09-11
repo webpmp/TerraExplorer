@@ -20,7 +20,7 @@ import {
   ContextCategory,
   CONTEXT_CATEGORY_HEADINGS
 } from '../utils/contextClassification';
-import { generateDefaultRouteName } from '../services/queryNormalizer';
+import { generateDefaultRouteName, normalizeSemanticEntityTitle, isCoordinateTitle } from '../services/queryNormalizer';
 export { classifyContext, isPureGeographicLabel, sanitizeContextMarkdown };
 
 
@@ -650,8 +650,9 @@ export const normalizeHeaderGeographicHierarchy = (
     return { displayTitle: '', displaySubtitle: null, displayAltNames: null };
   }
 
-  const isGenericTitle = (str?: string): boolean => {
+  const isGenericOrCoordinateTitle = (str?: string): boolean => {
     if (!str || typeof str !== 'string') return true;
+    if (isCoordinateTitle(str)) return true;
     const trimmed = str.trim().toLowerCase();
     return !trimmed ||
       trimmed === 'route context' ||
@@ -667,12 +668,21 @@ export const normalizeHeaderGeographicHierarchy = (
 
   const rawCandidate = info.canonicalName || (info as any).displayName || info.waypoint?.canonicalName || info.name || info.waypoint?.name || '';
   let rawTitle = cleanMetadataString(rawTitleOverride || rawCandidate) || '';
-  if (isGenericTitle(rawTitle) && rawCandidate && !isGenericTitle(rawCandidate)) {
+  if (isGenericOrCoordinateTitle(rawTitle) && rawCandidate && !isGenericOrCoordinateTitle(rawCandidate)) {
     rawTitle = cleanMetadataString(rawCandidate) || '';
   }
-  if (rawTitle && rawTitle === rawTitle.toLowerCase()) {
-    rawTitle = rawTitle.replace(/\b([a-z])/g, (_, l) => l.toUpperCase());
-  }
+
+  // Authoritative normalization of semantic title
+  rawTitle = normalizeSemanticEntityTitle({
+    explicitTitle: rawTitle,
+    canonicalName: info.canonicalName || info.waypoint?.canonicalName,
+    displayName: (info as any).displayName,
+    name: info.name || info.waypoint?.name,
+    description: info.description || info.waypoint?.description,
+    historicalContext: (info as any).historicalContext || (info as any).context,
+    routeTitle: (info as any).routeTitle || info.waypoint?.routeTitle,
+    coordinates: info.coordinates || info.waypoint
+  });
 
   // Step A: Parse candidate place name & title geographic qualifiers
   let primaryNameCandidate = rawTitle;
@@ -1927,7 +1937,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     'parchment': {
       container: "shadow-[4px_4px_10px_rgba(0,0,0,0.3)] text-[#3e2723] font-sans",
       panelBg: "bg-transparent",
-      header: "bg-[#e8d5b5]/30",
+      header: "",
       headerTitle: "text-[#8b5a2b] uppercase tracking-wider brand-font",
       locationTitle: "text-[#8b5a2b] font-garamond tracking-wide",
       tag: "text-[#3e2723] bg-[#d2b48c] rounded-sm font-bold shadow-sm",
@@ -2571,7 +2581,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           )}
           {/* Header */}
 
-          <div className={`relative p-5 shrink-0 flex flex-col items-center ${skin === 'modern' ? 'border-b border-white/10' : ''} ${theme.header}`}>
+          <div className={`relative p-5 shrink-0 flex flex-col items-center ${skin === 'modern' ? 'border-b border-white/10' : ''} ${theme.header}`.replace(/\s+/g, ' ').trim()}>
             {/* 1. Close X button */}
             <button onClick={onClose} className={`absolute top-3 right-3 p-1 z-50 pointer-events-auto transition-colors ${theme.closeBtn}`} aria-label="Close panel">
               <X size={20} />

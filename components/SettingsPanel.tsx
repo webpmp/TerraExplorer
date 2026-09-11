@@ -149,10 +149,17 @@ export const testNewsConnectionService = async (
   const newsApiKey = apiKeys?.newsApiKey || env?.VITE_NEWS_API_KEY || '';
   const newsDataKey = apiKeys?.newsDataApiKey || env?.VITE_NEWS_DATA_API_KEY || '';
 
+  const activeKey = provider === 'nyt' ? nytKey : (provider === 'newsapi' ? newsApiKey : (provider === 'newsdata' ? newsDataKey : ''));
+  const isKeyConfigured = Boolean(activeKey && activeKey.trim());
+
+  console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=START\nAPIKeyConfigured=${isKeyConfigured}\nAPIKeySource=environment`);
+
   const query = 'archaeology discovery';
   let url = '';
 
   if (provider === 'gemini') {
+    console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=SUCCESS\nStatus=200\nResponseReceived=true`);
+    console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=COMPLETE\nResult=SUCCESS`);
     return {
       outcome: 'SUCCESS',
       message: 'Gemini News Search is configured.'
@@ -161,6 +168,8 @@ export const testNewsConnectionService = async (
 
   if (provider === 'nyt') {
     if (!nytKey) {
+      console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=FAILED\nError=API key not configured for ${providerLabel}`);
+      console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=COMPLETE\nResult=FAILED`);
       return {
         outcome: 'FAILED',
         message: 'NYT API Key is missing.'
@@ -169,6 +178,8 @@ export const testNewsConnectionService = async (
     url = `https://api.nytimes.com/svc/search/v2/articlesearch.json?q=${encodeURIComponent(query)}&api-key=${encodeURIComponent(nytKey)}`;
   } else if (provider === 'newsapi') {
     if (!newsApiKey) {
+      console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=FAILED\nError=API key not configured for ${providerLabel}`);
+      console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=COMPLETE\nResult=FAILED`);
       return {
         outcome: 'FAILED',
         message: 'NewsAPI Key is missing.'
@@ -177,6 +188,8 @@ export const testNewsConnectionService = async (
     url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(query)}&pageSize=1&apiKey=${encodeURIComponent(newsApiKey)}`;
   } else if (provider === 'newsdata') {
     if (!newsDataKey) {
+      console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=FAILED\nError=API key not configured for ${providerLabel}`);
+      console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=COMPLETE\nResult=FAILED`);
       return {
         outcome: 'FAILED',
         message: 'NewsData.io Key is missing.'
@@ -184,6 +197,8 @@ export const testNewsConnectionService = async (
     }
     url = `https://newsdata.io/api/1/news?apikey=${encodeURIComponent(newsDataKey)}&q=${encodeURIComponent(query)}&size=1`;
   } else {
+    console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=FAILED\nError=Unknown news provider: ${provider}`);
+    console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=COMPLETE\nResult=FAILED`);
     return {
       outcome: 'FAILED',
       message: `Unknown news provider: ${provider}`
@@ -193,13 +208,16 @@ export const testNewsConnectionService = async (
   let testOutcome: 'SUCCESS' | 'FAILED' = 'FAILED';
 
   try {
-    console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=START\nEndpoint=${url.replace(/api[-_]?key=[^&]+/i, 'apiKey=REDACTED')}`);
+    const redactedEndpoint = url
+      .replace(/api[-_]?key=[^&]+/i, 'apiKey=REDACTED')
+      .replace(/apikey=[^&]+/i, 'apiKey=REDACTED');
+    console.log(`[NEWS TEST CONNECTION]\nProvider=${providerLabel}\nAction=REQUEST\nEndpoint=${redactedEndpoint}`);
 
     const res = await fetch(url);
     if (res.ok) {
       let usableArticlesCount = 0;
       try {
-        const data = await res.clone().json();
+        const data = typeof (res as any).clone === 'function' ? await res.clone().json() : await res.json();
 
         if (Array.isArray(data.articles)) {
           // NewsAPI

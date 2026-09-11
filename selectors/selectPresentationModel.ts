@@ -1,8 +1,18 @@
 import { ResolvedEntity, PresentationModel, MetadataLoadState } from '../domain';
 import { formatUserFacingCategory } from '../utils/categoryFormatting';
+import { normalizeSemanticEntityTitle } from '../services/queryNormalizer';
 
 export const selectEntityTitle = (entity: ResolvedEntity): string => {
-    return entity.subject.identity.canonicalName ?? entity.subject.primaryLocation.label;
+    const raw = entity.subject.identity.canonicalName ?? entity.subject.primaryLocation.label;
+    return normalizeSemanticEntityTitle({
+        explicitTitle: raw,
+        canonicalName: entity.subject.identity.canonicalName,
+        displayName: entity.subject.primaryLocation.label,
+        name: raw,
+        description: entity.metadata?.description,
+        historicalContext: entity.metadata?.historicalContext,
+        coordinates: entity.subject.primaryLocation.location?.coordinates
+    });
 };
 
 export const selectEntitySubtitle = (entity: ResolvedEntity): string => {

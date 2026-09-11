@@ -59,7 +59,7 @@ describe('Semantic Entity Resolution Architecture Tests', () => {
       const routed = routeIntentAndExtractEntity('Where did the launch of Sputnik take place?');
       expect(routed.intent).toBe('HISTORICAL_EVENT');
       expect(routed.entity.toLowerCase()).toContain('sputnik');
-      expect(routed.resolutionMode).toBe('MULTI_LOCATION_EXPLORATION');
+      expect(routed.resolutionMode).toBe('SINGLE_POINT');
     });
 
     test('Gagarin Launch query routes to HISTORICAL_EVENT and extracts entity', () => {

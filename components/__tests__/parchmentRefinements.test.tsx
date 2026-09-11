@@ -353,5 +353,71 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
     );
     expect(modernFavs).not.toContain('lucide-open-book-perfect-fill');
   });
+
+  test('9. InfoPanel header in Parchment theme has no explicit background class, creating a seamless surface with waypoint navigator', () => {
+    const routeInfo = {
+      ...dummyInfo,
+      name: 'Trans-Saharan Route',
+      waypoints: [
+        { name: 'Timbuktu', lat: 16.7666, lng: -3.0026 },
+        { name: 'Ghadames', lat: 30.1333, lng: 9.5 }
+      ]
+    };
+
+    const parchmentHtml = renderToStaticMarkup(
+      <InfoPanel
+        info={routeInfo}
+        onClose={vi.fn()}
+        skin="parchment"
+        routeNav={{
+          waypoints: routeInfo.waypoints,
+          currentIndex: 0,
+          onSelectIndex: vi.fn()
+        }}
+      />
+    );
+
+    // Parchment header container has no bg-[#e8d5b5]/30 and renders cleanly
+    expect(parchmentHtml).toContain('<div class="relative p-5 shrink-0 flex flex-col items-center">');
+    expect(parchmentHtml).not.toContain('bg-[#e8d5b5]/30');
+
+    // Waypoint navigator container remains transparent
+    expect(parchmentHtml).toContain('bg-transparent');
+
+    // Modern skin retains border-b border-white/10 and bg-white/5
+    const modernHtml = renderToStaticMarkup(
+      <InfoPanel
+        info={routeInfo}
+        onClose={vi.fn()}
+        skin="modern"
+        routeNav={{
+          waypoints: routeInfo.waypoints,
+          currentIndex: 0,
+          onSelectIndex: vi.fn()
+        }}
+      />
+    );
+    expect(modernHtml).toContain('relative p-5 shrink-0 flex flex-col items-center border-b border-white/10 bg-gradient-to-r from-blue-900 to-cyan-900');
+
+    // Retro-green retains bg-green-900/30
+    const greenHtml = renderToStaticMarkup(
+      <InfoPanel
+        info={routeInfo}
+        onClose={vi.fn()}
+        skin="retro-green"
+      />
+    );
+    expect(greenHtml).toContain('relative p-5 shrink-0 flex flex-col items-center bg-green-900/30');
+
+    // Retro-amber retains bg-amber-900/30
+    const amberHtml = renderToStaticMarkup(
+      <InfoPanel
+        info={routeInfo}
+        onClose={vi.fn()}
+        skin="retro-amber"
+      />
+    );
+    expect(amberHtml).toContain('relative p-5 shrink-0 flex flex-col items-center bg-amber-900/30');
+  });
 });
 

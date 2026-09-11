@@ -652,27 +652,31 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
            - Identify the EXACT physical site, facility, launchpad, or battlefield where the specific queried historical event occurred.
            - Event Semantic Anchoring: The queried event MUST remain the primary anchor of the location resolution, coordinates, description, and notable facts.
              Examples:
+             - "Where did the Lusitania sink?" / "Lusitania sinking" -> Set 'name' to "RMS Lusitania Sinking Site" at ~51.3762° N, 11.4558° W off the Old Head of Kinsale, Ireland. DO NOT name the location "Position 51.3762 N, 11.4558 W" or "Coordinates...".
+             - "Where did the Titanic sink?" -> Set 'name' to "RMS Titanic Sinking Site" at ~41.7269° N, 49.9483° W.
              - "Where did the launch of Sputnik take place?" / "launch of Sputnik" -> Resolve to "Site No. 1, Baikonur Cosmodrome" at ~45.92° N, 63.34° E in present-day Kazakhstan (the specific launch site of Sputnik 1 on Oct 4, 1957; do NOT select Site No. 33 or unrelated later facilities).
              - "Where did Yuri Gagarin launch into space?" -> Resolve to "Site No. 1 (Gagarin's Start), Baikonur Cosmodrome" at ~45.92° N, 63.34° E in present-day Kazakhstan (the launch site of Vostok 1 on Apr 12, 1961).
              - "Where did the first atomic bomb test take place?" -> Resolve to "Trinity Site, White Sands" at ~33.677° N, 106.475° W.
+             - "Where was Abraham Lincoln assassinated?" -> Resolve to "Ford's Theatre" at ~38.8967° N, 77.0258° W in Washington, D.C.
              - "Where was the signing of the Declaration of Independence?" -> Resolve to "Pennsylvania State House (Independence Hall)" at ~39.948° N, 75.150° W in Philadelphia.
              - "Where was the Apollo 11 launch?" -> Resolve to "Launch Complex 39A, Kennedy Space Center" at ~28.608° N, 80.604° W in Florida.
              - "Where was the Hindenburg disaster?" -> Resolve to "Lakehurst Naval Air Station" at ~40.033° N, 74.333° W in New Jersey.
-           - Set 'name' to the specific physical site name.
+           - Set 'name' to a meaningful, descriptive title (e.g., "RMS Lusitania Sinking Site", "Ford's Theatre"). NEVER set 'name' to raw coordinates or "Position ...".
            - Set 'entityType' to 'historical_event_site', 'historical_site', or 'battlefield'.
            - Set 'type' to 'Point of Interest'. DO NOT return generic surrounding city names.
            - Other events at the same broader facility (e.g. Gagarin in 1961 for a Sputnik query) may only appear as secondary context and must NEVER displace the queried event.
         2. DISCOVERY_OBJECT_LOCATION:
            - Resolve the original discovery / recovery site coordinates (e.g. North Atlantic ocean floor for Titanic, Stockholm Harbor for Vasa discovery site, Terror Bay / King William Island in Nunavut for HMS Terror, Wilmot and Crampton Bay in Nunavut for HMS Erebus, Fort Julien for Rosetta Stone, Qumran Caves for Dead Sea Scrolls).
-           - Set 'entityType' to 'historical_site'.
+           - Set 'name' to the descriptive discovery/shipwreck site name. NEVER set 'name' to raw coordinates.
+           - Set 'entityType' to 'historical_site' or 'shipwreck_site'.
            - Set 'locationType' to 'discovery_location'.
            - Set 'type' to 'Point of Interest'. DO NOT return current display museum locations unless query explicitly asks for the museum.
         3. NATURAL_LOCATION:
            - Resolve geographic features or places. For mountains, mountains ranges, lakes, rivers, set 'entityType' to 'mountain', 'natural_feature', 'ocean', etc. For cities, set 'entityType' to 'city'.
 
         Return a JSON object:
-        - 'name': The feature's proper name only (e.g. "Mount Rainier" not "Mount Rainier, Washington"). Do NOT append State, Province, Country, or administrative hierarchy.
-        - 'locationString': The geographic hierarchy separated from the title (e.g. "Florida, United States").
+        - 'name': The feature's proper name only (e.g. "Mount Rainier" not "Mount Rainier, Washington", "RMS Lusitania Sinking Site" not coordinates). Do NOT append State, Province, Country, or administrative hierarchy. FORBIDDEN: Do NOT output coordinate strings (e.g., "Position 51.3762 N, 11.4558 W") as the name.
+        - 'locationString': The geographic hierarchy separated from the title (e.g. "Celtic Sea, off Old Head of Kinsale, Ireland").
         - 'entityType': Choose ONE from: city, country, state, ocean, natural_feature, mountain, landmark, museum, historical_event_site, archaeological_site, discovery_site, shipwreck_site, artifact, battlefield, festival_site.
         - 'type': Choose ONE from: Continent, Country, State, City, Ocean, Point of Interest.
         - 'metadataMode': MUST be exactly one of: "historical_site", "modern_place", or "natural_feature".
@@ -770,6 +774,21 @@ Return only JSON:
            data.locationString = historicalLocationStr;
          }
       }
+
+      // Canonicalize and normalize name through authoritative semantic entity normalization
+      const normalizedTitle = normalizeSemanticEntityTitle({
+        explicitTitle: data.name,
+        canonicalName: data.canonicalName,
+        displayName: data.displayName,
+        name: data.name,
+        subject: targetSearchTerm,
+        rawQuery: rawQuery || query,
+        query: query,
+        description: data.description,
+        coordinates: data.coordinates
+      });
+      data.name = normalizedTitle;
+      data.canonicalName = normalizedTitle;
 
       if (data.name) {
         const entityCheck = validateEntityIdentity(targetSearchTerm, data.name, { rawQuery: rawQuery || query, intent });
@@ -2871,11 +2890,13 @@ export interface ExtractedQuery {
   entity: string;
   queryShape?: 'NATURAL_LANGUAGE_QUESTION' | 'DIRECT' | 'HISTORICAL_ROUTE' | 'MULTI_LOCATION' | 'EXPLORATORY' | 'HISTORICAL_EVENT' | 'DISCOVERY_OBJECT_LOCATION' | string;
   subject?: string;
+  event?: string;
+  requestedRelationship?: string;
   discoveryTarget?: string;
   resolutionMode?: 'SINGLE_POINT' | 'MULTI_LOCATION_EXPLORATION';
 }
 
-import { detectHistoricalRouteEvent } from './queryNormalizer';
+import { detectHistoricalRouteEvent, normalizeSemanticEntityTitle } from './queryNormalizer';
 
 export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
   const clean = query.trim();
@@ -3001,53 +3022,95 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
     }
   }
 
-  // 3. Check for Discovery / Recovery patterns first
-  const discoveryPatterns = [
-    /^\s*where\s+(?:was|were)\s+(?:the\s+)?(.+?)\s+(?:found|discovered|recovered|unearthed|excavated|located)\s*\??\s*$/i,
-    /^\s*where\s+did\s+(?:they|researchers|archaeologists)?\s*(?:find|discover|recover|unearth|excavate)\s+(?:the\s+)?(.+?)\s*\??\s*$/i,
-    /^\s*discovery\s+site\s+of\s+(?:the\s+)?(.+?)\s*\??\s*$/i,
-    /^\s*location\s+where\s+(?:the\s+)?(.+?)\s+was\s+(?:found|discovered|recovered|unearthed)\s*\??\s*$/i,
+  // 3. Check for Discovery / Recovery patterns
+  const discoveryPatterns: { regex: RegExp; getDetails: (match: RegExpMatchArray) => { subject: string; event: string; relationship: string } }[] = [
+    {
+      regex: /^\s*where\s+(?:was|were)\s+(?:the\s+)?(.+?)\s+(found|discovered|recovered|unearthed|excavated|located)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: m[2], relationship: 'discovery_site' })
+    },
+    {
+      regex: /^\s*where\s+did\s+(?:they|researchers|archaeologists)?\s*(find|discover|recover|unearth|excavate)\s+(?:the\s+)?(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[2], event: m[1], relationship: 'discovery_site' })
+    },
+    {
+      regex: /^\s*discovery\s+site\s+of\s+(?:the\s+)?(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: 'discovery', relationship: 'discovery_site' })
+    },
+    {
+      regex: /^\s*location\s+where\s+(?:the\s+)?(.+?)\s+was\s+(found|discovered|recovered|unearthed)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: m[2], relationship: 'discovery_site' })
+    }
   ];
 
-  for (const pattern of discoveryPatterns) {
-    const match = clean.match(pattern);
-    if (match && match[1]) {
-      let entityStr = match[1].replace(/[?.,!]+$/, "").trim();
+  for (const item of discoveryPatterns) {
+    const match = clean.match(item.regex);
+    if (match) {
+      const { subject, event, relationship } = item.getDetails(match);
+      let entityStr = subject.replace(/[?.,!]+$/, "").trim();
       entityStr = entityStr.replace(/^(?:the\s+)?(?:wreck|wreckage|remains|ruins|site)\s+of\s+(?:the\s+)?/i, "");
       const cleanedEntity = entityStr.replace(/^the\s+/i, "");
-      const finalEntity = toCanonicalTitleCase(cleanedEntity || entityStr);
+      const finalSubject = toCanonicalTitleCase(cleanedEntity || entityStr);
       return {
         intent: 'DISCOVERY_OBJECT_LOCATION',
-        entity: finalEntity,
+        entity: finalSubject,
+        subject: finalSubject,
+        event,
+        requestedRelationship: relationship,
+        resolutionMode: 'SINGLE_POINT',
         queryShape: 'DISCOVERY_OBJECT_LOCATION'
       };
     }
   }
 
-  // 4. Check for Historical Event patterns
-  const historicalPatterns = [
-    /^\s*where\s+did\s+(.+?)\s+take\s+place\s*\??\s*$/i,
-    /^\s*where\s+did\s+(.+?)\s+happen\s*\??\s*$/i,
-    /^\s*where\s+did\s+(.+?)\s+occur\s*\??\s*$/i,
-    /^\s*when\s+and\s+where\s+did\s+(.+?)\s+take\s+place\s*\??\s*$/i,
-    /^\s*where\s+did\s+(.+?)\s+(?:launch|land|crash|sink|surrender|sign|fight|battle|die|originate|occur|erupt)\b.*?\??\s*$/i,
-    /^\s*where\s+was\s+(?:the\s+)?(.+?)\s+(?:signed|fought|launched|tested|built|founded|assassinated|executed)\s*\??\s*$/i,
-    /^\s*where\s+was\s+(?:the\s+)?(.+?(?:battle|massacre|signing|treaty|launch|landing|bombing|disaster|explosion|siege|revolution|protest|riot|summit))\s*\??\s*$/i,
+  // 4. Check for Historical Event patterns (Location of Event -> SINGLE_POINT)
+  const historicalPatterns: { regex: RegExp; getDetails: (match: RegExpMatchArray) => { subject: string; event?: string; relationship?: string } }[] = [
+    {
+      regex: /^\s*where\s+did\s+(.+?)\s+take\s+place\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: 'event', relationship: 'event_site' })
+    },
+    {
+      regex: /^\s*where\s+did\s+(.+?)\s+happen\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: 'event', relationship: 'event_site' })
+    },
+    {
+      regex: /^\s*where\s+did\s+(.+?)\s+occur\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: 'event', relationship: 'event_site' })
+    },
+    {
+      regex: /^\s*when\s+and\s+where\s+did\s+(.+?)\s+take\s+place\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: 'event', relationship: 'event_site' })
+    },
+    {
+      regex: /^\s*where\s+was\s+(?:the\s+)?(.+?(?:battle|massacre|signing|treaty|launch|landing|bombing|disaster|explosion|siege|revolution|protest|riot|summit))\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: 'event', relationship: 'event_site' })
+    },
+    {
+      regex: /^\s*where\s+was\s+(?:the\s+)?(.+?)\s+(signed|fought|launched|tested|built|founded|assassinated|executed|shot|murdered)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: m[2], relationship: `${m[2]}_site` })
+    },
+    {
+      regex: /^\s*where\s+did\s+(?:the\s+)?(.+?)\s+(launch|land|touch\s+down|sink|sank|crash|crashed|disappear|disappeared|surrender|surrendered|sign|fight|battle|die|died|originate|erupt|erupted)\b.*?\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: m[2], relationship: `${m[2]}_site` })
+    },
   ];
 
-  for (const pattern of historicalPatterns) {
-    const match = clean.match(pattern);
-    if (match && match[1]) {
-      const entityStr = match[1].replace(/[?.,!]+$/, "").trim();
+  for (const item of historicalPatterns) {
+    const match = clean.match(item.regex);
+    if (match) {
+      const { subject, event, relationship } = item.getDetails(match);
+      const entityStr = subject.replace(/[?.,!]+$/, "").trim();
       const cleanedEntity = entityStr.replace(/^the\s+/i, "");
-      const finalEntity = toCanonicalTitleCase(cleanedEntity || entityStr);
+      const finalSubject = toCanonicalTitleCase(cleanedEntity || entityStr);
       
-      console.log(`Intent:\nHISTORICAL_EVENT\nRouting decision:\nMULTI_LOCATION_EXPLORATION`);
+      console.log(`Intent:\nHISTORICAL_EVENT\nRouting decision:\nSINGLE_POINT\nsubject="${finalSubject}"\nevent="${event}"`);
       
       return {
         intent: 'HISTORICAL_EVENT',
-        entity: finalEntity,
-        resolutionMode: 'MULTI_LOCATION_EXPLORATION',
+        entity: finalSubject,
+        subject: finalSubject,
+        event,
+        requestedRelationship: relationship,
+        resolutionMode: 'SINGLE_POINT',
         queryShape: 'HISTORICAL_EVENT'
       };
     }

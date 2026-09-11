@@ -14,7 +14,7 @@ import { validateEarthGeography } from './celestialCapabilities';
 import { getHistoricalEntityKnowledge, toCanonicalTitleCase } from './geographic/historicalCoordinateValidator';
 import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
 import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation, isInvalidCanonicalName } from './geographic/entityIdentityValidator';
-import { detectHistoricalRouteEvent } from './queryNormalizer';
+import { detectHistoricalRouteEvent, normalizeSemanticEntityTitle } from './queryNormalizer';
 import { getAuthoritativeEventModel } from './geographic/historicalRouteRegistry';
 import { resolveAlias } from './geographic/geographicAliases';
 
@@ -154,8 +154,8 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   console.log(`Initial Resolver Error: ${error || 'None'}`);
 
   const allowedErrors = ["NO_GEOGRAPHIC_DATA", "LOCATION_SYSTEM_UNAVAILABLE", "UNABLE_TO_RESOLVE", "TEMP_FAILURE", "HISTORICAL_LOCATION_UNCONFIRMED"];
-  const nonGeographicIntents = ['EXPLORATORY', 'HISTORICAL_EVENT', 'BROAD_CULTURAL_QUERY', 'MULTI_LOCATION_DISCOVERY'];
-  const isGeographicIntent = !nonGeographicIntents.includes(entityResult.intentResult.intent);
+  const nonGeographicIntents = ['EXPLORATORY', 'BROAD_CULTURAL_QUERY', 'MULTI_LOCATION_DISCOVERY'];
+  const isGeographicIntent = entityResult.intentResult.resolutionMode === 'SINGLE_POINT' || !nonGeographicIntents.includes(entityResult.intentResult.intent);
 
   // Step 0: Validate entity identity of the initial resolver result
   if (resolvedData && resolvedData.name) {
@@ -239,10 +239,14 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
       coordinatesValid = true;
       console.log(`[HISTORICAL KNOWLEDGE RESOLUTION]\nentity="${histKnowledge.entity}"\nsource=${coordSource}\ncoordinates=${resolvedData.coordinates.lat},${resolvedData.coordinates.lng}\nconfidence=${histKnowledge.confidence}\ncountry=${histKnowledge.country || 'unknown'}\noriginalQuery="${originalQueryEntity}"`);
     } else {
+      const recoveryTarget = (resolvedData?.name && resolvedData.name !== 'Unknown' && resolvedData.name !== resolvedEntityName)
+        ? resolvedData.name
+        : resolvedEntityName;
+
       const recoveryCoords = await recoverCoordinatesFromAi(
         entityResult.intentResult.normalized.request.rawQuery,
         entityResult.intentResult.intent,
-        resolvedEntityName
+        recoveryTarget
       );
 
       let recoveredValid = false;
@@ -266,8 +270,8 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
           resolvedData.name = recoveredName;
           resolvedData.canonicalName = recoveredName;
         } else {
-          resolvedData.name = resolvedEntityName;
-          resolvedData.canonicalName = resolvedData.canonicalName || resolvedEntityName;
+          resolvedData.name = resolvedData.name || resolvedEntityName;
+          resolvedData.canonicalName = resolvedData.canonicalName || resolvedData.name || resolvedEntityName;
         }
         (resolvedData as any).coordinateSource = incoming.source;
         const incomingTrust: string = (recoveryCoords as any).coordinateTrust || 'provisional';
@@ -292,13 +296,13 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
         recoveredValid = true;
         source = incoming.source;
       } else {
-        resolvedData.name = resolvedEntityName;
-        resolvedData.canonicalName = resolvedData.canonicalName || resolvedEntityName;
+        resolvedData.name = resolvedData.name || resolvedEntityName;
+        resolvedData.canonicalName = resolvedData.canonicalName || resolvedData.name || resolvedEntityName;
         resolvedData.coordinates = undefined;
         error = "NO_GEOGRAPHIC_DATA";
       }
 
-      console.log(`[COORDINATE RECOVERY]\nRecovery success: ${recoveredValid ? 'Yes' : 'No'}\nRecovered coordinates: ${recoveryCoords ? JSON.stringify(recoveryCoords) : 'None'}\nSource: ${source}\nresolvedEntity="${resolvedEntityName}"\noriginalQuery="${originalQueryEntity}"`);
+      console.log(`[COORDINATE RECOVERY]\nRecovery success: ${recoveredValid ? 'Yes' : 'No'}\nRecovered coordinates: ${recoveryCoords ? JSON.stringify(recoveryCoords) : 'None'}\nSource: ${source}\nresolvedEntity="${resolvedEntityName}"\nrecoveryTarget="${recoveryTarget}"\noriginalQuery="${originalQueryEntity}"`);
     }
   }
 
@@ -422,7 +426,19 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
 
       const resolvedCanonical = resolvedData.canonicalName || (resolvedData.name && resolvedData.name !== 'Unknown' ? resolvedData.name : null);
       const queryCanonical = resolvedEntityName && resolvedEntityName !== 'Unknown' ? resolvedEntityName : null;
-      let canonicalName = histKnowledge?.entity || resolvedCanonical || queryCanonical || (resolvedData.name || 'Unknown');
+      let canonicalName = histKnowledge?.entity || resolvedCanonical || queryCanonical || (resolvedData.name && resolvedData.name !== 'Unknown' ? resolvedData.name : null);
+
+      canonicalName = normalizeSemanticEntityTitle({
+        explicitTitle: canonicalName || undefined,
+        canonicalName: canonicalName || undefined,
+        displayName: (resolvedData as any).displayName,
+        name: resolvedData.name,
+        subject: resolvedEntityName,
+        rawQuery: entityResult.intentResult.normalized.request.rawQuery,
+        query: entityResult.intentResult.normalized.request.rawQuery,
+        description: resolvedData.description,
+        coordinates: resolvedData.coordinates
+      });
 
       if (isInvalidCanonicalName(canonicalName)) {
         if (resolvedCanonical && !isInvalidCanonicalName(resolvedCanonical)) {

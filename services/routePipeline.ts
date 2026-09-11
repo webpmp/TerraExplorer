@@ -8,6 +8,7 @@ import { validateEntityAlias } from './geographic/entityIdentityValidator';
 import { getHistoricalEntityKnowledge, validateHistoricalCoordinate } from './geographic/historicalCoordinateValidator';
 import { validateCandidateAgainstRegistry, validateDocumentedSegment, getAuthoritativeEventModel, resolveCanonicalRouteGroup, buildCanonicalEventTopology, findAuthoritativeAnchorAcrossEvent, isAnchorMatch } from './geographic/historicalRouteRegistry';
 import { validateHistoricalWaypointContent } from './historicalContentValidation';
+import { normalizeSemanticEntityTitle } from './queryNormalizer';
 
 /**
  * Normalizes raw/malformed AI route membership structures into a clean RouteWaypointMembership[] array
@@ -195,10 +196,20 @@ export const runRoutePipeline = async (
       console.log(`[Item ${i}: "${item.name}"] Warning: ${warning}`);
     }
 
+    const normalizedWpTitle = normalizeSemanticEntityTitle({
+      explicitTitle: item.name,
+      canonicalName: item.canonicalName,
+      name: item.name,
+      subject: item.canonicalName || item.name,
+      routeTitle: item.routeTitle || rawTitle,
+      description: item.description,
+      coordinates: { lat: typeof item.lat === 'number' ? item.lat : Number(item.lat), lng: typeof item.lng === 'number' ? item.lng : Number(item.lng) }
+    });
+
     const wp: Waypoint = {
       id: item.id || `wp-${i}-${Date.now()}`,
-      name: item.name || "Unknown Waypoint",
-      canonicalName: item.canonicalName,
+      name: normalizedWpTitle || item.name || "Unknown Waypoint",
+      canonicalName: item.canonicalName || normalizedWpTitle,
       historicalRegion: item.historicalRegion,
       modernLocation: item.modernLocation,
       lat: typeof item.lat === 'number' ? item.lat : (Number(item.lat) || 0),

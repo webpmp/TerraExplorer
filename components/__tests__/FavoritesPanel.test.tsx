@@ -113,21 +113,67 @@ describe('FavoritesPanel - Selected Route Chevron Border', () => {
     expect(parchmentHtml).toContain('stroke="#5c3a21"');
   });
 
-  it('5. Applies text-xs font size to saved route metadata and footer in retro-green and retro-amber themes, keeping text-[10px] in modern and parchment', () => {
-    const greenHtml = renderToStaticMarkup(<FavoritesPanel {...defaultProps} skin="retro-green" />);
-    expect(greenHtml).toMatch(/<p class="text-xs opacity-60 truncate">2 waypoints/);
-    expect(greenHtml).toMatch(/<div class="p-3 text-xs opacity-50 text-center border-t border-current">/);
+  it('5. Applies text-sm font size to saved route waypoint count across all themes without location text', () => {
+    const skins: ('modern' | 'parchment' | 'retro-green' | 'retro-amber')[] = ['modern', 'parchment', 'retro-green', 'retro-amber'];
 
-    const amberHtml = renderToStaticMarkup(<FavoritesPanel {...defaultProps} skin="retro-amber" />);
-    expect(amberHtml).toMatch(/<p class="text-xs opacity-60 truncate">2 waypoints/);
-    expect(amberHtml).toMatch(/<div class="p-3 text-xs opacity-50 text-center border-t border-current">/);
+    for (const skin of skins) {
+      const html = renderToStaticMarkup(<FavoritesPanel {...defaultProps} skin={skin} />);
+      expect(html).toContain('<p class="text-sm opacity-60 truncate">2 waypoints</p>');
+      expect(html).not.toContain('2 waypoints •');
+      expect(html).not.toContain('New York');
+    }
+  });
 
-    const modernHtml = renderToStaticMarkup(<FavoritesPanel {...defaultProps} skin="modern" />);
-    expect(modernHtml).toMatch(/<p class="text-\[10px\] opacity-60 truncate">2 waypoints/);
-    expect(modernHtml).toMatch(/<div class="p-3 text-\[10px\] opacity-50 text-center border-t border-white\/10">/);
+  it('6. Correctly renders singular "1 waypoint" and plural "9 waypoints" / "3 waypoints"', () => {
+    const singleWaypointRoute: FavoriteLocation = {
+      id: 'route-single',
+      name: 'Single Stop Route',
+      type: 'route',
+      waypoints: [{ id: 'wp-1', name: 'Cairo', lat: 30.0444, lng: 31.2357 }]
+    };
 
-    const parchmentHtml = renderToStaticMarkup(<FavoritesPanel {...defaultProps} skin="parchment" />);
-    expect(parchmentHtml).toMatch(/<p class="text-\[10px\] opacity-60 truncate">2 waypoints/);
-    expect(parchmentHtml).toMatch(/<div class="p-3 text-\[10px\] opacity-50 text-center ">/);
+    const multiWaypointRoute: FavoriteLocation = {
+      id: 'route-multi',
+      name: 'Silk Road Tour',
+      type: 'route',
+      waypoints: Array.from({ length: 9 }, (_, i) => ({
+        id: `wp-${i + 1}`,
+        name: `Stop ${i + 1}`,
+        lat: 35.0 + i,
+        lng: 70.0 + i
+      }))
+    };
+
+    const threeWaypointRoute: FavoriteLocation = {
+      id: 'route-three',
+      name: 'Golden Triangle',
+      type: 'route',
+      waypoints: [
+        { id: 'wp-1', name: 'Delhi', lat: 28.6139, lng: 77.209 },
+        { id: 'wp-2', name: 'Agra', lat: 27.1767, lng: 78.0081 },
+        { id: 'wp-3', name: 'Jaipur', lat: 26.9124, lng: 75.7873 }
+      ]
+    };
+
+    const singleHtml = renderToStaticMarkup(
+      <FavoritesPanel {...defaultProps} favorites={[singleWaypointRoute]} activeRouteId="route-single" />
+    );
+    expect(singleHtml).toContain('<p class="text-sm opacity-60 truncate">1 waypoint</p>');
+    expect(singleHtml).not.toContain('1 waypoint •');
+    expect(singleHtml).not.toContain('Cairo');
+
+    const multiHtml = renderToStaticMarkup(
+      <FavoritesPanel {...defaultProps} favorites={[multiWaypointRoute]} activeRouteId="route-multi" />
+    );
+    expect(multiHtml).toContain('<p class="text-sm opacity-60 truncate">9 waypoints</p>');
+    expect(multiHtml).not.toContain('9 waypoints •');
+    expect(multiHtml).not.toContain('Stop 1');
+
+    const threeHtml = renderToStaticMarkup(
+      <FavoritesPanel {...defaultProps} favorites={[threeWaypointRoute]} activeRouteId="route-three" />
+    );
+    expect(threeHtml).toContain('<p class="text-sm opacity-60 truncate">3 waypoints</p>');
+    expect(threeHtml).not.toContain('3 waypoints •');
+    expect(threeHtml).not.toContain('Delhi');
   });
 });

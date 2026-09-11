@@ -238,8 +238,8 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
                 {fav.name}
             </p>
             {isRoute && fav.waypoints && (
-                <p className={`${skin === 'retro-green' || skin === 'retro-amber' ? 'text-xs' : 'text-[10px]'} opacity-60 truncate`}>
-                    {fav.waypoints.length} waypoints • {fav.waypoints[0]?.name}
+                <p className="text-sm opacity-60 truncate">
+                    {fav.waypoints.length} {fav.waypoints.length === 1 ? 'waypoint' : 'waypoints'}
                 </p>
             )}
             {!isRoute && (
