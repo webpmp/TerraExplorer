@@ -97,15 +97,19 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
       if (skin === 'modern') {
         expect(html).toContain('border-cyan-400');
         expect(html).toContain('text-cyan-300');
+        expect(html).toMatch(/class="[^"]*text-xs[^"]*"[^>]*>GENERAL<\/button>/);
       } else if (skin === 'retro-green') {
         expect(html).toContain('border-green-400');
         expect(html).toContain('text-green-300');
+        expect(html).toMatch(/class="[^"]*text-sm[^"]*"[^>]*>GENERAL<\/button>/);
       } else if (skin === 'retro-amber') {
         expect(html).toContain('border-amber-400');
         expect(html).toContain('text-amber-300');
+        expect(html).toMatch(/class="[^"]*text-sm[^"]*"[^>]*>GENERAL<\/button>/);
       } else if (skin === 'parchment') {
         expect(html).toContain('text-[#3e2723]');
-        expect(html).toContain('bg-[#e8d5b5]/40');
+        expect(html).toContain('bg-transparent');
+        expect(html).toMatch(/class="[^"]*text-xs[^"]*"[^>]*>GENERAL<\/button>/);
       }
     });
   });
@@ -159,6 +163,38 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(html).toContain('75%');
     expect(html).toContain('Test Voice');
     expect(html).not.toContain('DOC MODE');
+  });
+
+  test('7b. AUDIO tab toggle has muted retro background when OFF and bright theme background when ON in retro themes', () => {
+    // OFF state in retro-green
+    const greenOffHtml = renderToStaticMarkup(
+      <SettingsPanel {...baseProps} skin="retro-green" initialTab="audio" settings={{ ...baseSettings, narrationEnabled: false }} />
+    );
+    expect(greenOffHtml).toContain('bg-green-900/40 border-current');
+    expect(greenOffHtml).toContain('translate-x-0');
+    expect(greenOffHtml).toContain('bg-green-400'); // thumb
+
+    // ON state in retro-green
+    const greenOnHtml = renderToStaticMarkup(
+      <SettingsPanel {...baseProps} skin="retro-green" initialTab="audio" settings={{ ...baseSettings, narrationEnabled: true }} />
+    );
+    expect(greenOnHtml).toContain('bg-green-400');
+    expect(greenOnHtml).toContain('translate-x-5');
+
+    // OFF state in retro-amber
+    const amberOffHtml = renderToStaticMarkup(
+      <SettingsPanel {...baseProps} skin="retro-amber" initialTab="audio" settings={{ ...baseSettings, narrationEnabled: false }} />
+    );
+    expect(amberOffHtml).toContain('bg-amber-900/40 border-current');
+    expect(amberOffHtml).toContain('translate-x-0');
+    expect(amberOffHtml).toContain('bg-[#ffb000]'); // thumb
+
+    // ON state in retro-amber
+    const amberOnHtml = renderToStaticMarkup(
+      <SettingsPanel {...baseProps} skin="retro-amber" initialTab="audio" settings={{ ...baseSettings, narrationEnabled: true }} />
+    );
+    expect(amberOnHtml).toContain('bg-[#ffb000]');
+    expect(amberOnHtml).toContain('translate-x-5');
   });
 
   test('8. PROVIDERS tab News section renders SHOW NEWS toggle in OFF state when showNews is false', () => {

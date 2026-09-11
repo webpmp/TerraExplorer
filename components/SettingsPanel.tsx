@@ -479,7 +479,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
     text-sm font-bold uppercase tracking-wider flex items-center gap-2 mb-4
     ${isParchment ? 'text-[#8b5a2b]' : ''}
     ${skin === 'modern' ? 'text-white/60' : ''}
-    ${isRetro ? 'text-[#33ff33] border-b border-[#33ff33] pb-1' : ''}
+    ${isRetro ? 'text-green-300 border-b border-green-400 pb-1' : ''}
     ${skin === 'retro-amber' ? 'text-[#ffb000] border-[#ffb000]' : ''}
   `;
 
@@ -493,14 +493,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
     w-full px-3 py-2 rounded-lg text-sm transition-colors
     ${isParchment ? 'bg-[#e6d5b8] border-[#8b5a2b]/30 text-[#3e2723] focus:border-[#8b5a2b] focus:ring-1 focus:ring-[#8b5a2b]' : ''}
     ${skin === 'modern' ? 'bg-white/10 border-white/20 text-white focus:bg-white/20 focus:border-white/40' : ''}
-    ${isRetro ? 'bg-transparent border-2 border-[#33ff33] text-[#33ff33] rounded-none focus:outline-none' : ''}
+    ${isRetro ? 'bg-transparent border-2 border-green-400 text-green-300 rounded-none focus:outline-none' : ''}
     ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000]' : ''}
   `;
 
   const sliderClasses = `
     w-full cursor-pointer
     ${skin === 'modern' ? 'accent-cyan-400' : ''}
-    ${skin === 'retro-green' ? 'accent-[#33ff33]' : ''}
+    ${skin === 'retro-green' ? 'accent-green-400' : ''}
     ${skin === 'retro-amber' ? 'accent-[#ffb000]' : ''}
     ${skin === 'parchment' ? 'accent-[#8b5a2b]' : ''}
   `;
@@ -521,7 +521,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
       <div className="relative z-[1] flex flex-col flex-1 shrink min-h-0 overflow-hidden">
         <div className={headerClasses}>
         <div className="flex items-center gap-3">
-          <SettingsIcon size={20} className={isRetro && skin === 'retro-amber' ? 'text-[#ffb000]' : isRetro ? 'text-[#33ff33]' : 'text-current'} />
+          <SettingsIcon size={20} className={isParchment ? 'text-[#8b5a2b]' : isRetro && skin === 'retro-amber' ? 'text-[#ffb000]' : isRetro ? 'text-green-300' : 'text-current'} />
           <h2 className={`text-lg font-bold ${theme.headerTitle}`}>
             SETTINGS
           </h2>
@@ -567,7 +567,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                   document.getElementById(`settings-tab-${prevTab.id}`)?.focus();
                 }
               }}
-              className={`flex-1 py-2.5 px-1.5 text-xs uppercase tracking-wider font-semibold transition-colors text-center focus:outline-none ${
+              className={`flex-1 py-2.5 px-1.5 ${
+                isRetro ? 'text-sm' : 'text-xs'
+              } uppercase tracking-wider font-semibold transition-colors text-center focus:outline-none ${
                 isActive ? theme.tabActive : theme.tabInactive
               }`}
             >
@@ -588,8 +590,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
         {activeTab === 'general' && (
           <div className="space-y-6">
             <div>
-              <div className={`flex items-center justify-between mb-1 ${isRetro ? 'border-b border-[#33ff33] pb-1' : ''} ${skin === 'retro-amber' ? 'border-[#ffb000]' : ''}`}>
-                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#8b5a2b]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${isRetro ? 'text-[#33ff33]' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
+              <div className={`flex items-center justify-between mb-1 ${isRetro ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-[#ffb000]' : ''}`}>
+                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#8b5a2b]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${isRetro ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
                   <Film size={16} />
                   <span>DOC MODE</span>
                 </div>
@@ -610,7 +612,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                         : isRetro
                         ? skin === 'retro-amber'
                           ? 'bg-[#ffb000]'
-                          : 'bg-[#33ff33]'
+                          : 'bg-green-400'
                         : 'bg-cyan-500'
                       : isParchment
                       ? 'bg-[#d2b48c]'
@@ -622,7 +624,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                   <span
                     className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
                       settings.documentaryMode ? 'translate-x-5' : 'translate-x-0'
-                    } ${isRetro ? (skin === 'retro-amber' ? 'bg-[#ffb000]' : 'bg-[#33ff33]') : ''}`}
+                    } ${isRetro ? (skin === 'retro-amber' ? 'bg-[#ffb000]' : 'bg-green-400') : ''}`}
                   />
                 </button>
               </div>
@@ -705,7 +707,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                           className={`px-3 py-2 rounded-lg text-sm border whitespace-nowrap transition-colors
                             ${isParchment ? 'border-[#8b5a2b]/30 hover:bg-[#e6d5b8]' : ''}
                             ${skin === 'modern' ? 'border-white/20 hover:bg-white/10' : ''}
-                            ${isRetro ? 'border-[#33ff33] rounded-none hover:bg-[#33ff33]/10 text-[#33ff33] disabled:opacity-50' : ''}
+                            ${isRetro ? 'border-green-400 rounded-none hover:bg-green-400/10 text-green-300 disabled:opacity-50' : ''}
                             ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
                           `}
                         >
@@ -740,7 +742,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                         className={`w-full py-2 px-4 rounded-lg text-sm border font-medium transition-colors disabled:opacity-50
                           ${isParchment ? 'border-[#8b5a2b] bg-[#8b5a2b]/10 hover:bg-[#8b5a2b]/20 text-[#8b5a2b]' : ''}
                           ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20 text-white' : ''}
-                          ${isRetro ? 'border-[#33ff33] rounded-none hover:bg-[#33ff33]/20 text-[#33ff33]' : ''}
+                          ${isRetro ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300' : ''}
                           ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
                         `}
                       >
@@ -755,7 +757,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                       {modelTestStatus !== 'idle' && (
                         <p className={`text-xs ${
                           modelTestStatus === 'success'
-                            ? (isParchment ? 'text-[#2e7d32]' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-[#33ff33]') : 'text-green-400')
+                            ? (isParchment ? 'text-[#2e7d32]' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-400') : 'text-green-400')
                             : (isParchment ? 'text-[#c62828]' : 'text-red-400')
                         }`}>
                           {modelTestMessage}
@@ -797,7 +799,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                     className={`w-full py-2 px-4 rounded-lg text-sm border font-medium transition-colors disabled:opacity-50
                       ${isParchment ? 'border-[#8b5a2b] bg-[#8b5a2b]/10 hover:bg-[#8b5a2b]/20 text-[#8b5a2b]' : ''}
                       ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20 text-white' : ''}
-                      ${isRetro ? 'border-[#33ff33] rounded-none hover:bg-[#33ff33]/20 text-[#33ff33]' : ''}
+                      ${isRetro ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300' : ''}
                       ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
                     `}
                   >
@@ -814,7 +816,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                   {mapTestStatus !== 'idle' && (
                     <p className={`text-xs ${
                       mapTestStatus === 'success'
-                        ? (isParchment ? 'text-[#2e7d32]' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-[#33ff33]') : 'text-green-400')
+                        ? (isParchment ? 'text-[#2e7d32]' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-400') : 'text-green-400')
                         : mapTestStatus === 'blocked'
                         ? (isParchment ? 'text-[#b78103]' : 'text-amber-400')
                         : (isParchment ? 'text-[#c62828]' : 'text-red-400')
@@ -845,7 +847,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                   </div>
 
                   <div>
-                    <h4 className={`text-xs font-bold uppercase tracking-wider mb-1 ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-[#33ff33]') : 'text-white/80'}`}>
+                    <h4 className={`text-xs font-bold uppercase tracking-wider mb-1 ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300') : 'text-white/80'}`}>
                       API KEY SETUP
                     </h4>
                     <p className={`text-xs opacity-70 mb-2 ${isRetro ? 'uppercase' : ''}`}>
@@ -855,7 +857,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                       isParchment 
                         ? 'bg-[#e6d5b8] text-[#3e2723] border border-[#8b5a2b]/30' 
                         : isRetro 
-                        ? (skin === 'retro-amber' ? 'bg-black/60 text-[#ffb000] border border-[#ffb000]' : 'bg-black/60 text-[#33ff33] border border-[#33ff33]') 
+                        ? (skin === 'retro-amber' ? 'bg-black/60 text-[#ffb000] border border-[#ffb000]' : 'bg-black/60 text-green-300 border border-green-400') 
                         : 'bg-black/50 text-cyan-200 border border-white/10'
                     }`}>
                       <pre className="whitespace-pre">{`VITE_CARTO_API_KEY=your_carto_api_key`}</pre>
@@ -870,13 +872,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
 
             {/* Section 3: NEWS PROVIDER */}
             <div className="space-y-4">
-              <div className={`flex items-center justify-between mb-1 ${isRetro ? 'border-b border-[#33ff33] pb-1' : ''} ${skin === 'retro-amber' ? 'border-[#ffb000]' : ''}`}>
-                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#8b5a2b]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${isRetro ? 'text-[#33ff33]' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
+              <div className={`flex items-center justify-between mb-1 ${isRetro ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-[#ffb000]' : ''}`}>
+                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#8b5a2b]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${isRetro ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
                   <Newspaper size={16} />
                   <span>NEWS PROVIDER</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`text-xs font-semibold uppercase tracking-wider ${isParchment ? 'text-[#8b5a2b]' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-[#33ff33]') : 'text-white/80'}`}>
+                  <span className={`text-xs font-semibold uppercase tracking-wider ${isParchment ? 'text-[#8b5a2b]' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300') : 'text-white/80'}`}>
                     SHOW NEWS
                   </span>
                   <button
@@ -896,7 +898,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                           : isRetro
                           ? skin === 'retro-amber'
                             ? 'bg-[#ffb000]'
-                            : 'bg-[#33ff33]'
+                            : 'bg-green-400'
                           : 'bg-cyan-500'
                         : isParchment
                         ? 'bg-[#d2b48c]'
@@ -908,7 +910,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                     <span
                       className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
                         settings.showNews !== false ? 'translate-x-5' : 'translate-x-0'
-                      } ${isRetro ? (skin === 'retro-amber' ? 'bg-[#ffb000]' : 'bg-[#33ff33]') : ''}`}
+                      } ${isRetro ? (skin === 'retro-amber' ? 'bg-[#ffb000]' : 'bg-green-400') : ''}`}
                     />
                   </button>
                 </div>
@@ -938,7 +940,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                       className={`w-full py-2 px-4 rounded-lg text-sm border font-medium transition-colors disabled:opacity-50
                         ${isParchment ? 'border-[#8b5a2b] bg-[#8b5a2b]/10 hover:bg-[#8b5a2b]/20 text-[#8b5a2b]' : ''}
                         ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20 text-white' : ''}
-                        ${isRetro ? 'border-[#33ff33] rounded-none hover:bg-[#33ff33]/20 text-[#33ff33]' : ''}
+                        ${isRetro ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300' : ''}
                         ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
                       `}
                     >
@@ -953,7 +955,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                     {newsTestStatus !== 'idle' && (
                       <p className={`text-xs ${
                         newsTestStatus === 'success'
-                          ? (isParchment ? 'text-[#2e7d32]' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-[#33ff33]') : 'text-green-400')
+                          ? (isParchment ? 'text-[#2e7d32]' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-400') : 'text-green-400')
                           : (isParchment ? 'text-[#c62828]' : 'text-red-400')
                       }`}>
                         {newsTestMessage}
@@ -974,7 +976,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                 </div>
 
                 <div>
-                  <h4 className={`text-xs font-bold uppercase tracking-wider mb-2.5 ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-[#33ff33]') : 'text-white/80'}`}>
+                  <h4 className={`text-xs font-bold uppercase tracking-wider mb-2.5 ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300') : 'text-white/80'}`}>
                     News API Sources
                   </h4>
                   <div className="space-y-3 text-xs">
@@ -1035,7 +1037,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                 </div>
 
                 <div>
-                  <h4 className={`text-xs font-bold uppercase tracking-wider mb-1 ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-[#33ff33]') : 'text-white/80'}`}>
+                  <h4 className={`text-xs font-bold uppercase tracking-wider mb-1 ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300') : 'text-white/80'}`}>
                     API KEYS
                   </h4>
                   <p className={`text-xs opacity-70 mb-2 ${isRetro ? 'uppercase' : ''}`}>
@@ -1045,7 +1047,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                     isParchment 
                       ? 'bg-[#e6d5b8] text-[#3e2723] border border-[#8b5a2b]/30' 
                       : isRetro 
-                      ? (skin === 'retro-amber' ? 'bg-black/60 text-[#ffb000] border border-[#ffb000]' : 'bg-black/60 text-[#33ff33] border border-[#33ff33]') 
+                      ? (skin === 'retro-amber' ? 'bg-black/60 text-[#ffb000] border border-[#ffb000]' : 'bg-black/60 text-green-300 border border-green-400') 
                       : 'bg-black/50 text-cyan-200 border border-white/10'
                   }`}>
                     <pre className="whitespace-pre">{`GEMINI_API_KEY=your_gemini_api_key
@@ -1092,7 +1094,7 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                             : isRetro
                             ? skin === 'retro-amber'
                               ? 'bg-amber-900/30 border-[#ffb000] text-[#ffb000]'
-                              : 'bg-green-900/30 border-[#33ff33] text-[#33ff33]'
+                              : 'bg-green-900/30 border-green-400 text-green-300'
                             : 'bg-cyan-900/30 border-cyan-400 text-white ring-1 ring-cyan-400/50'
                           : isParchment
                           ? 'border-[#8b5a2b]/30 hover:bg-[#e8d5b5]/30'
@@ -1110,7 +1112,7 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                           isParchment 
                             ? 'bg-[#8b5a2b]/20 text-[#5c3a21]' 
                             : isRetro 
-                            ? (skin === 'retro-amber' ? 'border border-[#ffb000]' : 'border border-[#33ff33]') 
+                            ? (skin === 'retro-amber' ? 'border border-[#ffb000]' : 'border border-green-400') 
                             : 'bg-cyan-500/20 text-cyan-300'
                         }`}>
                           Active
@@ -1128,8 +1130,8 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
         {activeTab === 'audio' && (
           <div className="space-y-6">
             <div>
-              <div className={`flex items-center justify-between mb-1 ${isRetro ? 'border-b border-[#33ff33] pb-1' : ''} ${skin === 'retro-amber' ? 'border-[#ffb000]' : ''}`}>
-                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#8b5a2b]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${isRetro ? 'text-[#33ff33]' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
+              <div className={`flex items-center justify-between mb-1 ${isRetro ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-[#ffb000]' : ''}`}>
+                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#8b5a2b]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${isRetro ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
                   <Volume2 size={16} />
                   <span>Narration</span>
                 </div>
@@ -1150,19 +1152,19 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                         : isRetro
                         ? skin === 'retro-amber'
                           ? 'bg-[#ffb000]'
-                          : 'bg-[#33ff33]'
+                          : 'bg-green-400'
                         : 'bg-cyan-500'
                       : isParchment
                       ? 'bg-[#d2b48c]'
                       : isRetro
-                      ? 'bg-transparent border-current'
+                      ? (skin === 'retro-amber' ? 'bg-amber-900/40 border-current' : 'bg-green-900/40 border-current')
                       : 'bg-white/20'
                   }`}
                 >
                   <span
                     className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
                       settings.narrationEnabled ? 'translate-x-5' : 'translate-x-0'
-                    } ${isRetro ? (skin === 'retro-amber' ? 'bg-[#ffb000]' : 'bg-[#33ff33]') : ''}`}
+                    } ${isRetro ? (skin === 'retro-amber' ? 'bg-[#ffb000]' : 'bg-green-400') : ''}`}
                   />
                 </button>
               </div>
@@ -1180,45 +1182,37 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                 <label className={labelClasses}>Voice</label>
                 <select
                   value={settings.narrationVoice || ''}
-                  onChange={(e) => {
-                    const voice = e.target.value;
-                    narrationService.setVoiceURI(voice);
-                    onUpdateSettings({
-                      ...settings,
-                      narrationVoice: voice
-                    });
-                  }}
+                  onChange={(e) => onUpdateSettings({ ...settings, narrationVoice: e.target.value })}
                   disabled={!settings.narrationEnabled}
                   className={inputClasses}
                 >
                   <option value="">System Default Voice</option>
-                  {availableVoices.map((v) => (
-                    <option key={v.voiceURI} value={v.voiceURI}>
-                      {v.name} ({v.lang})
+                  {availableVoices.map((voice) => (
+                    <option key={voice.name} value={voice.name}>
+                      {voice.name} ({voice.lang})
                     </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <div className="flex justify-between items-center mb-1">
+                <div className="flex justify-between text-xs mb-1">
                   <label className={labelClasses}>Speed</label>
-                  <span className="text-xs opacity-70">
-                    {(settings.narrationSpeed ?? 0.9).toFixed(1)}x
+                  <span className={`font-mono ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? 'text-current' : 'text-cyan-300'}`}>
+                    {(settings.narrationSpeed || 1.0).toFixed(1)}x
                   </span>
                 </div>
                 <input
                   type="range"
                   min="0.5"
-                  max="1.5"
+                  max="2.0"
                   step="0.1"
-                  value={settings.narrationSpeed ?? 0.9}
+                  value={settings.narrationSpeed || 1.0}
                   onChange={(e) => {
-                    const speed = parseFloat(e.target.value);
-                    narrationService.setSpeed(speed);
+                    const val = parseFloat(e.target.value);
                     onUpdateSettings({
                       ...settings,
-                      narrationSpeed: speed
+                      narrationSpeed: val
                     });
                   }}
                   disabled={!settings.narrationEnabled}
@@ -1227,10 +1221,10 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
               </div>
 
               <div>
-                <div className="flex justify-between items-center mb-1">
+                <div className="flex justify-between text-xs mb-1">
                   <label className={labelClasses}>Volume</label>
-                  <span className="text-xs opacity-70">
-                    {Math.round((settings.narrationVolume ?? 1.0) * 100)}%
+                  <span className={`font-mono ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? 'text-current' : 'text-cyan-300'}`}>
+                    {Math.round((settings.narrationVolume || 0.8) * 100)}%
                   </span>
                 </div>
                 <input
@@ -1238,13 +1232,12 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                   min="0"
                   max="1"
                   step="0.05"
-                  value={settings.narrationVolume ?? 1.0}
+                  value={settings.narrationVolume ?? 0.8}
                   onChange={(e) => {
-                    const volume = parseFloat(e.target.value);
-                    narrationService.setVolume(volume);
+                    const val = parseFloat(e.target.value);
                     onUpdateSettings({
                       ...settings,
-                      narrationVolume: volume
+                      narrationVolume: val
                     });
                   }}
                   disabled={!settings.narrationEnabled}
@@ -1260,7 +1253,7 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                   className={`px-4 py-2 rounded-lg text-sm border font-medium transition-colors
                     ${isParchment ? 'border-[#8b5a2b] bg-[#8b5a2b]/10 hover:bg-[#8b5a2b]/20 text-[#8b5a2b]' : ''}
                     ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20' : ''}
-                    ${isRetro ? 'border-[#33ff33] rounded-none hover:bg-[#33ff33]/20 text-[#33ff33] disabled:opacity-50' : ''}
+                    ${isRetro ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300 disabled:opacity-50' : ''}
                     ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
                   `}
                 >

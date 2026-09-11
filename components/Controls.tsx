@@ -440,8 +440,14 @@ const Controls: React.FC<ControlsProps> = ({
 
       {/* Trace Route Modal */}
       {isTraceModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm pointer-events-auto">
-              <div className={`relative w-full max-w-lg p-6 flex flex-col gap-4 overflow-hidden ${theme.modal} ${skin === 'parchment' ? '[isolation:isolate]' : ''}`}>
+          <div
+            onClick={() => onToggleTraceModal(false)}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm pointer-events-auto"
+          >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className={`relative w-full max-w-lg p-6 flex flex-col gap-4 overflow-hidden ${theme.modal} ${skin === 'parchment' ? '[isolation:isolate]' : ''}`}
+              >
                   {skin === 'parchment' && (
                     <div className="parchment-background" aria-hidden="true" />
                   )}

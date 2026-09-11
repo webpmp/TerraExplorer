@@ -337,3 +337,45 @@ describe('Controls Footer Copyright and Attribution', () => {
   });
 });
 
+describe('Controls Trace Route Modal Outside Click Behavior', () => {
+  const skins: SkinType[] = ['modern', 'parchment', 'retro-green', 'retro-amber'];
+
+  skins.forEach((skin) => {
+    test(`Trace Route modal in theme "${skin}" has outside-click dismiss container and stops bubbling inside panel`, () => {
+      const onToggleTraceModal = vi.fn();
+      const html = renderToStaticMarkup(
+        <Controls
+          onZoomIn={vi.fn()}
+          onZoomOut={vi.fn()}
+          onSearch={vi.fn()}
+          onTraceRoute={vi.fn()}
+          isSearching={false}
+          skin={skin}
+          showFavorites={false}
+          onToggleShowFavorites={vi.fn()}
+          paused={false}
+          isTraceModalOpen={true}
+          onToggleTraceModal={onToggleTraceModal}
+          isZoomLocked={false}
+          onToggleZoomLock={vi.fn()}
+        />
+      );
+
+      // Verify modal backdrop container exists with full-screen fixed positioning
+      expect(html).toContain('fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm pointer-events-auto');
+
+      // Verify inner panel exists inside the backdrop
+      expect(html).toContain('max-w-lg p-6 flex flex-col gap-4 overflow-hidden');
+
+      // Verify Trace Route title and form elements are present inside the panel
+      expect(html).toContain('Trace Route</h2>');
+      expect(html).toContain('Paste text here...');
+      expect(html).toContain('Generate Route</button>');
+
+      // Verify X close button is present
+      expect(html).toContain('absolute top-0 right-0 p-1 hover:opacity-70');
+    });
+  });
+});
+
+

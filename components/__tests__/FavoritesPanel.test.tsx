@@ -112,4 +112,22 @@ describe('FavoritesPanel - Selected Route Chevron Border', () => {
     expect(parchmentHtml).toContain('fill="#e8d5b5"');
     expect(parchmentHtml).toContain('stroke="#5c3a21"');
   });
+
+  it('5. Applies text-xs font size to saved route metadata and footer in retro-green and retro-amber themes, keeping text-[10px] in modern and parchment', () => {
+    const greenHtml = renderToStaticMarkup(<FavoritesPanel {...defaultProps} skin="retro-green" />);
+    expect(greenHtml).toMatch(/<p class="text-xs opacity-60 truncate">2 waypoints/);
+    expect(greenHtml).toMatch(/<div class="p-3 text-xs opacity-50 text-center border-t border-current">/);
+
+    const amberHtml = renderToStaticMarkup(<FavoritesPanel {...defaultProps} skin="retro-amber" />);
+    expect(amberHtml).toMatch(/<p class="text-xs opacity-60 truncate">2 waypoints/);
+    expect(amberHtml).toMatch(/<div class="p-3 text-xs opacity-50 text-center border-t border-current">/);
+
+    const modernHtml = renderToStaticMarkup(<FavoritesPanel {...defaultProps} skin="modern" />);
+    expect(modernHtml).toMatch(/<p class="text-\[10px\] opacity-60 truncate">2 waypoints/);
+    expect(modernHtml).toMatch(/<div class="p-3 text-\[10px\] opacity-50 text-center border-t border-white\/10">/);
+
+    const parchmentHtml = renderToStaticMarkup(<FavoritesPanel {...defaultProps} skin="parchment" />);
+    expect(parchmentHtml).toMatch(/<p class="text-\[10px\] opacity-60 truncate">2 waypoints/);
+    expect(parchmentHtml).toMatch(/<div class="p-3 text-\[10px\] opacity-50 text-center ">/);
+  });
 });

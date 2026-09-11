@@ -238,7 +238,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
                 {fav.name}
             </p>
             {isRoute && fav.waypoints && (
-                <p className="text-[10px] opacity-60 truncate">
+                <p className={`${skin === 'retro-green' || skin === 'retro-amber' ? 'text-xs' : 'text-[10px]'} opacity-60 truncate`}>
                     {fav.waypoints.length} waypoints • {fav.waypoints[0]?.name}
                 </p>
             )}
@@ -327,7 +327,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
                     )}
                 </div>
                 
-                <div className={`p-3 text-[10px] opacity-50 text-center ${skin === 'parchment' ? '' : isRetro ? 'border-t border-current' : 'border-t border-white/10'}`}>
+                <div className={`p-3 ${skin === 'retro-green' || skin === 'retro-amber' ? 'text-xs' : 'text-[10px]'} opacity-50 text-center ${skin === 'parchment' ? '' : isRetro ? 'border-t border-current' : 'border-t border-white/10'}`}>
                     {activeRouteId ? `Route Active (${favorites.find(f => f.id === activeRouteId)?.waypoints?.length || 0} waypoints)` : "No Active Route"} • {visibleFavoriteIds.length} POIs Visible
                 </div>
               </div>
