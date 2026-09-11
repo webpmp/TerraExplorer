@@ -975,12 +975,15 @@ export const SectionHeader: React.FC<{
       : 'bg-cyan-400/20';
 
   return (
-    <div className={`info-panel-section-header flex items-center gap-2 mt-3 mb-[15px] ${theme.icon || ''} ${className}`}>
-      {icon && <span className="shrink-0 opacity-80">{icon}</span>}
-      <h3 className={`text-sm font-semibold uppercase tracking-[0.16em] leading-tight shrink-0 ${headerColorClass}`}>
+    <div className={`info-panel-section-header overflow-hidden mt-3 mb-[15px] min-w-0 max-w-full ${theme.icon || ''} ${className}`}>
+      <h3 className={`text-sm font-semibold uppercase tracking-[0.16em] leading-tight min-w-0 max-w-full whitespace-normal break-normal ${headerColorClass}`}>
+        {icon && <span className="inline-block align-middle mr-2 shrink-0 opacity-80">{icon}</span>}
         {title}
+        <span
+          className={`section-header-rule inline-block align-middle w-full h-[1px] -mr-[100%] ml-2 ${ruleColorClass}`}
+          aria-hidden="true"
+        />
       </h3>
-      <div className={`flex-1 h-[1px] ${ruleColorClass}`} aria-hidden="true" />
     </div>
   );
 };
@@ -2644,13 +2647,13 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             </div>
 
             {/* 3. Location title & geographic hierarchy */}
-            <div className="flex flex-col gap-2 items-center text-center">
-              <div className="flex flex-col items-center justify-center gap-1">
-                 <h2 className={`${titleSize} font-bold text-center ${theme.locationTitle || theme.headerTitle}`}>
+            <div className="flex flex-col gap-2 items-center text-center w-full min-w-0">
+              <div className="flex flex-col items-center justify-center gap-1 w-full min-w-0">
+                 <h2 className={`${titleSize} font-bold text-center w-full min-w-0 max-w-full whitespace-normal break-normal ${theme.locationTitle || theme.headerTitle}`}>
                    {displayTitle || (isError ? "Error" : isLoading ? "Searching..." : "Location Info")}
                  </h2>
                  {displaySubtitle && (
-                   <div className={`mt-1 ${isParchment ? 'text-xl font-normal font-garamond text-[#8b5a2b]' : `${bodySize} font-medium ${isRetro ? 'text-current opacity-90' : 'text-slate-300'}`}`}>
+                   <div className={`mt-1 w-full min-w-0 max-w-full whitespace-normal break-normal ${isParchment ? 'text-xl font-normal font-garamond text-[#8b5a2b]' : `${bodySize} font-medium ${isRetro ? 'text-current opacity-90' : 'text-slate-300'}`}`}>
                      {displaySubtitle}
                    </div>
                  )}
@@ -2660,7 +2663,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                    </span>
                  )}
               </div>
-              <p className={`${subtextSize} font-mono ${theme.subtext}`}>
+              <p className={`${subtextSize} font-mono ${theme.subtext} w-full min-w-0 max-w-full whitespace-normal break-normal`}>
                 {isValidCoordinates(info?.coordinates)
                   ? `${info!.coordinates.lat >= 0 ? info!.coordinates.lat.toFixed(2) + '° N' : Math.abs(info!.coordinates.lat).toFixed(2) + '° S'}, ${info!.coordinates.lng >= 0 ? info!.coordinates.lng.toFixed(2) + '° E' : Math.abs(info!.coordinates.lng).toFixed(2) + '° W'}${info?.isApproximate ? ' (Approximate)' : ''}`
                   : (isLoading ? 'Searching...' : 'Coordinates unavailable')}
@@ -2670,23 +2673,18 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
           {/* Route Navigation */}
           {isMultiLocation && routeNav && (
-             <div className={`relative z-[1] p-3 flex items-center justify-between ${isRetro ? 'border-b border-current opacity-80' : isParchment ? 'bg-transparent' : 'border-b border-white/10 bg-white/5'}`}>
-                <button onClick={routeNav.onPrev} className={`p-1.5 rounded-full ${theme.navBtn} pointer-events-auto`} aria-label="Previous waypoint">
+             <div className={`relative z-[1] p-3 flex items-center justify-between min-w-0 ${isRetro ? 'border-b border-current opacity-80' : isParchment ? 'bg-transparent' : 'border-b border-white/10 bg-white/5'}`}>
+                <button onClick={routeNav.onPrev} className={`p-1.5 rounded-full ${theme.navBtn} pointer-events-auto shrink-0`} aria-label="Previous waypoint">
                     <ChevronLeft size={16} />
                 </button>
-                <div className="flex flex-col items-center text-center px-2">
-                    {routeNav.routeGroupName && (
-                      <span className={`text-[10px] uppercase tracking-wider font-semibold opacity-75 mb-0.5 ${theme.subtext}`}>
-                        {routeNav.routeGroupName}
-                      </span>
-                    )}
+                <div className="flex flex-col items-center text-center px-2 min-w-0">
                     <span className={`${isRetro ? 'text-base' : 'text-xs'} font-bold uppercase tracking-widest ${theme.subtext}`}>
                         {routeNav.routeGroupName && routeNav.routeLocalCurrent !== undefined && routeNav.routeLocalTotal !== undefined
                           ? `Waypoint ${routeNav.routeLocalCurrent} of ${routeNav.routeLocalTotal}`
                           : `Waypoint ${routeNav.current} of ${routeNav.total}`}
                     </span>
                 </div>
-                <button onClick={routeNav.onNext} className={`p-1.5 rounded-full ${theme.navBtn} pointer-events-auto`} aria-label="Next waypoint">
+                <button onClick={routeNav.onNext} className={`p-1.5 rounded-full ${theme.navBtn} pointer-events-auto shrink-0`} aria-label="Next waypoint">
                     <ChevronRight size={16} />
                 </button>
             </div>
@@ -2697,7 +2695,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           <div
             ref={scrollRef}
             onScroll={updateScrollFade}
-            className={`flex-1 overflow-y-auto ${theme.panelBg} relative pointer-events-auto info-panel-scrollable ${isParchment ? 'parchment-scrollbar' : ''}`}
+            className={`flex-1 overflow-y-auto overflow-x-hidden ${theme.panelBg} relative pointer-events-auto info-panel-scrollable ${isParchment ? 'parchment-scrollbar' : ''}`}
             style={maskStyle}
             data-infopanel="true"
             onWheel={(e) => e.stopPropagation()}

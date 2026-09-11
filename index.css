@@ -15,8 +15,18 @@
 }
 
 
-.modern-osm-hover:hover {
-  background-color: rgba(0, 0, 0, 0.25);
+/* ─── Section Header Inline Divider ───────────────────────────────────────── */
+.info-panel-section-header {
+  overflow: hidden;
+}
+
+.section-header-rule {
+  display: inline-block;
+  vertical-align: middle;
+  width: 100%;
+  height: 1px;
+  margin-right: -100%;
+  margin-left: 0.5rem; /* gap-2 equivalent (8px) */
 }
 
 /* ─── Parchment panel stacking architecture ────────────────────────────────── */

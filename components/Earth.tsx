@@ -932,6 +932,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
                 color: wpThemeColor.fill,
                 outlineColor: wpThemeColor.outline,
                 id: wp.id,
+                routeGroupId: wp.routeGroupId,
                 isWaypoint: true,
                 isMultiLocation,
                 index: typeof wp.sequence === 'number' ? wp.sequence - 1 : idx,

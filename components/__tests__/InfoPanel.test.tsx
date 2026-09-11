@@ -1,5 +1,5 @@
 import { describe, test, it, expect } from 'vitest';
-import { normalizeDisplayText, cleanMetadataString, formatImageAttribution, normalizeGeoComparisonName, areGeoComponentsRedundant, isRedundantWithTitle, deduplicateGeographicHierarchy, formatGeographicContext, normalizeHeaderGeographicHierarchy, getHeaderLocation, calculateScrollFade, getScrollFadeMaskStyle } from '../InfoPanel';
+import { normalizeDisplayText, cleanMetadataString, formatImageAttribution, normalizeGeoComparisonName, areGeoComponentsRedundant, isRedundantWithTitle, deduplicateGeographicHierarchy, formatGeographicContext, normalizeHeaderGeographicHierarchy, getHeaderLocation, calculateScrollFade, getScrollFadeMaskStyle, SectionHeader } from '../InfoPanel';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import InfoPanel from '../InfoPanel';
@@ -166,8 +166,8 @@ describe('Lightbox Metadata Integration', () => {
       />
     );
     expect(parchmentHtml).toContain('Tabasco, Mexico');
-    expect(parchmentHtml).toContain('mt-1 text-xl font-normal font-garamond text-[#8b5a2b]');
-    expect(parchmentHtml).not.toContain('mt-1 text-xl font-normal font-garamond text-[#5a3e1b]');
+    expect(parchmentHtml).toContain('mt-1 w-full min-w-0 max-w-full whitespace-normal break-normal text-xl font-normal font-garamond text-[#8b5a2b]');
+    expect(parchmentHtml).not.toContain('text-[#5a3e1b]');
 
     const modernHtml = renderToStaticMarkup(
       <InfoPanel
@@ -182,7 +182,7 @@ describe('Lightbox Metadata Integration', () => {
         onLoadMoreNews={async () => {}}
       />
     );
-    expect(modernHtml).toContain('mt-1 text-sm font-medium text-slate-300');
+    expect(modernHtml).toContain('mt-1 w-full min-w-0 max-w-full whitespace-normal break-normal text-sm font-medium text-slate-300');
     expect(modernHtml).not.toContain('font-garamond text-slate-300');
 
     const retroHtml = renderToStaticMarkup(
@@ -198,7 +198,7 @@ describe('Lightbox Metadata Integration', () => {
         onLoadMoreNews={async () => {}}
       />
     );
-    expect(retroHtml).toContain('mt-1 text-lg font-medium text-current opacity-90');
+    expect(retroHtml).toContain('mt-1 w-full min-w-0 max-w-full whitespace-normal break-normal text-lg font-medium text-current opacity-90');
     expect(retroHtml).not.toContain('font-garamond');
   });
 
@@ -437,8 +437,8 @@ describe('Lightbox Metadata Integration', () => {
     );
 
     // Section headers: text-sm font-semibold uppercase tracking-[0.16em] text-cyan-300
-    expect(html).toContain('class="text-sm font-semibold uppercase tracking-[0.16em] leading-tight shrink-0 text-cyan-300">Climate</h3>');
-    expect(html).toContain('class="text-sm font-semibold uppercase tracking-[0.16em] leading-tight shrink-0 text-cyan-300">News</h3>');
+    expect(html).toContain('Climate<span class="section-header-rule');
+    expect(html).toContain('News<span class="section-header-rule');
 
     // Climate type uses semantic title style
     expect(html).toContain('<p class="font-bold text-sm text-white/95 leading-snug" style="text-transform:none">Semiarid climate</p>');
@@ -694,7 +694,7 @@ describe('Lightbox Metadata Integration', () => {
       );
 
       // NEWS header must appear after news is requested/loaded
-      expect(html).toContain('class="text-sm font-semibold uppercase tracking-[0.16em] leading-tight shrink-0 text-cyan-300">News</h3>');
+      expect(html).toContain('News<span class="section-header-rule');
       expect(html).toContain('Zion Shuttle System Upgrades Announced');
       expect(html).toContain('Park officials detail new electric shuttle fleet.');
       expect(html).toContain('Utah News</span><span>·</span><span>August 16, 2026</span>');
@@ -1153,7 +1153,7 @@ describe('Lightbox Metadata Integration', () => {
       expect(parchmentHtml).toMatch(/class="[^"]*text-xs[^"]*font-bold[^"]*uppercase[^"]*tracking-widest[^"]*"[^>]*>\s*Waypoint 3 of 9/);
     });
 
-    it('displays route-local "WAYPOINT X OF Y" and subordinate route name header for multi-route events', () => {
+    it('displays route-local "WAYPOINT X OF Y" without repeating route name in waypoint navigation control', () => {
       const multiRouteNav = {
         current: 1,
         total: 13,
@@ -1178,10 +1178,10 @@ describe('Lightbox Metadata Integration', () => {
         />
       );
 
-      // Subordinate route name is clearly visible
-      expect(html).toContain('Northern Route');
-      // Prominent route-local waypoint counter
+      // Waypoint navigation contains only the clean waypoint counter
       expect(html).toContain('Waypoint 1 of 4');
+      // Waypoint navigation does NOT duplicate the routeGroupName
+      expect(html).not.toMatch(/<div[^>]*class="[^"]*flex[^"]*items-center[^"]*justify-between[^"]*"[^>]*>[\s\S]*?Northern Route[\s\S]*?<\/div>/);
       // Does NOT display the global "Waypoint 1 of 13"
       expect(html).not.toContain('Waypoint 1 of 13');
     });
@@ -2353,20 +2353,20 @@ describe('Lightbox Metadata Integration', () => {
       expect(html).toContain('mb-[15px]');
 
       // Shared section header typography: text-sm font-semibold uppercase tracking-[0.16em] text-cyan-300
-      expect(html).toContain('<h3 class="text-sm font-semibold uppercase tracking-[0.16em] leading-tight shrink-0 text-cyan-300">Notable Facts</h3>');
-      expect(html).toContain('<h3 class="text-sm font-semibold uppercase tracking-[0.16em] leading-tight shrink-0 text-cyan-300">Population</h3>');
-      expect(html).toContain('<h3 class="text-sm font-semibold uppercase tracking-[0.16em] leading-tight shrink-0 text-cyan-300">News</h3>');
+      expect(html).toContain('Notable Facts');
+      expect(html).toContain('Population');
+      expect(html).toContain('News');
 
       // Subtle divider rule
-      expect(html).toContain('class="flex-1 h-[1px] bg-cyan-400/20"');
+      expect(html).toContain('section-header-rule inline-block align-middle w-full h-[1px] -mr-[100%] ml-2 bg-cyan-400/20');
 
       // Visual hierarchy: Location Title -> Notable Facts -> Fact Title -> Population -> News
       const titlePos = html.indexOf('Rome');
-      const notableHeaderPos = html.indexOf('>Notable Facts</h3>');
+      const notableHeaderPos = html.indexOf('Notable Facts');
       const factTitlePos = html.indexOf('Colosseum');
-      const popHeaderPos = html.indexOf('>Population</h3>');
+      const popHeaderPos = html.indexOf('Population');
       const popValuePos = html.indexOf('2,748,109');
-      const newsHeaderPos = html.indexOf('>News</h3>');
+      const newsHeaderPos = html.indexOf('News');
       const newsTitlePos = html.indexOf('Rome Announces Heritage Preservation Initiative');
 
       expect(titlePos).toBeGreaterThan(-1);
@@ -2882,6 +2882,152 @@ describe('Lightbox Metadata Integration', () => {
       const result = normalizeHeaderGeographicHierarchy(fallbackWaypointInfo, undefined, true);
       expect(result.displayTitle).toBe('Stalingrad');
       expect(result.displayTitle).not.toBe('Route Context');
+    });
+  });
+
+  describe('InfoPanel Long Text Wrapping & Horizontal Overflow Prevention', () => {
+    const shackletonWaypointInfo = {
+      name: 'Plymouth, England',
+      canonicalName: 'Plymouth',
+      type: 'historical_waypoint' as any,
+      description: 'The port from which Ernest Shackleton set sail on the Endurance in August 1914.',
+      coordinates: { lat: 50.3755, lng: -4.1427 },
+      routeContext: {
+        title: "Ernest Shackleton's Endurance Expedition",
+        text: 'August 8, 1914: The Endurance departs for Buenos Aires.'
+      },
+      waypoint: {
+        name: 'Plymouth, England',
+        canonicalName: 'Plymouth',
+        routeGroupName: "Ernest Shackleton's Endurance Expedition",
+        sequence: 1,
+        globalSequence: 1,
+        isSequential: true
+      }
+    };
+
+    const shackletonNav = {
+      current: 1,
+      total: 9,
+      routeGroupName: "Ernest Shackleton's Endurance Expedition",
+      onNext: () => {},
+      onPrev: () => {}
+    };
+
+    it('1. Simplifies waypoint navigation section to "Waypoint 1 of 9" and does NOT render route name in navigation bar', () => {
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={shackletonWaypointInfo}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+          routeNav={shackletonNav}
+        />
+      );
+
+      expect(html).toContain('Waypoint 1 of 9');
+      // The navigation container should contain only the waypoint counter
+      const navContainerMatch = html.match(/aria-label="Previous waypoint"[\s\S]*?<\/button>([\s\S]*?)<button[^>]*aria-label="Next waypoint"/);
+      expect(navContainerMatch).not.toBeNull();
+      expect(navContainerMatch![1]).not.toContain("Ernest Shackleton");
+      expect(navContainerMatch![1]).toContain("Waypoint 1 of 9");
+    });
+
+    it('2. Keeps full route name visible in the route context SectionHeader without shrink-0 and with natural word wrapping', () => {
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={shackletonWaypointInfo}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+          routeNav={shackletonNav}
+        />
+      );
+
+      expect(html).toContain("Ernest Shackleton&#x27;s Endurance Expedition");
+      expect(html).toContain('info-panel-section-header');
+      expect(html).toContain('whitespace-normal');
+      expect(html).toContain('break-normal');
+      expect(html).not.toMatch(/class="[^"]*info-panel-section-header[^"]*"[^>]*>[\s\S]*?<h3[^>]*shrink-0/);
+      expect(html).not.toMatch(/class="[^"]*info-panel-section-header[^"]*"[^>]*>[\s\S]*?<h3[^>]*break-words/);
+      expect(html).not.toMatch(/class="[^"]*info-panel-section-header[^"]*"[^>]*>[\s\S]*?<h3[^>]*overflow-wrap:anywhere/);
+    });
+
+    it('3. Guarantees scrollable content uses overflow-x-hidden and overflow-y-auto', () => {
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={shackletonWaypointInfo}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('info-panel-scrollable');
+      expect(html).toContain('overflow-y-auto');
+      expect(html).toContain('overflow-x-hidden');
+    });
+
+    it('4. Allows long location names and geographic subtitles to wrap naturally with whitespace-normal and break-normal', () => {
+      const veryLongLocationInfo = {
+        name: 'A Very Long Historical Location Name That Exceeds The Normal Panel Width Without Breaking',
+        canonicalName: 'A Very Long Historical Location Name That Exceeds The Normal Panel Width Without Breaking',
+        state: 'A Very Long Administrative Region Name That Spans Multiple Lines Comfortably',
+        country: 'United Kingdom of Great Britain and Northern Ireland',
+        type: 'historical_waypoint' as any,
+        description: 'A test description for very long names.',
+        coordinates: { lat: 50.0, lng: -4.0 }
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={veryLongLocationInfo}
+          onClose={() => {}}
+          isLoading={false}
+          skin="parchment"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('A Very Long Historical Location Name That Exceeds The Normal Panel Width Without Breaking');
+      expect(html).toContain('whitespace-normal');
+      expect(html).toContain('break-normal');
+      expect(html).not.toContain('break-words');
+      expect(html).not.toContain('[overflow-wrap:anywhere]');
+    });
+
+    it('5. SectionHeader renders inline continuation divider that follows final wrapped line across 1-line, 2-line, and 3-line headers', () => {
+      const singleLine = renderToStaticMarkup(
+        <SectionHeader title="Notable Facts" />
+      );
+      expect(singleLine).toContain('Notable Facts');
+      expect(singleLine).toContain('section-header-rule inline-block align-middle w-full h-[1px] -mr-[100%] ml-2');
+      expect(singleLine).not.toMatch(/[\uFFFD\u00A0]|\\n|<br>/);
+
+      const twoLine = renderToStaticMarkup(
+        <SectionHeader title="Ernest Shackleton's Endurance Expedition" />
+      );
+      expect(twoLine).toContain("Ernest Shackleton&#x27;s Endurance Expedition");
+      expect(twoLine).toContain('section-header-rule inline-block align-middle w-full h-[1px] -mr-[100%] ml-2');
+      expect(twoLine).not.toMatch(/[\uFFFD\u00A0]|\\n|<br>/);
+
+      const threeLine = renderToStaticMarkup(
+        <SectionHeader title="A Very Long Historical Route Name That Requires Multiple Lines Across The Panel" />
+      );
+      expect(threeLine).toContain("A Very Long Historical Route Name That Requires Multiple Lines Across The Panel");
+      expect(threeLine).toContain('section-header-rule inline-block align-middle w-full h-[1px] -mr-[100%] ml-2');
+      expect(threeLine).not.toMatch(/[\uFFFD\u00A0]|\\n|<br>/);
     });
   });
 });

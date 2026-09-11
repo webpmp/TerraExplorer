@@ -1892,10 +1892,12 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                 const pinSize = isSelected ? 22 : 16;
                 const isMultiDigit = showMarkerNumber && (marker.index + 1) >= 10;
                 
+                const markerRouteGroupId = marker.routeGroupId || (marker.data as any)?.routeGroupId;
                 const markerColors = getThemeMarkerColors(skin, {
                   isWaypoint,
                   customColor: marker.color,
-                  highwayOutlineColor: themePalette.highways
+                  highwayOutlineColor: themePalette.highways,
+                  routeGroupId: markerRouteGroupId
                 });
                 const color = markerColors.fill;
                 const outlineColor = markerColors.outline;

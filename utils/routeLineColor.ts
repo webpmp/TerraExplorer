@@ -15,23 +15,24 @@ export interface ConnectingLineColorOptions {
   routeGroupId?: string;
 }
 
-// Deterministic, high-contrast route color palettes for multi-route events
+// Deterministic, harmonious theme-based route color palettes for multi-route events
+// Uses distinct shades and tints of cyan / teal / sky blue aligned with the Modern theme
 export const MODERN_ROUTE_PALETTE_GLOBE = [
-  '#00e5ff', // Cyan (Default / Route 1)
-  '#f59e0b', // Amber (Route 2)
-  '#ec4899', // Pink / Magenta (Route 3)
-  '#10b981', // Emerald (Route 4)
-  '#8b5cf6', // Violet (Route 5)
-  '#06b6d4'  // Light Cyan (Route 6)
+  '#00e5ff', // Vibrant Cyan (Default / Primary Route 1)
+  '#00b4d8', // Vivid Cerulean / Sky (Route 2)
+  '#22d3ee', // Bright Cyan 400 (Route 3)
+  '#0ea5e9', // Ocean Sky 500 (Route 4)
+  '#38bdf8', // Light Sky 400 (Route 5)
+  '#06b6d4'  // Electric Cyan 500 (Route 6)
 ];
 
 export const MODERN_ROUTE_PALETTE_OSM = [
-  '#0891b2', // Deep Cyan (Default / Route 1)
-  '#d97706', // Deep Amber (Route 2)
-  '#db2777', // Deep Rose/Pink (Route 3)
-  '#059669', // Deep Emerald (Route 4)
-  '#7c3aed', // Deep Violet (Route 5)
-  '#0284c7'  // Deep Sky Blue (Route 6)
+  '#0891b2', // Deep Cyan 600 (Default / Primary Route 1)
+  '#0284c7', // Deep Sky 600 (Route 2)
+  '#0e7490', // Dark Cyan 700 (Route 3)
+  '#0369a1', // Dark Sky 700 (Route 4)
+  '#155e75', // Midnight Cyan 800 (Route 5)
+  '#075985'  // Deep Navy Sky 800 (Route 6)
 ];
 
 /**
