@@ -454,6 +454,25 @@ describe('StackedImageCarousel Component', () => {
       expect(parchmentHtml).toContain('border-[#8b5a2b]');
       expect(parchmentHtml).toContain('font-serif');
     });
+
+    it('uses bg-black/85 and backdrop-blur-sm for lightbox backdrop', () => {
+      const html = renderToStaticMarkup(
+        <StackedImageCarousel
+          images={multipleImages}
+          locationName="Matterhorn"
+          skin="modern"
+          initialLightboxOpen={true}
+        />
+      );
+
+      const modalMatch = html.match(/<div[^>]*data-testid="lightbox-modal"[^>]*>/);
+      expect(modalMatch).not.toBeNull();
+      const modalTag = modalMatch![0];
+
+      expect(modalTag).toContain('bg-black/85');
+      expect(modalTag).toContain('backdrop-blur-sm');
+      expect(modalTag).not.toContain('bg-black/95');
+    });
   });
 });
 

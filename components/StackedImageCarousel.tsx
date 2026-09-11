@@ -306,7 +306,7 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
 
   const lightboxModal = isLightboxOpen ? (
     <div 
-      className="fixed inset-0 z-[9999] bg-black/95 flex flex-col items-center justify-center p-4 md:p-8 pointer-events-auto select-none" 
+      className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-4 md:p-8 pointer-events-auto select-none" 
       onClick={() => setIsLightboxOpen(false)}
       onWheel={(e) => { e.stopPropagation(); }}
       data-testid="lightbox-modal"
