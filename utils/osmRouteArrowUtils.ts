@@ -243,6 +243,106 @@ export function lineIntersectsRect(p1: Point2D, p2: Point2D, rect: BoundingBox):
   return u1 <= u2;
 }
 
+export interface ClippedLineSegment {
+  p1: Point2D;
+  p2: Point2D;
+  startOffset: number;
+  dashOffset: number;
+}
+
+/**
+ * Calculates the cycle length of an SVG stroke-dasharray (e.g. '2.5 5' -> 7.5).
+ */
+export function getDashCycleLength(dashArrayStr: string): number {
+  const parts = dashArrayStr
+    .trim()
+    .split(/[\s,]+/)
+    .map(Number)
+    .filter((n) => !isNaN(n) && n > 0);
+  if (parts.length === 0) return 7.5;
+  const sum = parts.reduce((a, b) => a + b, 0);
+  return parts.length % 2 === 1 ? sum * 2 : sum;
+}
+
+/**
+ * Clips a 2D line segment p1 -> p2 against an axis-aligned bounding box (viewport bounds)
+ * using the Liang-Barsky algorithm.
+ *
+ * Preserves the continuous dash pattern phase by calculating the exact strokeDashoffset
+ * based on the distance clipped from the start of the original segment.
+ *
+ * This prevents browser SVG rasterizers from overflowing/collapsing dashes when zoomed far in
+ * on OSM where screen coordinates span millions of pixels, ensuring the dashed connector
+ * remains crisp, scale-invariant, and visibly dashed at all OSM zoom levels.
+ */
+export function clipLineToViewport(
+  p1: Point2D,
+  p2: Point2D,
+  bounds: BoundingBox,
+  dashArray: string = ROUTE_LINE_DASH_ARRAY
+): ClippedLineSegment | null {
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  const totalLength = Math.hypot(dx, dy);
+
+  if (totalLength === 0) {
+    if (pointInRect(p1, bounds)) {
+      return { p1: { ...p1 }, p2: { ...p2 }, startOffset: 0, dashOffset: 0 };
+    }
+    return null;
+  }
+
+  let t0 = 0;
+  let t1 = 1;
+
+  const p = [-dx, dx, -dy, dy];
+  const q = [
+    p1.x - bounds.left,
+    bounds.right - p1.x,
+    p1.y - bounds.top,
+    bounds.bottom - p1.y
+  ];
+
+  for (let i = 0; i < 4; i++) {
+    const pi = p[i];
+    const qi = q[i];
+
+    if (pi === 0) {
+      if (qi < 0) return null;
+    } else {
+      const r = qi / pi;
+      if (pi < 0) {
+        if (r > t1) return null;
+        if (r > t0) t0 = r;
+      } else {
+        if (r < t0) return null;
+        if (r < t1) t1 = r;
+      }
+    }
+  }
+
+  if (t0 > t1) {
+    return null;
+  }
+
+  const startOffset = t0 * totalLength;
+  const cycleLength = getDashCycleLength(dashArray);
+  const dashOffset = -(startOffset % cycleLength);
+
+  return {
+    p1: {
+      x: p1.x + t0 * dx,
+      y: p1.y + t0 * dy
+    },
+    p2: {
+      x: p1.x + t1 * dx,
+      y: p1.y + t1 * dy
+    },
+    startOffset,
+    dashOffset
+  };
+}
+
 /**
  * Calculates SVG arrowhead corner vertices given tip point, orientation angle, length and width.
  */

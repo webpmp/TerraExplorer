@@ -217,6 +217,10 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
     expect(parchmentHtml).not.toContain('shadow-[inset_0_0_0_1px_rgba(140,110,75,0.35)]');
     expect(parchmentHtml).toContain('parchment-background');
     expect(parchmentHtml).toContain('EXPLORE');
+    // Parchment EXPLORE button has no colored rectangle background
+    expect(parchmentHtml).not.toMatch(/EXPLORE<\/button>/ && /bg-\[#e8d5b5\][^>]*>EXPLORE/);
+    expect(parchmentHtml).not.toMatch(/hover:bg-\[#d2b48c\]\/80/);
+    expect(parchmentHtml).toContain('text-[#5c3a21]');
   });
 
   test('6. Stacking architecture preserves z-0 background and z-1 crisp content including Waypoint Navigation', () => {

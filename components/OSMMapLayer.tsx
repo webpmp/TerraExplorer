@@ -26,6 +26,7 @@ import { getConnectingLineColor } from '../utils/routeLineColor';
 import {
   calculateOSMRouteArrow,
   estimateOSMLabelBounds,
+  clipLineToViewport,
   ROUTE_LINE_DASH_ARRAY,
   ROUTE_LINE_STROKE_WIDTH,
   getRouteLineOpacity,
@@ -1767,13 +1768,24 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                       const sx2 = osmProjection.screenCenterX + (x2 - osmProjection.exactX) * 256;
                       const sy2 = osmProjection.screenCenterY + (y2 - osmProjection.exactY) * 256;
 
-                      // Check if both points are far off-screen
-                      if (
-                        (sx1 < -500 && sx2 < -500) ||
-                        (sx1 > viewportSize.width + 500 && sx2 > viewportSize.width + 500) ||
-                        (sy1 < -500 && sy2 < -500) ||
-                        (sy1 > viewportSize.height + 500 && sy2 > viewportSize.height + 500)
-                      ) {
+                      const segStyle = getRouteSegmentStyle(wp.segmentEvidence || segment.segmentEvidence, skin);
+
+                      // Clip line segment to viewport bounding box with margin to prevent SVG rasterizer overflow at high zoom
+                      const viewportBounds = {
+                        left: -200,
+                        top: -200,
+                        right: viewportSize.width + 200,
+                        bottom: viewportSize.height + 200
+                      };
+
+                      const clippedLine = clipLineToViewport(
+                        { x: sx1, y: sy1 },
+                        { x: sx2, y: sy2 },
+                        viewportBounds,
+                        segStyle.strokeDasharray
+                      );
+
+                      if (!clippedLine) {
                         return null;
                       }
 
@@ -1834,21 +1846,20 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                       const dy = sy2 - sy1;
                       const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
 
-                      const segStyle = getRouteSegmentStyle(wp.segmentEvidence || segment.segmentEvidence, skin);
-
-                      console.log(`[OSM ROUTE SEGMENT]\nfromId=${wp.id}\nfromName=${wp.name}\nfromSequence=${wp.sequence}\ntoId=${nextWp.id}\ntoName=${nextWp.name}\ntoSequence=${nextWp.sequence}\nevidence=${wp.segmentEvidence || segment.segmentEvidence || 'DOCUMENTED_ROUTE_SEGMENT'}\nisSecondary=${segStyle.isSecondary}\nfromScreen=(${sx1.toFixed(1)}, ${sy1.toFixed(1)})\ntoScreen=(${sx2.toFixed(1)}, ${sy2.toFixed(1)})\ndx=${dx.toFixed(1)}\ndy=${dy.toFixed(1)}\nangle=${angle.toFixed(1)}°`);
+                      console.log(`[OSM ROUTE SEGMENT]\nfromId=${wp.id}\nfromName=${wp.name}\nfromSequence=${wp.sequence}\ntoId=${nextWp.id}\ntoName=${nextWp.name}\ntoSequence=${nextWp.sequence}\nevidence=${wp.segmentEvidence || segment.segmentEvidence || 'DOCUMENTED_ROUTE_SEGMENT'}\nisSecondary=${segStyle.isSecondary}\nfromScreen=(${sx1.toFixed(1)}, ${sy1.toFixed(1)})\ntoScreen=(${sx2.toFixed(1)}, ${sy2.toFixed(1)})\nclippedP1=(${clippedLine.p1.x.toFixed(1)}, ${clippedLine.p1.y.toFixed(1)})\nclippedP2=(${clippedLine.p2.x.toFixed(1)}, ${clippedLine.p2.y.toFixed(1)})\ndashOffset=${clippedLine.dashOffset.toFixed(2)}\ndx=${dx.toFixed(1)}\ndy=${dy.toFixed(1)}\nangle=${angle.toFixed(1)}°`);
 
                       return (
                         <g key={`osm-route-seg-${segment.group.id}-${wp.id || i}-${nextWp.id || i + 1}`}>
                           {/* Thematic route line: solid/primary for DOCUMENTED_ROUTE_SEGMENT, faded/secondary for HIGH_LEVEL_HISTORICAL_ASSOCIATION */}
                           <line
-                            x1={sx1}
-                            y1={sy1}
-                            x2={sx2}
-                            y2={sy2}
+                            x1={clippedLine.p1.x}
+                            y1={clippedLine.p1.y}
+                            x2={clippedLine.p2.x}
+                            y2={clippedLine.p2.y}
                             stroke={routeColor}
                             strokeWidth={segStyle.strokeWidth}
                             strokeDasharray={segStyle.strokeDasharray}
+                            strokeDashoffset={clippedLine.dashOffset}
                             strokeLinecap="round"
                             opacity={segStyle.opacity}
                           />

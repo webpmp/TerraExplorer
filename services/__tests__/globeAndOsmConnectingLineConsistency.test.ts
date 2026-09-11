@@ -12,7 +12,9 @@ import {
   getRouteLineOpacity,
   calculateOSMRouteArrow,
   buildGlobeRouteGeometry,
-  slerpUnitVectors
+  slerpUnitVectors,
+  clipLineToViewport,
+  getDashCycleLength
 } from '../../utils/osmRouteArrowUtils';
 import { getConnectingLineColor, isBrightTerrainAt } from '../../utils/routeLineColor';
 import { SkinType, Waypoint } from '../../types';
@@ -235,6 +237,71 @@ describe('Globe & OSM Route Connecting Line Visual Consistency Suite', () => {
 
       expect(geom).not.toBeNull();
       expect(geom!.getAttribute('position').count).toBeGreaterThan(0);
+    });
+  });
+
+  describe('5. High OSM Zoom Line Clipping & Scale-Invariant Dash Consistency', () => {
+    const viewportBounds = { left: -200, top: -200, right: 1920 + 200, bottom: 1080 + 200 };
+
+    it('calculates correct dash cycle length for primary and secondary dash arrays', () => {
+      expect(getDashCycleLength(ROUTE_LINE_DASH_ARRAY)).toBe(7.5);
+      expect(getDashCycleLength('1.5 6')).toBe(7.5);
+      expect(getDashCycleLength('4 4')).toBe(8);
+      expect(getDashCycleLength('5')).toBe(10); // Odd single number repeats -> 5 + 5
+    });
+
+    it('preserves unclipped coordinates when segment is fully inside viewport', () => {
+      const p1 = { x: 100, y: 100 };
+      const p2 = { x: 500, y: 500 };
+      const clipped = clipLineToViewport(p1, p2, viewportBounds, ROUTE_LINE_DASH_ARRAY);
+
+      expect(clipped).not.toBeNull();
+      expect(clipped!.p1.x).toBe(100);
+      expect(clipped!.p1.y).toBe(100);
+      expect(clipped!.p2.x).toBe(500);
+      expect(clipped!.p2.y).toBe(500);
+      expect(clipped!.startOffset).toBe(0);
+      expect(clipped!.dashOffset).toBe(-0);
+    });
+
+    it('clips extreme high-zoom offscreen coordinates and computes precise strokeDashoffset', () => {
+      // Simulates high zoom (e.g. z=18) where waypoint 1 is -500,000px offscreen and waypoint 2 is +500,000px offscreen
+      const p1 = { x: -500000, y: 500 };
+      const p2 = { x: 500000, y: 500 };
+      const clipped = clipLineToViewport(p1, p2, viewportBounds, ROUTE_LINE_DASH_ARRAY);
+
+      expect(clipped).not.toBeNull();
+      // Bounded within [-200, 2120]
+      expect(clipped!.p1.x).toBe(-200);
+      expect(clipped!.p1.y).toBe(500);
+      expect(clipped!.p2.x).toBe(2120);
+      expect(clipped!.p2.y).toBe(500);
+
+      // Distance from p1 to clipped.p1 is 499,800px
+      // 499800 % 7.5 = 0 -> dashOffset = 0
+      expect(clipped!.startOffset).toBe(499800);
+      expect(clipped!.dashOffset).toBeCloseTo(0, 5);
+    });
+
+    it('maintains continuous dash phase across arbitrary pan/zoom fractional offsets', () => {
+      const p1 = { x: -100000, y: 0 };
+      const p2 = { x: 100000, y: 0 };
+      
+      const clipped = clipLineToViewport(p1, p2, viewportBounds, ROUTE_LINE_DASH_ARRAY);
+      expect(clipped).not.toBeNull();
+      
+      // The dash offset must always be within (-cycleLength, 0]
+      const cycle = getDashCycleLength(ROUTE_LINE_DASH_ARRAY);
+      expect(clipped!.dashOffset).toBeLessThanOrEqual(0);
+      expect(clipped!.dashOffset).toBeGreaterThan(-cycle);
+    });
+
+    it('returns null when line segment is entirely outside viewport', () => {
+      const p1 = { x: -5000, y: -5000 };
+      const p2 = { x: -1000, y: -2000 };
+      const clipped = clipLineToViewport(p1, p2, viewportBounds, ROUTE_LINE_DASH_ARRAY);
+
+      expect(clipped).toBeNull();
     });
   });
 });

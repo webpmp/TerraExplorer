@@ -326,7 +326,7 @@ const Controls: React.FC<ControlsProps> = ({
       inputWrapper: "backdrop-blur-md border-0 rounded-none shadow-none",
       inputIcon: "text-[#8b5a2b]",
       inputField: "text-[#522B07] placeholder-[#522B07] font-mono text-sm",
-      submitBtn: "bg-[#e8d5b5] text-[#5c3a21] hover:bg-[#d2b48c]/80 rounded-none font-sans font-bold uppercase",
+      submitBtn: "text-[#5c3a21] rounded-none font-sans font-bold uppercase",
       resetBtn: "text-[#8b5a2b] hover:text-[#3e2723] mr-2 p-1",
       glow: "hidden",
       statusRow: "bg-[#f4ead5]/95 border border-[#8b5a2b]/40 text-[#5c3a21] font-sans shadow-sm rounded",
