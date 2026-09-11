@@ -177,6 +177,11 @@ const CONTINENTS = [
  * Normalizes a geographic or entity name strictly for comparison purposes:
  * - strips diacritics / accents
  * - converts to lowercase
+/**
+ * Normalizes a geographic or entity name strictly for comparison purposes:
+ * - converts & to 'and'
+ * - strips diacritics / accents
+ * - converts to lowercase
  * - strips periods, apostrophes, quotes
  * - normalizes whitespace and punctuation
  */
@@ -186,11 +191,13 @@ export const normalizeGeoComparisonName = (str: unknown): string => {
   if (!s) return '';
 
   return s
-    .toLowerCase()
+    .replace(/\s*&\s*/g, ' and ')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
     .replace(/['’`.]/g, '')
     .replace(/[^\w\s-]/g, ' ')
+    .replace(/[-_]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 };
@@ -251,28 +258,95 @@ export const areGeoComponentsRedundant = (
   }
 
   // 4. Compound / conjunctive hierarchy: e.g. "South Georgia" vs "South Georgia and the South Sandwich Islands"
-  const isConjunctOf = (shortNorm: string, longNorm: string) => {
+  const isCompoundOf = (shortNorm: string, longNorm: string) => {
     if (shortNorm.length < 3) return false;
-    return (
+    if (shortNorm === longNorm) return true;
+
+    // Check conjunctive compound: starts with, ends with, or enclosed with "and"
+    if (
       longNorm.startsWith(`${shortNorm} and `) ||
-      longNorm.startsWith(`${shortNorm} & `) ||
       longNorm.endsWith(` and ${shortNorm}`) ||
-      longNorm.endsWith(` & ${shortNorm}`) ||
-      longNorm === `${shortNorm} islands` ||
-      longNorm === `${shortNorm} territory` ||
       longNorm.includes(` ${shortNorm} and `) ||
-      longNorm.includes(` ${shortNorm} & `)
-    );
+      longNorm.includes(` and ${shortNorm} and `)
+    ) {
+      return true;
+    }
+
+    // Check common geographical suffix/prefix wrappers (islands, island, territory, state, province)
+    if (
+      longNorm === `${shortNorm} islands` ||
+      longNorm === `${shortNorm} island` ||
+      longNorm === `${shortNorm} territory` ||
+      longNorm === `territory of ${shortNorm}` ||
+      longNorm === `state of ${shortNorm}` ||
+      longNorm === `province of ${shortNorm}` ||
+      longNorm === `republic of ${shortNorm}`
+    ) {
+      return true;
+    }
+
+    return false;
   };
 
-  if (isConjunctOf(normA, normB) || isConjunctOf(stdA, stdB)) {
+  if (isCompoundOf(normA, normB) || isCompoundOf(stdA, stdB)) {
     return { isRedundant: true, relation: 'compound_nested', preferred: rawA };
   }
-  if (isConjunctOf(normB, normA) || isConjunctOf(stdB, stdA)) {
+  if (isCompoundOf(normB, normA) || isCompoundOf(stdB, stdA)) {
     return { isRedundant: true, relation: 'compound_nested', preferred: rawB };
   }
 
   return { isRedundant: false };
+};
+
+/**
+ * Deduplicates a list of geographic hierarchy components, eliminating exact duplicates,
+ * normalized punctuation/casing variants, and compound/nested representations
+ * while preferring the most specific geographic context.
+ */
+export const deduplicateGeographicHierarchy = (
+  components: (string | undefined | null)[]
+): string[] => {
+  if (!components || !Array.isArray(components)) return [];
+
+  const validComponents = components
+    .map(c => (typeof c === 'string' ? c.trim() : ''))
+    .filter(c => Boolean(c) && !isPlaceholderString(c));
+
+  if (validComponents.length <= 1) return validComponents;
+
+  const result: string[] = [];
+
+  for (const candidate of validComponents) {
+    let shouldAdd = true;
+    let replaceIdx = -1;
+    let replacementVal: string | undefined;
+
+    for (let i = 0; i < result.length; i++) {
+      const existing = result[i];
+      const red = areGeoComponentsRedundant(candidate, existing);
+      if (red.isRedundant) {
+        shouldAdd = false;
+        // If candidate is the preferred/more specific component over existing, replace existing
+        if (
+          red.preferred &&
+          normalizeGeoComparisonName(red.preferred) === normalizeGeoComparisonName(candidate) &&
+          normalizeGeoComparisonName(candidate) !== normalizeGeoComparisonName(existing)
+        ) {
+          replaceIdx = i;
+          replacementVal = red.preferred;
+        }
+        break;
+      }
+    }
+
+    if (replaceIdx >= 0 && replacementVal) {
+      result[replaceIdx] = replacementVal;
+    } else if (shouldAdd) {
+      result.push(candidate);
+    }
+  }
+
+  return result;
 };
 
 /**
@@ -374,7 +448,15 @@ export const extractHeaderSettlement = (info: any): string | undefined => {
  */
 export const extractHeaderCountry = (info: any): string | undefined => {
   if (!info) return undefined;
-  const rawCountry = cleanVal(info.country || info.context?.country || info.address?.country || info.waypoint?.country);
+  const rawCountry = cleanVal(
+    info.country ||
+    info.context?.country ||
+    info.address?.country ||
+    info.waypoint?.country ||
+    info.territory ||
+    info.context?.territory ||
+    info.waypoint?.territory
+  );
   if (rawCountry && !isPlaceholderString(rawCountry)) {
     return rawCountry;
   }
@@ -412,7 +494,7 @@ export const parseLocationHierarchyString = (locStr: string): ParsedLocationHier
   const isStreetOrBuildingNumber = (s: string) => /^\d+\s+[A-Za-z]/i.test(s) || /^\d+[a-z]?$/i.test(s);
   const isAdministrativeNoise = (s: string) => /\b(\d+(st|nd|rd|th)?\s+district|district of|regional unit of|regional unit|metropolitan city of|metropolitan city|arrondissement|county|suburb|quarter|borough)\b/i.test(s);
 
-  const cleanParts: string[] = [];
+  let cleanParts: string[] = [];
   let foundCleanMunicipality: string | undefined;
 
   for (const part of rawParts) {
@@ -443,6 +525,9 @@ export const parseLocationHierarchyString = (locStr: string): ParsedLocationHier
       cleanParts.push(part);
     }
   }
+
+  // Deduplicate hierarchy parts
+  cleanParts = deduplicateGeographicHierarchy(cleanParts);
 
   if (cleanParts.length === 0) return {};
 
@@ -492,10 +577,15 @@ export const getHeaderLocation = (
     ''
   ) || '';
 
-  let settlement = extractHeaderSettlement(info);
-  let state = extractHeaderState(info);
-  let country = extractHeaderCountry(info);
-  let continent = cleanVal(info.continent || info.context?.continent);
+  const rawSettlement = extractHeaderSettlement(info);
+  const rawState = extractHeaderState(info);
+  const rawCountry = extractHeaderCountry(info);
+  const rawContinent = cleanVal(info.continent || info.context?.continent);
+
+  let parsedSettlement: string | undefined;
+  let parsedState: string | undefined;
+  let parsedCountry: string | undefined;
+  let parsedContinent: string | undefined;
 
   const locString = cleanVal(
     info.locationString ||
@@ -506,88 +596,45 @@ export const getHeaderLocation = (
 
   if (locString) {
     const parsed = parseLocationHierarchyString(locString);
-    if (!settlement && parsed.settlement) settlement = parsed.settlement;
-    if (!state && parsed.state) state = parsed.state;
-    if (!country && parsed.country) country = parsed.country;
-    if (!continent && parsed.continent) continent = parsed.continent;
+    parsedSettlement = parsed.settlement;
+    parsedState = parsed.state;
+    parsedCountry = parsed.country;
+    parsedContinent = parsed.continent;
   }
 
-  // Check redundancy with title
-  const isSettlementTitle = settlement ? isRedundantWithTitle(settlement, rawTitle, info.name) : false;
-  const isStateTitle = state ? isRedundantWithTitle(state, rawTitle, info.name) : false;
-  const isCountryTitle = country ? isRedundantWithTitle(country, rawTitle, info.name) : false;
+  // Deduplicate and resolve best candidates for each hierarchy tier
+  const candidateSettlements = deduplicateGeographicHierarchy([rawSettlement, parsedSettlement]);
+  const candidateStates = deduplicateGeographicHierarchy([rawState, parsedState]);
+  const candidateCountries = deduplicateGeographicHierarchy([rawCountry, parsedCountry]);
 
-  // 1. If the entity itself is a Settlement/City (e.g. title: "Clovis", "Boston", "Paris"):
-  if (isSettlementTitle) {
-    if (state && country && !isStateTitle && !isCountryTitle) {
-      return `${state}, ${country}`;
-    }
-    if (state && !isStateTitle) {
-      return state;
-    }
-    if (country && !isCountryTitle) {
-      return country;
-    }
-    if (continent) {
+  // Overall candidate list in specificity order: settlement -> state -> country
+  const allCandidates = deduplicateGeographicHierarchy([
+    ...candidateSettlements,
+    ...candidateStates,
+    ...candidateCountries
+  ]);
+
+  // Filter out any candidates that are redundant with displayedTitle or canonicalName
+  const nonRedundantGeo = allCandidates.filter(comp => !isRedundantWithTitle(comp, rawTitle, info.name));
+
+  if (nonRedundantGeo.length === 0) {
+    const continent = parsedContinent || rawContinent;
+    if (continent && !isRedundantWithTitle(continent, rawTitle, info.name)) {
       return continent;
     }
     return null;
   }
 
-  // 2. If the entity itself is a State/Province (e.g. title: "California"):
-  if (isStateTitle) {
-    if (country && !isCountryTitle) {
-      return country;
-    }
-    if (continent) {
-      return continent;
-    }
-    return null;
+  if (nonRedundantGeo.length === 1) {
+    return nonRedundantGeo[0];
   }
 
-  // 3. If the entity itself is a Country (e.g. title: "France"):
-  if (isCountryTitle) {
-    if (continent) {
-      return continent;
-    }
-    return null;
+  if (nonRedundantGeo.length === 2) {
+    return `${nonRedundantGeo[0]}, ${nonRedundantGeo[1]}`;
   }
 
-  // 4. For Landmarks, Historical Sites, Natural Features, POIs, Events, etc.:
-  // City + Country when available
-  if (settlement && country) {
-    if (settlement.toLowerCase() === country.toLowerCase() || areGeoComponentsRedundant(settlement, country).isRedundant) {
-      const red = areGeoComponentsRedundant(settlement, country);
-      return red.preferred || settlement;
-    }
-    return `${settlement}, ${country}`;
-  }
-
-  // 5. Fallback: If no city available, but state & country exist: state, country
-  if (state && country) {
-    if (state.toLowerCase() === country.toLowerCase() || areGeoComponentsRedundant(state, country).isRedundant) {
-      const red = areGeoComponentsRedundant(state, country);
-      return red.preferred || state;
-    }
-    return `${state}, ${country}`;
-  }
-
-  // 6. Fallback: If only city available: city
-  if (settlement) {
-    return settlement;
-  }
-
-  // 7. Fallback: If only state available: state
-  if (state) {
-    return state;
-  }
-
-  // 8. Fallback: If only country available: country
-  if (country) {
-    return country;
-  }
-
-  return null;
+  // 3+ components: prefer most specific + most general (first and last)
+  return `${nonRedundantGeo[0]}, ${nonRedundantGeo[nonRedundantGeo.length - 1]}`;
 };
 
 /**

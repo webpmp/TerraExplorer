@@ -228,6 +228,129 @@ export const HISTORICAL_ROUTE_REGISTRY: Record<string, HistoricalEventRouteModel
         documentedConsecutiveSegments: []
       }
     }
+  },
+  'shackleton-endurance': {
+    eventTitle: "Ernest Shackleton's Endurance Expedition",
+    eventPattern: /\b(?:shackleton|endurance\s+(?:expedition|voyage)|trans-antarctic)\b/i,
+    routeGroups: {
+      'shackleton-endurance': {
+        id: 'shackleton-endurance',
+        name: "Ernest Shackleton's Endurance Expedition",
+        isSequential: true,
+        corridorDescription: "Imperial Trans-Antarctic Expedition route from Plymouth through Buenos Aires, Grytviken, the Weddell Sea, Elephant Island, and South Georgia rescue at Stromness and Punta Arenas.",
+        documentedAnchors: [
+          {
+            id: 'plymouth',
+            name: "Plymouth, England",
+            canonicalName: "Plymouth",
+            lat: 50.3755,
+            lng: -4.1427,
+            waypointType: 'route_waypoint',
+            role: 'origin',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "August 8, 1914: The Endurance departs for Buenos Aires."
+          },
+          {
+            id: 'buenos-aires',
+            name: "Buenos Aires, Argentina",
+            canonicalName: "Buenos Aires",
+            lat: -34.6037,
+            lng: -58.3816,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "October 9, 1914: The ship arrives to pick up supplies and crew."
+          },
+          {
+            id: 'grytviken',
+            name: "Grytviken, South Georgia",
+            canonicalName: "Grytviken",
+            lat: -54.2811,
+            lng: -36.5092,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "December 5, 1914: The expedition departs the whaling station for the Weddell Sea."
+          },
+          {
+            id: 'weddell-sea',
+            name: "Weddell Sea (Ice Trap)",
+            canonicalName: "Weddell Sea",
+            lat: -76.5,
+            lng: -35.0,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "January 1915: The Endurance becomes frozen fast in the pack ice."
+          },
+          {
+            id: 'endurance-sinks',
+            name: "Endurance Sinks",
+            canonicalName: "Endurance Sinks",
+            lat: -69.08,
+            lng: -51.5,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "November 21, 1915: Crushed by ice, the ship sinks, stranding the crew."
+          },
+          {
+            id: 'elephant-island',
+            name: "Elephant Island",
+            canonicalName: "Elephant Island",
+            lat: -61.1417,
+            lng: -55.2333,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "April 1916: The crew reaches solid land for the first time in 497 days."
+          },
+          {
+            id: 'king-haakon-bay',
+            name: "King Haakon Bay",
+            canonicalName: "King Haakon Bay",
+            lat: -54.1500,
+            lng: -37.2333,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "May 1916: Shackleton and five men land after the perilous voyage of the James Caird."
+          },
+          {
+            id: 'stromness',
+            name: "Stromness Whaling Station",
+            canonicalName: "Stromness",
+            lat: -54.1600,
+            lng: -36.7110,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "May 20, 1916: Shackleton, Worsley, and Crean reach safety after crossing the mountains."
+          },
+          {
+            id: 'punta-arenas',
+            name: "Punta Arenas, Chile",
+            canonicalName: "Punta Arenas",
+            lat: -53.1638,
+            lng: -70.9171,
+            waypointType: 'route_waypoint',
+            role: 'destination',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "August 30, 1916: The tug Yelcho, commanded by Luis Pardo, finally rescues the remaining crew from Elephant Island."
+          }
+        ],
+        documentedConsecutiveSegments: [
+          ['plymouth', 'buenos-aires'],
+          ['buenos-aires', 'grytviken'],
+          ['grytviken', 'weddell-sea'],
+          ['weddell-sea', 'endurance-sinks'],
+          ['endurance-sinks', 'elephant-island'],
+          ['elephant-island', 'king-haakon-bay'],
+          ['king-haakon-bay', 'stromness'],
+          ['stromness', 'punta-arenas']
+        ]
+      }
+    }
   }
 };
 
@@ -276,6 +399,7 @@ export function resolveCanonicalRouteGroup(
   if (clean.includes('benge') || clean.includes('johnbenge')) return eventModel.routeGroups['benge-route'] || null;
   if (clean.includes('bell') || clean.includes('johnbell')) return eventModel.routeGroups['bell-route'] || null;
   if (clean.includes('water') || clean.includes('river') || clean.includes('boat')) return eventModel.routeGroups['water-route'] || null;
+  if (clean.includes('shackleton') || clean.includes('endurance') || clean.includes('antarctic')) return eventModel.routeGroups['shackleton-endurance'] || null;
 
   return null;
 }
@@ -559,11 +683,14 @@ export function buildCanonicalEventTopology(eventTitle: string): {
 
   const route: Array<any> = [];
 
+  const groupValues = Object.values(model.routeGroups);
+  const isSingleSequentialRoute = groupValues.length === 1 && groupValues[0].isSequential;
+
   for (const [groupId, groupDef] of Object.entries(model.routeGroups)) {
     routeGroups.push({
       id: groupDef.id,
       name: groupDef.name,
-      type: 'detachment',
+      type: isSingleSequentialRoute ? 'documented_route' : 'detachment',
       isSequential: groupDef.isSequential,
       description: groupDef.corridorDescription
     });
@@ -577,6 +704,8 @@ export function buildCanonicalEventTopology(eventTitle: string): {
         lat: anchor.lat,
         lng: anchor.lng,
         sequence: idx + 1,
+        globalSequence: route.length + 1,
+        isSequential: groupDef.isSequential,
         routeGroupId: groupDef.id,
         routeGroupName: groupDef.name,
         memberships: [{
@@ -597,10 +726,11 @@ export function buildCanonicalEventTopology(eventTitle: string): {
 
   return {
     title: model.eventTitle,
-    routeType: 'multi_location_campaign',
-    routeEvidenceMode: 'MULTI_ROUTE_EVENT',
-    isSequential: false,
+    routeType: isSingleSequentialRoute ? 'expedition' : 'multi_location_campaign',
+    routeEvidenceMode: isSingleSequentialRoute ? 'DOCUMENTED_ROUTE' : 'MULTI_ROUTE_EVENT',
+    isSequential: isSingleSequentialRoute,
     routeGroups,
     route
   };
 }
+

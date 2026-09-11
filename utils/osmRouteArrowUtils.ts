@@ -13,13 +13,14 @@ export const ARROW_WIDTH = 6;
 export const MIN_ARROW_SEGMENT_LENGTH = 20;
 
 // Shared Route Connecting Line Dash & Visual Styling Constants (Single Source of Truth)
-export const ROUTE_LINE_DASH_ARRAY = '4 2.67';
-export const ROUTE_LINE_DASH_LENGTH = 4;
-export const ROUTE_LINE_GAP_LENGTH = 2.67;
+// Short dash with noticeably larger gap for a lightweight, restrained historical expedition/trail appearance
+export const ROUTE_LINE_DASH_ARRAY = '2.5 5';
+export const ROUTE_LINE_DASH_LENGTH = 2.5;
+export const ROUTE_LINE_GAP_LENGTH = 5;
 export const ROUTE_LINE_STROKE_WIDTH = 1.75;
 
 // Secondary / High-Level Historical Association Styling (Faded & Dotted)
-export const ROUTE_LINE_SECONDARY_DASH_ARRAY = '2 4';
+export const ROUTE_LINE_SECONDARY_DASH_ARRAY = '1.5 6';
 export const ROUTE_LINE_SECONDARY_STROKE_WIDTH = 1.25;
 
 import { SkinType, Waypoint } from '../types';
@@ -550,7 +551,7 @@ export interface GlobeRouteGeometryOptions {
  * Builds custom 3D BufferGeometry containing dashed line ribbons and directional arrows
  * for waypoint connecting lines on the 3D globe.
  * 
- * Reuses the exact same 6:4 dash ratio, stroke proportion, directional arrow aspect ratio (12:8),
+ * Reuses the exact same short-dash / larger-gap pattern, stroke proportion, directional arrow aspect ratio (9:6),
  * placement, orientation, and theme-aware / contrast-aware colors as the OSM connecting line.
  */
 export function buildGlobeRouteGeometry(
@@ -582,9 +583,9 @@ export function buildGlobeRouteGeometry(
   const arrowBackOffset = DEFAULT_ARROW_BACK_OFFSET * scale; // ~0.0112
   const minSegmentLength = MIN_ARROW_SEGMENT_LENGTH * scale; // ~0.016
 
-  const dashLength = ROUTE_LINE_DASH_LENGTH * scale; // ~0.0032
-  const gapLength = ROUTE_LINE_GAP_LENGTH * scale;   // ~0.0021 (exact 1.5 dash:gap ratio)
-  const cycleLength = dashLength + gapLength;        // ~0.0053
+  const dashLength = ROUTE_LINE_DASH_LENGTH * scale; // ~0.0020
+  const gapLength = ROUTE_LINE_GAP_LENGTH * scale;   // ~0.0040 (short dash with larger gap)
+  const cycleLength = dashLength + gapLength;        // ~0.0060
   const strokeWidth = ROUTE_LINE_STROKE_WIDTH * scale; // ~0.0014 (1.5px equivalent)
   const halfStroke = strokeWidth / 2;
 

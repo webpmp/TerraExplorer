@@ -1,5 +1,5 @@
 import { describe, test, it, expect } from 'vitest';
-import { normalizeDisplayText, cleanMetadataString, formatImageAttribution, normalizeGeoComparisonName, areGeoComponentsRedundant, isRedundantWithTitle, formatGeographicContext, normalizeHeaderGeographicHierarchy, getHeaderLocation, calculateScrollFade, getScrollFadeMaskStyle } from '../InfoPanel';
+import { normalizeDisplayText, cleanMetadataString, formatImageAttribution, normalizeGeoComparisonName, areGeoComponentsRedundant, isRedundantWithTitle, deduplicateGeographicHierarchy, formatGeographicContext, normalizeHeaderGeographicHierarchy, getHeaderLocation, calculateScrollFade, getScrollFadeMaskStyle } from '../InfoPanel';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import InfoPanel from '../InfoPanel';
@@ -1774,6 +1774,41 @@ describe('Lightbox Metadata Integration', () => {
         expect(areGeoComponentsRedundant('North Carolina', 'South Carolina').isRedundant).toBe(false);
         expect(areGeoComponentsRedundant('San Francisco', 'Alcatraz Island').isRedundant).toBe(false);
         expect(areGeoComponentsRedundant('California', 'Death Valley').isRedundant).toBe(false);
+      });
+    });
+
+    describe('deduplicateGeographicHierarchy reusable hierarchy deduplication engine', () => {
+      // Requirement 12.A: Grytviken
+      it('A. Grytviken: deduplicates compound territory and preserves specific context ["South Georgia"]', () => {
+        const input = ['South Georgia', 'South Georgia and the South Sandwich Islands'];
+        expect(deduplicateGeographicHierarchy(input)).toEqual(['South Georgia']);
+
+        const reversedInput = ['South Georgia and the South Sandwich Islands', 'South Georgia'];
+        expect(deduplicateGeographicHierarchy(reversedInput)).toEqual(['South Georgia']);
+      });
+
+      // Requirement 12.B: Normal place with distinct hierarchy
+      it('B. Normal place with distinct hierarchy: preserves distinct levels ["Paris", "France"]', () => {
+        const input = ['Paris', 'France'];
+        expect(deduplicateGeographicHierarchy(input)).toEqual(['Paris', 'France']);
+      });
+
+      // Requirement 12.C: Place where names merely share a word but are not duplicates
+      it('C. Place where names merely share a word: preserves both valid geographic levels', () => {
+        expect(deduplicateGeographicHierarchy(['York', 'New York'])).toEqual(['York', 'New York']);
+        expect(deduplicateGeographicHierarchy(['Virginia', 'West Virginia'])).toEqual(['Virginia', 'West Virginia']);
+        expect(deduplicateGeographicHierarchy(['North Carolina', 'South Carolina'])).toEqual(['North Carolina', 'South Carolina']);
+        expect(deduplicateGeographicHierarchy(['South Africa', 'Africa'])).toEqual(['South Africa', 'Africa']);
+        expect(deduplicateGeographicHierarchy(['South Korea', 'Korea'])).toEqual(['South Korea', 'Korea']);
+      });
+
+      // Requirement 12.D: Different casing/whitespace/punctuation representing the same geographic name
+      it('D. Different casing/whitespace/punctuation: collapses duplicates correctly', () => {
+        const input = ['South Georgia', '  south   georgia  ', 'South-Georgia.', 'South Georgia & the South Sandwich Islands'];
+        expect(deduplicateGeographicHierarchy(input)).toEqual(['South Georgia']);
+
+        const ampersandInput = ['Trinidad & Tobago', 'Trinidad and Tobago'];
+        expect(deduplicateGeographicHierarchy(ampersandInput)).toEqual(['Trinidad & Tobago']);
       });
     });
 

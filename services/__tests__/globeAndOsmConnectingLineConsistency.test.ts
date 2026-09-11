@@ -26,11 +26,11 @@ describe('Globe & OSM Route Connecting Line Visual Consistency Suite', () => {
   ];
 
   describe('1. Dash Pattern Design & Proportions', () => {
-    it('shares the exact dash:gap ratio (1.5) across OSM and Globe constants with refined stroke', () => {
-      expect(ROUTE_LINE_DASH_ARRAY).toBe('4 2.67');
-      expect(ROUTE_LINE_DASH_LENGTH).toBe(4);
-      expect(ROUTE_LINE_GAP_LENGTH).toBe(2.67);
-      expect(ROUTE_LINE_DASH_LENGTH / ROUTE_LINE_GAP_LENGTH).toBeCloseTo(1.5, 1);
+    it('shares short-dash larger-gap pattern (gap > dash) across OSM and Globe constants with refined stroke', () => {
+      expect(ROUTE_LINE_DASH_ARRAY).toBe('2.5 5');
+      expect(ROUTE_LINE_DASH_LENGTH).toBe(2.5);
+      expect(ROUTE_LINE_GAP_LENGTH).toBe(5);
+      expect(ROUTE_LINE_GAP_LENGTH).toBeGreaterThan(ROUTE_LINE_DASH_LENGTH);
       expect(ROUTE_LINE_STROKE_WIDTH).toBe(1.75);
     });
 
