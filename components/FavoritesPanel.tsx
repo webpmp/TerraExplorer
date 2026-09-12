@@ -289,7 +289,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
   return (
     <>
       <div className="relative w-88 md:w-96 max-h-1/2 flex flex-col shrink min-h-0 animate-in slide-in-from-left-8 fade-in duration-300 transition-opacity duration-300 pointer-events-auto">
-          <div className={`${theme.container} relative flex flex-col shrink min-h-0 overflow-hidden ${skin === 'parchment' ? 'isolation-auto [isolation:isolate]' : ''}`}>
+          <div className={`${theme.container} relative flex flex-col shrink min-h-0 ${skin === 'parchment' ? '[isolation:isolate]' : 'overflow-hidden'}`}>
               {skin === 'parchment' && (
                 <div className="parchment-background" aria-hidden="true" />
               )}
@@ -337,8 +337,8 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
       {/* Route Editor Modal */}
       {editingRoute && (
          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm pointer-events-auto">
-            <div className={`relative w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden ${theme.modal} ${skin === 'parchment' ? '[isolation:isolate]' : ''}`}>
-               {skin === 'parchment' && (
+             <div className={`relative w-full max-w-2xl max-h-[85vh] flex flex-col ${skin === 'parchment' ? '[isolation:isolate]' : 'overflow-hidden'} ${theme.modal}`}>
+                {skin === 'parchment' && (
                  <div className="parchment-background" aria-hidden="true" />
                )}
                <div className="relative z-[1] flex flex-col flex-1 overflow-hidden">

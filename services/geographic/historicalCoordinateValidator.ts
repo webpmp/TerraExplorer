@@ -17,10 +17,17 @@ export interface HistoricalCoordinateValidationResult {
   isApproximate?: boolean;
 }
 
+import { HistoricalGeographicScope } from '../../domain';
+
 export interface HistoricalEntityKnowledge {
   entity: string;
   entityType: string;
   expectedRegion: string;
+  geographicScope?: HistoricalGeographicScope;
+  singleLocation?: boolean;
+  significance?: string;
+  notable?: string[];
+  contextNotes?: string;
   approximateRegion?: string;
   country?: string;
   state?: string;
@@ -573,6 +580,174 @@ export const HISTORICAL_KNOWLEDGE_BASE: Record<string, HistoricalEntityKnowledge
     },
     boundingBox: { minLat: -24.0, maxLat: -16.0, minLng: 145.0, maxLng: 153.0 }
   },
+  "hms hood": {
+    entity: "HMS Hood",
+    entityType: "shipwreck",
+    expectedRegion: "Denmark Strait (between Greenland and Iceland, North Atlantic Ocean)",
+    approximateRegion: "Denmark Strait",
+    country: "Iceland",
+    region: "Denmark Strait",
+    marineRegion: "Denmark Strait / North Atlantic Ocean",
+    historicalContext: "Royal Navy battlecruiser HMS Hood was sunk by the German battleship Bismarck during the Battle of the Denmark Strait on May 24, 1941; the shipwreck was discovered in July 2001 in the Denmark Strait between Greenland and Iceland at a depth of 2,800 meters.",
+    sourceRationale: "Discovered in July 2001 by David Mearns and Blue Water Recoveries in the Denmark Strait.",
+    confidence: "high",
+    allowedCountries: ["Iceland", "Greenland", "United Kingdom"],
+    forbiddenRegions: ["Lesotho", "Ascension Island", "South Atlantic", "Indian Ocean", "Pacific Ocean", "Africa", "Australia", "United States", "Antarctica"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: 63.3333,
+      lng: -31.8333,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 62.0, maxLat: 65.0, minLng: -35.0, maxLng: -28.0 }
+  },
+  "the hms hood": {
+    entity: "HMS Hood",
+    entityType: "shipwreck",
+    expectedRegion: "Denmark Strait (between Greenland and Iceland, North Atlantic Ocean)",
+    approximateRegion: "Denmark Strait",
+    country: "Iceland",
+    region: "Denmark Strait",
+    marineRegion: "Denmark Strait / North Atlantic Ocean",
+    historicalContext: "Royal Navy battlecruiser HMS Hood was sunk by the German battleship Bismarck during the Battle of the Denmark Strait on May 24, 1941; the shipwreck was discovered in July 2001 in the Denmark Strait between Greenland and Iceland at a depth of 2,800 meters.",
+    sourceRationale: "Discovered in July 2001 by David Mearns and Blue Water Recoveries in the Denmark Strait.",
+    confidence: "high",
+    allowedCountries: ["Iceland", "Greenland", "United Kingdom"],
+    forbiddenRegions: ["Lesotho", "Ascension Island", "South Atlantic", "Indian Ocean", "Pacific Ocean", "Africa", "Australia", "United States", "Antarctica"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: 63.3333,
+      lng: -31.8333,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 62.0, maxLat: 65.0, minLng: -35.0, maxLng: -28.0 }
+  },
+  "hms hood wreck site": {
+    entity: "HMS Hood Wreck Site",
+    entityType: "shipwreck",
+    expectedRegion: "Denmark Strait (between Greenland and Iceland, North Atlantic Ocean)",
+    approximateRegion: "Denmark Strait",
+    country: "Iceland",
+    region: "Denmark Strait",
+    marineRegion: "Denmark Strait / North Atlantic Ocean",
+    historicalContext: "Royal Navy battlecruiser HMS Hood was sunk by the German battleship Bismarck during the Battle of the Denmark Strait on May 24, 1941; the shipwreck was discovered in July 2001 in the Denmark Strait between Greenland and Iceland at a depth of 2,800 meters.",
+    sourceRationale: "Discovered in July 2001 by David Mearns and Blue Water Recoveries in the Denmark Strait.",
+    confidence: "high",
+    allowedCountries: ["Iceland", "Greenland", "United Kingdom"],
+    forbiddenRegions: ["Lesotho", "Ascension Island", "South Atlantic", "Indian Ocean", "Pacific Ocean", "Africa", "Australia", "United States", "Antarctica"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: 63.3333,
+      lng: -31.8333,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 62.0, maxLat: 65.0, minLng: -35.0, maxLng: -28.0 }
+  },
+  "hms hood found": {
+    entity: "HMS Hood Wreck Site",
+    entityType: "shipwreck",
+    expectedRegion: "Denmark Strait (between Greenland and Iceland, North Atlantic Ocean)",
+    approximateRegion: "Denmark Strait",
+    country: "Iceland",
+    region: "Denmark Strait",
+    marineRegion: "Denmark Strait / North Atlantic Ocean",
+    historicalContext: "Royal Navy battlecruiser HMS Hood was sunk by the German battleship Bismarck during the Battle of the Denmark Strait on May 24, 1941; the shipwreck was discovered in July 2001 in the Denmark Strait between Greenland and Iceland at a depth of 2,800 meters.",
+    sourceRationale: "Discovered in July 2001 by David Mearns and Blue Water Recoveries in the Denmark Strait.",
+    confidence: "high",
+    allowedCountries: ["Iceland", "Greenland", "United Kingdom"],
+    forbiddenRegions: ["Lesotho", "Ascension Island", "South Atlantic", "Indian Ocean", "Pacific Ocean", "Africa", "Australia", "United States", "Antarctica"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: 63.3333,
+      lng: -31.8333,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 62.0, maxLat: 65.0, minLng: -35.0, maxLng: -28.0 }
+  },
+  "the hms hood found": {
+    entity: "HMS Hood Wreck Site",
+    entityType: "shipwreck",
+    expectedRegion: "Denmark Strait (between Greenland and Iceland, North Atlantic Ocean)",
+    approximateRegion: "Denmark Strait",
+    country: "Iceland",
+    region: "Denmark Strait",
+    marineRegion: "Denmark Strait / North Atlantic Ocean",
+    historicalContext: "Royal Navy battlecruiser HMS Hood was sunk by the German battleship Bismarck during the Battle of the Denmark Strait on May 24, 1941; the shipwreck was discovered in July 2001 in the Denmark Strait between Greenland and Iceland at a depth of 2,800 meters.",
+    sourceRationale: "Discovered in July 2001 by David Mearns and Blue Water Recoveries in the Denmark Strait.",
+    confidence: "high",
+    allowedCountries: ["Iceland", "Greenland", "United Kingdom"],
+    forbiddenRegions: ["Lesotho", "Ascension Island", "South Atlantic", "Indian Ocean", "Pacific Ocean", "Africa", "Australia", "United States", "Antarctica"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: 63.3333,
+      lng: -31.8333,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 62.0, maxLat: 65.0, minLng: -35.0, maxLng: -28.0 }
+  },
+  "hms hood shipwreck": {
+    entity: "HMS Hood Wreck Site",
+    entityType: "shipwreck",
+    expectedRegion: "Denmark Strait (between Greenland and Iceland, North Atlantic Ocean)",
+    approximateRegion: "Denmark Strait",
+    country: "Iceland",
+    region: "Denmark Strait",
+    marineRegion: "Denmark Strait / North Atlantic Ocean",
+    historicalContext: "Royal Navy battlecruiser HMS Hood was sunk by the German battleship Bismarck during the Battle of the Denmark Strait on May 24, 1941; the shipwreck was discovered in July 2001 in the Denmark Strait between Greenland and Iceland at a depth of 2,800 meters.",
+    sourceRationale: "Discovered in July 2001 by David Mearns and Blue Water Recoveries in the Denmark Strait.",
+    confidence: "high",
+    allowedCountries: ["Iceland", "Greenland", "United Kingdom"],
+    forbiddenRegions: ["Lesotho", "Ascension Island", "South Atlantic", "Indian Ocean", "Pacific Ocean", "Africa", "Australia", "United States", "Antarctica"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: 63.3333,
+      lng: -31.8333,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 62.0, maxLat: 65.0, minLng: -35.0, maxLng: -28.0 }
+  },
+  "the hms hood shipwreck": {
+    entity: "HMS Hood Wreck Site",
+    entityType: "shipwreck",
+    expectedRegion: "Denmark Strait (between Greenland and Iceland, North Atlantic Ocean)",
+    approximateRegion: "Denmark Strait",
+    country: "Iceland",
+    region: "Denmark Strait",
+    marineRegion: "Denmark Strait / North Atlantic Ocean",
+    historicalContext: "Royal Navy battlecruiser HMS Hood was sunk by the German battleship Bismarck during the Battle of the Denmark Strait on May 24, 1941; the shipwreck was discovered in July 2001 in the Denmark Strait between Greenland and Iceland at a depth of 2,800 meters.",
+    sourceRationale: "Discovered in July 2001 by David Mearns and Blue Water Recoveries in the Denmark Strait.",
+    confidence: "high",
+    allowedCountries: ["Iceland", "Greenland", "United Kingdom"],
+    forbiddenRegions: ["Lesotho", "Ascension Island", "South Atlantic", "Indian Ocean", "Pacific Ocean", "Africa", "Australia", "United States", "Antarctica"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: 63.3333,
+      lng: -31.8333,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 62.0, maxLat: 65.0, minLng: -35.0, maxLng: -28.0 }
+  },
   "trail of tears": {
     entity: "Trail of Tears",
     entityType: "historical_event",
@@ -1002,6 +1177,201 @@ export const HISTORICAL_KNOWLEDGE_BASE: Record<string, HistoricalEntityKnowledge
       confidence: "high"
     },
     boundingBox: { minLat: 29.8, maxLat: 30.2, minLng: 30.9, maxLng: 31.5 }
+  },
+  "boston massacre": {
+    entity: "Boston Massacre Site",
+    entityType: "historical_event_site",
+    geographicScope: "POINT_EVENT",
+    singleLocation: true,
+    expectedRegion: "Boston, Massachusetts, United States",
+    approximateRegion: "Boston, Massachusetts",
+    country: "United States",
+    state: "Massachusetts",
+    nearbyCity: "Boston",
+    region: "Downtown Boston / Freedom Trail",
+    historicalContext: "The Boston Massacre was a confrontation on March 5, 1770, in which British soldiers shot and killed several people while under harassment by a mob in Boston, Massachusetts.",
+    sourceRationale: "The Boston Massacre occurred outside the Old State House at the intersection of Congress and State Streets in Boston.",
+    confidence: "high",
+    allowedCountries: ["United States"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 42.3588,
+      lng: -71.0578,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 42.3, maxLat: 42.4, minLng: -71.1, maxLng: -71.0 }
+  },
+  "boston massacre site": {
+    entity: "Boston Massacre Site",
+    entityType: "historical_event_site",
+    geographicScope: "POINT_EVENT",
+    singleLocation: true,
+    expectedRegion: "Boston, Massachusetts, United States",
+    approximateRegion: "Boston, Massachusetts",
+    country: "United States",
+    state: "Massachusetts",
+    nearbyCity: "Boston",
+    region: "Downtown Boston / Freedom Trail",
+    historicalContext: "The Boston Massacre was a confrontation on March 5, 1770, in which British soldiers shot and killed several people while under harassment by a mob in Boston, Massachusetts.",
+    sourceRationale: "The Boston Massacre occurred outside the Old State House at the intersection of Congress and State Streets in Boston.",
+    confidence: "high",
+    allowedCountries: ["United States"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 42.3588,
+      lng: -71.0578,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 42.3, maxLat: 42.4, minLng: -71.1, maxLng: -71.0 }
+  },
+  "battle of gettysburg": {
+    entity: "Battle of Gettysburg",
+    entityType: "historical_event_site",
+    geographicScope: "POINT_EVENT",
+    singleLocation: true,
+    expectedRegion: "Gettysburg, Pennsylvania, United States",
+    approximateRegion: "Gettysburg, Pennsylvania",
+    country: "United States",
+    state: "Pennsylvania",
+    nearbyCity: "Gettysburg",
+    region: "Adams County, Pennsylvania",
+    historicalContext: "The Battle of Gettysburg was fought July 1–3, 1863, in and around the town of Gettysburg, Pennsylvania, by Union and Confederate forces during the American Civil War.",
+    sourceRationale: "Gettysburg National Military Park preserves the battlefield site.",
+    confidence: "high",
+    allowedCountries: ["United States"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 39.8167,
+      lng: -77.2333,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 39.75, maxLat: 39.88, minLng: -77.30, maxLng: -77.18 }
+  },
+  "great depression": {
+    entity: "Great Depression",
+    entityType: "historical_event",
+    geographicScope: "GLOBAL_EVENT",
+    singleLocation: false,
+    expectedRegion: "Global (North America, Europe, Latin America, Asia, Australasia)",
+    region: "Global",
+    historicalContext: "The Great Depression was a severe worldwide economic depression that took place mostly during the 1930s, beginning in the United States after a major fall in stock prices that began around September 4, 1929, and became worldwide news with the stock market crash of October 29, 1929 (known as Black Tuesday). It affected industrialized nations and primary commodity-exporting countries worldwide.",
+    significance: "The longest, deepest, and most widespread economic depression of the 20th century.",
+    contextNotes: "As a global macro-economic event spanning numerous countries and continents, the Great Depression has no single canonical geographic point or coordinate location.",
+    notable: [
+      "Originated following the Wall Street stock market crash of October 1929",
+      "Caused catastrophic declines in industrial output, employment, and international trade globally",
+      "Spurred major governmental economic policy reforms including the US New Deal and expanded social safety nets"
+    ],
+    confidence: "high",
+    allowedCountries: [],
+    exactLocationConfirmed: false,
+    exactLocationKnown: false
+  },
+  "the great depression": {
+    entity: "Great Depression",
+    entityType: "historical_event",
+    geographicScope: "GLOBAL_EVENT",
+    singleLocation: false,
+    expectedRegion: "Global (North America, Europe, Latin America, Asia, Australasia)",
+    region: "Global",
+    historicalContext: "The Great Depression was a severe worldwide economic depression that took place mostly during the 1930s, beginning in the United States after a major fall in stock prices that began around September 4, 1929, and became worldwide news with the stock market crash of October 29, 1929 (known as Black Tuesday). It affected industrialized nations and primary commodity-exporting countries worldwide.",
+    significance: "The longest, deepest, and most widespread economic depression of the 20th century.",
+    contextNotes: "As a global macro-economic event spanning numerous countries and continents, the Great Depression has no single canonical geographic point or coordinate location.",
+    notable: [
+      "Originated following the Wall Street stock market crash of October 1929",
+      "Caused catastrophic declines in industrial output, employment, and international trade globally",
+      "Spurred major governmental economic policy reforms including the US New Deal and expanded social safety nets"
+    ],
+    confidence: "high",
+    allowedCountries: [],
+    exactLocationConfirmed: false,
+    exactLocationKnown: false
+  },
+  "world war ii": {
+    entity: "World War II",
+    entityType: "historical_event",
+    geographicScope: "GLOBAL_EVENT",
+    singleLocation: false,
+    expectedRegion: "Global (European, Pacific, Atlantic, Mediterranean, and Asian theaters)",
+    region: "Global",
+    historicalContext: "World War II was a global conflict that lasted from 1939 to 1945. The vast majority of the world's countries, including all of the great powers, fought as part of two opposing military alliances: the Allies and the Axis.",
+    significance: "The deadliest conflict in human history, involving over 30 countries and resulting in tens of millions of fatalities.",
+    contextNotes: "World War II encompassed multiple continental and oceanic theaters across Europe, the Pacific, Asia, and Africa, with no single geographic coordinate.",
+    notable: [
+      "Involved principal combatants across Europe, East Asia, and the Pacific Ocean",
+      "Led to the creation of the United Nations and the establishment of the post-war geopolitical order",
+      "Marked the first and only wartime use of nuclear weapons"
+    ],
+    confidence: "high",
+    allowedCountries: [],
+    exactLocationConfirmed: false,
+    exactLocationKnown: false
+  },
+  "world war i": {
+    entity: "World War I",
+    entityType: "historical_event",
+    geographicScope: "GLOBAL_EVENT",
+    singleLocation: false,
+    expectedRegion: "Global / Europe, Middle East, Africa, Pacific",
+    region: "Global",
+    historicalContext: "World War I was a global conflict lasting from 1914 to 1918, fought between the Allied Powers and the Central Powers across multiple fronts in Europe, the Middle East, and beyond.",
+    significance: "One of the largest wars in history, leading to major political changes including the collapse of four empires.",
+    contextNotes: "World War I was fought across extensive geographic fronts including the Western Front, Eastern Front, Italian Front, and Middle Eastern theaters.",
+    notable: [
+      "Fought across the Western, Eastern, and Middle Eastern fronts",
+      "Ended with the Treaty of Versailles and the dissolution of the Austro-Hungarian, Ottoman, and Russian empires",
+      "Introduced widespread industrialized warfare, armored combat, and aerial combat"
+    ],
+    confidence: "high",
+    allowedCountries: [],
+    exactLocationConfirmed: false,
+    exactLocationKnown: false
+  },
+  "industrial revolution": {
+    entity: "Industrial Revolution",
+    entityType: "historical_event",
+    geographicScope: "GLOBAL_EVENT",
+    singleLocation: false,
+    expectedRegion: "Global (originated in Great Britain; expanded across Europe and North America)",
+    region: "Global",
+    historicalContext: "The Industrial Revolution was the transition to new manufacturing processes in Great Britain, continental Europe, and the United States, in the period from around 1760 to about 1840.",
+    significance: "Transformed agrarian societies into mechanized, industrial economies, fundamentally reshaping human demographics and urban development.",
+    contextNotes: "The Industrial Revolution was a multi-decade technological and socioeconomic transformation spanning Britain, Western Europe, and North America.",
+    notable: [
+      "Pioneered steam power, mechanized textile production, and modern metallurgy",
+      "Drove massive urbanization and the growth of modern factory production systems",
+      "Laid the technological foundations for modern industrial society"
+    ],
+    confidence: "high",
+    allowedCountries: [],
+    exactLocationConfirmed: false,
+    exactLocationKnown: false
+  },
+  "viking age": {
+    entity: "Viking Age",
+    entityType: "historical_event",
+    geographicScope: "REGIONAL_EVENT",
+    singleLocation: false,
+    expectedRegion: "Scandinavia, British Isles, North Atlantic, Eastern Europe",
+    region: "Regional",
+    historicalContext: "The Viking Age was the period during the Middle Ages (c. 793–1066 CE) when Norsemen undertook large-scale raiding, colonizing, conquest, and trading throughout Europe and reached North America.",
+    significance: "An era of maritime exploration, trade, and settlement spanning the North Atlantic and European river networks.",
+    contextNotes: "The Viking Age spans multiple centuries and regions across Scandinavia, the British Isles, Iceland, Greenland, and Eastern Europe.",
+    notable: [
+      "Encompassed Norse sea exploration, trade routes, and settlement from North America to Byzantium",
+      "Established major trade networks across the Baltic and North Sea corridors",
+      "Concluded around 1066 with the Battle of Stamford Bridge and the Christianization of Scandinavia"
+    ],
+    confidence: "high",
+    allowedCountries: [],
+    exactLocationConfirmed: false,
+    exactLocationKnown: false
   }
 };
 
@@ -1227,7 +1597,7 @@ const US_STATE_MAP: Record<string, string> = {
 export function toCanonicalTitleCase(str: string): string {
   if (!str) return '';
   const hist = getHistoricalEntityKnowledge(str);
-  if (hist?.entity) return hist.entity;
+  if (hist?.entity && hist.entity.toLowerCase() === str.trim().toLowerCase()) return hist.entity;
 
   const raw = str.trim();
 

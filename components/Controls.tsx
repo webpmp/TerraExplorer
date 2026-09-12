@@ -446,7 +446,7 @@ const Controls: React.FC<ControlsProps> = ({
           >
               <div
                 onClick={(e) => e.stopPropagation()}
-                className={`relative w-full max-w-lg p-6 flex flex-col gap-4 overflow-hidden ${theme.modal} ${skin === 'parchment' ? '[isolation:isolate]' : ''}`}
+                className={`relative w-full max-w-lg p-6 flex flex-col gap-4 ${skin === 'parchment' ? '[isolation:isolate]' : 'overflow-hidden'} ${theme.modal}`}
               >
                   {skin === 'parchment' && (
                     <div className="parchment-background" aria-hidden="true" />
@@ -476,7 +476,7 @@ const Controls: React.FC<ControlsProps> = ({
                           disabled={!traceText.trim()}
                           className={`py-3 font-bold uppercase tracking-wider text-sm transition-all ${
                             skin === 'parchment'
-                              ? 'border-0 bg-[#e8d5b5] text-[#5c3a21] hover:bg-[#d2b48c] hover:text-[#3e2723] font-sans rounded-sm'
+                              ? 'border-0 bg-transparent hover:bg-transparent text-[#5c3a21] hover:text-[#3e2723] font-sans rounded-none shadow-none'
                               : theme.btn
                           } ${!traceText.trim() ? 'opacity-50 cursor-not-allowed' : 'hover:scale-[1.02]'}`}
                         >
@@ -583,7 +583,7 @@ const Controls: React.FC<ControlsProps> = ({
               <div className="absolute inset-[-3px] z-0 pointer-events-none active-search-glow-parchment" />
             )}
             {/* Inner container: parchment background behind crisp content */}
-            <div className={`relative flex items-center transition-all overflow-hidden ${theme.inputWrapper}`}>
+            <div className={`relative flex items-center transition-all ${skin === 'parchment' ? '[isolation:isolate]' : 'overflow-hidden'} ${theme.inputWrapper}`}>
               <div className="parchment-background" aria-hidden="true" />
               <div className="relative z-[1] flex items-center w-full">
                 <Search className={`ml-4 shrink-0 ${theme.inputIcon}`} size={20} />

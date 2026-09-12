@@ -22,6 +22,7 @@ import { isPlaceholderString } from '../components/InfoPanel';
 import { validateEarthGeography } from './celestialCapabilities';
 import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
 import { validateHistoricalCoordinate, getHistoricalEntityKnowledge, toCanonicalTitleCase } from './geographic/historicalCoordinateValidator';
+import { determineHistoricalEventScope, logHistoricalEventScope } from './geographic/historicalEventScope';
 import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation, validateEntityCoordinates, logAiCoordinateTrust, logEntityCoordinateValidation, CoordinateTrustLevel } from './geographic/entityIdentityValidator';
 import { buildCanonicalEventTopology, getAuthoritativeEventModel } from './geographic/historicalRouteRegistry';
 
@@ -3102,7 +3103,10 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
       const cleanedEntity = entityStr.replace(/^the\s+/i, "");
       const finalSubject = toCanonicalTitleCase(cleanedEntity || entityStr);
       
-      console.log(`Intent:\nHISTORICAL_EVENT\nRouting decision:\nSINGLE_POINT\nsubject="${finalSubject}"\nevent="${event}"`);
+      const scopeInfo = determineHistoricalEventScope(finalSubject, clean);
+      const resolutionMode = scopeInfo.singleLocation ? 'SINGLE_POINT' : 'HISTORICAL_NON_POINT';
+      
+      console.log(`Intent:\nHISTORICAL_EVENT\nRouting decision:\n${resolutionMode}\nsubject="${finalSubject}"\nevent="${event}"\ngeographicScope="${scopeInfo.scope}"`);
       
       return {
         intent: 'HISTORICAL_EVENT',
@@ -3110,8 +3114,10 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
         subject: finalSubject,
         event,
         requestedRelationship: relationship,
-        resolutionMode: 'SINGLE_POINT',
-        queryShape: 'HISTORICAL_EVENT'
+        resolutionMode: resolutionMode as any,
+        queryShape: 'HISTORICAL_EVENT',
+        geographicScope: scopeInfo.scope as any,
+        singleLocation: scopeInfo.singleLocation
       };
     }
   }
@@ -3202,6 +3208,15 @@ export const recoverCoordinatesFromAi = async (rawQuery: string, intent: string,
   if (registeredEventModel) {
     console.warn(`[Coordinate Recovery] Unsafe single-point coordinate recovery blocked for recognized multi-location historical event "${registeredEventModel.eventTitle}".`);
     return null;
+  }
+
+  // Hard guard against coordinate recovery for non-point historical events (e.g. Great Depression, World War II)
+  if (intent === 'HISTORICAL_EVENT' || intent === 'SINGLE_LOCATION' || intent === 'NATURAL_LOCATION') {
+    const histScope = determineHistoricalEventScope(entity, rawQuery);
+    if (!histScope.singleLocation) {
+      console.warn(`[Coordinate Recovery] Coordinate recovery blocked for non-point historical event "${entity}" (scope: ${histScope.scope}).`);
+      return null;
+    }
   }
 
   // Reject entity strings that are clearly query sentences rather than real location names

@@ -365,7 +365,11 @@ describe('Controls Trace Route Modal Outside Click Behavior', () => {
       expect(html).toContain('fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm pointer-events-auto');
 
       // Verify inner panel exists inside the backdrop
-      expect(html).toContain('max-w-lg p-6 flex flex-col gap-4 overflow-hidden');
+      if (skin === 'parchment') {
+        expect(html).toContain('max-w-lg p-6 flex flex-col gap-4 [isolation:isolate]');
+      } else {
+        expect(html).toContain('max-w-lg p-6 flex flex-col gap-4 overflow-hidden');
+      }
 
       // Verify Trace Route title and form elements are present inside the panel
       expect(html).toContain('Trace Route</h2>');

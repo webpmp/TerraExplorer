@@ -15,7 +15,11 @@ export const createIdentity = (
     canonicalName: string,
     category: EntityCategory,
     entityType: EntityType,
-    diagnostics: ClassificationDiagnostics
+    diagnostics: ClassificationDiagnostics,
+    options?: {
+        geographicScope?: any;
+        singleLocation?: boolean;
+    }
 ): SearchIdentity => {
     if (!canonicalName || canonicalName.trim() === '') {
         throw new Error("canonicalName cannot be empty");
@@ -27,6 +31,8 @@ export const createIdentity = (
         canonicalName,
         category,
         entityType,
+        geographicScope: options?.geographicScope,
+        singleLocation: options?.singleLocation,
         entityProvenance: {
             provider: 'System',
             timestamp: Date.now(),
@@ -41,8 +47,11 @@ export const createResolvedSubject = (
     primaryLocation: GeographicRecord,
     additionalLocations?: GeographicRecord[]
 ): ResolvedSubject => {
-    if (!primaryLocation.location.coordinates || typeof primaryLocation.location.coordinates.lat !== 'number' || typeof primaryLocation.location.coordinates.lng !== 'number') {
-        throw new Error("GeographicRecord must contain valid coordinates");
+    const isNonPoint = identity.singleLocation === false || (identity.geographicScope && identity.geographicScope !== 'POINT_EVENT');
+    if (!isNonPoint) {
+        if (!primaryLocation.location.coordinates || typeof primaryLocation.location.coordinates.lat !== 'number' || typeof primaryLocation.location.coordinates.lng !== 'number') {
+            throw new Error("GeographicRecord must contain valid coordinates");
+        }
     }
 
     return {

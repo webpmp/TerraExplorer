@@ -12,6 +12,7 @@ import { reverseGeocode, enrichSettlementPopulation, isPopulationBearingEntity }
 import { isPlaceholderString } from '../components/InfoPanel';
 import { validateEarthGeography } from './celestialCapabilities';
 import { getHistoricalEntityKnowledge, toCanonicalTitleCase } from './geographic/historicalCoordinateValidator';
+import { determineHistoricalEventScope, logHistoricalEventScope } from './geographic/historicalEventScope';
 import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
 import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation, isInvalidCanonicalName } from './geographic/entityIdentityValidator';
 import { detectHistoricalRouteEvent, normalizeSemanticEntityTitle } from './queryNormalizer';
@@ -908,7 +909,133 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
   const histCheck = detectHistoricalRouteEvent(request.rawQuery);
   const isHistoricalMatch = histCheck.isHistoricalRouteEvent || Boolean(getAuthoritativeEventModel(entityResult.entity));
 
-  console.log(`[PIPELINE ROUTING]\nentity: "${entityResult.entity}"\nhistoricalRegistryMatch: ${isHistoricalMatch}\nselectedPipeline: ${isHistoricalMatch || entityResult.intentResult.intent === 'route' || entityResult.intentResult.intent === 'EXPLORATORY' || entityResult.intentResult.intent === 'MULTI_LOCATION_DISCOVERY' || (entityResult as any).resolutionMode === 'MULTI_LOCATION_EXPLORATION' ? 'HISTORICAL_ROUTE' : 'SINGLE_LOCATION'}`);
+  // Check Historical Event Scope (POINT_EVENT vs GLOBAL_EVENT / REGIONAL_EVENT / NON_GEOGRAPHIC_HISTORICAL_EVENT)
+  const histScope = (entityResult.intentResult.intent === 'HISTORICAL_EVENT' || (entityResult as any).geographicScope)
+    ? determineHistoricalEventScope(entityResult.entity, request.rawQuery)
+    : null;
+
+  const isNonPointHistorical = Boolean(histScope && !histScope.singleLocation);
+
+  const selectedPipeline = isHistoricalMatch || entityResult.intentResult.intent === 'route' || entityResult.intentResult.intent === 'EXPLORATORY' || entityResult.intentResult.intent === 'MULTI_LOCATION_DISCOVERY' || (entityResult as any).resolutionMode === 'MULTI_LOCATION_EXPLORATION'
+    ? 'HISTORICAL_ROUTE'
+    : (isNonPointHistorical ? 'HISTORICAL_NON_POINT' : 'SINGLE_LOCATION');
+
+  console.log(`[PIPELINE ROUTING]\nentity: "${entityResult.entity}"\nhistoricalRegistryMatch: ${isHistoricalMatch}\nselectedPipeline: ${selectedPipeline}`);
+
+  if (histScope) {
+    logHistoricalEventScope({
+      entity: entityResult.entity,
+      scope: histScope.scope,
+      singleLocation: histScope.singleLocation,
+      routing: histScope.routing,
+      coordinateResolution: isNonPointHistorical ? 'SKIPPED' : undefined,
+      reason: isNonPointHistorical ? histScope.reason : undefined
+    });
+  }
+
+  if (isNonPointHistorical && histScope) {
+    const canonicalName = toCanonicalTitleCase(entityResult.entity);
+    const kbEntry = getHistoricalEntityKnowledge(canonicalName) || getHistoricalEntityKnowledge(entityResult.entity);
+    const desc = kbEntry?.historicalContext || `Historical event: ${canonicalName}`;
+    const significance = kbEntry?.significance;
+    const notable = kbEntry?.notable || [];
+    const contextNotes = kbEntry?.contextNotes ? [kbEntry.contextNotes] : [];
+    const expectedRegion = kbEntry?.expectedRegion || (histScope.scope === 'GLOBAL_EVENT' ? 'Global' : 'Regional');
+
+    const identity = createIdentity(
+      request.rawQuery,
+      canonicalName,
+      'historical_event',
+      'historical_event',
+      {},
+      {
+        geographicScope: histScope.scope,
+        singleLocation: false
+      }
+    );
+
+    const primaryLocation = {
+      label: canonicalName,
+      featureType: 'historical_event',
+      location: {
+        coordinates: undefined,
+        address: {
+          country: expectedRegion,
+          state: undefined,
+          city: undefined,
+          full: expectedRegion
+        }
+      },
+      coordinateSource: 'deterministic' as CoordinateSource,
+      coordinateTrust: 'verified' as any,
+      identityStatus: 'verified' as GeographicIdentityStatus,
+      isApproximate: false,
+      exactLocationKnown: false,
+      provenance: {
+        provider: 'AuthoritativeHistoricalRegistry',
+        timestamp: Date.now(),
+        cache: false
+      },
+      diagnostics: {}
+    };
+
+    const subject = createResolvedSubject(identity, primaryLocation as any);
+
+    const metadata: EnrichmentResult = {
+      description: desc,
+      notable,
+      contextNotes,
+      historicalContext: desc,
+      intent: entityResult.intentResult.intent,
+      news: []
+    };
+    if (significance) {
+      (metadata as any).significance = significance;
+    }
+
+    const resolvedEntity = createResolvedEntity(subject, metadata);
+    (resolvedEntity as any).singleLocation = false;
+    (resolvedEntity as any).geographicScope = histScope.scope;
+
+    const isValid = validateResolvedEntity(resolvedEntity);
+
+    const finalData = {
+      name: canonicalName,
+      canonicalName,
+      displayName: canonicalName,
+      entityType: 'historical_event',
+      type: 'historical_event',
+      category: 'historical_event',
+      intent: entityResult.intentResult.intent,
+      historicalContext: desc,
+      coordinates: undefined,
+      coordinateSource: 'deterministic',
+      isApproximate: false,
+      exactLocationKnown: false,
+      singleLocation: false,
+      geographicScope: histScope.scope,
+      description: desc,
+      significance,
+      notable,
+      news: [],
+      contextNotes,
+      locationString: expectedRegion,
+      locationLabel: expectedRegion,
+      country: expectedRegion
+    };
+
+    const result: FinalLocationResult = {
+      mode: 'location',
+      entity: resolvedEntity,
+      isValid,
+      error: isValid ? undefined : 'NO_GEOGRAPHIC_DATA'
+    };
+    (result as any).finalData = finalData;
+
+    console.log(`[NATURAL LOCATION RESULT]\nname: ${finalData.name}\ncoordinates: none\nentityType: ${finalData.entityType}\nmetadataAvailable: true\nvalid: ${isValid}`);
+
+    return result;
+  }
 
   if (
     isHistoricalMatch ||

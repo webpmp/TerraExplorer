@@ -75,12 +75,16 @@ export type NonGeographicEntityType =
     | "vehicle" 
     | "artifact";
 
+export type HistoricalGeographicScope = 'POINT_EVENT' | 'REGIONAL_EVENT' | 'GLOBAL_EVENT' | 'NON_GEOGRAPHIC_HISTORICAL_EVENT';
+
 export type EntityType = GeographicEntityType | NonGeographicEntityType;
 
 export interface CanonicalGeographicEntity {
   readonly canonicalName: string;
-  readonly entityType: GeographicEntityType;
-  readonly coordinates: GeoCoordinates;
+  readonly entityType: EntityType;
+  readonly coordinates?: GeoCoordinates;
+  readonly geographicScope?: HistoricalGeographicScope;
+  readonly singleLocation?: boolean;
   readonly coordinateSource?: CoordinateSource;
   readonly identityStatus?: GeographicIdentityStatus;
   readonly providerSignals?: string[];
@@ -105,7 +109,7 @@ export interface AddressInfo { country?: string; state?: string; city?: string; 
 export interface BoundingBox { north: number; south: number; east: number; west: number; }
 
 export interface GeoLocation {
-    coordinates: GeoCoordinates;
+    coordinates?: GeoCoordinates;
     address?: AddressInfo;
     boundingBox?: BoundingBox;
     suggestedZoom?: number;
@@ -142,6 +146,8 @@ export interface SearchIdentity {
     readonly canonicalName: string;
     readonly category: EntityCategory;
     readonly entityType: EntityType;
+    readonly geographicScope?: HistoricalGeographicScope;
+    readonly singleLocation?: boolean;
     readonly entityProvenance: Provenance;
     readonly diagnostics: ClassificationDiagnostics;
 }

@@ -23,12 +23,28 @@ export interface EnrichmentCompletenessResult {
 export function evaluateEnrichmentCompleteness(
   data: any,
   canonicalName?: string,
-  entityType?: string
+  entityType?: string,
+  geographicScope?: string
 ): EnrichmentCompletenessResult {
+  const isNonPointHistorical =
+    entityType === 'historical_event' ||
+    data?.entityType === 'historical_event' ||
+    data?.geographicScope === 'GLOBAL_EVENT' ||
+    data?.geographicScope === 'REGIONAL_EVENT' ||
+    data?.geographicScope === 'global' ||
+    data?.geographicScope === 'regional' ||
+    geographicScope === 'GLOBAL_EVENT' ||
+    geographicScope === 'REGIONAL_EVENT' ||
+    geographicScope === 'global' ||
+    geographicScope === 'regional' ||
+    data?.singleLocation === false;
+
   if (!data || typeof data !== 'object') {
     return {
       status: 'FAILED',
-      missingFields: ['description', 'notable', 'contextNotes', 'climate'],
+      missingFields: isNonPointHistorical
+        ? ['description', 'notable', 'contextNotes']
+        : ['description', 'notable', 'contextNotes', 'climate'],
       newsStatus: 'optional/empty',
       recoveryRequired: true,
       recoveryReason: 'No enrichment data present'
@@ -56,16 +72,18 @@ export function evaluateEnrichmentCompleteness(
     missing.push('contextNotes');
   }
 
-  // 4. Climate
-  const hasClimate = data.climate && (
-    (typeof data.climate === 'string' && !isPlaceholderString(data.climate)) ||
-    (typeof data.climate === 'object' && (
-      (data.climate.name && !isPlaceholderString(data.climate.name)) ||
-      (data.climate.value && !isPlaceholderString(data.climate.value))
-    ))
-  );
-  if (!hasClimate) {
-    missing.push('climate');
+  // 4. Climate (Only required for localized geographic points / features)
+  if (!isNonPointHistorical) {
+    const hasClimate = data.climate && (
+      (typeof data.climate === 'string' && !isPlaceholderString(data.climate)) ||
+      (typeof data.climate === 'object' && (
+        (data.climate.name && !isPlaceholderString(data.climate.name)) ||
+        (data.climate.value && !isPlaceholderString(data.climate.value))
+      ))
+    );
+    if (!hasClimate) {
+      missing.push('climate');
+    }
   }
 
   // 5. News (Optional)
@@ -187,7 +205,16 @@ export const validateResolvedEntity = (entity: ResolvedEntity | null | undefined
 
   // Level 1: Coordinate Validity
   const coords = entity.subject?.primaryLocation?.location?.coordinates;
+  const isNonPointHistorical = 
+    entity.subject?.identity?.singleLocation === false ||
+    entity.subject?.identity?.geographicScope === 'GLOBAL_EVENT' ||
+    entity.subject?.identity?.geographicScope === 'REGIONAL_EVENT' ||
+    entity.subject?.identity?.geographicScope === 'NON_GEOGRAPHIC_HISTORICAL_EVENT' ||
+    (entity.subject?.identity?.entityType === 'historical_event' && !coords);
+
   if (isValidCoordinates(coords)) {
+    coordinatesValid = true;
+  } else if (isNonPointHistorical) {
     coordinatesValid = true;
   } else {
     valid = false;
@@ -195,7 +222,7 @@ export const validateResolvedEntity = (entity: ResolvedEntity | null | undefined
   }
 
   console.log(`[COORDINATE_VALIDATION]
-coordinates: ${JSON.stringify(coords)}
+coordinates: ${JSON.stringify(coords || 'none')}
 valid: ${coordinatesValid}`);
 
   // Level 2: Geographic Identity Validity

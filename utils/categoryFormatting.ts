@@ -63,7 +63,8 @@ export function formatUserFacingCategory(entityType?: string, name?: string, raw
     if (type === 'airport' || n.includes('airport') || n.includes('airfield')) return 'Airport';
     if (type === 'station' || n.includes('station')) return 'Station';
     if (type === 'bridge' || n.includes('bridge')) return 'Bridge';
-    if (type === 'historical_site' || type === 'historic_site' || type === 'historic' || type === 'heritage_site' || type === 'historical_event_site' || type === 'battlefield') return 'Historic Site';
+    if (type === 'historical_event_site') return 'Historical Event Site';
+    if (type === 'historical_site' || type === 'historic_site' || type === 'historic' || type === 'heritage_site' || type === 'battlefield') return 'Historic Site';
     if (type === 'archaeological_site' || type === 'ruins' || type === 'monument' || type === 'castle' || type === 'fort') return 'Historic Site';
     if (type === 'shipwreck_site' || type === 'shipwreck') return 'Historic Site';
     if (type === 'park' || n.endsWith(' park')) return 'Park';
@@ -85,6 +86,8 @@ export function formatUserFacingCategory(entityType?: string, name?: string, raw
     if (type === 'administrative_region' || type === 'administrative' || type === 'state' || type === 'province' || type === 'department' || type === 'county' || type === 'district' || type === 'region') return 'Region';
     if (type === 'country') return 'Country';
     if (type === 'road' || type === 'route' || type === 'trail') return 'Route';
+
+    if (type === 'minor_poi' || type === 'point_of_interest' || type === 'poi') return 'Point of Interest';
 
     if (type) {
         const cleaned = type.replace(/_/g, ' ').trim();

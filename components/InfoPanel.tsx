@@ -24,54 +24,54 @@ import { generateDefaultRouteName, normalizeSemanticEntityTitle, isCoordinateTit
 export { classifyContext, isPureGeographicLabel, sanitizeContextMarkdown };
 
 
-export const MedievalEmeraldBronzePinIcon: React.FC<{ size?: number; className?: string }> = ({ size = 32, className = '' }) => (
+export const MedievalEmeraldBronzePinIcon: React.FC<{ width?: number; height?: number; className?: string }> = ({ width = 54, height = 38, className = '' }) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
-    viewBox="0 0 100 100"
-    width={size}
-    height={size}
-    className={`drop-shadow-sm ${className}`}
+    viewBox="0 0 160 110"
+    width={width}
+    height={height}
+    className={`opacity-85 hover:opacity-100 ${className}`.trim()}
     aria-hidden="true"
   >
     <defs>
-      {/* Aged Bronze */}
       <radialGradient id="bronzeHead" cx="35%" cy="28%" r="70%">
         <stop offset="0%" stopColor="#d6b56a" />
         <stop offset="35%" stopColor="#a77b32" />
         <stop offset="72%" stopColor="#76501f" />
         <stop offset="100%" stopColor="#4b3215" />
       </radialGradient>
-      {/* Emerald Inset */}
       <radialGradient id="emerald" cx="35%" cy="30%" r="70%">
         <stop offset="0%" stopColor="#2a8a5b" />
         <stop offset="45%" stopColor="#115E3B" />
         <stop offset="100%" stopColor="#061F13" />
       </radialGradient>
-      {/* Dark Metal Shaft */}
       <linearGradient id="shaft" x1="0%" y1="0%" x2="100%" y2="0%">
         <stop offset="0%" stopColor="#3a3022" />
         <stop offset="45%" stopColor="#171511" />
         <stop offset="100%" stopColor="#51442e" />
       </linearGradient>
-      {/* Soft Shadow */}
-      <filter id="shadow" x="-40%" y="-40%" width="180%" height="200%">
-        <feDropShadow
-          dx="1"
-          dy="3"
-          stdDeviation="2.5"
-          floodColor="#000000"
-          floodOpacity="0.45"
-        />
+      <filter id="shadowBlur" x="-20%" y="-20%" width="140%" height="140%">
+        <feGaussianBlur stdDeviation="2.2" />
       </filter>
     </defs>
-    {/* Pin */}
-    <g filter="url(#shadow)">
-      {/* Short metal shaft */}
+    {/* Perspective ground shadow */}
+    <g filter="url(#shadowBlur)" opacity="0.12">
+      <path
+        d="M 49,96 L 51,96
+             L 81,72
+             C 86,63 118,65 122,50
+             C 126,35 102,24 88,34
+             C 76,43 72,55 76,68
+             L 49,96 Z"
+        fill="#3a3a3a"
+      />
+    </g>
+    {/* Main pin graphic */}
+    <g>
       <path
         d="M 48,58 L 52,58 L 53,91 L 50,97 L 47,91 Z"
         fill="url(#shaft)"
       />
-      {/* Bronze pin head */}
       <circle
         cx="50"
         cy="43"
@@ -80,7 +80,6 @@ export const MedievalEmeraldBronzePinIcon: React.FC<{ size?: number; className?:
         stroke="#4b3215"
         strokeWidth="2"
       />
-      {/* Raised bronze inner rim */}
       <circle
         cx="50"
         cy="43"
@@ -90,7 +89,6 @@ export const MedievalEmeraldBronzePinIcon: React.FC<{ size?: number; className?:
         strokeWidth="2"
         opacity="0.7"
       />
-      {/* Emerald inset */}
       <circle
         cx="50"
         cy="43"
@@ -99,7 +97,6 @@ export const MedievalEmeraldBronzePinIcon: React.FC<{ size?: number; className?:
         stroke="#6e5427"
         strokeWidth="1.5"
       />
-      {/* Subtle highlight */}
       <ellipse
         cx="44"
         cy="36"
@@ -1728,6 +1725,12 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const displayCategory = useMemo(() => {
     if (!info) return '';
     const rawType = (info.entityType || (info.waypoint as any)?.entityType || info.type || '').toString().toLowerCase();
+    if (rawType === 'historical_event') {
+      return 'Historical Event';
+    }
+    if (rawType === 'historical_event_site') {
+      return 'Historical Event Site';
+    }
     const isHistorical = rawType.includes('historical') || rawType.includes('historic') || rawType === 'battlefield' || (info.waypoint && isSingleLocation);
 
     if (isSingleLocation && isHistorical) {
@@ -2157,7 +2160,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       tabActive: "text-[#3e2723] font-bold bg-[#e8d5b5]/40",
       tabInactive: "text-[#8b5a2b] hover:bg-[#e8d5b5]/50 hover:text-[#5c3a21]",
       listDot: "bg-[#8b5a2b] rounded-sm",
-      closeBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] rounded",
+      closeBtn: "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity duration-200 hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] rounded",
       actionBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] rounded",
       loadMoreBtn: "bg-transparent hover:bg-transparent text-[#5c3a21] rounded-sm text-sm tracking-widest uppercase font-bold",
       notesInput: "bg-[#f4ead5]/40 border border-[#8b5a2b]/30 text-[#522B07] placeholder-[#8b5a2b]/60 focus:border-[#8b5a2b]/70 shadow-[inset_0_1px_2px_rgba(139,90,43,0.1)] rounded-sm outline-none caret-[#522B07]",
@@ -2773,14 +2776,14 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   return (
     <>
       <div
-        className="absolute top-[282px] right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-342px)] flex flex-col gap-3 animate-in slide-in-from-right-12 fade-in duration-500 pointer-events-none"
+        className={`absolute top-[282px] right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-342px)] flex flex-col gap-3 animate-in slide-in-from-right-12 fade-in duration-500 pointer-events-none ${isParchment ? 'group' : ''}`}
         data-testid="info-panel"
         data-infopanel="true"
         onWheel={(e) => e.stopPropagation()}
       >
         {/* Main Info Box */}
         <div
-          className={`${theme.container} relative flex flex-col shrink min-h-0 overflow-hidden pointer-events-auto ${isParchment ? '[isolation:isolate]' : ''}`}
+          className={`${theme.container} relative flex flex-col shrink min-h-0 ${isParchment ? '[isolation:isolate] group' : 'overflow-hidden'} pointer-events-auto`}
           data-infopanel="true"
           onWheel={(e) => e.stopPropagation()}
         >
@@ -2792,7 +2795,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
           <div className={`relative p-5 shrink-0 flex flex-col items-center ${skin === 'modern' ? 'border-b border-white/10' : ''} ${theme.header}`.replace(/\s+/g, ' ').trim()}>
             {/* 1. Close X button */}
-            <button onClick={onClose} className={`absolute top-3 right-3 p-1 z-50 pointer-events-auto transition-colors ${theme.closeBtn}`} aria-label="Close panel">
+            <button onClick={onClose} className={`absolute top-3 right-3 p-1 z-50 ${isParchment ? '' : 'pointer-events-auto '}transition-colors ${theme.closeBtn}`} aria-label="Close panel">
               <X size={20} />
             </button>
 
@@ -2805,7 +2808,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                   title={isFavorite ? "Edit Favorite" : (routeNav ? "Save Route" : "Save Location")}
                 >
                   {isParchment ? (
-                    <MedievalEmeraldBronzePinIcon size={32} className={isFavorite ? "opacity-100 scale-105" : "opacity-85 hover:opacity-100"} />
+                    <MedievalEmeraldBronzePinIcon className={isFavorite ? "opacity-100 scale-105" : ""} />
                   ) : (
                     <Pin size={24} className={isFavorite ? "fill-current" : ""} />
                   )}
@@ -2891,7 +2894,15 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
               <p className={`${subtextSize} font-mono ${theme.subtext} w-full min-w-0 max-w-full whitespace-normal break-normal`}>
                 {isValidCoordinates(info?.coordinates)
                   ? `${info!.coordinates.lat >= 0 ? info!.coordinates.lat.toFixed(2) + '° N' : Math.abs(info!.coordinates.lat).toFixed(2) + '° S'}, ${info!.coordinates.lng >= 0 ? info!.coordinates.lng.toFixed(2) + '° E' : Math.abs(info!.coordinates.lng).toFixed(2) + '° W'}${info?.isApproximate ? ' (Approximate)' : ''}`
-                  : (isLoading ? 'Searching...' : 'Coordinates unavailable')}
+                  : (isLoading 
+                      ? 'Searching...' 
+                      : ((info as any)?.geographicScope === 'GLOBAL_EVENT' || (info as any)?.geographicScope === 'global'
+                          ? 'Global Scope'
+                          : ((info as any)?.geographicScope === 'REGIONAL_EVENT' || (info as any)?.geographicScope === 'regional'
+                              ? 'Regional Scope'
+                              : ((info as any)?.geographicScope === 'NON_GEOGRAPHIC_HISTORICAL_EVENT'
+                                  ? 'Non-Geographic Event'
+                                  : 'Coordinates unavailable'))))}
               </p>
             </div>
           </div>
@@ -3043,7 +3054,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         {/* My Notes Section */}
         {hasNotes ? (
           <div
-            className={`pointer-events-auto shrink-0 transition-all duration-300 relative overflow-hidden ${theme.container} ${!isNotesExpanded ? 'hover:brightness-110 cursor-pointer' : ''} ${isParchment ? '[isolation:isolate]' : ''}`}
+            className={`pointer-events-auto shrink-0 transition-all duration-300 relative ${isParchment ? '[isolation:isolate]' : 'overflow-hidden'} ${theme.container} ${!isNotesExpanded ? 'hover:brightness-110 cursor-pointer' : ''}`}
             data-infopanel="true"
             onWheel={(e) => e.stopPropagation()}
           >
@@ -3148,74 +3159,74 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                        )}
 
                        {/* Notes List */}
-                       <div
-                         className={`space-y-2 max-h-48 overflow-y-auto ${isParchment ? 'parchment-scrollbar' : 'custom-scrollbar'}`}
-                         onWheel={(e) => e.stopPropagation()}
-                       >
+                       <div className="space-y-2">
                          {notes.map((note) => (
-                             <div key={note.id} className={`p-3 group relative ${theme.noteCard}`}>
+                             <div
+                               key={note.id}
+                               className={`p-2.5 rounded transition-colors group relative ${
+                                 isParchment
+                                   ? 'bg-[#e8d5b5]/40 hover:bg-[#e8d5b5]/60 border border-[#8b5a2b]/20'
+                                   : isRetro
+                                   ? 'bg-black/50 border border-current/20'
+                                   : 'bg-white/5 hover:bg-white/10'
+                               }`}
+                             >
                                  {editingNoteId === note.id ? (
-                                     <div className="flex flex-col gap-2">
+                                     <div>
                                          <textarea
-                                            ref={editNoteTextareaRef}
-                                            value={editNoteText}
-                                            onChange={(e) => setEditNoteText(e.target.value)}
-                                            placeholder="Write a note..."
-                                            className={`w-full p-2.5 text-sm transition-colors outline-none resize-none ${notesTextareaClass}`}
-                                            rows={3}
-                                            autoFocus
+                                           ref={editTextareaRef}
+                                           value={editingNoteText}
+                                           onChange={(e) => setEditingNoteText(e.target.value)}
+                                           className={`w-full p-2 text-sm bg-transparent border outline-none resize-none ${theme.notesInput} ${isParchment ? 'border-[#8b5a2b]/30 focus:border-[#8b5a2b]' : ''}`}
+                                           rows={3}
+                                           autoFocus
                                          />
-                                         <div className="flex justify-end gap-2">
+                                         <div className="flex justify-end gap-2 mt-1.5">
                                              <button
                                                type="button"
-                                               onClick={cancelEdit}
+                                               onClick={handleCancelEdit}
                                                className={`p-1.5 transition-colors ${noteCancelBtnThemeClass}`}
                                                title="Cancel edit"
                                                aria-label="Cancel edit"
                                              >
-                                               <X size={14} />
+                                                 <X size={14} />
                                              </button>
                                              <button
                                                type="button"
-                                               onClick={() => saveEdit(note.id)}
-                                               disabled={!editNoteText.trim()}
+                                               onClick={() => handleSaveEdit(note.id)}
+                                               disabled={!editingNoteText.trim()}
                                                className={`p-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${noteSaveBtnThemeClass}`}
-                                               title="Save note"
-                                               aria-label="Save note"
+                                               title="Save changes"
+                                               aria-label="Save changes"
                                              >
                                                  {isParchment ? <AntiqueBookIcon size={14} /> : <Save size={14} />}
                                              </button>
                                          </div>
                                      </div>
                                  ) : (
-                                    <>
-                                        <p className={`${bodySize} ${theme.bodyText} pr-6 break-words whitespace-pre-wrap`}>
-                                            {renderNoteText(note.text)}
-                                        </p>
-                                        <p className={`text-[10px] mt-1 opacity-50 ${theme.subtext}`}>
-                                            {new Date(note.timestamp).toLocaleDateString()}
-                                        </p>
-                                        <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button 
-                                              type="button"
-                                              onClick={() => startEditing(note)} 
-                                              className={`p-1 transition-colors ${noteEditBtnThemeClass}`}
-                                              title="Edit note"
-                                              aria-label="Edit note"
-                                            >
-                                              <Edit2 size={12} />
-                                            </button>
-                                            <button 
-                                              type="button"
-                                              onClick={() => handleDeleteNote(note.id)} 
-                                              className={`p-1 transition-colors ${noteDeleteBtnThemeClass}`} 
-                                              title="Delete note" 
-                                              aria-label="Delete note"
-                                            >
-                                              <Trash2 size={12} />
-                                            </button>
-                                        </div>
-                                    </>
+                                     <div className="flex justify-between items-start gap-2">
+                                         <p className={`text-sm whitespace-pre-wrap flex-1 ${isParchment ? 'text-[#3e2723]' : theme.text}`}>{note.text}</p>
+                                         <div className="flex gap-1 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
+                                             <button
+                                               type="button"
+                                               onClick={() => handleStartEdit(note)}
+                                               className={`p-1 transition-colors ${noteEditBtnThemeClass}`}
+                                               title="Edit note"
+                                               aria-label="Edit note"
+                                             >
+                                                 <Edit2 size={13} />
+                                             </button>
+                                             <button
+                                               type="button"
+                                               onClick={() => handleDeleteNote(note.id)}
+                                               className={`p-1 transition-colors ${noteDeleteBtnThemeClass}`}
+                                               title="Delete note"
+                                               aria-label="Delete note"
+                                             >
+                                                 <Trash2 size={13} />
+                                             </button>
+                                         </div>
+                                     </div>
                                  )}
                              </div>
                          ))}
@@ -3236,7 +3247,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                </div>
           </div>
         ) : (
-          <div className={`relative p-4 shrink-0 flex justify-center items-center pointer-events-auto transition-all overflow-hidden ${theme.container} ${isParchment ? '[isolation:isolate]' : ''}`}>
+          <div className={`relative p-4 shrink-0 flex justify-center items-center pointer-events-auto transition-all ${isParchment ? '[isolation:isolate]' : 'overflow-hidden'} ${theme.container}`}>
              {isParchment && (
                <div className="parchment-background" aria-hidden="true" />
              )}

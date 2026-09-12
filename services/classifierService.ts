@@ -35,6 +35,8 @@ export const classifyGeographicEntityWithEvidence = async (
             let resType: GeographicEntityType = entry.entityType as GeographicEntityType;
             if (['city', 'town', 'village', 'hamlet', 'municipality'].includes(resType)) {
                 resType = 'settlement';
+            } else if (resType === 'historical_event' as any || resType === 'historical_event_site') {
+                resType = 'historical_event_site';
             }
             return {
                 entityType: resType,
@@ -47,7 +49,12 @@ export const classifyGeographicEntityWithEvidence = async (
     // 1.5. HISTORICAL KNOWLEDGE BASE HAS TOP HISTORICAL AUTHORITY
     const histKnowledge = getHistoricalEntityKnowledge(cleanName) || getHistoricalEntityKnowledge(q);
     if (histKnowledge?.entityType) {
-        const hType = (histKnowledge.entityType === 'shipwreck' ? 'shipwreck_site' : histKnowledge.entityType) as GeographicEntityType;
+        let hType: GeographicEntityType = histKnowledge.entityType as GeographicEntityType;
+        if (histKnowledge.entityType === 'shipwreck') {
+            hType = 'shipwreck_site';
+        } else if (histKnowledge.entityType === 'historical_event') {
+            hType = histKnowledge.singleLocation === false ? 'historical_event' : 'historical_event_site';
+        }
         return {
             entityType: hType,
             confidence: 'authoritative',
@@ -55,8 +62,8 @@ export const classifyGeographicEntityWithEvidence = async (
         };
     }
 
-    if (adminContext?.entityType && (adminContext.entityType === 'shipwreck' || adminContext.entityType === 'shipwreck_site' || adminContext.entityType === 'mountain' || adminContext.entityType === 'mountain_range' || adminContext.entityType === 'canyon' || adminContext.entityType === 'lake' || adminContext.entityType === 'river' || adminContext.entityType === 'infrastructure')) {
-        const eType = adminContext.entityType === 'shipwreck' ? 'shipwreck_site' : adminContext.entityType;
+    if (adminContext?.entityType && (adminContext.entityType === 'shipwreck' || adminContext.entityType === 'shipwreck_site' || adminContext.entityType === 'mountain' || adminContext.entityType === 'mountain_range' || adminContext.entityType === 'canyon' || adminContext.entityType === 'lake' || adminContext.entityType === 'river' || adminContext.entityType === 'infrastructure' || adminContext.entityType === 'historical_event' || adminContext.entityType === 'historical_event_site')) {
+        const eType = adminContext.entityType === 'shipwreck' ? 'shipwreck_site' : (adminContext.entityType === 'historical_event' ? 'historical_event_site' : adminContext.entityType);
         return {
             entityType: eType as GeographicEntityType,
             confidence: 'authoritative',
@@ -230,6 +237,10 @@ export const classifyGeographicEntityWithEvidence = async (
 
     if (q.match(/\b(monument|memorial|statue of liberty|eiffel tower|tower of london|big ben|taj mahal|castles?|forts?|palaces?)\b/i) || signals.some(s => s === 'monument' || s.includes('monument'))) {
         return { entityType: 'monument', confidence: 'authoritative', evidence: `Name or provider tag matched monument` };
+    }
+
+    if (signals.some(s => s === 'historical_event_site' || s === 'historical_event' || s.includes('historical_event_site') || s.includes('event_site')) || q.match(/\b(event site|historical event site)\b/i)) {
+        return { entityType: 'historical_event_site', confidence: 'authoritative', evidence: `Provider tag matched historical event site: ${signals.join(', ')}` };
     }
 
     if (signals.some(s => s.includes('historic') || s.includes('memorial') || s.includes('castle') || s === 'historic' || s === 'historical_site')) {

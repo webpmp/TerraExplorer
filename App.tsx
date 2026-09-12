@@ -2640,8 +2640,33 @@ const App: React.FC = () => {
       }
 
       const hasValidCoords = pipelineResult.isValid && (pipelineResult as any).finalData && !pipelineResult.error && (pipelineResult as any).finalData.coordinates;
+      const isValidNonPointResult = pipelineResult.isValid && (pipelineResult as any).finalData && !pipelineResult.error && (pipelineResult as any).finalData.singleLocation === false;
 
-      if (hasValidCoords) {
+      if (isValidNonPointResult) {
+        const finalData = (pipelineResult as any).finalData!;
+        console.log(`[SearchNarration] NON_POINT_RESULT_DISPLAYED name="${finalData.name}" scope="${finalData.geographicScope}"`);
+
+        activeScanIdRef.current += 1;
+        setScanningArea(null);
+        setIsScanningArea(false);
+        setScanStatus(null);
+        scanFullyProcessedRef.current = true;
+        programmaticTransitionUntilRef.current = Date.now() + 1500;
+
+        setAutoRotate(false);
+        setInteractionState('PIN_SELECTED');
+        setMarkers([]);
+        setSelectedMarkerId(null);
+        setSelectedMarkerCoordinates(null);
+        selectedMarkerCoordinatesRef.current = null;
+        setLocationInfo(finalData);
+        locationInfoRef.current = finalData;
+        setIsDiscoveryLoading(false);
+
+        if (finalData.description) {
+          maybeTriggerNarration(finalData);
+        }
+      } else if (hasValidCoords) {
         const finalData = (pipelineResult as any).finalData!;
         const { lat, lng } = finalData.coordinates;
 

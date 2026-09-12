@@ -936,6 +936,44 @@ describe('Lightbox Metadata Integration', () => {
       }
     });
 
+    it('renders HISTORICAL EVENT SITE badge for historical event locations across all themes', () => {
+      const bostonMassacreLocation = {
+        name: "Boston Massacre Site",
+        canonicalName: "Boston Massacre Site",
+        type: "Historical Event Site" as any,
+        entityType: "historical_event_site",
+        locationString: "Boston, United States",
+        city: "Boston",
+        state: "Massachusetts",
+        country: "United States",
+        coordinates: { lat: 42.3588, lng: -71.0578 },
+        description: "The Boston Massacre Site marks the location outside the Old State House where British soldiers fired into a crowd of colonists on March 5, 1770.",
+        notable: [],
+        news: []
+      };
+
+      const themes = ['modern', 'retro-green', 'retro-amber', 'parchment'] as const;
+      for (const skin of themes) {
+        const html = renderToStaticMarkup(
+          <InfoPanel
+            info={bostonMassacreLocation as any}
+            onClose={() => {}}
+            isLoading={false}
+            skin={skin}
+            isFavorite={false}
+            onSaveFavorite={() => {}}
+            onRemoveFavorite={() => {}}
+          />
+        );
+
+        expect(html).toContain('Boston Massacre Site</h2>');
+        expect(html).toContain('Boston, United States');
+        expect(html).toContain('HISTORICAL EVENT SITE');
+        expect(html).not.toContain('MINOR POI');
+        expect(html).toContain('42.36° N, 71.06° W');
+      }
+    });
+
     it('correctly renders entities with no alternate names', () => {
       const simpleLocation = {
         name: 'Eiffel Tower',
@@ -3029,8 +3067,59 @@ describe('Lightbox Metadata Integration', () => {
       expect(threeLine).toContain('section-header-rule inline-block align-middle w-full h-[1px] -mr-[100%] ml-2');
       expect(threeLine).not.toMatch(/[\uFFFD\u00A0]|\\n|<br>/);
     });
+
+    it('6. Parchment Close Panel button is hidden by default with opacity-0 pointer-events-none and revealed on group-hover, while non-parchment themes remain visible by default', () => {
+      const mockInfo = {
+        name: 'Boston Massacre Site',
+        description: 'Historic site in Boston.',
+        coordinates: { lat: 42.3588, lng: -71.0578 }
+      };
+
+      const parchmentHtml = renderToStaticMarkup(
+        <InfoPanel
+          info={mockInfo as any}
+          onClose={() => {}}
+          isLoading={false}
+          skin="parchment"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      // Verify parchment container has group class
+      expect(parchmentHtml).toContain('group');
+      // Verify close button in parchment has hover-reveal classes
+      expect(parchmentHtml).toContain('opacity-0');
+      expect(parchmentHtml).toContain('pointer-events-none');
+      expect(parchmentHtml).toContain('group-hover:opacity-100');
+      expect(parchmentHtml).toContain('group-hover:pointer-events-auto');
+      expect(parchmentHtml).toContain('aria-label="Close panel"');
+      expect(parchmentHtml).toContain('text-[#8b5a2b]');
+
+      // Verify non-parchment themes do not hide close button
+      const nonParchmentSkins = ['modern', 'retro-green', 'retro-amber'] as const;
+      for (const skin of nonParchmentSkins) {
+        const nonParchmentHtml = renderToStaticMarkup(
+          <InfoPanel
+            info={mockInfo as any}
+            onClose={() => {}}
+            isLoading={false}
+            skin={skin}
+            isFavorite={false}
+            onSaveFavorite={() => {}}
+            onRemoveFavorite={() => {}}
+          />
+        );
+
+        expect(nonParchmentHtml).toContain('aria-label="Close panel"');
+        expect(nonParchmentHtml).not.toContain('opacity-0 pointer-events-none group-hover:opacity-100');
+        expect(nonParchmentHtml).toMatch(/class="[^"]*pointer-events-auto[^"]*"[^>]*aria-label="Close panel"/);
+      }
+    });
   });
 });
+
 
 
 

@@ -179,6 +179,62 @@ describe('Semantic Entity Resolution Architecture Tests', () => {
       expect(coords.lng).toBeLessThan(-95.0);
       expect(coords.lng).toBeGreaterThan(-105.0);
     });
+
+    test('Historical Event Site Pipeline Resolution: Boston Massacre resolves to historical_event_site and displays HISTORICAL EVENT SITE', async () => {
+      const { runSearchPipeline } = await import('../pipeline');
+      const { formatUserFacingCategory } = await import('../../utils/categoryFormatting');
+
+      const query = "Where did the Boston Massacre take place?";
+      const result = await runSearchPipeline({ rawQuery: query });
+
+      expect(result.isValid).toBe(true);
+      expect(result.mode).toBe('location');
+      expect(result.entity).toBeDefined();
+
+      const entity = result.entity!;
+      expect(entity.subject.identity.canonicalName).toBe('Boston Massacre Site');
+      expect(entity.subject.identity.entityType).toBe('historical_event_site');
+
+      const finalData = (result as any).finalData;
+      expect(finalData).toBeDefined();
+      expect(finalData.name).toBe('Boston Massacre Site');
+      expect(finalData.entityType).toBe('historical_event_site');
+      expect(finalData.coordinates.lat).toBeCloseTo(42.3588, 3);
+      expect(finalData.coordinates.lng).toBeCloseTo(-71.0578, 3);
+
+      const category = formatUserFacingCategory(finalData.entityType, finalData.name, finalData.type);
+      expect(category).toBe('Historical Event Site');
+      expect(category.toUpperCase()).toBe('HISTORICAL EVENT SITE');
+      expect(category.toUpperCase()).not.toBe('MINOR POI');
+    });
+
+    test('Classification precedence: genuine minor POI remains minor_poi / Point of Interest', async () => {
+      const { classifyGeographicEntity } = await import('../classifierService');
+      const { formatUserFacingCategory } = await import('../../utils/categoryFormatting');
+
+      const minorResult = await classifyGeographicEntity(
+        'Joe\'s Corner Bakery',
+        { lat: 40.7128, lng: -74.0060 },
+        ['shop', 'bakery']
+      );
+      expect(minorResult).toBe('minor_poi');
+      const formattedMinor = formatUserFacingCategory(minorResult);
+      expect(formattedMinor).toBe('Point of Interest');
+    });
+
+    test('Classification precedence: iconic landmark retains landmark classification', async () => {
+      const { classifyGeographicEntity } = await import('../classifierService');
+      const { formatUserFacingCategory } = await import('../../utils/categoryFormatting');
+
+      const landmarkResult = await classifyGeographicEntity(
+        'Eiffel Tower',
+        { lat: 48.8584, lng: 2.2945 },
+        ['landmark', 'tourism=attraction']
+      );
+      expect(landmarkResult).toBe('landmark');
+      const formattedLandmark = formatUserFacingCategory(landmarkResult);
+      expect(formattedLandmark).toBe('Landmark');
+    });
   });
 });
 

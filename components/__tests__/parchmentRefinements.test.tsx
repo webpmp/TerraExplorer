@@ -608,8 +608,8 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
     );
     // EXPLORE button
     expect(parchmentControls).toContain('text-[#5c3a21] hover:text-[#3e2723] bg-transparent hover:bg-transparent rounded-none font-sans font-bold uppercase tracking-wider text-sm');
-    // GENERATE ROUTE button
-    expect(parchmentControls).toContain('border-0 bg-[#e8d5b5] text-[#5c3a21] hover:bg-[#d2b48c] hover:text-[#3e2723] font-sans rounded-sm');
+    // GENERATE ROUTE button (no filled background)
+    expect(parchmentControls).toContain('border-0 bg-transparent hover:bg-transparent text-[#5c3a21] hover:text-[#3e2723] font-sans rounded-none shadow-none');
 
     // 3. SettingsPanel: TEST CONNECTION & TEST VOICE
     const parchmentProvidersSettings = renderToStaticMarkup(
@@ -689,6 +689,41 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
     );
     expect(parchmentControls).toContain('font-bold uppercase text-[#5c3a21] text-lg tracking-wider brand-font');
     expect(parchmentControls).toContain('Trace Route');
+  });
+
+  test('13. Settings panel removes decorative settings glyph only in Parchment theme', () => {
+    const parchmentSettings = renderToStaticMarkup(
+      <SettingsPanel
+        settings={defaultSettings}
+        onUpdateSettings={vi.fn()}
+        onClose={vi.fn()}
+        skin="parchment"
+      />
+    );
+    expect(parchmentSettings).toContain('SETTINGS');
+    expect(parchmentSettings).not.toContain('lucide-settings');
+
+    const modernSettings = renderToStaticMarkup(
+      <SettingsPanel
+        settings={defaultSettings}
+        onUpdateSettings={vi.fn()}
+        onClose={vi.fn()}
+        skin="modern"
+      />
+    );
+    expect(modernSettings).toContain('SETTINGS');
+    expect(modernSettings).toContain('lucide-settings');
+
+    const retroSettings = renderToStaticMarkup(
+      <SettingsPanel
+        settings={defaultSettings}
+        onUpdateSettings={vi.fn()}
+        onClose={vi.fn()}
+        skin="retro-amber"
+      />
+    );
+    expect(retroSettings).toContain('SETTINGS');
+    expect(retroSettings).toContain('lucide-settings');
   });
 });
 

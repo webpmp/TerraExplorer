@@ -479,8 +479,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
   const theme = themes[skin];
 
   const containerClasses = `
-    relative w-96 flex flex-col shrink min-h-0 h-[700px] pointer-events-auto transition-all duration-300 overflow-hidden
-    ${theme.container} ${isParchment ? '[isolation:isolate]' : ''}
+    relative w-96 flex flex-col shrink min-h-0 h-[700px] pointer-events-auto transition-all duration-300
+    ${theme.container} ${isParchment ? '[isolation:isolate]' : 'overflow-hidden'}
   `;
 
   const headerClasses = `
@@ -538,8 +538,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
       )}
       <div className="relative z-[1] flex flex-col flex-1 shrink min-h-0 overflow-hidden">
         <div className={headerClasses}>
-        <div className="flex items-center gap-3">
-          <SettingsIcon size={20} className={isParchment ? 'text-[#8b5a2b]' : isRetro && skin === 'retro-amber' ? 'text-[#ffb000]' : isRetro ? 'text-green-300' : 'text-current'} />
+        <div className={`flex items-center ${isParchment ? '' : 'gap-3'}`}>
+          {!isParchment && (
+            <SettingsIcon size={20} className={isRetro && skin === 'retro-amber' ? 'text-[#ffb000]' : isRetro ? 'text-green-300' : 'text-current'} />
+          )}
           <h2 className={`text-lg font-bold ${theme.headerTitle}`}>
             SETTINGS
           </h2>
