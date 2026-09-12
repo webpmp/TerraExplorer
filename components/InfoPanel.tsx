@@ -24,6 +24,94 @@ import { generateDefaultRouteName, normalizeSemanticEntityTitle, isCoordinateTit
 export { classifyContext, isPureGeographicLabel, sanitizeContextMarkdown };
 
 
+export const MedievalEmeraldBronzePinIcon: React.FC<{ size?: number; className?: string }> = ({ size = 32, className = '' }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 100 100"
+    width={size}
+    height={size}
+    className={`drop-shadow-sm ${className}`}
+    aria-hidden="true"
+  >
+    <defs>
+      {/* Aged Bronze */}
+      <radialGradient id="bronzeHead" cx="35%" cy="28%" r="70%">
+        <stop offset="0%" stopColor="#d6b56a" />
+        <stop offset="35%" stopColor="#a77b32" />
+        <stop offset="72%" stopColor="#76501f" />
+        <stop offset="100%" stopColor="#4b3215" />
+      </radialGradient>
+      {/* Emerald Inset */}
+      <radialGradient id="emerald" cx="35%" cy="30%" r="70%">
+        <stop offset="0%" stopColor="#2a8a5b" />
+        <stop offset="45%" stopColor="#115E3B" />
+        <stop offset="100%" stopColor="#061F13" />
+      </radialGradient>
+      {/* Dark Metal Shaft */}
+      <linearGradient id="shaft" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stopColor="#3a3022" />
+        <stop offset="45%" stopColor="#171511" />
+        <stop offset="100%" stopColor="#51442e" />
+      </linearGradient>
+      {/* Soft Shadow */}
+      <filter id="shadow" x="-40%" y="-40%" width="180%" height="200%">
+        <feDropShadow
+          dx="1"
+          dy="3"
+          stdDeviation="2.5"
+          floodColor="#000000"
+          floodOpacity="0.45"
+        />
+      </filter>
+    </defs>
+    {/* Pin */}
+    <g filter="url(#shadow)">
+      {/* Short metal shaft */}
+      <path
+        d="M 48,58 L 52,58 L 53,91 L 50,97 L 47,91 Z"
+        fill="url(#shaft)"
+      />
+      {/* Bronze pin head */}
+      <circle
+        cx="50"
+        cy="43"
+        r="25"
+        fill="url(#bronzeHead)"
+        stroke="#4b3215"
+        strokeWidth="2"
+      />
+      {/* Raised bronze inner rim */}
+      <circle
+        cx="50"
+        cy="43"
+        r="19"
+        fill="none"
+        stroke="#c39a4d"
+        strokeWidth="2"
+        opacity="0.7"
+      />
+      {/* Emerald inset */}
+      <circle
+        cx="50"
+        cy="43"
+        r="11"
+        fill="url(#emerald)"
+        stroke="#6e5427"
+        strokeWidth="1.5"
+      />
+      {/* Subtle highlight */}
+      <ellipse
+        cx="44"
+        cy="36"
+        rx="5"
+        ry="3"
+        fill="#ffffff"
+        opacity="0.16"
+      />
+    </g>
+  </svg>
+);
+
 export const AntiqueBookIcon: React.FC<{ size?: number; className?: string }> = ({ size = 16, className = '' }) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -55,6 +143,127 @@ export const AntiqueBookIcon: React.FC<{ size?: number; className?: string }> = 
     <path d="M10 7v9l2-1.5 2 1.5V7" fill="#A0522D"></path>
   </svg>
 );
+
+export const VoyagerCeremonialBanner: React.FC<{
+  isFavorite: boolean;
+  onFavoriteClick: () => void;
+  favoriteTitle: string;
+  favoriteDialog?: React.ReactNode;
+}> = ({ isFavorite, onFavoriteClick, favoriteTitle, favoriteDialog }) => {
+  return (
+    <div className="relative w-full px-1 py-0 flex items-center justify-center select-none" data-testid="voyager-ceremonial-banner">
+      {/* Option 3: THE VOYAGER Horizontal Banner SVG Artwork */}
+      <svg
+        viewBox="0 0 800 90"
+        className="w-full h-auto max-h-[62px] block drop-shadow-sm pointer-events-none"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        aria-hidden="true"
+      >
+        <defs>
+          <linearGradient id="voyager-g-gold" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#A67C1E" />
+            <stop offset="30%" stopColor="#FDF1A9" />
+            <stop offset="50%" stopColor="#D4AF37" />
+            <stop offset="70%" stopColor="#F3E5AB" />
+            <stop offset="100%" stopColor="#8A640F" />
+          </linearGradient>
+          <linearGradient id="voyager-g-emerald" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#0A2F1D" />
+            <stop offset="50%" stopColor="#115E3B" />
+            <stop offset="100%" stopColor="#0A2F1D" />
+          </linearGradient>
+          <linearGradient id="voyager-g-emerald-fold" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#061F13" />
+            <stop offset="100%" stopColor="#010A06" />
+          </linearGradient>
+        </defs>
+
+        {/* Folded ribbon ends */}
+        <path d="M 15,25 L 65,25 L 65,75 L 15,75 L 32,50 Z" fill="url(#voyager-g-emerald-fold)" />
+        <path d="M 785,25 L 735,25 L 735,75 L 785,75 L 768,50 Z" fill="url(#voyager-g-emerald-fold)" />
+
+        {/* Fold underlap shadow triangles */}
+        <path d="M 55,15 L 65,25 L 55,25 Z" fill="#020C07" />
+        <path d="M 745,15 L 735,25 L 745,25 Z" fill="#020C07" />
+
+        {/* Main emerald banner cloth */}
+        <path
+          d="M 55,15 L 745,15 L 735,75 L 65,75 Z"
+          fill="url(#voyager-g-emerald)"
+          stroke="#051A10"
+          strokeWidth="2"
+        />
+
+        {/* Outer gold border */}
+        <path
+          d="M 68,23 L 732,23 L 725,67 L 75,67 Z"
+          fill="none"
+          stroke="url(#voyager-g-gold)"
+          strokeWidth="1.5"
+          opacity="0.9"
+        />
+
+        {/* Inner subtle double gold border */}
+        <path
+          d="M 72,27 L 728,27 L 721,63 L 79,63 Z"
+          fill="none"
+          stroke="url(#voyager-g-gold)"
+          strokeWidth="0.7"
+          opacity="0.6"
+        />
+
+        {/* Central rotated diamond medallion */}
+        <rect
+          x="-19"
+          y="-19"
+          width="38"
+          height="38"
+          fill="#0A2F1D"
+          stroke="url(#voyager-g-gold)"
+          strokeWidth="2.5"
+          transform="translate(400,45) rotate(45)"
+        />
+
+        {/* Center compass emblem artwork */}
+        <g transform="translate(400,45)">
+          <circle r="14" fill="none" stroke="url(#voyager-g-gold)" strokeWidth="1" opacity="0.85" />
+          <circle r="11" fill="none" stroke="url(#voyager-g-gold)" strokeWidth="0.5" strokeDasharray="1 1.5" opacity="0.6" />
+
+          {/* Secondary 4-point diagonal facets */}
+          <polygon points="0,-11 2.5,-2.5 11,0 2.5,2.5 0,11 -2.5,2.5 -11,0 -2.5,-2.5" fill="url(#voyager-g-gold)" opacity={isFavorite ? "0.95" : "0.55"} />
+
+          {/* Primary 4-point compass rose facets */}
+          <polygon points="0,-15 2.5,-2 0,0" fill="#FDF1A9" />
+          <polygon points="0,-15 -2.5,-2 0,0" fill="#A67C1E" />
+          <polygon points="15,0 2,2.5 0,0" fill="#FDF1A9" />
+          <polygon points="15,0 2,-2.5 0,0" fill="#A67C1E" />
+          <polygon points="0,15 -2.5,2 0,0" fill="#FDF1A9" />
+          <polygon points="0,15 2.5,2 0,0" fill="#A67C1E" />
+          <polygon points="-15,0 -2,-2.5 0,0" fill="#FDF1A9" />
+          <polygon points="-15,0 -2,2.5 0,0" fill="#A67C1E" />
+
+          {/* Center pivot jewel */}
+          <circle r="2.5" fill="url(#voyager-g-gold)" stroke="#061F13" strokeWidth="0.5" />
+        </g>
+      </svg>
+
+      {/* Accessible Interactive Center Compass Button */}
+      <button
+        type="button"
+        onClick={onFavoriteClick}
+        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full flex items-center justify-center cursor-pointer transition-transform hover:scale-110 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] z-10"
+        title={favoriteTitle}
+        aria-label={favoriteTitle}
+      >
+        <span className="sr-only">{favoriteTitle}</span>
+      </button>
+
+      {/* Dialog Popover if open */}
+      {favoriteDialog}
+    </div>
+  );
+};
 
 export interface GalleryImage {
   url: string;
@@ -1950,7 +2159,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       listDot: "bg-[#8b5a2b] rounded-sm",
       closeBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] rounded",
       actionBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] rounded",
-      loadMoreBtn: "bg-[#e8d5b5]/50 hover:bg-[#d2b48c] text-[#5c3a21] rounded-sm text-sm tracking-widest uppercase font-bold",
+      loadMoreBtn: "bg-transparent hover:bg-transparent text-[#5c3a21] rounded-sm text-sm tracking-widest uppercase font-bold",
       notesInput: "bg-[#f4ead5]/40 border border-[#8b5a2b]/30 text-[#522B07] placeholder-[#8b5a2b]/60 focus:border-[#8b5a2b]/70 shadow-[inset_0_1px_2px_rgba(139,90,43,0.1)] rounded-sm outline-none caret-[#522B07]",
       noteCard: "bg-[#f4ead5]/40 border border-[#8b5a2b]/20 rounded-sm shadow-sm",
       navBtn: "bg-transparent hover:text-[#3e2723] text-[#5c3a21] hover:opacity-80 transition-opacity",
@@ -2588,73 +2797,79 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             </button>
 
             {/* 2. Save Location and Copy text buttons */}
-            <div className="flex justify-center w-full -mt-[10px] mb-[26px] relative z-10 gap-2">
-              <button
-                onClick={handleFavoriteClick}
-                className={`p-2 transition-colors ${theme.actionBtn}`}
-                title={isFavorite ? "Edit Favorite" : (routeNav ? "Save Route" : "Save Location")}
-              >
-                <Pin size={24} className={isFavorite ? "fill-current" : ""} />
-              </button>
+            {!(isParchment && isMultiLocation) && (
+              <div className="flex justify-center w-full -mt-[10px] mb-[26px] relative z-10 gap-2">
+                <button
+                  onClick={handleFavoriteClick}
+                  className={`p-2 transition-colors ${theme.actionBtn}`}
+                  title={isFavorite ? "Edit Favorite" : (routeNav ? "Save Route" : "Save Location")}
+                >
+                  {isParchment ? (
+                    <MedievalEmeraldBronzePinIcon size={32} className={isFavorite ? "opacity-100 scale-105" : "opacity-85 hover:opacity-100"} />
+                  ) : (
+                    <Pin size={24} className={isFavorite ? "fill-current" : ""} />
+                  )}
+                </button>
 
-              {/* Favorite Dialog Popover */}
-              {showFavoriteDialog && (
-                 <div className={`absolute top-full mt-2 w-64 p-3 z-50 flex flex-col gap-3 left-1/2 -translate-x-1/2 ${theme.popover}`}>
-                    <h3 className={`text-xs text-left font-bold uppercase tracking-wider ${isRetro ? 'text-current' : isParchment ? 'text-[#8b5a2b]' : 'text-cyan-300'}`}>
-                      {isFavorite ? 'Edit Favorite' : (routeNav ? 'Save Route' : 'Save Location')}
-                    </h3>
-                    <form onSubmit={submitFavorite} className="flex flex-col gap-2">
-                       <input
-                         type="text"
-                         value={favoriteNameInput}
-                         onChange={(e) => setFavoriteNameInput(e.target.value)}
-                         placeholder="Enter name..."
-                         className={`w-full p-2 text-sm bg-transparent border outline-none ${theme.notesInput} ${isParchment ? 'border-[#8b5a2b]/30 focus:border-[#8b5a2b]' : ''}`}
-                         autoFocus
-                       />
-                       <div className="flex gap-2 justify-end">
-                          {isFavorite && (
-                              <button
-                                type="button"
-                                onClick={() => { onRemoveFavorite(); setShowFavoriteDialog(false); }}
-                                className="p-1.5 hover:text-red-400 transition-colors"
-                                title="Remove"
-                                aria-label="Remove favorite"
-                              >
-                                  <Trash2 size={16} />
-                              </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => setShowFavoriteDialog(false)}
-                            className={`px-2 py-1 text-xs opacity-70 hover:opacity-100 rounded transition-colors ${
-                              isParchment 
-                                ? 'text-[#5c3a21] hover:bg-[#e8d5b5]/50' 
-                                : isRetro 
-                                ? 'hover:bg-white/10' 
-                                : 'hover:bg-white/10 text-gray-300 hover:text-white'
-                            }`}
-                          >
-                              Cancel
-                          </button>
-                          <button
-                            type="submit"
-                            disabled={!favoriteNameInput.trim()}
-                            className={`px-3 py-1 text-xs font-bold uppercase transition-colors disabled:opacity-50 ${
-                              isParchment
-                                ? 'bg-[#8b5a2b] text-[#f4ead5] hover:bg-[#5c3a21] rounded-sm shadow-sm'
-                                : isRetro
-                                ? (skin === 'retro-amber' ? 'bg-amber-400 text-black hover:bg-amber-300' : 'bg-green-400 text-black hover:bg-green-300')
-                                : 'bg-cyan-600 hover:bg-cyan-500 text-white rounded'
-                            }`}
-                          >
-                              Save
-                          </button>
-                       </div>
-                    </form>
-                 </div>
-              )}
-            </div>
+                {/* Favorite Dialog Popover */}
+                {showFavoriteDialog && (
+                   <div className={`absolute top-full mt-2 w-64 p-3 z-50 flex flex-col gap-3 left-1/2 -translate-x-1/2 ${theme.popover}`}>
+                      <h3 className={`text-xs text-left font-bold uppercase tracking-wider ${isRetro ? 'text-current' : isParchment ? 'text-[#8b5a2b]' : 'text-cyan-300'}`}>
+                        {isFavorite ? 'Edit Favorite' : (routeNav ? 'Save Route' : 'Save Location')}
+                      </h3>
+                      <form onSubmit={submitFavorite} className="flex flex-col gap-2">
+                         <input
+                           type="text"
+                           value={favoriteNameInput}
+                           onChange={(e) => setFavoriteNameInput(e.target.value)}
+                           placeholder="Enter name..."
+                           className={`w-full p-2 text-sm bg-transparent border outline-none ${theme.notesInput} ${isParchment ? 'border-[#8b5a2b]/30 focus:border-[#8b5a2b]' : ''}`}
+                           autoFocus
+                         />
+                         <div className="flex gap-2 justify-end">
+                            {isFavorite && (
+                                <button
+                                  type="button"
+                                  onClick={() => { onRemoveFavorite(); setShowFavoriteDialog(false); }}
+                                  className="p-1.5 hover:text-red-400 transition-colors"
+                                  title="Remove"
+                                  aria-label="Remove favorite"
+                                >
+                                    <Trash2 size={16} />
+                                </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setShowFavoriteDialog(false)}
+                              className={`px-2 py-1 text-xs opacity-70 hover:opacity-100 rounded transition-colors ${
+                                isParchment 
+                                  ? 'text-[#5c3a21] hover:bg-[#e8d5b5]/50' 
+                                  : isRetro 
+                                  ? 'hover:bg-white/10' 
+                                  : 'hover:bg-white/10 text-gray-300 hover:text-white'
+                              }`}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={!favoriteNameInput.trim()}
+                              className={`px-3 py-1 text-xs font-bold uppercase transition-colors disabled:opacity-50 ${
+                                isParchment
+                                  ? 'bg-[#8b5a2b] text-[#f4ead5] hover:bg-[#5c3a21] rounded-sm shadow-sm'
+                                  : isRetro
+                                  ? (skin === 'retro-amber' ? 'bg-amber-400 text-black hover:bg-amber-300' : 'bg-green-400 text-black hover:bg-green-300')
+                                  : 'bg-cyan-600 hover:bg-cyan-500 text-white rounded'
+                              }`}
+                            >
+                                Save
+                            </button>
+                         </div>
+                      </form>
+                   </div>
+                )}
+              </div>
+            )}
 
             {/* 3. Location title & geographic hierarchy */}
             <div className="flex flex-col gap-2 items-center text-center w-full min-w-0">
@@ -2681,9 +2896,64 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             </div>
           </div>
 
+          {/* Ceremonial Voyager Banner for multi-waypoint routes in parchment skin */}
+          {isParchment && isMultiLocation && (
+            <VoyagerCeremonialBanner
+              isFavorite={isFavorite}
+              onFavoriteClick={handleFavoriteClick}
+              favoriteTitle={isFavorite ? "Edit Favorite" : (routeNav ? "Save Route" : "Save Location")}
+              favoriteDialog={
+                showFavoriteDialog ? (
+                  <div className={`absolute top-full mt-2 w-64 p-3 z-50 flex flex-col gap-3 left-1/2 -translate-x-1/2 ${theme.popover}`}>
+                    <h3 className={`text-xs text-left font-bold uppercase tracking-wider text-[#8b5a2b]`}>
+                      {isFavorite ? 'Edit Favorite' : (routeNav ? 'Save Route' : 'Save Location')}
+                    </h3>
+                    <form onSubmit={submitFavorite} className="flex flex-col gap-2">
+                      <input
+                        type="text"
+                        value={favoriteNameInput}
+                        onChange={(e) => setFavoriteNameInput(e.target.value)}
+                        placeholder="Enter name..."
+                        className={`w-full p-2 text-sm bg-transparent border outline-none ${theme.notesInput} border-[#8b5a2b]/30 focus:border-[#8b5a2b]`}
+                        autoFocus
+                      />
+                      <div className="flex gap-2 justify-end">
+                        {isFavorite && (
+                          <button
+                            type="button"
+                            onClick={() => { onRemoveFavorite(); setShowFavoriteDialog(false); }}
+                            className="p-1.5 hover:text-red-400 transition-colors"
+                            title="Remove"
+                            aria-label="Remove favorite"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setShowFavoriteDialog(false)}
+                          className="px-2 py-1 text-xs opacity-70 hover:opacity-100 rounded transition-colors text-[#5c3a21] hover:bg-[#e8d5b5]/50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={!favoriteNameInput.trim()}
+                          className="px-3 py-1 text-xs font-bold uppercase transition-colors disabled:opacity-50 bg-[#8b5a2b] text-[#f4ead5] hover:bg-[#5c3a21] rounded-sm shadow-sm"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                ) : null
+              }
+            />
+          )}
+
           {/* Route Navigation */}
           {isMultiLocation && routeNav && (
-             <div className={`relative z-[1] p-3 flex items-center justify-between min-w-0 ${isRetro ? 'border-b border-current opacity-80' : isParchment ? 'bg-transparent' : 'border-b border-white/10 bg-white/5'}`}>
+             <div className={`relative z-[1] ${isParchment ? 'px-3 py-1 bg-transparent' : isRetro ? 'px-3 py-1.5 border-b border-current opacity-80' : 'px-3 py-1.5 border-b border-white/10 bg-white/5'} flex items-center justify-between min-w-0`}>
                 <button onClick={routeNav.onPrev} className={`p-1.5 rounded-full ${theme.navBtn} pointer-events-auto shrink-0`} aria-label="Previous waypoint">
                     <ChevronLeft size={16} />
                 </button>
@@ -2973,9 +3243,13 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
              <button
                 type="button"
                 onClick={handleStartAddNote}
-                className={`relative z-[1] flex w-full justify-center items-center gap-2 px-6 py-3 font-bold uppercase tracking-wider text-sm transition-colors ${theme.actionBtn} hover:brightness-110`}
+                className={`relative z-[1] flex w-full justify-center items-center ${
+                  isParchment
+                    ? 'bg-transparent hover:bg-transparent text-[#5c3a21] hover:text-[#3e2723] rounded-sm'
+                    : 'gap-2 ' + theme.actionBtn + ' hover:brightness-110'
+                } px-6 py-3 font-bold uppercase tracking-wider text-sm transition-colors`}
              >
-                <StickyNote size={16} />
+                {!isParchment && <StickyNote size={16} />}
                 Add Note
              </button>
           </div>

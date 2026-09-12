@@ -326,7 +326,7 @@ const Controls: React.FC<ControlsProps> = ({
       inputWrapper: "backdrop-blur-md border-0 rounded-none shadow-none",
       inputIcon: "text-[#8b5a2b]",
       inputField: "text-[#522B07] placeholder-[#522B07] font-mono text-sm",
-      submitBtn: "text-[#5c3a21] rounded-none font-sans font-bold uppercase",
+      submitBtn: "text-[#5c3a21] hover:text-[#3e2723] bg-transparent hover:bg-transparent rounded-none font-sans font-bold uppercase tracking-wider text-sm",
       resetBtn: "text-[#8b5a2b] hover:text-[#3e2723] mr-2 p-1",
       glow: "hidden",
       statusRow: "bg-[#f4ead5]/95 border border-[#8b5a2b]/40 text-[#5c3a21] font-sans shadow-sm rounded",
@@ -455,7 +455,7 @@ const Controls: React.FC<ControlsProps> = ({
                     <button onClick={() => onToggleTraceModal(false)} className={`absolute top-0 right-0 p-1 hover:opacity-70`}>
                         <X size={20} />
                     </button>
-                    <h2 className="text-xl font-bold uppercase tracking-wide">Trace Route</h2>
+                    <h2 className={`font-bold uppercase ${skin === 'parchment' ? 'text-[#5c3a21] text-lg tracking-wider brand-font' : 'text-xl tracking-wide'}`}>Trace Route</h2>
                     <p className="text-sm opacity-70">Paste an article, URL, or text block. The system will identify locations and create a connected journey.</p>
                     <form onSubmit={handleTraceSubmit} className="flex flex-col gap-4">
                         <textarea
@@ -474,9 +474,9 @@ const Controls: React.FC<ControlsProps> = ({
                         <button
                           type="submit"
                           disabled={!traceText.trim()}
-                          className={`py-3 font-bold uppercase tracking-widest transition-all ${
+                          className={`py-3 font-bold uppercase tracking-wider text-sm transition-all ${
                             skin === 'parchment'
-                              ? 'bg-[#e8d5b5] text-[#5c3a21] hover:bg-[#d2b48c] hover:text-[#3e2723] shadow-[2px_2px_4px_rgba(0,0,0,0.2)] font-sans rounded-none'
+                              ? 'border-0 bg-[#e8d5b5] text-[#5c3a21] hover:bg-[#d2b48c] hover:text-[#3e2723] font-sans rounded-sm'
                               : theme.btn
                           } ${!traceText.trim() ? 'opacity-50 cursor-not-allowed' : 'hover:scale-[1.02]'}`}
                         >

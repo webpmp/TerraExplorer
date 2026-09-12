@@ -758,7 +758,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                         onClick={handleTestModelConnection}
                         disabled={modelTestStatus === 'testing' || !settings.lmStudioUrl}
                         className={`w-full py-2 px-4 rounded-lg text-sm border font-medium transition-colors disabled:opacity-50
-                          ${isParchment ? 'border-[#8b5a2b] bg-[#8b5a2b]/10 hover:bg-[#8b5a2b]/20 text-[#8b5a2b]' : ''}
+                          ${isParchment ? 'border-0 bg-[#e8d5b5] hover:bg-[#d2b48c] text-[#5c3a21] hover:text-[#3e2723] font-bold uppercase tracking-wider' : ''}
                           ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20 text-white' : ''}
                           ${isRetro ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300' : ''}
                           ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
@@ -815,7 +815,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                     onClick={handleTestMapConnection}
                     disabled={mapTestStatus === 'testing'}
                     className={`w-full py-2 px-4 rounded-lg text-sm border font-medium transition-colors disabled:opacity-50
-                      ${isParchment ? 'border-[#8b5a2b] bg-[#8b5a2b]/10 hover:bg-[#8b5a2b]/20 text-[#8b5a2b]' : ''}
+                      ${isParchment ? 'border-0 bg-[#e8d5b5] hover:bg-[#d2b48c] text-[#5c3a21] hover:text-[#3e2723] font-bold uppercase tracking-wider' : ''}
                       ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20 text-white' : ''}
                       ${isRetro ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300' : ''}
                       ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
@@ -956,7 +956,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                       onClick={handleTestNewsConnection}
                       disabled={newsTestStatus === 'testing'}
                       className={`w-full py-2 px-4 rounded-lg text-sm border font-medium transition-colors disabled:opacity-50
-                        ${isParchment ? 'border-[#8b5a2b] bg-[#8b5a2b]/10 hover:bg-[#8b5a2b]/20 text-[#8b5a2b]' : ''}
+                        ${isParchment ? 'border-0 bg-[#e8d5b5] hover:bg-[#d2b48c] text-[#5c3a21] hover:text-[#3e2723] font-bold uppercase tracking-wider' : ''}
                         ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20 text-white' : ''}
                         ${isRetro ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300' : ''}
                         ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
@@ -1269,7 +1269,7 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                   onClick={handleTestVoice}
                   disabled={!settings.narrationEnabled}
                   className={`px-4 py-2 rounded-lg text-sm border font-medium transition-colors
-                    ${isParchment ? 'border-[#8b5a2b] bg-[#8b5a2b]/10 hover:bg-[#8b5a2b]/20 text-[#8b5a2b]' : ''}
+                    ${isParchment ? 'border-0 bg-[#e8d5b5] hover:bg-[#d2b48c] text-[#5c3a21] hover:text-[#3e2723] font-bold uppercase tracking-wider' : ''}
                     ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20' : ''}
                     ${isRetro ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300 disabled:opacity-50' : ''}
                     ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}

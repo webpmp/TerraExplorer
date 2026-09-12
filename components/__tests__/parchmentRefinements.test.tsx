@@ -419,5 +419,278 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
     );
     expect(amberHtml).toContain('relative p-5 shrink-0 flex flex-col items-center bg-amber-900/30');
   });
+
+  test('8. Voyager Ceremonial Banner renders only for Parchment theme with multiple waypoints', () => {
+    const multiWaypointInfo: LocationInfo = {
+      name: 'Voyage Route',
+      description: 'A multi-waypoint expedition',
+      type: 'Route',
+      entityType: 'route',
+      coordinates: { lat: 10, lng: 20 },
+      waypoints: [
+        { name: 'Point A', coordinates: { lat: 10, lng: 20 } },
+        { name: 'Point B', coordinates: { lat: 12, lng: 22 } }
+      ]
+    };
+
+    const singleWaypointInfo: LocationInfo = {
+      name: 'Single Location',
+      description: 'A single point of interest',
+      type: 'City',
+      coordinates: { lat: 10, lng: 20 }
+    };
+
+    const multiRouteNav = {
+      waypoints: multiWaypointInfo.waypoints,
+      currentIndex: 0,
+      total: 2,
+      current: 1,
+      onSelectIndex: vi.fn(),
+      onPrev: vi.fn(),
+      onNext: vi.fn()
+    };
+
+    // Case 1: Parchment + Multiple Waypoints -> Banner renders, top thumbtack hidden
+    const parchmentMultiHtml = renderToStaticMarkup(
+      <InfoPanel
+        info={multiWaypointInfo}
+        onClose={vi.fn()}
+        skin="parchment"
+        routeNav={multiRouteNav}
+      />
+    );
+    expect(parchmentMultiHtml).toContain('data-testid="voyager-ceremonial-banner"');
+    expect(parchmentMultiHtml).toContain('voyager-g-emerald');
+    expect(parchmentMultiHtml).toContain('voyager-g-gold');
+    // Top thumbtack container (-mt-[10px] mb-[26px]) should not be rendered in header
+    expect(parchmentMultiHtml).not.toContain('-mt-[10px] mb-[26px]');
+
+    // Case 2: Parchment + 1 Waypoint -> Banner NOT rendered, top thumbtack present with MedievalEmeraldBronzePinIcon
+    const parchmentSingleHtml = renderToStaticMarkup(
+      <InfoPanel
+        info={singleWaypointInfo}
+        onClose={vi.fn()}
+        skin="parchment"
+      />
+    );
+    expect(parchmentSingleHtml).not.toContain('data-testid="voyager-ceremonial-banner"');
+    expect(parchmentSingleHtml).toContain('-mt-[10px] mb-[26px]');
+    expect(parchmentSingleHtml).toContain('bronzeHead');
+    expect(parchmentSingleHtml).not.toContain('lucide-pin');
+
+    // Case 3: Modern theme + Multiple Waypoints -> Banner NOT rendered, top thumbtack present with standard Pin
+    const modernMultiHtml = renderToStaticMarkup(
+      <InfoPanel
+        info={multiWaypointInfo}
+        onClose={vi.fn()}
+        skin="modern"
+        routeNav={multiRouteNav}
+      />
+    );
+    expect(modernMultiHtml).not.toContain('data-testid="voyager-ceremonial-banner"');
+    expect(modernMultiHtml).toContain('-mt-[10px] mb-[26px]');
+    expect(modernMultiHtml).toContain('lucide-pin');
+    expect(modernMultiHtml).not.toContain('bronzeHead');
+
+    // Case 4: Retro Green theme + Multiple Waypoints -> Banner NOT rendered, top thumbtack present with standard Pin
+    const retroMultiHtml = renderToStaticMarkup(
+      <InfoPanel
+        info={multiWaypointInfo}
+        onClose={vi.fn()}
+        skin="retro-green"
+        routeNav={multiRouteNav}
+      />
+    );
+    expect(retroMultiHtml).not.toContain('data-testid="voyager-ceremonial-banner"');
+    expect(retroMultiHtml).toContain('-mt-[10px] mb-[26px]');
+    expect(retroMultiHtml).toContain('lucide-pin');
+    expect(retroMultiHtml).not.toContain('bronzeHead');
+  });
+
+  test('9. Parchment theme LOAD NEWS button has no background in normal or hover states', () => {
+    const newsInfo: LocationInfo = {
+      name: 'London',
+      description: 'Capital city',
+      type: 'City',
+      coordinates: { lat: 51.5, lng: -0.1 },
+      news: []
+    };
+
+    const parchmentHtml = renderToStaticMarkup(
+      <InfoPanel
+        info={newsInfo}
+        onClose={vi.fn()}
+        skin="parchment"
+        showNews={true}
+      />
+    );
+    // Parchment uses bg-transparent hover:bg-transparent and no background tint on LOAD NEWS button
+    expect(parchmentHtml).toContain('bg-transparent hover:bg-transparent text-[#5c3a21]');
+    expect(parchmentHtml).not.toContain('bg-[#e8d5b5]/50 hover:bg-[#d2b48c]');
+
+    const modernHtml = renderToStaticMarkup(
+      <InfoPanel
+        info={newsInfo}
+        onClose={vi.fn()}
+        skin="modern"
+        showNews={true}
+      />
+    );
+    // Modern theme retains its background styles
+    expect(modernHtml).toContain('bg-white/5 border border-white/20 hover:bg-white/10 text-cyan-300');
+  });
+
+  test('10. Parchment theme ADD NOTE button has no icon and is centered by itself', () => {
+    const dummyLocInfo: LocationInfo = {
+      name: 'Paris',
+      description: 'Capital of France',
+      type: 'City',
+      coordinates: { lat: 48.85, lng: 2.35 }
+    };
+
+    const parchmentHtml = renderToStaticMarkup(
+      <InfoPanel
+        info={dummyLocInfo}
+        onClose={vi.fn()}
+        skin="parchment"
+      />
+    );
+    // Find the Add Note button in parchment - it should not contain lucide-sticky-note
+    expect(parchmentHtml).toContain('Add Note');
+    // The Add Note footer button should not render StickyNote in parchment
+    expect(parchmentHtml).not.toContain('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-sticky-note" aria-hidden="true"><path d="M21 9a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z"></path><path d="M15 3v5a1 1 0 0 0 1 1h5"></path></svg>Add Note');
+
+    const modernHtml = renderToStaticMarkup(
+      <InfoPanel
+        info={dummyLocInfo}
+        onClose={vi.fn()}
+        skin="modern"
+      />
+    );
+    // Modern theme Add Note button retains the StickyNote icon
+    expect(modernHtml).toContain('lucide-sticky-note');
+  });
+
+  test('11. Standardized Parchment buttons (LOAD NEWS, ADD NOTE, EXPLORE, GENERATE ROUTE, TEST CONNECTION, TEST VOICE)', () => {
+    const dummyLocInfo: LocationInfo = {
+      name: 'Paris',
+      description: 'Capital of France',
+      type: 'City',
+      coordinates: { lat: 48.85, lng: 2.35 },
+      news: []
+    };
+
+    // 1. InfoPanel: LOAD NEWS & ADD NOTE
+    const parchmentInfo = renderToStaticMarkup(
+      <InfoPanel info={dummyLocInfo} onClose={vi.fn()} skin="parchment" showNews={true} />
+    );
+    expect(parchmentInfo).toContain('bg-transparent hover:bg-transparent text-[#5c3a21]');
+    expect(parchmentInfo).toContain('Load News');
+    expect(parchmentInfo).toContain('Add Note');
+
+    // 2. Controls: EXPLORE & GENERATE ROUTE
+    const parchmentControls = renderToStaticMarkup(
+      <Controls
+        onZoomIn={vi.fn()}
+        onZoomOut={vi.fn()}
+        onSearch={vi.fn()}
+        onTraceRoute={vi.fn()}
+        isSearching={false}
+        skin="parchment"
+        showFavorites={false}
+        onToggleShowFavorites={vi.fn()}
+        paused={false}
+        isTraceModalOpen={true}
+        onToggleTraceModal={vi.fn()}
+        isZoomLocked={false}
+        onToggleZoomLock={vi.fn()}
+      />
+    );
+    // EXPLORE button
+    expect(parchmentControls).toContain('text-[#5c3a21] hover:text-[#3e2723] bg-transparent hover:bg-transparent rounded-none font-sans font-bold uppercase tracking-wider text-sm');
+    // GENERATE ROUTE button
+    expect(parchmentControls).toContain('border-0 bg-[#e8d5b5] text-[#5c3a21] hover:bg-[#d2b48c] hover:text-[#3e2723] font-sans rounded-sm');
+
+    // 3. SettingsPanel: TEST CONNECTION & TEST VOICE
+    const parchmentProvidersSettings = renderToStaticMarkup(
+      <SettingsPanel
+        settings={{ ...defaultSettings, aiProvider: 'lmstudio', newsProvider: 'tavily', lmStudioUrl: 'http://localhost:1234' }}
+        onUpdateSettings={vi.fn()}
+        onClose={vi.fn()}
+        skin="parchment"
+        initialTab="providers"
+      />
+    );
+    // TEST CONNECTION buttons have border-0, bg-[#e8d5b5], text-[#5c3a21]
+    const testConnButtons = parchmentProvidersSettings.match(/border-0 bg-\[#e8d5b5\] hover:bg-\[#d2b48c\] text-\[#5c3a21\] hover:text-\[#3e2723\] font-bold uppercase tracking-wider/g);
+    expect(testConnButtons?.length).toBe(3);
+
+    // Audio tab: TEST VOICE button
+    const parchmentAudioSettings = renderToStaticMarkup(
+      <SettingsPanel
+        settings={{ ...defaultSettings, narrationEnabled: true }}
+        onUpdateSettings={vi.fn()}
+        onClose={vi.fn()}
+        skin="parchment"
+        initialTab="audio"
+      />
+    );
+    expect(parchmentAudioSettings).toContain('border-0 bg-[#e8d5b5] hover:bg-[#d2b48c] text-[#5c3a21] hover:text-[#3e2723] font-bold uppercase tracking-wider');
+    expect(parchmentAudioSettings).toContain('Test Voice');
+  });
+
+  test('12. Standardized Parchment headers (EXPLORATIONS, SETTINGS, TRACE ROUTE)', () => {
+    // 1. FavoritesPanel: EXPLORATIONS
+    const parchmentFavs = renderToStaticMarkup(
+      <FavoritesPanel
+        favorites={[]}
+        onClose={vi.fn()}
+        visibleFavoriteIds={[]}
+        activeRouteId={null}
+        onToggleVisibility={vi.fn()}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+        onFlyTo={vi.fn()}
+        skin="parchment"
+      />
+    );
+    expect(parchmentFavs).toContain('text-lg font-bold text-[#5c3a21] font-bold uppercase tracking-wider brand-font');
+    expect(parchmentFavs).toContain('EXPLORATIONS');
+
+    // 2. SettingsPanel: SETTINGS
+    const parchmentSettings = renderToStaticMarkup(
+      <SettingsPanel
+        settings={defaultSettings}
+        onUpdateSettings={vi.fn()}
+        onClose={vi.fn()}
+        skin="parchment"
+      />
+    );
+    expect(parchmentSettings).toContain('text-lg font-bold text-[#5c3a21] font-bold uppercase tracking-wider brand-font');
+    expect(parchmentSettings).toContain('SETTINGS');
+
+    // 3. Controls: TRACE ROUTE
+    const parchmentControls = renderToStaticMarkup(
+      <Controls
+        onZoomIn={vi.fn()}
+        onZoomOut={vi.fn()}
+        onSearch={vi.fn()}
+        onTraceRoute={vi.fn()}
+        isSearching={false}
+        skin="parchment"
+        showFavorites={false}
+        onToggleShowFavorites={vi.fn()}
+        paused={false}
+        isTraceModalOpen={true}
+        onToggleTraceModal={vi.fn()}
+        isZoomLocked={false}
+        onToggleZoomLock={vi.fn()}
+      />
+    );
+    expect(parchmentControls).toContain('font-bold uppercase text-[#5c3a21] text-lg tracking-wider brand-font');
+    expect(parchmentControls).toContain('Trace Route');
+  });
 });
+
+
 
