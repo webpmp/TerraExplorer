@@ -366,4 +366,216 @@ describe('Parchment Theme Documentary Mode & Bidirectional Transition Suite', ()
     expect(spokenPayloads[0]).toContain('Stromness Whaling Station');
     expect(spokenPayloads[0]).not.toContain('Punta Arenas');
   });
+
+  it('Test G1: Distant marker at globe scale in Parchment theme (sepDeg >= 5.0°) rotates at stable baseDistance before descending', () => {
+    const recordedDistances: number[] = [];
+    const recordedPhases: string[] = [];
+    const recordedCoordinates: { lat: number; lng: number }[] = [];
+    let atmosphereFired = false;
+    let osmFired = false;
+    let isSettled = false;
+
+    const aspect = 1920 / 1080;
+    const baseDistance = (3.0 * 1.28985) / aspect; // ~2.15
+
+    const origin = { lat: 0, lng: 0 };
+    const destination = { name: 'Kyoto, Japan', lat: 35.0116, lng: 135.7681 }; // distant: ~120°
+
+    documentaryController.startSingleLocation(
+      destination,
+      {
+        getCameraDistance: () => baseDistance,
+        getCameraCoordinates: () => origin,
+        setCameraDistance: (d: number) => {
+          recordedDistances.push(d);
+          recordedPhases.push(documentaryController.getPhase());
+        },
+        setCameraPosition: (lat: number, lng: number, d: number) => {
+          recordedCoordinates.push({ lat, lng });
+          recordedDistances.push(d);
+          recordedPhases.push(documentaryController.getPhase());
+        },
+        onAtmosphereEnter: () => {
+          atmosphereFired = true;
+        },
+        onOSMEnter: () => {
+          osmFired = true;
+        },
+        onSettle: () => {
+          isSettled = true;
+        }
+      },
+      { duration: 'cinematic', skin: 'parchment', aspect }
+    );
+
+    expect(documentaryController.getPhase()).toBe('rotating');
+    expect(atmosphereFired).toBe(false);
+    expect(osmFired).toBe(false);
+
+    // During rotation (first 40% of 5500ms = 2200ms)
+    vi.advanceTimersByTime(2000);
+    expect(documentaryController.getPhase()).toBe('rotating');
+    expect(atmosphereFired).toBe(false);
+    expect(osmFired).toBe(false);
+
+    // Assert camera distance remained completely stable at baseDistance during rotation
+    for (const dist of recordedDistances) {
+      expect(dist).toBeCloseTo(baseDistance, 4);
+    }
+
+    // Now transition into descent phase (after 45% = 2475ms)
+    vi.advanceTimersByTime(1000); // t = 3000ms
+    expect(documentaryController.getPhase()).toBe('descending');
+
+    // In descent phase, coordinates are established at destination
+    const lastCoord = recordedCoordinates[recordedCoordinates.length - 1];
+    expect(lastCoord.lat).toBeCloseTo(destination.lat, 2);
+    expect(lastCoord.lng).toBeCloseTo(destination.lng, 2);
+
+    // Distance is now decreasing
+    const lastDist = recordedDistances[recordedDistances.length - 1];
+    expect(lastDist).toBeLessThan(baseDistance);
+
+    // Finish animation
+    vi.advanceTimersByTime(3000);
+    expect(isSettled).toBe(true);
+    expect(atmosphereFired).toBe(true);
+    expect(osmFired).toBe(true);
+  });
+
+  it('Test G2: Opposite-side destination (~180° separation) rotates full hemisphere at globe scale before descent', () => {
+    const recordedDistances: number[] = [];
+    const aspect = 1920 / 1080;
+    const baseDistance = (3.0 * 1.28985) / aspect;
+
+    const origin = { lat: 0, lng: 0 };
+    const antipodal = { name: 'Antipode', lat: 0, lng: 180 };
+
+    let atmosphereFiredAtRotation = false;
+
+    documentaryController.startSingleLocation(
+      antipodal,
+      {
+        getCameraDistance: () => baseDistance,
+        getCameraCoordinates: () => origin,
+        setCameraDistance: (d: number) => {
+          recordedDistances.push(d);
+        },
+        setCameraPosition: (_lat: number, _lng: number, d: number) => {
+          recordedDistances.push(d);
+          if (documentaryController.getPhase() === 'rotating' && d < baseDistance - 0.01) {
+            atmosphereFiredAtRotation = true;
+          }
+        },
+        onAtmosphereEnter: () => {},
+        onOSMEnter: () => {}
+      },
+      { duration: 'cinematic', skin: 'parchment', aspect }
+    );
+
+    expect(documentaryController.getPhase()).toBe('rotating');
+
+    // Advance 40% through duration
+    vi.advanceTimersByTime(2200);
+    expect(documentaryController.getPhase()).toBe('rotating');
+    expect(atmosphereFiredAtRotation).toBe(false);
+
+    // Distance during rotation remained at baseDistance
+    for (const d of recordedDistances) {
+      expect(d).toBeCloseTo(baseDistance, 4);
+    }
+  });
+
+  it('Test G3: Distant destination starting below globe overview (startDistance < globeAltitude - 0.2) elevates to globe altitude, rotates, then descends', () => {
+    const recordedDistances: number[] = [];
+    const recordedPhases: string[] = [];
+    const aspect = 1920 / 1080;
+    const baseDistance = (3.0 * 1.28985) / aspect; // ~2.15
+
+    const origin = { lat: 10, lng: 10 };
+    const destination = { name: 'Paris', lat: 48.8566, lng: 2.3522 }; // sep > 40°
+
+    documentaryController.startSingleLocation(
+      destination,
+      {
+        getCameraDistance: () => 1.80, // below globeAltitude - 0.2
+        getCameraCoordinates: () => origin,
+        setCameraDistance: (d: number) => {
+          recordedDistances.push(d);
+          recordedPhases.push(documentaryController.getPhase());
+        },
+        setCameraPosition: (_lat: number, _lng: number, d: number) => {
+          recordedDistances.push(d);
+          recordedPhases.push(documentaryController.getPhase());
+        }
+      },
+      { duration: 'cinematic', skin: 'parchment', aspect }
+    );
+
+    // Phase 1: Zooming out to globeAltitude
+    expect(documentaryController.getPhase()).toBe('zooming_out');
+    vi.advanceTimersByTime(1200);
+
+    // Phase 2: Rotating at globeAltitude
+    vi.advanceTimersByTime(1500);
+    expect(documentaryController.getPhase()).toBe('rotating');
+
+    // Phase 3: Descending to target
+    vi.advanceTimersByTime(2000);
+    expect(documentaryController.getPhase()).toBe('descending');
+  });
+
+  it('Test G4: Nearby destination (sepDeg < 5.0°) executes direct transition without separate full globe rotation', () => {
+    const origin = { lat: 37.7749, lng: -122.4194 }; // SF
+    const nearby = { name: 'Oakland', lat: 37.8044, lng: -122.2712 }; // sep ~ 0.1°
+
+    let phaseAtStart = '';
+
+    documentaryController.startSingleLocation(
+      nearby,
+      {
+        getCameraDistance: () => 2.0, // Above atmosphere floor in parchment
+        getCameraCoordinates: () => origin,
+        setCameraDistance: () => {},
+        setCameraPosition: () => {}
+      },
+      { duration: 'cinematic', skin: 'parchment' }
+    );
+
+    phaseAtStart = documentaryController.getPhase();
+    expect(phaseAtStart).toBe('descending');
+  });
+
+  it('Test G5: Multi-theme consistency: Parchment and Modern both rotate at globe scale before descent', () => {
+    const skins: SkinType[] = ['modern', 'parchment', 'retro-green', 'retro-amber'];
+    const origin = { lat: 0, lng: 0 };
+    const destination = { name: 'Reykjavik', lat: 64.1466, lng: -21.9426 };
+
+    for (const skin of skins) {
+      const recordedPhases: string[] = [];
+      const config = getDocumentaryCameraConfig(skin, 16 / 9);
+
+      documentaryController.startSingleLocation(
+        destination,
+        {
+          getCameraDistance: () => config.globeOverviewDistance,
+          getCameraCoordinates: () => origin,
+          setCameraDistance: () => {
+            recordedPhases.push(documentaryController.getPhase());
+          },
+          setCameraPosition: () => {
+            recordedPhases.push(documentaryController.getPhase());
+          }
+        },
+        { duration: 'cinematic', skin, aspect: 16 / 9 }
+      );
+
+      expect(documentaryController.getPhase()).toBe('rotating');
+      vi.advanceTimersByTime(1500);
+      expect(documentaryController.getPhase()).toBe('rotating');
+      vi.advanceTimersByTime(1500);
+      expect(documentaryController.getPhase()).toBe('descending');
+    }
+  });
 });
+

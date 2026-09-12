@@ -371,10 +371,17 @@ export class DocumentaryController {
       isLocalAtTarget = true;
       transitionType = 'local_pan';
       decisionReason = 'same_location_at_target';
-    } else if (startDistance < globeAltitude - 0.2) {
+    } else if (sepDeg < 5.0) {
+      // Nearby destination: smooth direct descent/local transition
       isDirectDescent = true;
       transitionType = 'direct_descent';
-      decisionReason = 'intermediate_altitude_descent';
+      decisionReason = 'nearby_destination_direct_descent';
+    } else if (startDistance < globeAltitude - 0.2) {
+      // Distant destination starting below globe overview:
+      // Elevate straight out to globe altitude, rotate to destination, then descend
+      isStartingFromOSM = true;
+      transitionType = 'distant_osm_to_globe';
+      decisionReason = 'intermediate_altitude_elevate_rotate_descend';
     } else {
       transitionType = 'globe_overview';
       decisionReason = 'high_altitude_globe_rotation_descent';
@@ -485,9 +492,9 @@ export class DocumentaryController {
         curLng = interp.lng;
         curDist = startDistance + (targetDistance - startDistance) * easedP;
       } else {
-        if (progress < 0.4) {
+        if (progress < 0.45) {
           this.currentPhase = 'rotating';
-          const p = progress / 0.4;
+          const p = progress / 0.45;
           const easedP = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
           const interp = interpolateCoordinates(originCoords.lat, originCoords.lng, destination.lat, destination.lng, easedP);
           curLat = interp.lat;
@@ -495,7 +502,7 @@ export class DocumentaryController {
           curDist = startDistance;
         } else {
           this.currentPhase = 'descending';
-          const p = (progress - 0.4) / 0.6;
+          const p = (progress - 0.45) / 0.55;
           const easedP = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
           curLat = destination.lat;
           curLng = destination.lng;
