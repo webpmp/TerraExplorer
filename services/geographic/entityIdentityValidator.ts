@@ -1,5 +1,6 @@
 import { getHistoricalEntityKnowledge } from './historicalCoordinateValidator';
 import { resolveAlias } from './geographicAliases';
+import { stripDiacritics, areEntitiesMatchingWithDiacritics, getUnicodeNormalizedForms } from './geographicNormalization';
 
 export interface EntityIdentityMatchOptions {
   rawQuery?: string;
@@ -43,12 +44,14 @@ const NATURAL_QUALIFIERS = new Set([
 
 /**
  * Normalizes text and extracts significant distinctive tokens for entity comparison.
+ * Strips diacritics and non-alphanumeric punctuation while retaining distinct Unicode tokens.
  */
 export function extractDistinctiveEntityTokens(text: string): string[] {
   if (!text || typeof text !== 'string') return [];
   
-  // Replace punctuation with spaces, convert to lowercase
-  const cleaned = text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+  // Replace punctuation with spaces, strip diacritics, and convert to lowercase
+  const diacriticStripped = stripDiacritics(text);
+  const cleaned = diacriticStripped.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
   const words = cleaned.split(/\s+/).filter(w => w.length > 0);
   
   const distinctive = words.filter(w => !GENERIC_STOP_WORDS.has(w) && w.length >= 2);
@@ -183,17 +186,22 @@ export function validateEntityIdentity(
     }
   }
 
-  // 1. Exact match & alias resolution
+  // 1. Exact match & alias resolution (with Unicode / diacritic equivalence)
   const reqAlias = resolveAlias(reqLower).canonical;
   const recAlias = resolveAlias(recLower).canonical;
 
-  if (reqLower === recLower || reqAlias === recLower || reqLower === recAlias || reqAlias === recAlias) {
+  if (
+    areEntitiesMatchingWithDiacritics(reqStr, recStr) ||
+    areEntitiesMatchingWithDiacritics(reqAlias, recStr) ||
+    areEntitiesMatchingWithDiacritics(reqStr, recAlias) ||
+    areEntitiesMatchingWithDiacritics(reqAlias, recAlias)
+  ) {
     return {
       matches: true,
       rejectionReason: 'NONE',
       requestedEntity: reqStr,
       recoveredEntity: recStr,
-      details: reqLower === recLower ? 'Exact match' : 'Alias match'
+      details: reqLower === recLower ? 'Exact match' : 'Diacritic / Alias match'
     };
   }
 
@@ -201,7 +209,13 @@ export function validateEntityIdentity(
   const reqKnowledge = getHistoricalEntityKnowledge(reqStr);
   if (reqKnowledge) {
     const canonicalKnowledgeName = reqKnowledge.entity.toLowerCase();
-    if (recLower === canonicalKnowledgeName || recLower.includes(canonicalKnowledgeName) || canonicalKnowledgeName.includes(recLower)) {
+    if (
+      areEntitiesMatchingWithDiacritics(recStr, canonicalKnowledgeName) ||
+      recLower.includes(canonicalKnowledgeName) ||
+      canonicalKnowledgeName.includes(recLower) ||
+      stripDiacritics(recLower).includes(stripDiacritics(canonicalKnowledgeName)) ||
+      stripDiacritics(canonicalKnowledgeName).includes(stripDiacritics(recLower))
+    ) {
       return {
         matches: true,
         rejectionReason: 'NONE',
@@ -212,8 +226,15 @@ export function validateEntityIdentity(
     }
   }
 
-  // 3. Substring matching with qualification preservation
-  if (reqLower.includes(recLower) || recLower.includes(reqLower)) {
+  // 3. Substring matching with qualification preservation (and diacritic tolerance)
+  const reqStripped = stripDiacritics(reqLower);
+  const recStripped = stripDiacritics(recLower);
+  if (
+    reqLower.includes(recLower) ||
+    recLower.includes(reqLower) ||
+    reqStripped.includes(recStripped) ||
+    recStripped.includes(reqStripped)
+  ) {
     // If requested contains recovered (e.g. "Yellowstone National Park" contains "Yellowstone National Park, WY")
     return {
       matches: true,
@@ -411,9 +432,15 @@ export function logEntityIdentityValidation(params: {
   identityValid: boolean;
   identityStatus: string;
   rejectionReason?: string;
+  normalizedEntity?: string;
+  diacriticStrippedEntity?: string;
 }): void {
+  const norm = params.normalizedEntity || (params.requestedEntity ? params.requestedEntity.toLowerCase().trim() : '');
+  const stripped = params.diacriticStrippedEntity || (params.requestedEntity ? stripDiacritics(params.requestedEntity).toLowerCase().trim() : '');
   console.log(`[ENTITY_IDENTITY_VALIDATION]
 requestedEntity: "${params.requestedEntity}"
+normalizedEntity: "${norm}"
+diacriticStrippedEntity: "${stripped}"
 candidateName: "${params.candidateName}"
 candidateEntityType: "${params.candidateEntityType || 'unknown'}"
 intent: "${params.intent || 'unknown'}"

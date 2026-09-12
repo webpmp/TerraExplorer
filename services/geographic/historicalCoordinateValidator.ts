@@ -1,5 +1,6 @@
 import { GeoCoordinates, isValidCoordinates, CoordinateSource } from '../../types';
 import { reverseGeocode } from './geographicResolver';
+import { stripDiacritics, areEntitiesMatchingWithDiacritics } from './geographicNormalization';
 
 export interface HistoricalValidationContext {
   rawQuery?: string;
@@ -1577,8 +1578,26 @@ reason: ${result.reason}`);
 }
 
 export function getHistoricalEntityKnowledge(entityName: string): HistoricalEntityKnowledge | undefined {
-  const normEntity = (entityName || '').toLowerCase().trim().replace(/^the\s+/i, '');
-  return HISTORICAL_KNOWLEDGE_BASE[normEntity] || HISTORICAL_KNOWLEDGE_BASE[entityName.toLowerCase().trim()];
+  if (!entityName || typeof entityName !== 'string') return undefined;
+  const normEntity = entityName.toLowerCase().trim().replace(/^the\s+/i, '');
+  const trimmed = entityName.toLowerCase().trim();
+  
+  const directMatch = HISTORICAL_KNOWLEDGE_BASE[normEntity] || HISTORICAL_KNOWLEDGE_BASE[trimmed];
+  if (directMatch) return directMatch;
+
+  const strippedNorm = stripDiacritics(normEntity);
+  const strippedTrimmed = stripDiacritics(trimmed);
+  const strippedMatch = HISTORICAL_KNOWLEDGE_BASE[strippedNorm] || HISTORICAL_KNOWLEDGE_BASE[strippedTrimmed];
+  if (strippedMatch) return strippedMatch;
+
+  // Search by diacritic-equivalence
+  for (const [key, val] of Object.entries(HISTORICAL_KNOWLEDGE_BASE)) {
+    if (areEntitiesMatchingWithDiacritics(key, normEntity) || areEntitiesMatchingWithDiacritics(val.entity, entityName)) {
+      return val;
+    }
+  }
+
+  return undefined;
 }
 
 const US_STATE_MAP: Record<string, string> = {
@@ -1597,7 +1616,7 @@ const US_STATE_MAP: Record<string, string> = {
 export function toCanonicalTitleCase(str: string): string {
   if (!str) return '';
   const hist = getHistoricalEntityKnowledge(str);
-  if (hist?.entity && hist.entity.toLowerCase() === str.trim().toLowerCase()) return hist.entity;
+  if (hist?.entity && areEntitiesMatchingWithDiacritics(hist.entity, str)) return hist.entity;
 
   const raw = str.trim();
 

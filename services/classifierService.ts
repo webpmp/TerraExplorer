@@ -2,7 +2,7 @@ import { GeographicEntityType } from '../domain';
 import { generateContentWithRetry, modelName } from './geminiService';
 import { GeoCoordinates } from '../types';
 import { DETERMINISTIC_LOCATION_DB } from './geographic/geographicData';
-import { normalizeGeographicQuery } from './geographic/geographicNormalization';
+import { normalizeGeographicQuery, stripDiacritics, areEntitiesMatchingWithDiacritics } from './geographic/geographicNormalization';
 import { resolveAlias } from './geographic/geographicAliases';
 import { getHistoricalEntityKnowledge } from './geographic/historicalCoordinateValidator';
 
@@ -23,11 +23,17 @@ export const classifyGeographicEntityWithEvidence = async (
     const q = cleanName.toLowerCase();
     const normalizedName = normalizeGeographicQuery(cleanName);
     const aliasResolved = resolveAlias(normalizedName).canonical;
+    const strippedQ = stripDiacritics(q);
+    const strippedClean = stripDiacritics(cleanName.toLowerCase());
 
     // 1. DETERMINISTIC GEOGRAPHIC DATA HAS TOP AUTHORITY
     // If deterministic record exists, preserve its authoritative entity classification.
-    const deterministicKey = [q, normalizedName, aliasResolved, q.replace(/^the\s+/, ''), cleanName.toLowerCase()]
+    let deterministicKey = [q, normalizedName, aliasResolved, q.replace(/^the\s+/, ''), cleanName.toLowerCase(), strippedQ, strippedClean]
         .find(k => DETERMINISTIC_LOCATION_DB[k]);
+
+    if (!deterministicKey) {
+        deterministicKey = Object.keys(DETERMINISTIC_LOCATION_DB).find(k => areEntitiesMatchingWithDiacritics(k, cleanName));
+    }
 
     if (deterministicKey) {
         const entry = DETERMINISTIC_LOCATION_DB[deterministicKey];

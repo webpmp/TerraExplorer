@@ -1,3 +1,70 @@
+/**
+ * Strips diacritics and combining marks from a string for robust matching.
+ * Converts to NFD and removes \u0300-\u036f combining characters.
+ */
+export function stripDiacritics(text: string): string {
+  if (!text || typeof text !== 'string') return "";
+  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+export interface UnicodeNormalizedForms {
+  original: string;
+  originalLower: string;
+  nfd: string;
+  nfc: string;
+  diacriticStripped: string;
+  diacriticStrippedLower: string;
+}
+
+/**
+ * Generates standard Unicode representations for robust multi-layer entity matching:
+ * - Original Unicode form
+ * - Lowercase Unicode form
+ * - Unicode NFD-normalized form
+ * - Unicode NFC-normalized form
+ * - Diacritic-stripped comparison form
+ * - Case-insensitive diacritic-stripped comparison form
+ */
+export function getUnicodeNormalizedForms(text: string): UnicodeNormalizedForms {
+  const original = text || "";
+  const originalLower = original.toLowerCase();
+  const nfd = original.normalize('NFD');
+  const nfc = original.normalize('NFC');
+  const diacriticStripped = stripDiacritics(original);
+  const diacriticStrippedLower = diacriticStripped.toLowerCase();
+
+  return {
+    original,
+    originalLower,
+    nfd,
+    nfc,
+    diacriticStripped,
+    diacriticStrippedLower
+  };
+}
+
+/**
+ * Checks whether two entity strings match across any Unicode / diacritic / case variations.
+ */
+export function areEntitiesMatchingWithDiacritics(a: string, b: string): boolean {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+
+  const aTrim = a.trim();
+  const bTrim = b.trim();
+  if (aTrim === bTrim) return true;
+
+  const aForms = getUnicodeNormalizedForms(aTrim);
+  const bForms = getUnicodeNormalizedForms(bTrim);
+
+  if (aForms.originalLower === bForms.originalLower) return true;
+  if (aForms.nfc === bForms.nfc) return true;
+  if (aForms.nfd === bForms.nfd) return true;
+  if (aForms.diacriticStrippedLower === bForms.diacriticStrippedLower) return true;
+
+  return false;
+}
+
 export function normalizeGeographicQuery(entity: string): string {
   if (!entity || typeof entity !== 'string') return "";
   

@@ -1,3 +1,5 @@
+import { stripDiacritics, areEntitiesMatchingWithDiacritics } from './geographicNormalization';
+
 export interface AliasResolution {
     original: string;
     canonical: string;
@@ -51,8 +53,15 @@ const ALIAS_DB: Record<string, string> = {
 };
 
 export function resolveAlias(normalizedQuery: string): AliasResolution {
+    if (!normalizedQuery || typeof normalizedQuery !== 'string') {
+        return {
+            original: normalizedQuery,
+            canonical: normalizedQuery,
+            aliasApplied: false
+        };
+    }
+
     const matched = ALIAS_DB[normalizedQuery];
-    
     if (matched) {
         return {
             original: normalizedQuery,
@@ -61,7 +70,28 @@ export function resolveAlias(normalizedQuery: string): AliasResolution {
             aliasMatched: normalizedQuery
         };
     }
+
+    const stripped = stripDiacritics(normalizedQuery);
+    if (ALIAS_DB[stripped]) {
+        return {
+            original: normalizedQuery,
+            canonical: ALIAS_DB[stripped],
+            aliasApplied: true,
+            aliasMatched: stripped
+        };
+    }
     
+    for (const [aliasKey, targetCanonical] of Object.entries(ALIAS_DB)) {
+        if (areEntitiesMatchingWithDiacritics(aliasKey, normalizedQuery)) {
+            return {
+                original: normalizedQuery,
+                canonical: targetCanonical,
+                aliasApplied: true,
+                aliasMatched: aliasKey
+            };
+        }
+    }
+
     return {
         original: normalizedQuery,
         canonical: normalizedQuery,

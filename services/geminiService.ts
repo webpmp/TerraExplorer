@@ -3211,7 +3211,7 @@ export const recoverCoordinatesFromAi = async (rawQuery: string, intent: string,
   }
 
   // Hard guard against coordinate recovery for non-point historical events (e.g. Great Depression, World War II)
-  if (intent === 'HISTORICAL_EVENT' || intent === 'SINGLE_LOCATION' || intent === 'NATURAL_LOCATION') {
+  if (intent === 'HISTORICAL_EVENT') {
     const histScope = determineHistoricalEventScope(entity, rawQuery);
     if (!histScope.singleLocation) {
       console.warn(`[Coordinate Recovery] Coordinate recovery blocked for non-point historical event "${entity}" (scope: ${histScope.scope}).`);

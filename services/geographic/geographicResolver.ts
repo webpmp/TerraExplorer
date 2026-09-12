@@ -1,5 +1,5 @@
 import { DETERMINISTIC_LOCATION_DB } from './geographicData';
-import { normalizeGeographicQuery } from './geographicNormalization';
+import { normalizeGeographicQuery, stripDiacritics, areEntitiesMatchingWithDiacritics } from './geographicNormalization';
 import { resolveAlias } from './geographicAliases';
 import { 
   EXACT_MATCH_BONUS, ADDRESS_RANK_BONUS, LOW_PRECISION_PENALTY, 
@@ -586,7 +586,17 @@ export async function resolveGeographicEntity(query: string): Promise<Geographic
     recordAliasMatch();
   }
 
-  const match = DETERMINISTIC_LOCATION_DB[cacheKey];
+  let match = DETERMINISTIC_LOCATION_DB[cacheKey];
+  if (!match) {
+    const strippedCacheKey = stripDiacritics(cacheKey);
+    match = DETERMINISTIC_LOCATION_DB[strippedCacheKey];
+  }
+  if (!match) {
+    const matchedKey = Object.keys(DETERMINISTIC_LOCATION_DB).find(k => areEntitiesMatchingWithDiacritics(k, cacheKey) || areEntitiesMatchingWithDiacritics(k, query));
+    if (matchedKey) {
+      match = DETERMINISTIC_LOCATION_DB[matchedKey];
+    }
+  }
 
   if (match) {
     const res: GeographicResolution = {
