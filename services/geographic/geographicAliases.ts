@@ -49,7 +49,29 @@ const ALIAS_DB: Record<string, string> = {
     "giza pyramid complex": "pyramids of giza",
     "mt everest": "mount everest",
     "the eiffel tower": "eiffel tower",
-    "the grand canyon": "grand canyon"
+    "the grand canyon": "grand canyon",
+
+    // Shipwrecks
+    "lusitania": "rms lusitania sinking site",
+    "the lusitania": "rms lusitania sinking site",
+    "rms lusitania": "rms lusitania sinking site",
+    "the rms lusitania": "rms lusitania sinking site",
+    "lusitania wreck": "rms lusitania sinking site",
+    "the lusitania wreck": "rms lusitania sinking site",
+    "lusitania wreck site": "rms lusitania sinking site",
+    "the lusitania wreck site": "rms lusitania sinking site",
+    "rms lusitania wreck": "rms lusitania sinking site",
+    "rms lusitania wreck site": "rms lusitania sinking site",
+    "the rms lusitania wreck": "rms lusitania sinking site",
+    "the rms lusitania wreck site": "rms lusitania sinking site",
+    "lusitania sinking": "rms lusitania sinking site",
+    "the lusitania sinking": "rms lusitania sinking site",
+    "sinking of the lusitania": "rms lusitania sinking site",
+    "sinking of the rms lusitania": "rms lusitania sinking site",
+    "lusitania found": "rms lusitania sinking site",
+    "the lusitania found": "rms lusitania sinking site",
+    "rms lusitania found": "rms lusitania sinking site",
+    "the rms lusitania found": "rms lusitania sinking site"
 };
 
 export function resolveAlias(normalizedQuery: string): AliasResolution {

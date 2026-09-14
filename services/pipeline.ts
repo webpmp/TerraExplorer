@@ -297,10 +297,40 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
         recoveredValid = true;
         source = incoming.source;
       } else {
-        resolvedData.name = resolvedData.name || resolvedEntityName;
-        resolvedData.canonicalName = resolvedData.canonicalName || resolvedData.name || resolvedEntityName;
-        resolvedData.coordinates = undefined;
-        error = "NO_GEOGRAPHIC_DATA";
+        const fallbackHist =
+          getHistoricalEntityKnowledge(resolvedEntityLookup) ||
+          getHistoricalEntityKnowledge(resolvedEntityName) ||
+          getHistoricalEntityKnowledge(resolvedData?.name || '') ||
+          getHistoricalEntityKnowledge(entityResult.entity);
+
+        if (fallbackHist?.approximateCoordinates) {
+          const coordSource = (fallbackHist.approximateCoordinates.source || 'deterministic') as CoordinateSource;
+          resolvedData.name = fallbackHist.entity;
+          resolvedData.canonicalName = fallbackHist.entity;
+          resolvedData.coordinates = { ...fallbackHist.approximateCoordinates };
+          (resolvedData as any).entityType = fallbackHist.entityType === 'shipwreck' ? 'shipwreck_site' : fallbackHist.entityType;
+          (resolvedData as any).coordinateSource = coordSource;
+          (resolvedData as any).coordinateTrust = coordSource === 'deterministic' ? 'verified' : 'provisional';
+          (resolvedData as any).identityStatus = 'verified';
+          (resolvedData as any).isApproximate = !fallbackHist.exactLocationConfirmed;
+          (resolvedData as any).exactLocationKnown = fallbackHist.exactLocationKnown ?? true;
+          (resolvedData as any).confirmedWreckLocation = fallbackHist.confirmedWreckLocation ?? true;
+          if (fallbackHist.country) (resolvedData as any).country = fallbackHist.country;
+          if (fallbackHist.state) (resolvedData as any).state = fallbackHist.state;
+          if (fallbackHist.nearbyCity || (fallbackHist as any).city) {
+            (resolvedData as any).city = fallbackHist.nearbyCity || (fallbackHist as any).city;
+          }
+          resolvedData.description = resolvedData.description || fallbackHist.historicalContext || fallbackHist.sourceRationale || "";
+          error = undefined;
+          recoveredValid = true;
+          source = coordSource;
+          console.log(`[HISTORICAL KNOWLEDGE FALLBACK RECOVERY]\nentity="${fallbackHist.entity}"\nsource=${coordSource}\ncoordinates=${resolvedData.coordinates.lat},${resolvedData.coordinates.lng}\nconfidence=${fallbackHist.confidence}\ncountry=${fallbackHist.country || 'unknown'}`);
+        } else {
+          resolvedData.name = resolvedData.name || resolvedEntityName;
+          resolvedData.canonicalName = resolvedData.canonicalName || resolvedData.name || resolvedEntityName;
+          resolvedData.coordinates = undefined;
+          error = "NO_GEOGRAPHIC_DATA";
+        }
       }
 
       console.log(`[COORDINATE RECOVERY]\nRecovery success: ${recoveredValid ? 'Yes' : 'No'}\nRecovered coordinates: ${recoveryCoords ? JSON.stringify(recoveryCoords) : 'None'}\nSource: ${source}\nresolvedEntity="${resolvedEntityName}"\nrecoveryTarget="${recoveryTarget}"\noriginalQuery="${originalQueryEntity}"`);

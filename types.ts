@@ -315,6 +315,8 @@ export interface UserSettings {
   narrationVoice?: string;
   narrationSpeed?: number;
   narrationVolume?: number;
+  retroGreenProjection?: boolean;
+  retroAmberProjection?: boolean;
 }
 
 export type RouteEvidenceMode =

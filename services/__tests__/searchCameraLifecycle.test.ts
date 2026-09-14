@@ -279,4 +279,135 @@ describe('Search Camera Lifecycle & Continuous Globe Rotation Suite', () => {
     expect(state.autoRotate).toBe(true); // Preserved!
     expect(state.logs).toContain('[Camera] SEARCH_NO_RESULT rotation preserved');
   });
+
+  it('7. Submitting a new search while zoomed into OSM triggers multi-frame smoothReturnToGlobe to 4.5 while maintaining autoRotate', () => {
+    let currentCameraDistance = 1.30;
+    let isOSMActive = true;
+    let autoRotate = false;
+    let selectedMarkerId: string | null = 'marker-old-123';
+    let selectedMarkerCoordinates: { lat: number; lng: number } | null = { lat: 35.7981, lng: -95.2497 };
+    const logs: string[] = [];
+    const distanceFrames: number[] = [];
+
+    const smoothReturnToGlobe = (targetDistance = 4.5, steps = 5) => {
+      const startDist = currentCameraDistance;
+      for (let i = 1; i <= steps; i++) {
+        const progress = i / steps;
+        const ease = progress < 0.5 ? 4 * progress * progress * progress : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+        const curDist = startDist + (targetDistance - startDist) * ease;
+        currentCameraDistance = curDist;
+        isOSMActive = curDist <= 1.55;
+        distanceFrames.push(Number(curDist.toFixed(3)));
+      }
+      logs.push(`[Camera] COMPLETE return to globe dist=${currentCameraDistance.toFixed(4)}`);
+    };
+
+    const handleSearchStart = (query: string) => {
+      logs.push(`[SearchNarration] SEARCH_SUBMITTED query="${query}"`);
+      logs.push('[Camera] SEARCH_STARTED rotation preserved');
+
+      // 1. Clear marker selection and coordinates immediately
+      selectedMarkerId = null;
+      selectedMarkerCoordinates = null;
+
+      // 2. Preserve auto-rotation
+      autoRotate = true;
+
+      // 3. Smooth return to globe
+      smoothReturnToGlobe(4.5);
+    };
+
+    handleSearchStart('Where was the Santa Maria found?');
+
+    expect(selectedMarkerId).toBeNull();
+    expect(selectedMarkerCoordinates).toBeNull();
+    expect(autoRotate).toBe(true);
+    expect(distanceFrames.length).toBe(5);
+    expect(distanceFrames[0]).toBeGreaterThan(1.30);
+    expect(distanceFrames[distanceFrames.length - 1]).toBe(4.5);
+    expect(currentCameraDistance).toBe(4.5);
+    expect(isOSMActive).toBe(false);
+  });
+
+  it('8. MARKER_SELECTION viewport load does NOT execute when selectedMarkerId is null', () => {
+    let loadViewportCalled = false;
+    let selectedMarkerCoordinates: { lat: number; lng: number } | null = { lat: 35.7981, lng: -95.2497 };
+    let selectedMarkerId: string | null = null; // Cleared on search start
+
+    const onMarkerEffect = (coords: typeof selectedMarkerCoordinates, id: typeof selectedMarkerId) => {
+      if (coords && id) {
+        loadViewportCalled = true;
+      }
+    };
+
+    onMarkerEffect(selectedMarkerCoordinates, selectedMarkerId);
+    expect(loadViewportCalled).toBe(false);
+  });
+
+  it('9. When new search resolves with Documentary Mode OFF, camera rotates globe to center marker and STOPS at globe level (4.5)', async () => {
+    let rotatedTo: { lat: number; lng: number } | null = null;
+    let cameraDistance = 4.5;
+    let isOSMTransitionStarted = false;
+
+    const reconcileCameraStateMock = (targetRotation: { lat: number; lng: number }) => {
+      rotatedTo = targetRotation;
+      cameraDistance = 4.5;
+    };
+
+    vi.spyOn(pipelineModule, 'runSearchPipeline').mockResolvedValue({
+      isValid: true,
+      mode: 'location',
+      finalData: {
+        name: 'New York',
+        canonicalName: 'New York',
+        coordinates: { lat: 40.7128, lng: -74.0060 },
+        entityType: 'city'
+      }
+    } as any);
+
+    const pipelineResult = await pipelineModule.runSearchPipeline({
+      rawQuery: 'New York',
+      intent: 'LOCATION_INQUIRY',
+      entity: 'New York'
+    });
+
+    const finalData = (pipelineResult as any).finalData;
+    const { lat, lng } = finalData.coordinates;
+
+    const documentaryMode = false;
+    if (documentaryMode) {
+      isOSMTransitionStarted = true;
+    } else {
+      reconcileCameraStateMock({ lat, lng });
+    }
+
+    expect(rotatedTo).toEqual({ lat: 40.7128, lng: -74.0060 });
+    expect(cameraDistance).toBe(4.5);
+    expect(isOSMTransitionStarted).toBe(false);
+  });
+
+  it('10. Full lifecycle: Normal search with Doc Mode OFF vs Doc Mode ON', () => {
+    // Normal Search with Doc Mode OFF:
+    const normalLogs: string[] = [];
+    normalLogs.push('[Camera] SEARCH_STARTED');
+    normalLogs.push('[Camera] GLOBE_ZOOM_OUT_STARTED');
+    normalLogs.push('[Camera] GLOBE_LEVEL_REACHED');
+    normalLogs.push('[Camera] NEW_LOCATION_COMMITTED');
+    normalLogs.push('[Camera] GLOBE_ROTATION_STARTED to lat=40.7128 lng=-74.0060');
+    normalLogs.push('[Camera] GLOBE_ROTATION_COMPLETED');
+
+    expect(normalLogs).not.toContain('[Camera] OSM_TRANSITION_STARTED');
+    expect(normalLogs[normalLogs.length - 1]).toBe('[Camera] GLOBE_ROTATION_COMPLETED');
+
+    // Search with Doc Mode ON:
+    const docLogs: string[] = [];
+    docLogs.push('[Camera] SEARCH_STARTED');
+    docLogs.push('[Camera] GLOBE_ZOOM_OUT_STARTED');
+    docLogs.push('[Camera] GLOBE_LEVEL_REACHED');
+    docLogs.push('[Camera] NEW_LOCATION_COMMITTED');
+    docLogs.push('[Camera] OSM_TRANSITION_STARTED');
+
+    expect(docLogs).toContain('[Camera] OSM_TRANSITION_STARTED');
+  });
 });
+

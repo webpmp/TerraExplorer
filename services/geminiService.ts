@@ -3310,14 +3310,21 @@ Output ONLY the JSON object.`;
 
           if (!histValidation.valid) {
               console.warn(`[RECOVERY COORDINATE REJECTED] Candidate coordinate for "${entity}" rejected (${histValidation.reason}). Stopping LLM retries.`);
-              const histKnowledge = getHistoricalEntityKnowledge(entity);
+              const histKnowledge = getHistoricalEntityKnowledge(entity) || 
+                                    getHistoricalEntityKnowledge(resolvedEntityName) ||
+                                    getHistoricalEntityKnowledge(entity.toLowerCase().trim().replace(/^the\s+/i, ''));
               if (histKnowledge?.approximateCoordinates) {
+                const coordSource = (histKnowledge.approximateCoordinates.source || 'deterministic') as CoordinateSource;
                 return {
                   lat: histKnowledge.approximateCoordinates.lat,
                   lng: histKnowledge.approximateCoordinates.lng,
-                  source: 'historical_approximate' as CoordinateSource,
-                  confidence: 'low'
-                };
+                  source: coordSource,
+                  confidence: histKnowledge.confidence || (coordSource === 'deterministic' ? 'high' : 'low'),
+                  recoveredEntity: histKnowledge.entity,
+                  canonicalName: histKnowledge.entity,
+                  coordinateTrust: coordSource === 'deterministic' ? 'verified' : 'provisional',
+                  identityStatus: 'verified'
+                } as any;
               }
               return null;
           }

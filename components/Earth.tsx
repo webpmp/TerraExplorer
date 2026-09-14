@@ -307,6 +307,7 @@ const UniversalMarker: React.FC<{
         <div 
           ref={domHitRef}
           data-marker-hit-id={markerId}
+          data-marker-selected={isSelected ? "true" : undefined}
           onMouseEnter={onMouseEnter}
           onMouseLeave={onMouseLeave}
           onClick={(e) => {
@@ -869,12 +870,70 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
   const [isStreetMapReady, setIsStreetMapReady] = useState<boolean>(false);
   const { autoRotate, isInteracting, skin, markers, favorites, showFavorites, selectedMarkerId, routeWaypoints, currentWaypointIndex, scanningArea } = props;
 
-  // Rotate the entire group
+  // Rotate the entire group and update unified coordinate projection
   useFrame((state, delta) => {
     if (autoRotate && !isInteracting && groupRef.current) {
       groupRef.current.rotation.y += delta * 0.05;
     }
+
+    // Expose coordinate projection helper for UI overlays (e.g. MarkerProjectionBeam) at any zoom level
+    if (typeof window !== 'undefined') {
+      (window as any).__terraexplorer_project_coordinates = (lat: number, lng: number): { x: number; y: number } | null => {
+        const distance = state.camera.position.length();
+
+        // 1. If OSM layer is active and MapLibre is ready, use MapLibre projection
+        const mlMap = (window as any).__terraexplorer_maplibre_map;
+        if (distance <= 1.55 && mlMap && typeof mlMap.project === 'function') {
+          try {
+            const pt = mlMap.project([lng, lat]);
+            if (pt && !isNaN(pt.x) && !isNaN(pt.y)) {
+              return { x: pt.x, y: pt.y };
+            }
+          } catch (_) {}
+        }
+
+        // 2. Otherwise use 3D Globe spherical projection
+        if (groupRef.current && state.camera) {
+          const pos = latLngToVector3(lat, lng, 1.0);
+          pos.applyMatrix4(groupRef.current.matrixWorld);
+
+          // Check if point is facing the camera
+          const isFacing = isGlobePointVisible(pos, state.camera.position);
+          if (!isFacing) {
+            return null;
+          }
+
+          const tempV = pos.clone().project(state.camera);
+          if (tempV.z > 1.0) {
+            return null;
+          }
+
+          const width = state.size.width || (typeof window !== 'undefined' ? window.innerWidth : 1920);
+          const height = state.size.height || (typeof window !== 'undefined' ? window.innerHeight : 1080);
+
+          return {
+            x: (tempV.x + 1.0) * 0.5 * width,
+            y: (-tempV.y + 1.0) * 0.5 * height
+          };
+        }
+
+        return null;
+      };
+
+      // Notify any active frame listeners (e.g. projection beam movement tracking)
+      if (typeof (window as any).__terraexplorer_on_frame === 'function') {
+        (window as any).__terraexplorer_on_frame();
+      }
+    }
   });
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined') {
+        delete (window as any).__terraexplorer_project_coordinates;
+      }
+    };
+  }, []);
 
   const isParchment = skin === 'parchment';
   const isModern = skin === 'modern' || isParchment;

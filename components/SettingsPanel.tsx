@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Settings as SettingsIcon, X, Server, Newspaper, Film, Volume2, KeyRound, ExternalLink, Map as MapIcon, Palette, Sliders } from 'lucide-react';
+import { Settings as SettingsIcon, X, Server, Newspaper, Film, Volume2, KeyRound, ExternalLink, Map as MapIcon, Palette, Sliders, Sparkles } from 'lucide-react';
 import { SkinType, UserSettings, AIProvider, NewsProvider } from '../types';
 import { narrationService } from '../services/narrationService';
 
@@ -1143,6 +1143,57 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                 })}
               </div>
             </div>
+
+            {isRetro && (
+              <>
+                <hr className={`border-t ${theme.divider}`} />
+                <div>
+                  <div className={`flex items-center justify-between mb-1 ${isRetro ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-[#ffb000]' : ''}`}>
+                    <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isRetro ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
+                      <Sparkles size={16} />
+                      <span>PROJECTION</span>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-label="Toggle projection beam"
+                      aria-checked={skin === 'retro-green' ? settings.retroGreenProjection !== false : settings.retroAmberProjection !== false}
+                      onClick={() => {
+                        if (skin === 'retro-green') {
+                          onUpdateSettings({
+                            ...settings,
+                            retroGreenProjection: settings.retroGreenProjection === false ? true : false
+                          });
+                        } else if (skin === 'retro-amber') {
+                          onUpdateSettings({
+                            ...settings,
+                            retroAmberProjection: settings.retroAmberProjection === false ? true : false
+                          });
+                        }
+                      }}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        (skin === 'retro-green' ? settings.retroGreenProjection !== false : settings.retroAmberProjection !== false)
+                          ? skin === 'retro-amber'
+                            ? 'bg-[#ffb000]'
+                            : 'bg-green-400'
+                          : 'bg-transparent border-current'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                          (skin === 'retro-green' ? settings.retroGreenProjection !== false : settings.retroAmberProjection !== false)
+                            ? 'translate-x-5'
+                            : 'translate-x-0'
+                        } ${skin === 'retro-amber' ? 'bg-[#ffb000]' : 'bg-green-400'}`}
+                      />
+                    </button>
+                  </div>
+                  <p className="text-xs opacity-70 mt-2 mb-4 uppercase">
+                    Renders a phosphor projection light beam connecting the selected map marker to the info panel.
+                  </p>
+                </div>
+              </>
+            )}
           </div>
         )}
 

@@ -7,6 +7,7 @@ import { ChevronDown, Loader2 } from 'lucide-react';
 
 import Earth from './components/Earth';
 import InfoPanel from './components/InfoPanel';
+import MarkerProjectionBeam from './components/MarkerProjectionBeam';
 import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import SettingsPanel from './components/SettingsPanel';
@@ -24,7 +25,7 @@ import logoImageGreen from './assets/logo-terra-explorer-green.png';
 import logoImageAmber from './assets/logo-terra-explorer-amber.png';
 import { calculateClampedZoomDelta, normalizeWheelDelta } from './utils/cameraZoomUtils';
 import { searchImageRegistry } from './services/imageDeduplicationService';
-import { documentaryController, DocumentaryDestination } from './services/documentaryController';
+import { documentaryController, DocumentaryDestination, interpolateCoordinates } from './services/documentaryController';
 import { narrationService, getNarrationDescription, getNarrationTitle } from './services/narrationService';
 import { latLngToVector3, vector3ToLatLng } from './utils/globeCoordinates';
 import { OSM_DETAIL_THRESHOLD, osmTileService } from './services/geographic/osmTileService';
@@ -99,6 +100,7 @@ const CameraAnimator: React.FC<{
             if (cameraStateRef.current) {
                 cameraStateRef.current.targetRotation = null;
             }
+            console.log('[Camera] GLOBE_ROTATION_COMPLETED');
             console.log(`[Camera] DISCOVERY_POSITIONING_COMPLETE discoveryId=${activeScanIdRef.current}`);
         }
     } else {
@@ -316,6 +318,8 @@ const App: React.FC = () => {
       try {
         const parsed = JSON.parse(saved);
         parsed.showNews = parsed.showNews !== undefined ? !!parsed.showNews : true;
+        parsed.retroGreenProjection = parsed.retroGreenProjection !== undefined ? !!parsed.retroGreenProjection : true;
+        parsed.retroAmberProjection = parsed.retroAmberProjection !== undefined ? !!parsed.retroAmberProjection : true;
         if (typeof parsed.documentaryDuration === 'string') {
           const map: Record<string, number> = { short: 3.2, cinematic: 5.5, long: 8.0 };
           parsed.documentaryDuration = map[parsed.documentaryDuration] ?? 5.5;
@@ -341,7 +345,9 @@ const App: React.FC = () => {
       narrationEnabled: false,
       narrationVoice: '',
       narrationSpeed: 0.9,
-      narrationVolume: 1.0
+      narrationVolume: 1.0,
+      retroGreenProjection: true,
+      retroAmberProjection: true
     };
   });
 
@@ -410,13 +416,7 @@ const App: React.FC = () => {
     const deltaLat = clampedLat - prevLat;
     const deltaLng = ((normalizedLng - prevLng + 540) % 360) - 180;
 
-    console.log(`[Camera Sync] OSM_ABSOLUTE_CENTER lat=${clampedLat.toFixed(4)} lng=${normalizedLng.toFixed(4)}`);
-    console.log(`[Camera Sync] PREVIOUS_CENTER lat=${prevLat.toFixed(4)} lng=${prevLng.toFixed(4)}`);
-    console.log(`[Camera Sync] DELTA lat=${deltaLat.toFixed(4)} lng=${deltaLng.toFixed(4)}`);
-    console.log(`[Camera Sync] GLOBE_TARGET lat=${clampedLat.toFixed(4)} lng=${normalizedLng.toFixed(4)}`);
-    console.log(`[Camera Sync] MODE=ABSOLUTE_TARGET`);
-    console.log(`[Camera] GEO_CENTER lat=${clampedLat.toFixed(4)} lng=${normalizedLng.toFixed(4)} distance=${distance.toFixed(4)}`);
-
+    // Log high-level camera target changes only if needed, avoiding per-frame spam during RAF animations
     previousGeoCenterRef.current = { lat: clampedLat, lng: normalizedLng };
 
     const localCameraVec = latLngToVector3(clampedLat, normalizedLng, distance);
@@ -443,7 +443,6 @@ const App: React.FC = () => {
       zoomAnimRef.current = null;
     }
     targetZoomRef.current = null;
-    isCameraAnimatingRef.current = false;
 
     if (cameraStateRef.current) {
       cameraStateRef.current.themeSuggestedDistance = distance;
@@ -471,41 +470,253 @@ const App: React.FC = () => {
   }, []);
 
   const panAnimRef = useRef<number | null>(null);
+  const activeWaypointTransitionIdRef = useRef<number>(0);
 
-  const smoothPanOSMCamera = useCallback((targetLat: number, targetLng: number, distance: number, durationMs = 450) => {
+  const cancelActiveCameraAnimations = useCallback(() => {
     if (panAnimRef.current) {
       cancelAnimationFrame(panAnimRef.current);
       panAnimRef.current = null;
+      console.log(`[Waypoint Camera] CANCEL transitionId=${activeWaypointTransitionIdRef.current}`);
     }
-    const startLat = previousGeoCenterRef.current.lat || targetLat;
-    let startLng = previousGeoCenterRef.current.lng || targetLng;
-    let dLng = targetLng - startLng;
-    if (dLng > 180) startLng += 360;
-    else if (dLng < -180) startLng -= 360;
+    if (zoomAnimRef.current) {
+      cancelAnimationFrame(zoomAnimRef.current);
+      zoomAnimRef.current = null;
+    }
+    targetZoomRef.current = null;
+    targetCameraPosRef.current = null;
+    if (cameraStateRef.current) {
+      cameraStateRef.current.targetRotation = null;
+    }
+  }, []);
+
+  const smoothReturnToGlobe = useCallback((targetDistance = 4.5, durationMs = 700) => {
+    const transitionId = ++activeWaypointTransitionIdRef.current;
+    cancelActiveCameraAnimations();
+    isCameraAnimatingRef.current = true;
+
+    // Derive starting position from actual current camera in world space
+    let startLat = previousGeoCenterRef.current.lat || 0;
+    let startLng = previousGeoCenterRef.current.lng || 0;
+    let startDist = currentCameraDistanceRef.current || targetDistance;
+
+    if (cameraControlsRef.current?.object) {
+      const camPos = cameraControlsRef.current.object.position;
+      startDist = camPos.length() || startDist;
+      if (earthRef.current) {
+        const localPos = earthRef.current.worldToLocal(camPos.clone());
+        const geo = vector3ToLatLng(localPos);
+        startLat = geo.lat;
+        startLng = geo.lng;
+      }
+    }
+
+    if (startDist >= targetDistance - 0.05) {
+      isCameraAnimatingRef.current = false;
+      console.log('[Camera] GLOBE_LEVEL_REACHED');
+      return;
+    }
 
     const startTime = performance.now();
+    console.log(`[Camera] GLOBE_ZOOM_OUT_STARTED from dist=${startDist.toFixed(4)} to dist=${targetDistance.toFixed(4)} duration=${durationMs}ms transitionId=${transitionId}`);
 
     const step = (now: number) => {
+      if (transitionId !== activeWaypointTransitionIdRef.current) return;
       const elapsed = now - startTime;
       const progress = Math.min(1, elapsed / durationMs);
       const ease = progress < 0.5
         ? 4 * progress * progress * progress
         : 1 - Math.pow(-2 * progress + 2, 3) / 2;
 
-      const curLat = startLat + (targetLat - startLat) * ease;
-      const curLng = startLng + (targetLng - startLng) * ease;
-
-      updateAuthoritativeCamera(curLat, curLng, distance);
+      const curDist = startDist + (targetDistance - startDist) * ease;
+      updateAuthoritativeCamera(startLat, startLng, curDist);
 
       if (progress < 1) {
         panAnimRef.current = requestAnimationFrame(step);
       } else {
         panAnimRef.current = null;
+        if (transitionId === activeWaypointTransitionIdRef.current) {
+          isCameraAnimatingRef.current = false;
+          updateAuthoritativeCamera(startLat, startLng, targetDistance);
+          console.log('[Camera] GLOBE_LEVEL_REACHED');
+          console.log(`[Camera] COMPLETE return to globe transitionId=${transitionId}`);
+        }
       }
     };
-
     panAnimRef.current = requestAnimationFrame(step);
-  }, [updateAuthoritativeCamera]);
+  }, [cancelActiveCameraAnimations, updateAuthoritativeCamera]);
+
+  const navigateWaypointCamera = useCallback((
+    targetWp: { id?: string; name?: string; lat: number; lng: number },
+    fromWp?: { lat: number; lng: number }
+  ) => {
+    const transitionId = ++activeWaypointTransitionIdRef.current;
+    const targetLat = targetWp.lat;
+    const targetLng = targetWp.lng;
+
+    cancelActiveCameraAnimations();
+    isCameraAnimatingRef.current = true;
+
+    // Derive starting position from actual current camera in world space
+    let startLat = previousGeoCenterRef.current.lat || targetLat;
+    let startLng = previousGeoCenterRef.current.lng || targetLng;
+    let startDist = currentCameraDistanceRef.current || 4.5;
+
+    if (cameraControlsRef.current?.object) {
+      const camPos = cameraControlsRef.current.object.position;
+      startDist = camPos.length() || startDist;
+      if (earthRef.current) {
+        const localPos = earthRef.current.worldToLocal(camPos.clone());
+        const geo = vector3ToLatLng(localPos);
+        startLat = geo.lat;
+        startLng = geo.lng;
+      }
+    }
+
+    const isOSM = (startDist <= OSM_DETAIL_THRESHOLD || isOSMActive);
+
+    if (isOSM) {
+      const bounds = osmViewportBoundsRef.current;
+      const isVisibleInOSMViewport = bounds
+        ? isMarkerInOSMViewport(targetLat, targetLng, bounds)
+        : isDestinationComfortablyVisible(
+            { lat: startLat, lng: startLng },
+            startDist,
+            { lat: targetLat, lng: targetLng },
+            {
+              viewportWidth: worldDimensions.width > 0 ? worldDimensions.width : (typeof window !== 'undefined' ? window.innerWidth : 1920),
+              viewportHeight: worldDimensions.height > 0 ? worldDimensions.height : (typeof window !== 'undefined' ? window.innerHeight : 1080)
+            }
+          );
+
+      if (isVisibleInOSMViewport) {
+        // In-viewport OSM pan (preserves current OSM zoom) with smooth cubic ease
+        const durationMs = 650;
+        const startTime = performance.now();
+        console.log(`[Waypoint Camera] START in-viewport pan to ${targetWp.name || ''} (${targetLat.toFixed(4)}, ${targetLng.toFixed(4)}) duration=${durationMs}ms transitionId=${transitionId}`);
+
+        const step = (now: number) => {
+          if (transitionId !== activeWaypointTransitionIdRef.current) return;
+          const elapsed = now - startTime;
+          const progress = Math.min(1, elapsed / durationMs);
+          const ease = progress < 0.5
+            ? 4 * progress * progress * progress
+            : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+          const cur = interpolateCoordinates(startLat, startLng, targetLat, targetLng, ease);
+          updateAuthoritativeCamera(cur.lat, cur.lng, startDist);
+
+          if (progress < 1) {
+            panAnimRef.current = requestAnimationFrame(step);
+          } else {
+            panAnimRef.current = null;
+            if (transitionId === activeWaypointTransitionIdRef.current) {
+              isCameraAnimatingRef.current = false;
+              updateAuthoritativeCamera(targetLat, targetLng, startDist);
+              console.log(`[Waypoint Camera] COMPLETE transitionId=${transitionId}`);
+            }
+          }
+        };
+        panAnimRef.current = requestAnimationFrame(step);
+      } else {
+        // Out-of-viewport OSM transition: overview framing -> rotate -> zoom in to 1.30
+        const targetOSMDist = 1.30;
+        const angularDist = calculateGreatCircleDistance(startLat, startLng, targetLat, targetLng);
+        const maxFramingLimit = 2.65;
+        const framingDist = Math.min(
+          maxFramingLimit,
+          Math.max(2.4, calculateModerateFramingDistance(angularDist, startDist, targetOSMDist, maxFramingLimit))
+        );
+        const durationMs = 1200;
+        const startTime = performance.now();
+        console.log(`[Waypoint Camera] START out-of-viewport staged transition to ${targetWp.name || ''} (${targetLat.toFixed(4)}, ${targetLng.toFixed(4)}) duration=${durationMs}ms transitionId=${transitionId}`);
+
+        const step = (now: number) => {
+          if (transitionId !== activeWaypointTransitionIdRef.current) return;
+          const elapsed = now - startTime;
+          const progress = Math.min(1, elapsed / durationMs);
+
+          let curLat: number;
+          let curLng: number;
+          let curDist: number;
+
+          if (progress < 0.35) {
+            const p1 = progress / 0.35;
+            const ease1 = p1 < 0.5 ? 2 * p1 * p1 : 1 - Math.pow(-2 * p1 + 2, 2) / 2;
+            curLat = startLat;
+            curLng = startLng;
+            curDist = startDist + (framingDist - startDist) * ease1;
+          } else if (progress < 0.67) {
+            const p2 = (progress - 0.35) / 0.32;
+            const ease2 = p2 < 0.5 ? 2 * p2 * p2 : 1 - Math.pow(-2 * p2 + 2, 2) / 2;
+            const interp = interpolateCoordinates(startLat, startLng, targetLat, targetLng, ease2);
+            curLat = interp.lat;
+            curLng = interp.lng;
+            curDist = framingDist;
+          } else {
+            const p3 = (progress - 0.67) / 0.33;
+            const ease3 = p3 < 0.5 ? 2 * p3 * p3 : 1 - Math.pow(-2 * p3 + 2, 2) / 2;
+            curLat = targetLat;
+            curLng = targetLng;
+            curDist = framingDist + (targetOSMDist - framingDist) * ease3;
+          }
+
+          curDist = Math.max(1.018, Math.min(maxFramingLimit, curDist));
+          updateAuthoritativeCamera(curLat, curLng, curDist);
+
+          if (progress < 1) {
+            panAnimRef.current = requestAnimationFrame(step);
+          } else {
+            panAnimRef.current = null;
+            if (transitionId === activeWaypointTransitionIdRef.current) {
+              isCameraAnimatingRef.current = false;
+              updateAuthoritativeCamera(targetLat, targetLng, targetOSMDist);
+              console.log(`[Waypoint Camera] COMPLETE transitionId=${transitionId}`);
+            }
+          }
+        };
+        panAnimRef.current = requestAnimationFrame(step);
+      }
+    } else {
+      // Globe navigation: explicitly rotate & orient the globe camera to center on active waypoint
+      const targetGlobeDist = cameraStateRef.current.activeRoute
+        ? cameraStateRef.current.routeSuggestedDistance
+        : (cameraStateRef.current.routeSuggestedDistance || (startDist > 1.55 ? startDist : 2.0));
+      const angularDist = calculateGreatCircleDistance(startLat, startLng, targetLat, targetLng);
+      // Ensure smooth visual pacing: minimum 900ms for short moves, scaling smoothly with angular distance up to 1400ms
+      const durationMs = Math.min(1400, Math.max(900, Math.round(angularDist * 600 + 700)));
+      const startTime = performance.now();
+      console.log(`[Waypoint Camera] START globe transition to ${targetWp.name || ''} (${targetLat.toFixed(4)}, ${targetLng.toFixed(4)}) angularDist=${angularDist.toFixed(2)}° duration=${durationMs}ms transitionId=${transitionId}`);
+
+      const step = (now: number) => {
+        if (transitionId !== activeWaypointTransitionIdRef.current) return;
+        const elapsed = now - startTime;
+        const progress = Math.min(1, elapsed / durationMs);
+        const ease = progress < 0.5
+          ? 4 * progress * progress * progress
+          : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+        const interp = interpolateCoordinates(startLat, startLng, targetLat, targetLng, ease);
+        const curDist = startDist + (targetGlobeDist - startDist) * ease;
+        updateAuthoritativeCamera(interp.lat, interp.lng, curDist);
+
+        if (progress < 1) {
+          panAnimRef.current = requestAnimationFrame(step);
+        } else {
+          panAnimRef.current = null;
+          if (transitionId === activeWaypointTransitionIdRef.current) {
+            isCameraAnimatingRef.current = false;
+            updateAuthoritativeCamera(targetLat, targetLng, targetGlobeDist);
+            console.log(`[Waypoint Camera] COMPLETE transitionId=${transitionId}`);
+          }
+        }
+      };
+      panAnimRef.current = requestAnimationFrame(step);
+    }
+  }, [cancelActiveCameraAnimations, updateAuthoritativeCamera, isOSMActive, worldDimensions]);
+
+  const smoothPanOSMCamera = useCallback((targetLat: number, targetLng: number, distance: number, durationMs = 450) => {
+    navigateWaypointCamera({ lat: targetLat, lng: targetLng });
+  }, [navigateWaypointCamera]);
 
   const smoothWaypointTransitionOSMCamera = useCallback((
     targetLat: number,
@@ -516,67 +727,8 @@ const App: React.FC = () => {
     fromLng?: number,
     durationMs = 1200
   ) => {
-    if (panAnimRef.current) {
-      cancelAnimationFrame(panAnimRef.current);
-      panAnimRef.current = null;
-    }
-    const startLat = typeof fromLat === 'number' ? fromLat : (previousGeoCenterRef.current.lat || targetLat);
-    const startLng = typeof fromLng === 'number' ? fromLng : (previousGeoCenterRef.current.lng || targetLng);
-
-    const angularDist = calculateGreatCircleDistance(startLat, startLng, targetLat, targetLng);
-    const maxFramingLimit = 2.65; // Sensible maximum zoom-out limit: safely above OSM_DETAIL_THRESHOLD (1.45)
-    const framingDist = Math.min(
-      maxFramingLimit,
-      Math.max(2.4, calculateModerateFramingDistance(angularDist, startDist, targetDist, maxFramingLimit))
-    );
-
-    const startTime = performance.now();
-
-    const step = (now: number) => {
-      const elapsed = now - startTime;
-      const progress = Math.min(1, elapsed / durationMs);
-
-      let curLat: number;
-      let curLng: number;
-      let curDist: number;
-
-      if (progress < 0.35) {
-        // Phase 1: Zoom straight OUT from origin waypoint (coordinates locked to start)
-        const p1 = progress / 0.35;
-        const ease1 = p1 < 0.5 ? 2 * p1 * p1 : 1 - Math.pow(-2 * p1 + 2, 2) / 2;
-        curLat = startLat;
-        curLng = startLng;
-        curDist = startDist + (framingDist - startDist) * ease1;
-      } else if (progress < 0.67) {
-        // Phase 2: Rotate globe at constant overview altitude (OSM is inactive)
-        const p2 = (progress - 0.35) / 0.32;
-        const ease2 = p2 < 0.5 ? 2 * p2 * p2 : 1 - Math.pow(-2 * p2 + 2, 2) / 2;
-        const interp = interpolateCoordinates(startLat, startLng, targetLat, targetLng, ease2);
-        curLat = interp.lat;
-        curLng = interp.lng;
-        curDist = framingDist;
-      } else {
-        // Phase 3: Zoom straight IN to target waypoint (coordinates locked to destination)
-        const p3 = (progress - 0.67) / 0.33;
-        const ease3 = p3 < 0.5 ? 2 * p3 * p3 : 1 - Math.pow(-2 * p3 + 2, 2) / 2;
-        curLat = targetLat;
-        curLng = targetLng;
-        curDist = framingDist + (targetDist - framingDist) * ease3;
-      }
-
-      curDist = Math.max(1.018, Math.min(maxFramingLimit, curDist));
-
-      updateAuthoritativeCamera(curLat, curLng, curDist);
-
-      if (progress < 1) {
-        panAnimRef.current = requestAnimationFrame(step);
-      } else {
-        panAnimRef.current = null;
-      }
-    };
-
-    panAnimRef.current = requestAnimationFrame(step);
-  }, [updateAuthoritativeCamera]);
+    navigateWaypointCamera({ lat: targetLat, lng: targetLng }, fromLat !== undefined && fromLng !== undefined ? { lat: fromLat, lng: fromLng } : undefined);
+  }, [navigateWaypointCamera]);
 
   const programmaticTransitionUntilRef = useRef<number>(0);
 
@@ -1510,9 +1662,11 @@ const App: React.FC = () => {
     if (prevActiveRouteIdRef.current !== activeRouteId) {
       prevActiveRouteIdRef.current = activeRouteId;
       cameraStateRef.current.activeRoute = activeRouteId;
-      requestAnimationFrame(() => {
-        reconcileCameraState();
-      });
+      if (!isCameraAnimatingRef.current && panAnimRef.current === null) {
+        requestAnimationFrame(() => {
+          reconcileCameraState();
+        });
+      }
     }
   }, [activeRouteId, reconcileCameraState]);
 
@@ -1831,17 +1985,15 @@ const App: React.FC = () => {
            ))
      );
 
-     if (isOSMActive || currentDist <= 1.45) {
-       if (isVisibleInOSMViewport) {
-         // Rule 1: Waypoint is inside current OSM viewport -> keep current zoom level, eased pan to waypoint. Do not zoom out, do not snap.
-         documentaryController.cancel('waypoint_visible_in_viewport');
-         setIsDocumentaryActive(false);
-         if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
-           smoothPanOSMCamera(wp.lat, wp.lng, currentDist);
-         }
-       } else {
-         // Rule 2 & 3: Waypoint is outside current OSM viewport -> calculate minimum camera adjustment (controlled zoom-out + eased pan), never full-earth globe view.
-         if (userSettings.documentaryMode) {
+     if (userSettings.documentaryMode) {
+       if (isOSMActive || currentDist <= 1.45) {
+         if (isVisibleInOSMViewport) {
+           documentaryController.cancel('waypoint_visible_in_viewport');
+           setIsDocumentaryActive(false);
+           if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
+             navigateWaypointCamera(wp, fromWp);
+           }
+         } else {
            const originWp = fromWp || {
              id: 'current-camera-pos',
              name: 'Current Viewport',
@@ -1859,23 +2011,8 @@ const App: React.FC = () => {
              },
              originWp
            );
-         } else {
-           setIsDocumentaryActive(false);
-           if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
-             smoothWaypointTransitionOSMCamera(
-               wp.lat,
-               wp.lng,
-               currentDist,
-               1.30,
-               fromWp?.lat ?? previousGeoCenterRef.current.lat,
-               fromWp?.lng ?? previousGeoCenterRef.current.lng
-             );
-           }
          }
-       }
-     } else {
-       // Globe / regional camera approaching OSM
-       if (userSettings.documentaryMode) {
+       } else {
          startDocumentaryFlow(
            {
              id: stableId,
@@ -1892,11 +2029,11 @@ const App: React.FC = () => {
              description: fromWp.description
            } : undefined
          );
-       } else {
-         setIsDocumentaryActive(false);
-         if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
-           smoothPanOSMCamera(wp.lat, wp.lng, 1.30);
-         }
+       }
+     } else {
+       setIsDocumentaryActive(false);
+       if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
+         navigateWaypointCamera(wp, fromWp);
        }
      }
 
@@ -2141,29 +2278,26 @@ const App: React.FC = () => {
 
         logCameraDecision(decision);
 
-        switch (decision.transitionDecision) {
-          case 'NO_CAMERA_MOVEMENT':
-            setIsDocumentaryActive(false);
-            break;
-
-          case 'PAN_CURRENT_OSM':
-            setIsDocumentaryActive(false);
-            if (typeof marker.lat === 'number' && typeof marker.lng === 'number') {
-              updateAuthoritativeCamera(marker.lat, marker.lng, currentDist);
-            }
-            break;
-
-          case 'PRESERVE_CURRENT_OSM_ZOOM':
-            setIsDocumentaryActive(false);
-            if (typeof marker.lat === 'number' && typeof marker.lng === 'number') {
-              smoothPanOSMCamera(marker.lat, marker.lng, currentDist);
-            }
-            break;
-
-          case 'REDIRECT_CURRENT_TRANSITION':
-          case 'TRANSITION_TO_OSM':
-          case 'ZOOM_CURRENT_OSM':
-            if (userSettings.documentaryMode) {
+        if (userSettings.documentaryMode) {
+          switch (decision.transitionDecision) {
+            case 'NO_CAMERA_MOVEMENT':
+              setIsDocumentaryActive(false);
+              break;
+            case 'PAN_CURRENT_OSM':
+              setIsDocumentaryActive(false);
+              if (typeof marker.lat === 'number' && typeof marker.lng === 'number') {
+                updateAuthoritativeCamera(marker.lat, marker.lng, currentDist);
+              }
+              break;
+            case 'PRESERVE_CURRENT_OSM_ZOOM':
+              setIsDocumentaryActive(false);
+              if (typeof marker.lat === 'number' && typeof marker.lng === 'number') {
+                smoothPanOSMCamera(marker.lat, marker.lng, currentDist);
+              }
+              break;
+            case 'REDIRECT_CURRENT_TRANSITION':
+            case 'TRANSITION_TO_OSM':
+            case 'ZOOM_CURRENT_OSM':
               startDocumentaryFlow({
                 id: stableId,
                 name: marker.name,
@@ -2171,13 +2305,13 @@ const App: React.FC = () => {
                 lng: marker.lng,
                 description: initialPayload.description
               });
-            } else {
-              setIsDocumentaryActive(false);
-              if (typeof marker.lat === 'number' && typeof marker.lng === 'number') {
-                smoothPanOSMCamera(marker.lat, marker.lng, 1.30);
-              }
-            }
-            break;
+              break;
+          }
+        } else {
+          setIsDocumentaryActive(false);
+          if (typeof marker.lat === 'number' && typeof marker.lng === 'number') {
+            navigateWaypointCamera({ id: stableId, name: marker.name, lat: marker.lat, lng: marker.lng });
+          }
         }
 
         if (initialPayload.description) {
@@ -2566,6 +2700,20 @@ const App: React.FC = () => {
     console.log(`[SearchNarration] SEARCH_SUBMITTED query="${cleanQuery}"`);
     console.log('[Camera] SEARCH_STARTED rotation preserved');
 
+    // Invalidate active camera animations and transitions
+    cancelActiveCameraAnimations();
+    activeWaypointTransitionIdRef.current++;
+
+    // Clear marker selection and coordinates state immediately
+    setSelectedMarkerId(null);
+    setSelectedMarkerCoordinates(null);
+    selectedMarkerCoordinatesRef.current = null;
+    activeSelectionIdRef.current = null;
+
+    // Smoothly zoom out to globe level if currently zoomed in, while preserving natural globe rotation
+    setAutoRotate(true);
+    smoothReturnToGlobe(4.5);
+
     // 1. Intent routing & entity extraction
     const parsedQuery = routeIntentAndExtractEntity(cleanQuery);
 
@@ -2696,6 +2844,7 @@ const App: React.FC = () => {
         scanFullyProcessedRef.current = true;
         programmaticTransitionUntilRef.current = Date.now() + 1500;
 
+        console.log(`[Camera] NEW_LOCATION_COMMITTED name="${finalData.name}" lat=${lat.toFixed(4)} lng=${lng.toFixed(4)}`);
         console.log('[Camera] DESTINATION_COMMITTED ownership transferred');
         setAutoRotate(false);
         setInteractionState('PIN_SELECTED');
@@ -2716,6 +2865,7 @@ const App: React.FC = () => {
         console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
 
         if (userSettings.documentaryMode) {
+          console.log('[Camera] OSM_TRANSITION_STARTED');
           startDocumentaryFlow({
             id: searchMarker.id,
             name: searchMarker.name,
@@ -2725,12 +2875,11 @@ const App: React.FC = () => {
           });
         } else {
           setIsDocumentaryActive(false);
-          const zoom = (pipelineResult as any).metadataResult?.coordinateResult?.suggestedZoom || 5;
-          const targetDist = isZoomLocked && lockedZoomDistance ? lockedZoomDistance : Math.max(1.3, 4.5 - ((zoom / 10) * (4.5 - 1.2)));
-
-          cameraStateRef.current.routeSuggestedDistance = targetDist;
+          cameraStateRef.current.themeSuggestedDistance = 4.5;
+          cameraStateRef.current.routeSuggestedDistance = 4.5;
           cameraStateRef.current.targetRotation = { lat, lng };
 
+          console.log(`[Camera] GLOBE_ROTATION_STARTED to lat=${lat.toFixed(4)} lng=${lng.toFixed(4)}`);
           requestAnimationFrame(() => {
              reconcileCameraState();
           });
@@ -2794,6 +2943,21 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
   const handleTraceRoute = async (text: string, searchRequestId?: number) => {
       const currentSearchId = searchRequestId || ++activeSearchRequestIdRef.current;
+
+      // Invalidate active camera animations and transitions
+      cancelActiveCameraAnimations();
+      activeWaypointTransitionIdRef.current++;
+
+      // Clear marker selection and coordinates state immediately
+      setSelectedMarkerId(null);
+      setSelectedMarkerCoordinates(null);
+      selectedMarkerCoordinatesRef.current = null;
+      activeSelectionIdRef.current = null;
+
+      // Smoothly zoom out to globe level if currently zoomed in, while preserving natural globe rotation
+      setAutoRotate(true);
+      smoothReturnToGlobe(4.5);
+
       setInteractionState('GLOBE_SEARCHING');
       setIsDiscoveryLoading(true);
       console.log('[Scan Lifecycle] DISCOVERY_STARTED');
@@ -3329,16 +3493,9 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
             setIsDragging(true);
             setAutoRotate(false);
             userModifiedZoomRef.current = true;
-            targetCameraPosRef.current = null;
-            if (zoomAnimRef.current) {
-              cancelAnimationFrame(zoomAnimRef.current);
-              zoomAnimRef.current = null;
-            }
-            targetZoomRef.current = null;
+            activeWaypointTransitionIdRef.current++;
+            cancelActiveCameraAnimations();
             isCameraAnimatingRef.current = false;
-            if (cameraStateRef.current) {
-              cameraStateRef.current.targetRotation = null;
-            }
             documentaryController.cancel('user_drag');
             narrationService.cancel();
             setIsDocumentaryActive(false);
@@ -3497,7 +3654,17 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
             onSkinChange={handleSkinChange}
             initialTab={settingsInitialTab}
           />
-        )}      </div>
+        )}
+      </div>
+
+      <MarkerProjectionBeam
+        skin={skin}
+        userSettings={userSettings}
+        locationInfo={locationInfo}
+        selectedMarkerCoordinates={selectedMarkerCoordinates}
+        isInfoPanelOpen={interactionState === 'PIN_SELECTED'}
+        isCameraMoving={isDragging || isInteracting || isDocumentaryActive || isScanningArea || isCameraAnimatingRef.current}
+      />
 
       {interactionState === 'PIN_SELECTED' && (
         <InfoPanel

@@ -701,6 +701,52 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
       const fullWidthButtons = html.match(/w-full py-2 px-4 rounded-lg text-sm border font-medium/g);
       expect(fullWidthButtons).toHaveLength(3);
     });
+
+    test('11. Renders PROJECTION toggle under APPEARANCE tab only for Retro Green and Retro Amber', () => {
+      // Modern: no projection toggle
+      const modernHtml = renderToStaticMarkup(
+        <SettingsPanel
+          {...baseProps}
+          skin="modern"
+          initialTab="appearance"
+        />
+      );
+      expect(modernHtml).not.toContain('PROJECTION');
+
+      // Parchment: no projection toggle
+      const parchmentHtml = renderToStaticMarkup(
+        <SettingsPanel
+          {...baseProps}
+          skin="parchment"
+          initialTab="appearance"
+        />
+      );
+      expect(parchmentHtml).not.toContain('PROJECTION');
+
+      // Retro Green: renders PROJECTION toggle
+      const greenHtml = renderToStaticMarkup(
+        <SettingsPanel
+          {...baseProps}
+          skin="retro-green"
+          initialTab="appearance"
+          settings={{ ...baseSettings, retroGreenProjection: true }}
+        />
+      );
+      expect(greenHtml).toContain('PROJECTION');
+      expect(greenHtml).toContain('aria-checked="true"');
+
+      // Retro Amber: renders PROJECTION toggle with independent state
+      const amberHtml = renderToStaticMarkup(
+        <SettingsPanel
+          {...baseProps}
+          skin="retro-amber"
+          initialTab="appearance"
+          settings={{ ...baseSettings, retroGreenProjection: true, retroAmberProjection: false }}
+        />
+      );
+      expect(amberHtml).toContain('PROJECTION');
+      expect(amberHtml).toContain('aria-checked="false"');
+    });
   });
 });
 

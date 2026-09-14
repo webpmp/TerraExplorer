@@ -670,7 +670,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
 
   // Synchronize authoritative center when a marker is selected
   useEffect(() => {
-    if (selectedMarkerCoordinates) {
+    if (selectedMarkerCoordinates && selectedMarkerId) {
       hasUserPannedSinceSelectionRef.current = false;
       const targetLat = selectedMarkerCoordinates.lat;
       const targetLng = selectedMarkerCoordinates.lng;
