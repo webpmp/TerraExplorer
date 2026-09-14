@@ -261,21 +261,39 @@ export function resolveBeamGeometry(coords: { lat: number; lng: number }): BeamG
   const { lat, lng } = coords;
   let point: { x: number; y: number } | null = null;
 
-  // 1. Unified 3D Globe / MapLibre projector from Earth.tsx
-  const projectFn = typeof window !== 'undefined'
-    ? (window as any).__terraexplorer_project_coordinates
-    : (typeof global !== 'undefined' ? (global as any).__terraexplorer_project_coordinates : null);
-
-  if (typeof projectFn === 'function') {
-    try {
-      const pt = projectFn(lat, lng);
-      if (pt && typeof pt.x === 'number' && typeof pt.y === 'number' && !isNaN(pt.x) && !isNaN(pt.y)) {
-        point = { x: pt.x, y: pt.y };
+  // 1. Direct DOM selected marker visual center (exact sub-pixel bounding box of the visual pin)
+  if (typeof document !== 'undefined') {
+    const selectedMarkerEl = document.querySelector('[data-marker-selected="true"]') ||
+                             document.querySelector('[data-marker-hit-id]');
+    if (selectedMarkerEl) {
+      const pinEl = selectedMarkerEl.querySelector('.rounded-full') || selectedMarkerEl;
+      const rect = pinEl.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        point = {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2
+        };
       }
-    } catch (_) {}
+    }
   }
 
-  // 2. Direct MapLibre projection fallback
+  // 2. Unified 3D Globe / MapLibre projector from Earth.tsx
+  if (!point) {
+    const projectFn = typeof window !== 'undefined'
+      ? (window as any).__terraexplorer_project_coordinates
+      : (typeof global !== 'undefined' ? (global as any).__terraexplorer_project_coordinates : null);
+
+    if (typeof projectFn === 'function') {
+      try {
+        const pt = projectFn(lat, lng);
+        if (pt && typeof pt.x === 'number' && typeof pt.y === 'number' && !isNaN(pt.x) && !isNaN(pt.y)) {
+          point = { x: pt.x, y: pt.y };
+        }
+      } catch (_) {}
+    }
+  }
+
+  // 3. Direct MapLibre projection fallback
   if (!point) {
     const map = typeof window !== 'undefined'
       ? (window as any).__terraexplorer_maplibre_map
@@ -288,21 +306,6 @@ export function resolveBeamGeometry(coords: { lat: number; lng: number }): BeamG
           point = { x: pt.x, y: pt.y };
         }
       } catch (_) {}
-    }
-  }
-
-  // 3. Direct DOM selected marker overlay element fallback
-  if (!point && typeof document !== 'undefined') {
-    const selectedMarkerEl = document.querySelector('[data-marker-selected="true"]') ||
-                             document.querySelector('[data-marker-hit-id]');
-    if (selectedMarkerEl) {
-      const rect = selectedMarkerEl.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        point = {
-          x: rect.left + rect.width / 2,
-          y: rect.top + rect.height / 2
-        };
-      }
     }
   }
 

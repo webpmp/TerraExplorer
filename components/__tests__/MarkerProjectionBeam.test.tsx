@@ -1,7 +1,7 @@
 import React from 'react';
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import MarkerProjectionBeam, { calculateBeamTrapezoid } from '../MarkerProjectionBeam';
+import MarkerProjectionBeam, { calculateBeamTrapezoid, resolveBeamGeometry } from '../MarkerProjectionBeam';
 import { SkinType, UserSettings, LocationInfo, LocationType } from '../../types';
 
 describe('MarkerProjectionBeam Component & Geometry Tests', () => {
@@ -321,6 +321,46 @@ describe('MarkerProjectionBeam Component & Geometry Tests', () => {
         expect(mote.opacity).toBeGreaterThan(0);
         expect(mote.opacity).toBeLessThanOrEqual(0.40);
       });
+    });
+  });
+
+  describe('5. Visual Marker Center Alignment (resolveBeamGeometry)', () => {
+    test('Aligns beam with the visual center of the marker DOM element rather than the ground tip', () => {
+      const mockPin = {
+        getBoundingClientRect: () => ({
+          left: 500,
+          top: 390,
+          right: 522,
+          bottom: 412,
+          width: 22,
+          height: 22,
+          x: 500,
+          y: 390,
+          toJSON: () => {}
+        })
+      };
+
+      const mockMarker = {
+        querySelector: (selector: string) => (selector === '.rounded-full' ? mockPin : null),
+        getBoundingClientRect: () => mockPin.getBoundingClientRect()
+      };
+
+      (global as any).document = {
+        querySelector: (selector: string) => {
+          if (selector.includes('data-marker-selected')) {
+            return mockMarker;
+          }
+          return null;
+        }
+      };
+
+      const geom = resolveBeamGeometry({ lat: 32.7767, lng: -96.797 });
+
+      expect(geom).not.toBeNull();
+      expect(geom?.markerPoint.x).toBe(511);
+      expect(geom?.markerPoint.y).toBe(401);
+
+      delete (global as any).document;
     });
   });
 });
