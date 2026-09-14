@@ -3050,7 +3050,10 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
       let entityStr = subject.replace(/[?.,!]+$/, "").trim();
       entityStr = entityStr.replace(/^(?:the\s+)?(?:wreck|wreckage|remains|ruins|site)\s+of\s+(?:the\s+)?/i, "");
       const cleanedEntity = entityStr.replace(/^the\s+/i, "");
-      const finalSubject = toCanonicalTitleCase(cleanedEntity || entityStr);
+      const kbEntry = getHistoricalEntityKnowledge(cleanedEntity) || getHistoricalEntityKnowledge(entityStr);
+      const finalSubject = (kbEntry?.entity && kbEntry.entityType === 'shipwreck')
+        ? kbEntry.entity
+        : toCanonicalTitleCase(cleanedEntity || entityStr);
       return {
         intent: 'DISCOVERY_OBJECT_LOCATION',
         entity: finalSubject,

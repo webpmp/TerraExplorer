@@ -40,8 +40,9 @@ import {
   calculateGlobeMarkerZoomScale,
   calculateGlobeMarkerDiameter,
   getThemeMarkerColors,
+  getWaypointNumberStyle,
   getMarkerBoxShadow,
-  getWaypointNumberStyle
+  getThemeMarkerScale
 } from '../utils/markerStyleUtils';
 
 // Custom Shader for Retro Effect
@@ -239,7 +240,7 @@ const UniversalMarker: React.FC<{
           domHitRef.current.style.display = 'flex';
           
           // Calculate dynamic zoom-aware marker diameter, border width, and font size
-          const diameter = calculateGlobeMarkerDiameter(distance, 26, roleScale);
+          const diameter = calculateGlobeMarkerDiameter(distance, undefined, roleScale, undefined, skin);
           const strokeWidth = calculateMarkerBorderWidth(diameter, skin);
 
           // Update visual marker size inside 40px hit area

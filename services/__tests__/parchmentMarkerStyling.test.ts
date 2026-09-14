@@ -6,7 +6,8 @@ import {
   calculateGlobeMarkerDiameter,
   getThemeMarkerColors,
   getMarkerBoxShadow,
-  getWaypointNumberStyle
+  getWaypointNumberStyle,
+  getThemeMarkerScale
 } from '../../utils/markerStyleUtils';
 
 describe('Parchment Theme & Proportional Marker Styling System', () => {
@@ -256,5 +257,84 @@ describe('Parchment Theme & Proportional Marker Styling System', () => {
       expect(borderZoomedIn).toBe(2.6); // 22 * 0.12
       expect(borderZoomedOut).toBe(3.1); // 26 * 0.12
     });
+
+    it('scales Modern, Retro Green, and Retro Amber smoothly and continuously larger as camera zooms in (distance decreases)', () => {
+      // Modern theme: ~17.5px at maximum zoom-out (distance >= 5.0)
+      const modern50 = calculateGlobeMarkerDiameter(5.0, undefined, 1.0, undefined, 'modern');
+      expect(modern50).toBe(17.5);
+
+      // Begins scaling larger smoothly and immediately as camera approaches location
+      const modern45 = calculateGlobeMarkerDiameter(4.5, undefined, 1.0, undefined, 'modern');
+      const modern40 = calculateGlobeMarkerDiameter(4.0, undefined, 1.0, undefined, 'modern');
+      const modern35 = calculateGlobeMarkerDiameter(3.5, undefined, 1.0, undefined, 'modern');
+      const modern30 = calculateGlobeMarkerDiameter(3.0, undefined, 1.0, undefined, 'modern');
+      const modern25 = calculateGlobeMarkerDiameter(2.5, undefined, 1.0, undefined, 'modern');
+      const modern20 = calculateGlobeMarkerDiameter(2.0, undefined, 1.0, undefined, 'modern');
+      const modern15 = calculateGlobeMarkerDiameter(1.5, undefined, 1.0, undefined, 'modern');
+      const modern145 = calculateGlobeMarkerDiameter(1.45, undefined, 1.0, undefined, 'modern');
+
+      // Monotonically strictly increasing as camera distance decreases
+      expect(modern50).toBeLessThan(modern45);
+      expect(modern45).toBeLessThan(modern40);
+      expect(modern40).toBeLessThan(modern35);
+      expect(modern35).toBeLessThan(modern30);
+      expect(modern30).toBeLessThan(modern25);
+      expect(modern25).toBeLessThan(modern20);
+      expect(modern20).toBeLessThan(modern15);
+      expect(modern15).toBeLessThanOrEqual(modern145);
+
+      // Check numeric progression
+      expect(modern50).toBe(17.5);
+      expect(modern45).toBeCloseTo(18.1, 1);
+      expect(modern35).toBeCloseTo(19.4, 1);
+      expect(modern25).toBeCloseTo(20.7, 1);
+      expect(modern145).toBe(22.0);
+
+      // Retro themes match Modern sizing exactly
+      const retroGreen50 = calculateGlobeMarkerDiameter(5.0, undefined, 1.0, undefined, 'retro-green');
+      const retroAmber50 = calculateGlobeMarkerDiameter(5.0, undefined, 1.0, undefined, 'retro-amber');
+      expect(retroGreen50).toBe(17.5);
+      expect(retroAmber50).toBe(17.5);
+
+      const retroGreen145 = calculateGlobeMarkerDiameter(1.45, undefined, 1.0, undefined, 'retro-green');
+      const retroAmber145 = calculateGlobeMarkerDiameter(1.45, undefined, 1.0, undefined, 'retro-amber');
+      expect(retroGreen145).toBe(22.0);
+      expect(retroAmber145).toBe(22.0);
+
+      // Verify that passing an arbitrary baseDiameter (e.g. legacy 22 or 26) cannot override the 17.5px far endpoint
+      const modernWithLegacyArg = calculateGlobeMarkerDiameter(5.0, 26, 1.0, undefined, 'modern');
+      expect(modernWithLegacyArg).toBe(17.5);
+
+      const retroGreenWithLegacyArg = calculateGlobeMarkerDiameter(5.0, 22, 1.0, undefined, 'retro-green');
+      expect(retroGreenWithLegacyArg).toBe(17.5);
+
+      // Parchment theme preserves exact 26px -> 22px curve completely unchanged
+      const parchmentOverview = calculateGlobeMarkerDiameter(5.0, undefined, 1.0, undefined, 'parchment');
+      const parchmentZoomedIn = calculateGlobeMarkerDiameter(1.45, undefined, 1.0, undefined, 'parchment');
+      expect(parchmentOverview).toBe(26.0);
+      expect(parchmentZoomedIn).toBe(22.0);
+    });
+  });
+
+  describe('5. Theme-Specific Visual Marker Scale Factor', () => {
+    it('returns scale 0.91 for Modern, Retro Green, and Retro Amber producing ~20px visual diameter', () => {
+      expect(getThemeMarkerScale('modern')).toBe(0.91);
+      expect(getThemeMarkerScale('retro-green')).toBe(0.91);
+      expect(getThemeMarkerScale('retro-amber')).toBe(0.91);
+      expect(getThemeMarkerScale(undefined)).toBe(0.91);
+
+      // Base 22px marker with 0.91 scale factor produces ~20.02px (approx 20px)
+      const baseDiameter = 22;
+      expect(baseDiameter * getThemeMarkerScale('modern')).toBeCloseTo(20.02, 2);
+      expect(baseDiameter * getThemeMarkerScale('retro-green')).toBeCloseTo(20.02, 2);
+      expect(baseDiameter * getThemeMarkerScale('retro-amber')).toBeCloseTo(20.02, 2);
+    });
+
+    it('returns scale 1.0 for Parchment preserving existing marker sizing', () => {
+      expect(getThemeMarkerScale('parchment')).toBe(1.0);
+      const baseDiameter = 22;
+      expect(baseDiameter * getThemeMarkerScale('parchment')).toBe(22);
+    });
   });
 });
+

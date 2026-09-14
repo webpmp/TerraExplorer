@@ -67,15 +67,37 @@ describe('Controls Search Error Presentation', () => {
       if (skin === 'retro-green') {
         expect(html).toContain('border-green-400');
         expect(html).toContain('font-retro');
+        expect(html).not.toContain('parchment-background');
       } else if (skin === 'retro-amber') {
         expect(html).toContain('border-amber-400');
         expect(html).toContain('font-retro');
+        expect(html).not.toContain('parchment-background');
       } else if (skin === 'parchment') {
-        expect(html).toContain('border-[#8b5a2b]');
+        expect(html).toContain('parchment-background');
+        expect(html).toContain('[isolation:isolate]');
+        expect(html).not.toContain('bg-[#f4ead5]/95');
+        expect(html).toContain('text-[#5c3a21]');
       } else {
         expect(html).toContain('rounded-full');
+        expect(html).not.toContain('parchment-background');
       }
     });
+  });
+
+  test('parchment theme renders "No results found for this query." with parchment-background and dark brown text', () => {
+    const errorMsg = 'No results found for this query.';
+    const html = renderToStaticMarkup(
+      <Controls {...baseProps} skin="parchment" searchError={errorMsg} onClearError={vi.fn()} />
+    );
+
+    expect(html).toContain('role="status"');
+    expect(html).toContain('aria-live="polite"');
+    expect(html).toContain(errorMsg);
+    expect(html).toContain('parchment-background');
+    expect(html).toContain('[isolation:isolate]');
+    expect(html).toContain('text-[#5c3a21]');
+    expect(html).not.toContain('bg-[#f4ead5]/95');
+    expect(html).toContain('aria-label="Dismiss error"');
   });
 
   test('does not place error message or warning icon inside the search input', () => {

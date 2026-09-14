@@ -329,7 +329,7 @@ const Controls: React.FC<ControlsProps> = ({
       submitBtn: "text-[#5c3a21] hover:text-[#3e2723] bg-transparent hover:bg-transparent rounded-none font-sans font-bold uppercase tracking-wider text-sm",
       resetBtn: "text-[#8b5a2b] hover:text-[#3e2723] mr-2 p-1",
       glow: "hidden",
-      statusRow: "bg-[#f4ead5]/95 border border-[#8b5a2b]/40 text-[#5c3a21] font-sans shadow-sm rounded",
+      statusRow: "text-[#5c3a21] font-sans shadow-sm",
       statusText: "text-[#522B07] font-sans",
       statusDismiss: "text-[#8b5a2b]/70 hover:text-[#3e2723] transition-colors p-0.5",
       copyright: "text-white/50 font-sans",
@@ -685,39 +685,44 @@ const Controls: React.FC<ControlsProps> = ({
 
         return (
           <div
-            className={`w-full max-w-[532px] pointer-events-auto flex items-center justify-between px-3.5 py-1.5 -mt-2.5 text-xs transition-all animate-in fade-in duration-200 ${theme.statusRow}`}
+            className={`relative w-full max-w-[532px] pointer-events-auto flex items-center justify-between px-3.5 py-1.5 -mt-2.5 text-xs transition-all animate-in fade-in duration-200 ${skin === 'parchment' ? '[isolation:isolate]' : ''} ${theme.statusRow}`}
             role="status"
             aria-live="polite"
           >
-            <span className={`truncate text-xs ${theme.statusText} flex flex-wrap items-center gap-x-1.5`}>
-              <span>{mainMessage}</span>
-              {hasGuidance && (
-                <span className="opacity-90 inline-flex items-center">
-                  (
-                  {onOpenSettingsTab || onToggleSettings ? (
-                    <button
-                      type="button"
-                      onClick={handleOpenProviders}
-                      className="underline hover:opacity-100 transition-opacity font-semibold cursor-pointer"
-                    >
-                      Settings &gt; Providers
-                    </button>
-                  ) : (
-                    <span>Settings &gt; Providers</span>
-                  )}
-                  )
-                </span>
-              )}
-            </span>
-            <button
-              type="button"
-              onClick={onClearError}
-              className={`ml-2 shrink-0 ${theme.statusDismiss}`}
-              aria-label="Dismiss error"
-              title="Dismiss"
-            >
-              <X size={14} />
-            </button>
+            {skin === 'parchment' && (
+              <div className="parchment-background" aria-hidden="true" />
+            )}
+            <div className="relative z-[1] flex items-center justify-between w-full min-w-0">
+              <span className={`truncate text-xs ${theme.statusText} flex flex-wrap items-center gap-x-1.5`}>
+                <span>{mainMessage}</span>
+                {hasGuidance && (
+                  <span className="opacity-90 inline-flex items-center">
+                    (
+                    {onOpenSettingsTab || onToggleSettings ? (
+                      <button
+                        type="button"
+                        onClick={handleOpenProviders}
+                        className="underline hover:opacity-100 transition-opacity font-semibold cursor-pointer"
+                      >
+                        Settings &gt; Providers
+                      </button>
+                    ) : (
+                      <span>Settings &gt; Providers</span>
+                    )}
+                    )
+                  </span>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={onClearError}
+                className={`ml-2 shrink-0 ${theme.statusDismiss}`}
+                aria-label="Dismiss error"
+                title="Dismiss"
+              >
+                <X size={14} />
+              </button>
+            </div>
           </div>
         );
       })()}

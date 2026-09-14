@@ -36,18 +36,46 @@ export function calculateGlobeMarkerZoomScale(
 
 /**
  * Calculates the dynamic pixel diameter for a 3D globe marker given camera distance, base diameter, and role scale.
- * Enforces a readable minimum marker size threshold (MIN_GLOBE_MARKER_DIAMETER = 22px) so markers never shrink
- * below legible dimensions at close zoom levels immediately preceding OSM transition.
+ * - Parchment: base diameter 26px at overview (distance >= 5.0), scaling with zoomScale down to 22px clamp near OSM threshold (unchanged).
+ * - Modern, Retro Green, Retro Amber: ~17.5px at maximum zoom-out (distance >= 5.0), smoothly and continuously growing to 22.0px
+ *   as the camera zooms in towards the location (distance -> 1.45) with zero jumps, plateaus, or thresholds.
  */
 export function calculateGlobeMarkerDiameter(
   cameraDistance: number,
-  baseDiameter: number = 26,
+  baseDiameter?: number,
   roleScale: number = 1.0,
-  minDiameter: number = MIN_GLOBE_MARKER_DIAMETER
+  minDiameter?: number,
+  skin?: SkinType
 ): number {
-  const zoomScale = calculateGlobeMarkerZoomScale(cameraDistance);
-  const calculatedMarkerSize = Math.round(baseDiameter * zoomScale * roleScale * 10) / 10;
-  return Math.max(calculatedMarkerSize, minDiameter);
+  const isParchment = skin === 'parchment' || (!skin && baseDiameter === 26);
+  if (isParchment) {
+    const effectiveBase = baseDiameter ?? 26;
+    const effectiveMin = minDiameter ?? MIN_GLOBE_MARKER_DIAMETER;
+    const zoomScale = calculateGlobeMarkerZoomScale(cameraDistance);
+    const calculatedMarkerSize = Math.round(effectiveBase * zoomScale * roleScale * 10) / 10;
+    return Math.max(calculatedMarkerSize, effectiveMin);
+  }
+
+  // Modern, Retro Green, Retro Amber (and default themes):
+  // Far overview (max zoom-out, distance >= 5.0): strictly 17.5px (within 16-18px target)
+  // Close camera approach (distance <= 1.45): 22.0px (larger close-range marker)
+  // Continuous smooth linear interpolation based on cameraDistance:
+  // cameraDistance decreases -> marker diameter increases
+  const FAR_DIAMETER = 17.5;
+  const NEAR_DIAMETER = 22.0;
+  const effectiveMin = minDiameter ?? 16.0;
+
+  const minDist = 1.45;
+  const maxDist = 5.0;
+  const clampedDist = Math.max(minDist, Math.min(maxDist, cameraDistance));
+  const t = (clampedDist - minDist) / (maxDist - minDist); // 0 at close zoom (1.45), 1 at max zoom-out (5.0)
+
+  // Smooth continuous interpolation:
+  // When t = 1 (distance >= 5.0): size = FAR_DIAMETER (17.5px)
+  // When t = 0 (distance <= 1.45): size = NEAR_DIAMETER (22.0px)
+  const interpolatedSize = NEAR_DIAMETER - t * (NEAR_DIAMETER - FAR_DIAMETER);
+  const calculatedMarkerSize = Math.round(interpolatedSize * roleScale * 10) / 10;
+  return Math.max(calculatedMarkerSize, effectiveMin);
 }
 
 /**
@@ -185,3 +213,16 @@ export function getWaypointNumberStyle(skin: SkinType): MarkerNumberStyle {
     lineHeight: 1
   };
 }
+
+/**
+ * Resolves base visual marker scale factor across themes.
+ * Modern, Retro Green, and Retro Amber scale at 0.91 to render an approximately 20px visual marker
+ * from the standard 22px base size, while Parchment retains 1.0 scale.
+ */
+export function getThemeMarkerScale(skin?: SkinType): number {
+  if (skin === 'parchment') {
+    return 1.0;
+  }
+  return 0.91;
+}
+

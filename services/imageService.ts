@@ -2,6 +2,7 @@ import { LocationInfo } from '../types';
 import { cleanMetadataString, formatImageAttribution, GalleryImage } from '../components/InfoPanel';
 import { searchImageRegistry, canonicalizeImageUrl } from './imageDeduplicationService';
 import { getHistoricalEntityKnowledge } from './geographic/historicalCoordinateValidator';
+import { stripDiacritics, areEntitiesMatchingWithDiacritics, getUnicodeNormalizedForms } from './geographic/geographicNormalization';
 
 export interface ImageCandidate {
   url: string;
@@ -740,7 +741,7 @@ export function detectGeographicMismatch(
 
 function normalizeDiacritics(str: string): string {
   if (!str) return '';
-  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  return stripDiacritics(str).toLowerCase();
 }
 
 export type ImageEvidenceType =
@@ -932,7 +933,8 @@ export function isDifferentNamedEntity(
   }
 
   // If title or description directly contains target entity name or any alias, check if candidate title is an overt person, prison, or disambiguation before accepting
-  if (allTargetAliases.some(a => fullText.includes(a))) {
+  const normFullText = stripDiacritics(fullText).toLowerCase();
+  if (allTargetAliases.some(a => fullText.includes(a) || normFullText.includes(stripDiacritics(a).toLowerCase()))) {
     const isOvertPersonOrFacility = nonSettlementPatterns.some(pattern => pattern.test(titleClean) && !pattern.test(targetLower));
     if (!isOvertPersonOrFacility) {
       return false;
@@ -1057,9 +1059,9 @@ export function deriveEntityAliases(
       addExact(noArticle);
       addCanonical(noArticle);
 
-      // 1. Symmetrical Inversion: "[Noun(s)] of [Location/Person]" <-> "[Location/Person] [Noun(s)]"
-      // e.g. "Pyramids of Giza" <-> "Giza Pyramids"
-      const ofMatch = noArticle.match(/^(.+?)\s+of\s+(?:the\s+)?(.+)$/i);
+      // 1. Symmetrical Inversion: "[Noun(s)] of/do/da/de/del/du/di [Location/Person]" <-> "[Location/Person] [Noun(s)]"
+      // e.g. "Pyramids of Giza" <-> "Giza Pyramids", "Caldeirão do Inferno" <-> "Inferno Caldeirão"
+      const ofMatch = noArticle.match(/^(.+?)\s+(?:of|do|da|de|del|du|di)\s+(?:the\s+|a\s+|an\s+|o\s+|a\s+|os\s+|as\s+|il\s+|lo\s+|la\s+|i\s+|gli\s+|le\s+|el\s+)?(.+)$/i);
       if (ofMatch) {
         const noun = ofMatch[1].trim();
         const loc = ofMatch[2].trim();
@@ -1185,10 +1187,19 @@ export function classifyImageEvidence(
   const canonicalName = entity.canonicalName || '';
   const title = candidate.title || '';
   const desc = candidate.description || candidate.caption || '';
-  const fullText = `${title} ${desc}`.toLowerCase();
-  const normFullText = normalizeDiacritics(fullText);
+  const fullText = `${title} ${desc} ${candidate.source || ''}`.toLowerCase();
+  const normFullText = stripDiacritics(fullText).toLowerCase();
   const titleLower = title.toLowerCase().trim();
-  const normTitle = normalizeDiacritics(titleLower);
+  const normTitle = stripDiacritics(titleLower).toLowerCase().trim();
+
+  // Clean candidate title by stripping prefix "File:" / "Image:", file extension, and underscores
+  const cleanTitle = title
+    .replace(/^(?:file|image):\s*/i, '')
+    .replace(/\.(?:jpe?g|png|svg|webp|gif)$/i, '')
+    .replace(/_/g, ' ')
+    .trim();
+  const cleanTitleLower = cleanTitle.toLowerCase();
+  const normCleanTitle = stripDiacritics(cleanTitleLower).toLowerCase().trim();
 
   const { exactAliases, canonicalAliases, alternateAliases, componentAliases } = deriveEntityAliases(
     entityName,
@@ -1198,24 +1209,38 @@ export function classifyImageEvidence(
 
   // Helper to match string against title or fullText
   const matchExactCandidateTitle = (alias: string): boolean => {
-    if (alias.length < 2) return false;
-    if (titleLower === alias || normTitle === normalizeDiacritics(alias)) return true;
-    if (titleLower.startsWith(`${alias} (`) || titleLower.startsWith(`${alias},`)) return true;
-    if (titleLower === `the ${alias}` || normTitle === `the ${normalizeDiacritics(alias)}`) return true;
-    if (titleLower === `${alias} estate` || titleLower === `${alias} castle` || titleLower === `${alias} fort` || titleLower === `${alias} house`) return true;
+    const aliasLower = alias.toLowerCase().trim();
+    const normAlias = stripDiacritics(aliasLower).toLowerCase().trim();
+    if (normAlias.length < 2) return false;
+
+    // Exact matches against raw or cleaned title (with or without diacritics)
+    if (titleLower === aliasLower || normTitle === normAlias || cleanTitleLower === aliasLower || normCleanTitle === normAlias) return true;
+    if (areEntitiesMatchingWithDiacritics(titleLower, aliasLower) || areEntitiesMatchingWithDiacritics(cleanTitleLower, aliasLower)) return true;
+
+    // Prefixes / suffixes
+    if (titleLower.startsWith(`${aliasLower} (`) || normTitle.startsWith(`${normAlias} (`) || cleanTitleLower.startsWith(`${aliasLower} (`) || normCleanTitle.startsWith(`${normAlias} (`)) return true;
+    if (titleLower.startsWith(`${aliasLower},`) || normTitle.startsWith(`${normAlias},`) || cleanTitleLower.startsWith(`${aliasLower},`) || normCleanTitle.startsWith(`${normAlias},`)) return true;
+    if (titleLower.startsWith(`${aliasLower} -`) || normTitle.startsWith(`${normAlias} -`) || cleanTitleLower.startsWith(`${aliasLower} -`) || normCleanTitle.startsWith(`${normAlias} -`)) return true;
+    if (titleLower.startsWith(`${aliasLower}:`) || normTitle.startsWith(`${normAlias}:`) || cleanTitleLower.startsWith(`${aliasLower}:`) || normCleanTitle.startsWith(`${normAlias}:`)) return true;
+    if (titleLower === `the ${aliasLower}` || normTitle === `the ${normAlias}` || cleanTitleLower === `the ${aliasLower}` || normCleanTitle === `the ${normAlias}`) return true;
+    if (titleLower === `${aliasLower} estate` || titleLower === `${aliasLower} castle` || titleLower === `${aliasLower} fort` || titleLower === `${aliasLower} house`) return true;
     return false;
   };
 
   const matchTextPhrase = (alias: string): boolean => {
-    if (alias.length < 3) return false;
-    const boundary = new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`, 'i');
-    return boundary.test(fullText) || boundary.test(normFullText);
+    const aliasLower = alias.toLowerCase().trim();
+    const normAlias = stripDiacritics(aliasLower).toLowerCase().trim();
+    if (normAlias.length < 3) return false;
+
+    const escaped = normAlias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const boundary = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, 'i');
+    return boundary.test(normFullText) || boundary.test(normCleanTitle) || boundary.test(normTitle);
   };
 
   // 1. Check title matches first: EXACT -> CANONICAL -> ALIAS -> COMPONENT
   const exactMatch = exactAliases.find(a => matchExactCandidateTitle(a));
   if (exactMatch) {
-    console.log(`[IMAGE ENTITY EXACT MATCH]\\ncanonicalEntity="${entityName}"\\nmatchedExact="${exactMatch}"\\ncandidateTitle="${title}"`);
+    console.log(`[IMAGE ENTITY EXACT MATCH]\ncanonicalEntity="${entityName}"\nmatchedExact="${exactMatch}"\ncandidateTitle="${title}"`);
     return {
       evidenceType: 'EXACT_ENTITY',
       entityMatchLevel: 'EXACT',
@@ -1225,7 +1250,7 @@ export function classifyImageEvidence(
 
   const canonicalTitleMatch = canonicalAliases.find(a => matchExactCandidateTitle(a));
   if (canonicalTitleMatch) {
-    console.log(`[IMAGE ENTITY CANONICAL MATCH]\\ncanonicalEntity="${entityName}"\\nmatchedCanonical="${canonicalTitleMatch}"\\ncandidateTitle="${title}"`);
+    console.log(`[IMAGE ENTITY CANONICAL MATCH]\ncanonicalEntity="${entityName}"\nmatchedCanonical="${canonicalTitleMatch}"\ncandidateTitle="${title}"`);
     return {
       evidenceType: 'EXACT_ENTITY',
       entityMatchLevel: 'CANONICAL',
@@ -1235,7 +1260,7 @@ export function classifyImageEvidence(
 
   const aliasTitleMatch = alternateAliases.find(a => matchExactCandidateTitle(a));
   if (aliasTitleMatch) {
-    console.log(`[IMAGE ENTITY ALIAS MATCH]\\ncanonicalEntity="${entityName}"\\nmatchedAlias="${aliasTitleMatch}"\\ncandidateTitle="${title}"`);
+    console.log(`[IMAGE ENTITY ALIAS MATCH]\ncanonicalEntity="${entityName}"\nmatchedAlias="${aliasTitleMatch}"\ncandidateTitle="${title}"`);
     return {
       evidenceType: 'KNOWN_ALIAS',
       entityMatchLevel: 'ALIAS',
@@ -1245,7 +1270,7 @@ export function classifyImageEvidence(
 
   const componentTitleMatch = componentAliases.find(a => matchExactCandidateTitle(a));
   if (componentTitleMatch) {
-    console.log(`[IMAGE ENTITY COMPONENT MATCH]\\ncanonicalEntity="${entityName}"\\nmatchedComponent="${componentTitleMatch}"\\ncandidateTitle="${title}"`);
+    console.log(`[IMAGE ENTITY COMPONENT MATCH]\ncanonicalEntity="${entityName}"\nmatchedComponent="${componentTitleMatch}"\ncandidateTitle="${title}"`);
     return {
       evidenceType: 'COMPONENT',
       entityMatchLevel: 'COMPONENT',
@@ -1256,7 +1281,7 @@ export function classifyImageEvidence(
   // 2. Check full text phrase matches: CANONICAL -> ALIAS -> COMPONENT
   const canonicalPhraseMatch = canonicalAliases.find(a => matchTextPhrase(a));
   if (canonicalPhraseMatch) {
-    console.log(`[IMAGE ENTITY CANONICAL MATCH]\\ncanonicalEntity="${entityName}"\\nmatchedCanonical="${canonicalPhraseMatch}"\\ncandidateTitle="${title}"`);
+    console.log(`[IMAGE ENTITY CANONICAL MATCH]\ncanonicalEntity="${entityName}"\nmatchedCanonical="${canonicalPhraseMatch}"\ncandidateTitle="${title}"`);
     return {
       evidenceType: 'EXACT_ENTITY',
       entityMatchLevel: 'CANONICAL',
@@ -1266,7 +1291,7 @@ export function classifyImageEvidence(
 
   const aliasPhraseMatch = alternateAliases.find(a => matchTextPhrase(a));
   if (aliasPhraseMatch) {
-    console.log(`[IMAGE ENTITY ALIAS MATCH]\\ncanonicalEntity="${entityName}"\\nmatchedAlias="${aliasPhraseMatch}"\\ncandidateTitle="${title}"`);
+    console.log(`[IMAGE ENTITY ALIAS MATCH]\ncanonicalEntity="${entityName}"\nmatchedAlias="${aliasPhraseMatch}"\ncandidateTitle="${title}"`);
     return {
       evidenceType: 'KNOWN_ALIAS',
       entityMatchLevel: 'ALIAS',
@@ -1276,7 +1301,7 @@ export function classifyImageEvidence(
 
   const componentPhraseMatch = componentAliases.find(a => matchTextPhrase(a));
   if (componentPhraseMatch) {
-    console.log(`[IMAGE ENTITY COMPONENT MATCH]\\ncanonicalEntity="${entityName}"\\nmatchedComponent="${componentPhraseMatch}"\\ncandidateTitle="${title}"`);
+    console.log(`[IMAGE ENTITY COMPONENT MATCH]\ncanonicalEntity="${entityName}"\nmatchedComponent="${componentPhraseMatch}"\ncandidateTitle="${title}"`);
     return {
       evidenceType: 'COMPONENT',
       entityMatchLevel: 'COMPONENT',
@@ -1288,15 +1313,14 @@ export function classifyImageEvidence(
   // Identify key distinctive tokens (length >= 4) from entity name and canonical variants
   const rawTokens = [entityName, canonicalName]
     .filter(Boolean)
+    .map(s => stripDiacritics(s).toLowerCase().replace(/[^a-z0-9\s]/g, ' '))
     .join(' ')
-    .toLowerCase()
-    .replace(/[^\w\s]/g, ' ')
     .split(/\s+/)
     .filter(t => t.length >= 4 && !['the', 'and', 'from', 'near', 'with', 'site', 'view', 'location', 'historic', 'ancient'].includes(t));
   const distinctTokens = Array.from(new Set(rawTokens));
 
   if (distinctTokens.length > 0) {
-    const matchingTokens = distinctTokens.filter(t => fullText.includes(t));
+    const matchingTokens = distinctTokens.filter(t => normFullText.includes(t));
     if (matchingTokens.length >= Math.min(2, distinctTokens.length) || (distinctTokens.length === 1 && matchingTokens.length === 1)) {
       return {
         evidenceType: 'RELATED_ENTITY',
@@ -1846,6 +1870,9 @@ export function validateImageCandidate(
   const title = candidate.title || '';
   const desc = candidate.description || candidate.caption || '';
   const fullText = `${title} ${desc}`.toLowerCase();
+  const normFullText = stripDiacritics(fullText).toLowerCase();
+  const titleLower = title.toLowerCase().trim();
+  const normTitle = stripDiacritics(titleLower).toLowerCase().trim();
   const eType = (entity.entityType || entity.type || '').toLowerCase();
   const isHistoricalWaypoint = isHistoricalWaypointEntity(entity);
   const isHistoricalVessel = !isHistoricalWaypoint && (eType.includes('shipwreck') || eType.includes('vessel') || entity.intent === 'DISCOVERY_OBJECT_LOCATION');
@@ -2189,17 +2216,24 @@ decision=${decision}`);
   }
 
   // 1. Evaluate coordinate trust / status based on provenance
-  let coordinateStatus: 'VERIFIED' | 'UNVERIFIED' | 'ABSENT' | 'INVALID' = 'VERIFIED';
+  let coordinateStatus: 'VERIFIED' | 'PROVISIONAL' | 'UNVERIFIED' | 'ABSENT' | 'INVALID' = 'VERIFIED';
   if (!entity.coordinates || (entity.coordinates.lat === undefined && entity.coordinates.lng === undefined)) {
     coordinateStatus = 'ABSENT';
   } else if (isSuspiciousPlaceholderCoordinate(entity.coordinates.lat, entity.coordinates.lng)) {
     coordinateStatus = 'INVALID';
   } else if (
-    entity.coordinateSource === 'ai_recovery' ||
+    entity.coordinateTrust === 'provisional' ||
+    entity.coordinateSource === 'ai_recovery'
+  ) {
+    coordinateStatus = (entity.identityStatus === 'unverified' || (entity as any).provenance === 'unverified')
+      ? 'UNVERIFIED'
+      : 'PROVISIONAL';
+  } else if (
     entity.identityStatus === 'unverified' ||
     entity.coordinateSource === 'llm' ||
     entity.coordinateSource === 'inferred' ||
-    (entity as any).provenance === 'unverified'
+    (entity as any).provenance === 'unverified' ||
+    entity.coordinateTrust === 'unverified'
   ) {
     coordinateStatus = 'UNVERIFIED';
   } else {
@@ -2272,9 +2306,9 @@ decision=${decision}`);
       geoEvidence = 'CONFLICTING';
       geoMismatchReason = geoCheck.reason || 'Geographic mismatch';
     } else if (
-      (entity.city && fullText.includes(entity.city.toLowerCase())) ||
-      (entity.state && fullText.includes(entity.state.toLowerCase())) ||
-      (entity.country && fullText.includes(entity.country.toLowerCase()))
+      (entity.city && (fullText.includes(entity.city.toLowerCase()) || normFullText.includes(stripDiacritics(entity.city).toLowerCase()))) ||
+      (entity.state && (fullText.includes(entity.state.toLowerCase()) || normFullText.includes(stripDiacritics(entity.state).toLowerCase()))) ||
+      (entity.country && (fullText.includes(entity.country.toLowerCase()) || normFullText.includes(stripDiacritics(entity.country).toLowerCase())))
     ) {
       geoEvidence = 'MATCHING';
     } else if (geoEvidence !== 'MATCHING') {
@@ -2316,8 +2350,9 @@ decision=${decision}`);
   let tier: ImageRelevanceTier | undefined;
 
   const isGeoConflicting = geoEvidence === 'CONFLICTING';
-  const conflictEvidenceTrusted = coordinateStatus === 'VERIFIED';
-  const isUntrustedGeoConflict = isGeoConflicting && !conflictEvidenceTrusted && hasStrongEntityMatch && (semanticFeatureMatch === 'STRONG');
+  const isTrustedGeoConflict = isGeoConflicting && (coordinateStatus === 'VERIFIED' || coordinateStatus === 'UNVERIFIED');
+  const isProvisionalGeoConflict = isGeoConflicting && coordinateStatus === 'PROVISIONAL';
+  const conflictEvidenceTrusted = isTrustedGeoConflict;
 
   // Hard Rejections across all policies:
   if (isFlag) {
@@ -2329,7 +2364,10 @@ decision=${decision}`);
   } else if (isDifferentEntity) {
     decision = 'REJECT';
     reason = 'DIFFERENT_ENTITY';
-  } else if (isGeoConflicting && !isUntrustedGeoConflict) {
+  } else if (isTrustedGeoConflict) {
+    decision = 'REJECT';
+    reason = 'GEOGRAPHIC_CONFLICT';
+  } else if (isProvisionalGeoConflict && !hasStrongEntityMatch && semanticFeatureMatch !== 'STRONG') {
     decision = 'REJECT';
     reason = 'GEOGRAPHIC_CONFLICT';
   } else {
@@ -2349,18 +2387,15 @@ decision=${decision}`);
 
       case 'LANDMARK_ENTITY': {
         if (hasStrongEntityMatch) {
-          if (geoEvidence === 'CONFLICTING' && !isUntrustedGeoConflict) {
-            decision = 'REJECT';
-            reason = 'GEOGRAPHIC_CONFLICT';
-          } else {
-            decision = 'ACCEPT';
-            tier = 1;
-            reason = (coordinateStatus === 'VERIFIED' && geoEvidence === 'MATCHING')
+          decision = 'ACCEPT';
+          tier = 1;
+          reason = isProvisionalGeoConflict
+            ? 'STRONG_ENTITY_MATCH_PROVISIONAL_GEO_CONFLICT'
+            : ((coordinateStatus === 'VERIFIED' && geoEvidence === 'MATCHING')
               ? 'STRONG_ENTITY_MATCH_GEO_VERIFIED'
-              : 'STRONG_ENTITY_MATCH';
-          }
+              : 'STRONG_ENTITY_MATCH');
         } else if (entityMatchLevel === 'COMPONENT' || entityMatchLevel === 'SUBFEATURE' || evidenceType === 'COMPONENT' || evidenceType === 'SUBFEATURE') {
-          if (geoEvidence === 'CONFLICTING' && !isUntrustedGeoConflict) {
+          if (isGeoConflicting) {
             decision = 'REJECT';
             reason = 'GEOGRAPHIC_CONFLICT';
           } else {
@@ -2371,8 +2406,10 @@ decision=${decision}`);
         } else if (entityMatchLevel === 'PARTIAL') {
           if (geoEvidence === 'MATCHING') {
             decision = 'ACCEPT';
-            tier = 2;
-            reason = 'PARTIAL_ENTITY_MATCH_WITH_GEO_CORROBORATION';
+            tier = coordinateStatus === 'PROVISIONAL' ? 3 : 2;
+            reason = coordinateStatus === 'PROVISIONAL'
+              ? 'PARTIAL_ENTITY_MATCH_WITH_PROVISIONAL_GEO_CORROBORATION'
+              : 'PARTIAL_ENTITY_MATCH_WITH_GEO_CORROBORATION';
           } else if (geoEvidence === 'CONFLICTING') {
             decision = 'REJECT';
             reason = 'GEOGRAPHIC_CONFLICT';
@@ -2395,21 +2432,36 @@ decision=${decision}`);
 
       case 'STRICT_ENTITY': {
         if (hasStrongEntityMatch) {
-          if (geoEvidence === 'CONFLICTING' && !isUntrustedGeoConflict) {
+          decision = 'ACCEPT';
+          tier = 1;
+          reason = isProvisionalGeoConflict
+            ? 'STRONG_ENTITY_MATCH_PROVISIONAL_GEO_CONFLICT'
+            : ((coordinateStatus === 'VERIFIED' && geoEvidence === 'MATCHING')
+              ? 'STRONG_ENTITY_MATCH_GEO_VERIFIED'
+              : 'STRONG_ENTITY_MATCH');
+        } else if (semanticFeatureMatch === 'STRONG') {
+          if (isGeoConflicting && isTrustedGeoConflict) {
             decision = 'REJECT';
             reason = 'GEOGRAPHIC_CONFLICT';
           } else {
             decision = 'ACCEPT';
-            tier = 1;
-            reason = (coordinateStatus === 'VERIFIED' && geoEvidence === 'MATCHING')
-              ? 'STRONG_ENTITY_MATCH_GEO_VERIFIED'
-              : 'STRONG_ENTITY_MATCH';
+            tier = 2;
+            reason = 'STRONG_SEMANTIC_ENTITY_MATCH';
           }
         } else if (entityMatchLevel === 'PARTIAL') {
           if (geoEvidence === 'MATCHING') {
-            decision = 'ACCEPT';
-            tier = 2;
-            reason = 'PARTIAL_ENTITY_MATCH_WITH_GEO_CORROBORATION';
+            if (coordinateStatus === 'VERIFIED') {
+              decision = 'ACCEPT';
+              tier = 2;
+              reason = 'PARTIAL_ENTITY_MATCH_WITH_GEO_CORROBORATION';
+            } else if (coordinateStatus === 'PROVISIONAL') {
+              decision = 'ACCEPT';
+              tier = 3;
+              reason = 'PARTIAL_ENTITY_MATCH_WITH_PROVISIONAL_GEO_CORROBORATION';
+            } else {
+              decision = 'REJECT';
+              reason = 'NO_ENTITY_SPECIFIC_EVIDENCE';
+            }
           } else if (geoEvidence === 'CONFLICTING') {
             decision = 'REJECT';
             reason = 'GEOGRAPHIC_CONFLICT';
@@ -2435,7 +2487,9 @@ decision=${decision}`);
         if (hasStrongEntityMatch) {
           decision = 'ACCEPT';
           tier = 1;
-          reason = 'EXACT_OR_ALIAS_FEATURE_MATCH';
+          reason = isProvisionalGeoConflict
+            ? 'STRONG_ENTITY_MATCH_PROVISIONAL_GEO_CONFLICT'
+            : 'EXACT_OR_ALIAS_FEATURE_MATCH';
         } else if (shape === 'GEOGRAPHIC_COLLECTION' || shape === 'DESCRIPTIVE_GEOGRAPHIC_QUERY') {
           // Geographic collections or descriptive queries allow strong related component features or representative parent views
           if (semanticFeatureMatch === 'STRONG') {
@@ -2467,7 +2521,7 @@ decision=${decision}`);
         if (hasStrongEntityMatch) {
           decision = 'ACCEPT';
           tier = 1;
-          reason = 'EXACT_LOCATION_MATCH';
+          reason = isProvisionalGeoConflict ? 'STRONG_ENTITY_MATCH_PROVISIONAL_GEO_CONFLICT' : 'EXACT_LOCATION_MATCH';
         } else if (semanticFeatureMatch === 'STRONG' || semanticFeatureMatch === 'MODERATE' || geoEvidence === 'MATCHING') {
           decision = 'ACCEPT';
           tier = (semanticFeatureMatch === 'STRONG') ? 2 : 3;
@@ -2512,10 +2566,10 @@ decision=${decision}`);
       score += 15;
     }
 
-    if (entity.city && fullText.includes(entity.city.toLowerCase())) {
+    if (entity.city && (fullText.includes(entity.city.toLowerCase()) || normFullText.includes(stripDiacritics(entity.city).toLowerCase()))) {
       score += 15;
     }
-    if (entity.country && fullText.includes(entity.country.toLowerCase())) {
+    if (entity.country && (fullText.includes(entity.country.toLowerCase()) || normFullText.includes(stripDiacritics(entity.country).toLowerCase()))) {
       score += 10;
     }
     if (geoEvidence === 'MATCHING') {
@@ -2523,6 +2577,9 @@ decision=${decision}`);
     }
     if (coordinateStatus === 'VERIFIED') {
       score += 10;
+    }
+    if (isProvisionalGeoConflict) {
+      score -= 10;
     }
   }
 
@@ -2536,20 +2593,33 @@ geographicConflict=${isGeoConflicting}
 conflictEvidenceTrusted=${conflictEvidenceTrusted}
 finalDecision=${decision}`);
 
+  const entityEvidenceStr = evidenceType === 'EXACT_ENTITY'
+    ? (entityMatchLevel === 'EXACT' ? 'EXACT_CANONICAL' : 'CANONICAL')
+    : (evidenceType === 'KNOWN_ALIAS' ? 'KNOWN_ALIAS' : (evidenceType === 'RELATED_ENTITY' ? 'PARTIAL' : (evidenceType === 'DIRECT_ENTITY_SOURCE' ? 'DIRECT_SOURCE' : 'NONE')));
+
+  const geoEvidenceStr = geoEvidence === 'MATCHING'
+    ? (coordinateStatus === 'PROVISIONAL' ? 'PROVISIONAL_MATCH' : 'MATCHING')
+    : geoEvidence;
+
   console.log(`[IMAGE VALIDATION]
 entity="${entity.name || ''}"
 shape="${shape}"
 policy="${policy}"
 candidate="${title || 'Untitled'}"
-EntityMatch=${entityMatchLevel}
-SemanticFeatureMatch=${semanticFeatureMatch}
-GeographicEvidence=${geoEvidence}
-GeographicConflict=${isGeoConflicting}
-Tier=${tier ?? 'NONE'}
-Decision=${decision}
-Reason=${reason}`);
+entityEvidence=${entityEvidenceStr}
+aliasEvidence=${matchedAlias || 'none'}
+semanticEntityEvidence=${semanticFeatureMatch}
+geographicEvidence=${geoEvidenceStr}
+geographicConflict=${isGeoConflicting}
+coordinateTrust=${coordinateStatus}
+coordinateSource=${entity.coordinateSource || 'unknown'}
+tier=${tier ?? 'NONE'}
+finalDecision=${decision}
+decision=${decision}
+reason=${reason}
+rejectionReason=${decision === 'REJECT' ? reason : 'none'}`);
 
-  const geographicConstraintApplied = coordinateStatus === 'VERIFIED';
+  const geographicConstraintApplied = coordinateStatus === 'VERIFIED' || coordinateStatus === 'PROVISIONAL';
 
   console.log(`[IMAGE CANDIDATE]
 Title=${title ? `"${title}"` : '"Untitled"'}
@@ -2673,11 +2743,13 @@ export function buildEntityImageQueries(info: {
     return buildHistoricalImageQueries(histContext);
   }
 
-  // 4. ENTITY_SPECIFIC Query Construction
+  // 4. ENTITY_SPECIFIC Query Construction with 7-Stage Escalation Hierarchy
   const queries: string[] = [];
   const rawName = (info.canonicalName || info.name || '').trim();
   const cleanName = rawName.split(/[,–-]/)[0].trim() || rawName;
+  const normCleanName = stripDiacritics(cleanName);
   const city = (info.city || '').trim();
+  const state = (info.state || '').trim();
   const country = (info.country || '').trim();
   const eType = (info.entityType || info.type || '').toLowerCase();
   const isHistoricalVessel = eType.includes('shipwreck') || eType.includes('vessel') || info.intent === 'DISCOVERY_OBJECT_LOCATION';
@@ -2723,40 +2795,69 @@ export function buildEntityImageQueries(info: {
         queries.push(`${cleanShipBase || rawName} ${info.state || info.country}`);
       }
     }
+    return Array.from(new Set(queries.filter(Boolean)));
   }
 
-  // Historic site, archaeological site, battlefield, monument, museum, landmark expansions
-  const isHistoricOrPoi = eType.includes('historic') || eType.includes('archaeological') || eType.includes('battlefield') || eType.includes('monument') || eType.includes('memorial') || eType.includes('museum') || eType.includes('ruin') || eType.includes('castle') || eType.includes('fort') || eType.includes('landmark') || eType.includes('poi');
-  if (isHistoricOrPoi && !isHistoricalVessel) {
-    const cleanBase = cleanName.replace(/\s+(?:site|historic site|monument|memorial|ruins|ruin|battlefield|courthouse|village|fort|castle|museum)$/i, '').trim();
-    if (cleanBase && cleanBase.toLowerCase() !== cleanName.toLowerCase()) {
-      queries.push(cleanBase);
-      queries.push(`${cleanBase} historic site`);
-      queries.push(`${cleanBase} archaeology`);
-      queries.push(`${cleanBase} ruins`);
-      queries.push(`${cleanBase} monument`);
-      queries.push(`${cleanBase} memorial`);
-      queries.push(`${cleanBase} excavation`);
-      queries.push(`${cleanBase} artifacts`);
-      queries.push(`${cleanBase} ${city || info.state || country || ''}`.trim());
-    } else {
-      queries.push(`${cleanName} historic site`);
-      queries.push(`${cleanName} archaeology`);
-      queries.push(`${cleanName} ruins`);
-      queries.push(`${cleanName} monument`);
-      queries.push(`${cleanName} excavation`);
-      queries.push(`${cleanName} artifacts`);
+  // Stage 1: Exact unconstrained entity name alone
+  if (cleanName) {
+    queries.push(cleanName);
+  }
+  if (rawName && rawName.toLowerCase() !== cleanName.toLowerCase()) {
+    queries.push(rawName);
+  }
+
+  // Stage 2: Entity + Country
+  if (country && country.toLowerCase() !== cleanName.toLowerCase()) {
+    queries.push(`${cleanName} ${country}`);
+  }
+
+  // Stage 3: Entity + Feature Type / Landscape / Landmark
+  const cleanEType = eType.replace(/_/g, ' ').replace(/\b(poi|location|entity)\b/g, '').trim();
+  if (cleanEType && !cleanName.toLowerCase().includes(cleanEType)) {
+    queries.push(`${cleanName} ${cleanEType}`);
+  }
+  if (eType.includes('natural') || eType.includes('mountain') || eType.includes('canyon') || eType.includes('feature')) {
+    queries.push(`${cleanName} natural feature`);
+    queries.push(`${cleanName} landscape`);
+  }
+  if (eType.includes('historic') || eType.includes('archaeological') || eType.includes('monument') || eType.includes('ruin') || eType.includes('castle') || eType.includes('landmark')) {
+    queries.push(`${cleanName} landmark`);
+    queries.push(`${cleanName} historic site`);
+  }
+
+  // Stage 4: Local language / Contextual photo terms
+  const isLusophone = country.toLowerCase().includes('brazil') || country.toLowerCase().includes('brasil') || country.toLowerCase().includes('portugal');
+  const isHispanophone = country.toLowerCase().includes('spain') || country.toLowerCase().includes('españa') || country.toLowerCase().includes('mexico') || country.toLowerCase().includes('colombia') || country.toLowerCase().includes('peru') || country.toLowerCase().includes('argentina') || country.toLowerCase().includes('chile');
+  if (isLusophone) {
+    queries.push(`${cleanName} turismo`);
+    queries.push(`${cleanName} fotos`);
+    queries.push(`${cleanName} paisagem`);
+  } else if (isHispanophone) {
+    queries.push(`${cleanName} turismo`);
+    queries.push(`${cleanName} fotos`);
+    queries.push(`${cleanName} paisaje`);
+  } else {
+    queries.push(`${cleanName} tourism`);
+    queries.push(`${cleanName} photography`);
+  }
+
+  // Stage 5: Diacritic-stripped / normalized variants
+  if (normCleanName && normCleanName.toLowerCase() !== cleanName.toLowerCase()) {
+    queries.push(normCleanName);
+    if (country) {
+      queries.push(`${normCleanName} ${country}`);
     }
   }
 
-  // Landmark + City + Country (e.g. "Forbidden City Beijing China")
-  if (city && country) {
+  // Stage 6: Geographic context (City / State / Country)
+  if (city && country && city.toLowerCase() !== cleanName.toLowerCase()) {
     queries.push(`${cleanName} ${city} ${country}`);
   }
-
-  // Landmark + City (e.g. "Forbidden City Beijing")
   if (city && city.toLowerCase() !== cleanName.toLowerCase()) {
     queries.push(`${cleanName} ${city}`);
+  }
+  if (state && state.toLowerCase() !== cleanName.toLowerCase() && state.toLowerCase() !== city.toLowerCase()) {
+    queries.push(`${cleanName} ${state}`);
   }
 
   // Known landmark-specific expansions
@@ -2764,40 +2865,9 @@ export function buildEntityImageQueries(info: {
     queries.push('Forbidden City Palace Museum Beijing');
   }
 
-  // Landmark + Country (e.g. "Forbidden City China", "Dubrovnik Croatia", "London United Kingdom")
-  if (country && country.toLowerCase() !== cleanName.toLowerCase()) {
-    queries.push(`${cleanName} ${country}`);
-  }
-
-  // Geographic collection and descriptive query expansions (generic feature-oriented queries)
-  if (imageIntent.shape === 'GEOGRAPHIC_COLLECTION' || imageIntent.shape === 'DESCRIPTIVE_GEOGRAPHIC_QUERY' || imageIntent.policy === 'GEOGRAPHIC_FEATURE') {
-    const featType = imageIntent.featureType;
-    const pLoc = imageIntent.parentLocation || city || country;
-    if (featType && pLoc) {
-      queries.push(`${cleanName}`);
-      queries.push(`${pLoc} ${featType}s`);
-      queries.push(`${featType}s ${pLoc}`);
-      queries.push(`${pLoc} ${featType}`);
-      if (country && pLoc.toLowerCase() !== country.toLowerCase()) {
-        queries.push(`${featType} ${pLoc} ${country}`);
-        queries.push(`${pLoc} ${featType}s ${country}`);
-      }
-      if (featType === 'canal') {
-        queries.push(`${pLoc} waterways`);
-        queries.push(`${pLoc} canal network`);
-      }
-    }
-  }
-
-  // Clean location name for modern/general places
-  if (!isHistoricalVessel && cleanName) {
-    queries.push(cleanName);
-  }
-
-  // Full raw name if different
-  if (!isHistoricalVessel && rawName && rawName.toLowerCase() !== cleanName.toLowerCase()) {
-    queries.push(rawName);
-  }
+  // Stage 7: Regional fallback
+  queries.push(`${cleanName} region`);
+  queries.push(`${cleanName} surrounding area`);
 
   // Return deduplicated list
   return Array.from(new Set(queries.filter(Boolean)));
@@ -2870,6 +2940,19 @@ async function _fetchAndValidateImagesInternal(
   const isHistorical = isHistoricalWaypointEntity(info) && imageIntent.type === 'ENTITY_SPECIFIC';
   const histContext = isHistorical ? extractHistoricalImageContext(info) : null;
 
+  const searchMetrics = {
+    queriesAttempted: 0,
+    candidatesCollected: 0,
+    exactEntityMatches: 0,
+    aliasMatches: 0,
+    semanticMatches: 0,
+    contextualMatches: 0,
+    obviousMismatches: 0,
+    provisionalGeoConflicts: 0,
+    trustedGeoConflicts: 0,
+    accepted: 0
+  };
+
   const processCandidate = (candidate: ImageCandidate, intentToUse: ResolvedImageIntent): boolean => {
     if (!candidate.url || typeof candidate.url !== 'string') return false;
     const cleanUrl = candidate.url.trim();
@@ -2883,6 +2966,7 @@ async function _fetchAndValidateImagesInternal(
       country: info.country,
       coordinates: info.coordinates,
       coordinateSource: (info as any).coordinateSource,
+      coordinateTrust: (info as any).coordinateTrust,
       identityStatus: (info as any).identityStatus,
       entityType: info.entityType || (info as any).type,
       type: (info as any).type,
@@ -2910,9 +2994,30 @@ async function _fetchAndValidateImagesInternal(
         tier: validation.tier,
         category
       });
+
+      searchMetrics.accepted++;
+      if (validation.tier === 1) {
+        searchMetrics.exactEntityMatches++;
+      } else if (validation.tier === 2) {
+        if (validation.reason?.includes('ALIAS')) {
+          searchMetrics.aliasMatches++;
+        } else {
+          searchMetrics.semanticMatches++;
+        }
+      } else if (validation.tier === 3) {
+        searchMetrics.contextualMatches++;
+      }
+      if (validation.reason?.includes('PROVISIONAL_GEO_CONFLICT')) {
+        searchMetrics.provisionalGeoConflicts++;
+      }
       return true;
+    } else {
+      searchMetrics.obviousMismatches++;
+      if (validation.reason === 'GEOGRAPHIC_CONFLICT') {
+        searchMetrics.trustedGeoConflicts++;
+      }
+      return false;
     }
-    return false;
   };
 
   const addCandidate = (candidate: ImageCandidate) => {
@@ -2921,6 +3026,7 @@ async function _fetchAndValidateImagesInternal(
     if (!cleanUrl || seenRawUrls.has(cleanUrl)) return;
     seenRawUrls.add(cleanUrl);
     allRawCandidates.push(candidate);
+    searchMetrics.candidatesCollected++;
     processCandidate(candidate, imageIntent);
   };
 
@@ -3015,6 +3121,7 @@ async function _fetchAndValidateImagesInternal(
 
   for (let i = 0; i < queries.length; i++) {
     const query = queries[i];
+    searchMetrics.queriesAttempted++;
     let candidateContext = (info as any).context || (info as any).routeTitle || (info as any).significance || histContextStr;
     if (typeof candidateContext === 'string' && /^(from route|route context|historical significance|notable facts|image|none)$/i.test(candidateContext.trim())) {
       candidateContext = histContextStr !== 'none' ? histContextStr : ((info as any).significance || '');
@@ -3053,8 +3160,9 @@ async function _fetchAndValidateImagesInternal(
       console.warn(`[IMAGE SEARCH] Failed query "${query}":`, e);
     }
 
-    // Stop searching early if we have sufficient high-scoring validated images
-    if (validatedCandidates.length >= 8) {
+    // Stop searching early if we have sufficient high-scoring validated images (at least 4 Tier 1/2 candidates)
+    const highQualityCount = validatedCandidates.filter(c => c.tier === 1 || c.tier === 2).length;
+    if (highQualityCount >= 4 || validatedCandidates.length >= 8) {
       break;
     }
   }
@@ -3094,6 +3202,19 @@ async function _fetchAndValidateImagesInternal(
     fallbackPolicy,
     fallbackAcceptedCount
   });
+
+  console.log(`[IMAGE SEARCH SUMMARY]
+entity="${info.name}"
+queriesAttempted=${searchMetrics.queriesAttempted}
+candidatesCollected=${searchMetrics.candidatesCollected}
+exactEntityMatches=${searchMetrics.exactEntityMatches}
+aliasMatches=${searchMetrics.aliasMatches}
+semanticMatches=${searchMetrics.semanticMatches}
+contextualMatches=${searchMetrics.contextualMatches}
+obviousMismatches=${searchMetrics.obviousMismatches}
+provisionalGeoConflicts=${searchMetrics.provisionalGeoConflicts}
+trustedGeoConflicts=${searchMetrics.trustedGeoConflicts}
+accepted=${searchMetrics.accepted}`);
 
   // 3. Selection, Uniqueness Filtering, Diversity, and Caption Enhancement
   const foundImages: GalleryImage[] = [];

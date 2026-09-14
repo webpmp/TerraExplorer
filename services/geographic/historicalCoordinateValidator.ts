@@ -1254,6 +1254,105 @@ export const HISTORICAL_KNOWLEDGE_BASE: Record<string, HistoricalEntityKnowledge
     },
     boundingBox: { minLat: 39.75, maxLat: 39.88, minLng: -77.30, maxLng: -77.18 }
   },
+  "battle of trafalgar": {
+    entity: "Battle of Trafalgar",
+    entityType: "historical_event_site",
+    geographicScope: "POINT_EVENT",
+    singleLocation: true,
+    expectedRegion: "Atlantic Ocean / Cape Trafalgar, Cádiz, Andalusia, Spain",
+    approximateRegion: "Off Cape Trafalgar, Cádiz, Andalusia, Spain (Atlantic Ocean)",
+    country: "Spain",
+    region: "Andalusia",
+    nearbyCity: "Cádiz",
+    marineRegion: "Atlantic Ocean / Gulf of Cádiz",
+    historicalContext: "The Battle of Trafalgar was a decisive naval engagement fought on October 21, 1805, during the Napoleonic Wars. The British Royal Navy, commanded by Vice Admiral Lord Nelson aboard HMS Victory, defeated the combined French and Spanish fleets off Cape Trafalgar on the southwestern coast of Spain.",
+    significance: "Established British naval supremacy for over a century and permanently eliminated Napoleon's plans to invade Britain.",
+    sourceRationale: "Naval engagement fought off Cape Trafalgar (Cabo de Trafalgar), southwest coast of Spain.",
+    notable: [
+      "Fought off Cape Trafalgar on the southwestern coast of Spain on October 21, 1805",
+      "Vice Admiral Horatio Nelson was mortally wounded aboard HMS Victory during the battle",
+      "The British fleet of 27 ships of the line defeated 33 Franco-Spanish ships without losing a single vessel"
+    ],
+    contextNotes: "Decisive naval battle site located in the Atlantic Ocean off the coast of Cape Trafalgar, Spain.",
+    confidence: "high",
+    allowedCountries: ["Spain", "United Kingdom", "France"],
+    forbiddenRegions: ["Bristol", "Gloucestershire", "London", "Avon", "England"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 36.1800,
+      lng: -6.0300,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 35.8, maxLat: 36.6, minLng: -6.4, maxLng: -5.7 }
+  },
+  "the battle of trafalgar": {
+    entity: "Battle of Trafalgar",
+    entityType: "historical_event_site",
+    geographicScope: "POINT_EVENT",
+    singleLocation: true,
+    expectedRegion: "Atlantic Ocean / Cape Trafalgar, Cádiz, Andalusia, Spain",
+    approximateRegion: "Off Cape Trafalgar, Cádiz, Andalusia, Spain (Atlantic Ocean)",
+    country: "Spain",
+    region: "Andalusia",
+    nearbyCity: "Cádiz",
+    marineRegion: "Atlantic Ocean / Gulf of Cádiz",
+    historicalContext: "The Battle of Trafalgar was a decisive naval engagement fought on October 21, 1805, during the Napoleonic Wars. The British Royal Navy, commanded by Vice Admiral Lord Nelson aboard HMS Victory, defeated the combined French and Spanish fleets off Cape Trafalgar on the southwestern coast of Spain.",
+    significance: "Established British naval supremacy for over a century and permanently eliminated Napoleon's plans to invade Britain.",
+    sourceRationale: "Naval engagement fought off Cape Trafalgar (Cabo de Trafalgar), southwest coast of Spain.",
+    notable: [
+      "Fought off Cape Trafalgar on the southwestern coast of Spain on October 21, 1805",
+      "Vice Admiral Horatio Nelson was mortally wounded aboard HMS Victory during the battle",
+      "The British fleet of 27 ships of the line defeated 33 Franco-Spanish ships without losing a single vessel"
+    ],
+    contextNotes: "Decisive naval battle site located in the Atlantic Ocean off the coast of Cape Trafalgar, Spain.",
+    confidence: "high",
+    allowedCountries: ["Spain", "United Kingdom", "France"],
+    forbiddenRegions: ["Bristol", "Gloucestershire", "London", "Avon", "England"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 36.1800,
+      lng: -6.0300,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 35.8, maxLat: 36.6, minLng: -6.4, maxLng: -5.7 }
+  },
+  "trafalgar": {
+    entity: "Battle of Trafalgar",
+    entityType: "historical_event_site",
+    geographicScope: "POINT_EVENT",
+    singleLocation: true,
+    expectedRegion: "Atlantic Ocean / Cape Trafalgar, Cádiz, Andalusia, Spain",
+    approximateRegion: "Off Cape Trafalgar, Cádiz, Andalusia, Spain (Atlantic Ocean)",
+    country: "Spain",
+    region: "Andalusia",
+    nearbyCity: "Cádiz",
+    marineRegion: "Atlantic Ocean / Gulf of Cádiz",
+    historicalContext: "The Battle of Trafalgar was a decisive naval engagement fought on October 21, 1805, during the Napoleonic Wars. The British Royal Navy, commanded by Vice Admiral Lord Nelson aboard HMS Victory, defeated the combined French and Spanish fleets off Cape Trafalgar on the southwestern coast of Spain.",
+    significance: "Established British naval supremacy for over a century and permanently eliminated Napoleon's plans to invade Britain.",
+    sourceRationale: "Naval engagement fought off Cape Trafalgar (Cabo de Trafalgar), southwest coast of Spain.",
+    notable: [
+      "Fought off Cape Trafalgar on the southwestern coast of Spain on October 21, 1805",
+      "Vice Admiral Horatio Nelson was mortally wounded aboard HMS Victory during the battle",
+      "The British fleet of 27 ships of the line defeated 33 Franco-Spanish ships without losing a single vessel"
+    ],
+    contextNotes: "Decisive naval battle site located in the Atlantic Ocean off the coast of Cape Trafalgar, Spain.",
+    confidence: "high",
+    allowedCountries: ["Spain", "United Kingdom", "France"],
+    forbiddenRegions: ["Bristol", "Gloucestershire", "London", "Avon", "England"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 36.1800,
+      lng: -6.0300,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 35.8, maxLat: 36.6, minLng: -6.4, maxLng: -5.7 }
+  },
   "great depression": {
     entity: "Great Depression",
     entityType: "historical_event",
@@ -1615,9 +1714,6 @@ const US_STATE_MAP: Record<string, string> = {
 
 export function toCanonicalTitleCase(str: string): string {
   if (!str) return '';
-  const hist = getHistoricalEntityKnowledge(str);
-  if (hist?.entity && areEntitiesMatchingWithDiacritics(hist.entity, str)) return hist.entity;
-
   const raw = str.trim();
 
   // Helper to title-case words without lowercasing already capitalized acronyms/Roman numerals (like II, III, DFW)
