@@ -269,6 +269,8 @@ const App: React.FC = () => {
   const [parchmentZoom, setParchmentZoom] = useState(1.0);
   const currentParchmentZoomRef = useRef<number>(1.0);
   const targetParchmentZoomRef = useRef<number>(1.0);
+  const markerPortalRef = useRef<HTMLDivElement>(null);
+  const labelPortalRef = useRef<HTMLDivElement>(null);
 
   const activeScanIdRef = useRef<number>(0);
   const scanResolvedRef = useRef<boolean>(false);
@@ -489,7 +491,18 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const smoothReturnToGlobe = useCallback((targetDistance = 4.5, durationMs = 700) => {
+  const getBaseGlobeDistance = useCallback(() => {
+    if (skin === 'parchment') {
+      const aspect = typeof window !== 'undefined' && window.innerHeight > 0
+        ? window.innerWidth / window.innerHeight
+        : 16 / 9;
+      return getParchmentBaseDistance(aspect);
+    }
+    return 4.5;
+  }, [skin]);
+
+  const smoothReturnToGlobe = useCallback((targetDistance?: number, durationMs = 700) => {
+    const finalTargetDist = targetDistance ?? getBaseGlobeDistance();
     const transitionId = ++activeWaypointTransitionIdRef.current;
     cancelActiveCameraAnimations();
     isCameraAnimatingRef.current = true;
@@ -497,7 +510,7 @@ const App: React.FC = () => {
     // Derive starting position from actual current camera in world space
     let startLat = previousGeoCenterRef.current.lat || 0;
     let startLng = previousGeoCenterRef.current.lng || 0;
-    let startDist = currentCameraDistanceRef.current || targetDistance;
+    let startDist = currentCameraDistanceRef.current || finalTargetDist;
 
     if (cameraControlsRef.current?.object) {
       const camPos = cameraControlsRef.current.object.position;
@@ -510,14 +523,14 @@ const App: React.FC = () => {
       }
     }
 
-    if (startDist >= targetDistance - 0.05) {
+    if (startDist >= finalTargetDist - 0.05) {
       isCameraAnimatingRef.current = false;
       console.log('[Camera] GLOBE_LEVEL_REACHED');
       return;
     }
 
     const startTime = performance.now();
-    console.log(`[Camera] GLOBE_ZOOM_OUT_STARTED from dist=${startDist.toFixed(4)} to dist=${targetDistance.toFixed(4)} duration=${durationMs}ms transitionId=${transitionId}`);
+    console.log(`[Camera] GLOBE_ZOOM_OUT_STARTED from dist=${startDist.toFixed(4)} to dist=${finalTargetDist.toFixed(4)} duration=${durationMs}ms transitionId=${transitionId}`);
 
     const step = (now: number) => {
       if (transitionId !== activeWaypointTransitionIdRef.current) return;
@@ -527,7 +540,7 @@ const App: React.FC = () => {
         ? 4 * progress * progress * progress
         : 1 - Math.pow(-2 * progress + 2, 3) / 2;
 
-      const curDist = startDist + (targetDistance - startDist) * ease;
+      const curDist = startDist + (finalTargetDist - startDist) * ease;
       updateAuthoritativeCamera(startLat, startLng, curDist);
 
       if (progress < 1) {
@@ -536,14 +549,14 @@ const App: React.FC = () => {
         panAnimRef.current = null;
         if (transitionId === activeWaypointTransitionIdRef.current) {
           isCameraAnimatingRef.current = false;
-          updateAuthoritativeCamera(startLat, startLng, targetDistance);
+          updateAuthoritativeCamera(startLat, startLng, finalTargetDist);
           console.log('[Camera] GLOBE_LEVEL_REACHED');
           console.log(`[Camera] COMPLETE return to globe transitionId=${transitionId}`);
         }
       }
     };
     panAnimRef.current = requestAnimationFrame(step);
-  }, [cancelActiveCameraAnimations, updateAuthoritativeCamera]);
+  }, [cancelActiveCameraAnimations, updateAuthoritativeCamera, getBaseGlobeDistance]);
 
   const navigateWaypointCamera = useCallback((
     targetWp: { id?: string; name?: string; lat: number; lng: number },
@@ -2712,7 +2725,7 @@ const App: React.FC = () => {
 
     // Smoothly zoom out to globe level if currently zoomed in, while preserving natural globe rotation
     setAutoRotate(true);
-    smoothReturnToGlobe(4.5);
+    smoothReturnToGlobe();
 
     // 1. Intent routing & entity extraction
     const parsedQuery = routeIntentAndExtractEntity(cleanQuery);
@@ -2875,8 +2888,9 @@ const App: React.FC = () => {
           });
         } else {
           setIsDocumentaryActive(false);
-          cameraStateRef.current.themeSuggestedDistance = 4.5;
-          cameraStateRef.current.routeSuggestedDistance = 4.5;
+          const baseGlobeDist = getBaseGlobeDistance();
+          cameraStateRef.current.themeSuggestedDistance = baseGlobeDist;
+          cameraStateRef.current.routeSuggestedDistance = baseGlobeDist;
           cameraStateRef.current.targetRotation = { lat, lng };
 
           console.log(`[Camera] GLOBE_ROTATION_STARTED to lat=${lat.toFixed(4)} lng=${lng.toFixed(4)}`);
@@ -2956,7 +2970,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
       // Smoothly zoom out to globe level if currently zoomed in, while preserving natural globe rotation
       setAutoRotate(true);
-      smoothReturnToGlobe(4.5);
+      smoothReturnToGlobe();
 
       setInteractionState('GLOBE_SEARCHING');
       setIsDiscoveryLoading(true);
@@ -3468,6 +3482,8 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           scanningArea={scanningArea}
           onCameraChange={updateAuthoritativeCamera}
           onOSMViewportBoundsChange={handleOSMViewportBoundsChange}
+          markerPortalRef={markerPortalRef}
+          labelPortalRef={labelPortalRef}
         />
 
         <VisibilityTracker
@@ -3657,6 +3673,13 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         )}
       </div>
 
+      {/* Waypoint Marker DOM Portal */}
+      <div
+        ref={markerPortalRef}
+        data-testid="marker-portal"
+        className="fixed inset-0 pointer-events-none z-[16] overflow-hidden"
+      />
+
       <MarkerProjectionBeam
         skin={skin}
         userSettings={userSettings}
@@ -3664,6 +3687,13 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         selectedMarkerCoordinates={selectedMarkerCoordinates}
         isInfoPanelOpen={interactionState === 'PIN_SELECTED'}
         isCameraMoving={isDragging || isInteracting || isDocumentaryActive || isScanningArea || isCameraAnimatingRef.current}
+      />
+
+      {/* Waypoint/Marker Label DOM Portal */}
+      <div
+        ref={labelPortalRef}
+        data-testid="label-portal"
+        className="fixed inset-0 pointer-events-none z-[18] overflow-hidden"
       />
 
       {interactionState === 'PIN_SELECTED' && (

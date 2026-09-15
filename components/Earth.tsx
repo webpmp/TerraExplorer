@@ -25,6 +25,8 @@ interface EarthProps {
   scanningArea?: GeoCoordinates | null;
   onCameraChange?: (lat: number, lng: number, distance: number) => void;
   onOSMViewportBoundsChange?: (bounds: OSMViewportBounds | null) => void;
+  markerPortalRef?: React.RefObject<HTMLElement | null>;
+  labelPortalRef?: React.RefObject<HTMLElement | null>;
 }
 
 import { latLngToVector3, vector3ToLatLng } from '../utils/globeCoordinates';
@@ -159,7 +161,8 @@ const UniversalMarker: React.FC<{
   onMouseEnter?: () => void,
   onMouseLeave?: () => void,
   markerId?: string,
-  scanOffsetsRef?: React.RefObject<Record<string, THREE.Vector3>>
+  scanOffsetsRef?: React.RefObject<Record<string, THREE.Vector3>>,
+  portalRef?: React.RefObject<HTMLElement | null> | React.MutableRefObject<HTMLElement | null>
 }> = ({ 
   position, 
   color, 
@@ -178,7 +181,8 @@ const UniversalMarker: React.FC<{
   onMouseEnter,
   onMouseLeave,
   markerId = '',
-  scanOffsetsRef
+  scanOffsetsRef,
+  portalRef
 }) => {
   const meshRef = useRef<THREE.Group>(null);
   const domHitRef = useRef<HTMLDivElement>(null);
@@ -296,6 +300,7 @@ const UniversalMarker: React.FC<{
 
       {/* DOM Overlay Pin (Layered at z-index 40, guarantees 100% visibility above OSM raster layer) */}
       <Html 
+        portal={portalRef as any}
         center 
         zIndexRange={[40, 0]} 
         style={{ 
@@ -463,7 +468,8 @@ const HoverOverlay: React.FC<{
   selectedMarkerId?: string | null;
   hoveredMarkerId?: string | null;
   setHoveredMarkerId?: (id: string | null) => void;
-}> = ({ isInteracting, groupRef, skin, onMarkerClick, outlineColor, selectedMarkerId, hoveredMarkerId, setHoveredMarkerId }) => {
+  portalRef?: React.RefObject<HTMLElement | null> | React.MutableRefObject<HTMLElement | null>;
+}> = ({ isInteracting, groupRef, skin, onMarkerClick, outlineColor, selectedMarkerId, hoveredMarkerId, setHoveredMarkerId, portalRef }) => {
   const isParchment = skin === 'parchment';
   const isModern = skin === 'modern' || isParchment;
   const isAmber = skin === 'retro-amber';
@@ -799,6 +805,7 @@ const HoverOverlay: React.FC<{
   return (
     <group ref={containerGroupRef} position={initWorldPos}>
       <Html 
+        portal={portalRef as any}
         center 
         zIndexRange={[100, 0]} 
         style={{ 
@@ -1547,6 +1554,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
           }}
           markerId={marker.id}
           scanOffsetsRef={scanOffsetsRef}
+          portalRef={props.markerPortalRef}
         />
         );
       })}
@@ -1647,6 +1655,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
       selectedMarkerId={effectiveSelectedMarkerId}
       hoveredMarkerId={hoveredMarkerId}
       setHoveredMarkerId={setHoveredMarkerId}
+      portalRef={props.labelPortalRef}
     />
     </>
   );

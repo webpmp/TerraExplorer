@@ -2161,7 +2161,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       tabInactive: "text-[#8b5a2b] hover:bg-[#e8d5b5]/50 hover:text-[#5c3a21]",
       listDot: "bg-[#8b5a2b] rounded-sm",
       closeBtn: "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity duration-200 hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] rounded",
-      actionBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] rounded",
+      actionBtn: "text-[#8b5a2b] rounded",
       loadMoreBtn: "bg-transparent hover:bg-transparent text-[#5c3a21] rounded-sm text-sm tracking-widest uppercase font-bold",
       notesInput: "bg-[#f4ead5]/40 border border-[#8b5a2b]/30 text-[#522B07] placeholder-[#8b5a2b]/60 focus:border-[#8b5a2b]/70 shadow-[inset_0_1px_2px_rgba(139,90,43,0.1)] rounded-sm outline-none caret-[#522B07]",
       noteCard: "bg-[#f4ead5]/40 border border-[#8b5a2b]/20 rounded-sm shadow-sm",
