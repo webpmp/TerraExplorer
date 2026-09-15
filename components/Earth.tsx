@@ -341,11 +341,34 @@ const UniversalMarker: React.FC<{
             background: 'transparent'
           }}
         >
+          {/* Dynamic Connector Line (z-index: 1) */}
+          <svg 
+            id={`connector-${markerId}`}
+            style={{ 
+              position: 'absolute', 
+              display: 'none',
+              zIndex: 1,
+              pointerEvents: 'none',
+              userSelect: 'none',
+              overflow: 'visible'
+            }}
+          >
+            <line 
+              id={`connector-line-${markerId}`}
+              x1="0" y1="0"
+              x2="32" y2="-32"
+              stroke={skin === 'modern' || skin === 'parchment' ? "rgba(255,255,255,0.7)" : outlineStr} 
+              strokeWidth="1.5" 
+            />
+          </svg>
+
           {/* Visual Marker Pin (strictly pointer-events: none, rigid 1:1 circular geometry) */}
           <div 
             ref={domPinRef}
             className="rounded-full"
             style={{
+              zIndex: 2,
+              position: 'relative',
               flexShrink: 0,
               aspectRatio: '1 / 1',
               boxSizing: 'border-box',
@@ -379,6 +402,26 @@ const UniversalMarker: React.FC<{
                 {waypointIndex + 1}
               </span>
             )}
+          </div>
+
+          {/* Dynamic Label Content (z-index: 3) */}
+          <div 
+            id={`label-${markerId}`}
+            style={{ 
+              position: 'absolute', 
+              display: 'none',
+              zIndex: 3, 
+              pointerEvents: 'none', 
+              userSelect: 'none'
+            }}
+            className={`px-3 py-1.5 rounded-lg whitespace-nowrap text-sm font-bold shadow-xl border backdrop-blur-md transition-opacity duration-150
+            ${(skin === 'modern' || skin === 'parchment')
+                ? 'bg-black/75 text-white border-white/20' 
+                : (skin === 'retro-amber')
+                  ? 'bg-black text-amber-300 border-amber-400 font-mono'
+                  : 'bg-black text-green-300 border-green-400 font-mono'}`}
+          >
+            {markerData?.displayName || markerData?.name || 'Unknown Location'}
           </div>
         </div>
       </Html>
@@ -479,10 +522,6 @@ const HoverOverlay: React.FC<{
   const [rayHoveredObject, setRayHoveredObject] = useState<THREE.Object3D | null>(null);
 
   const containerGroupRef = useRef<THREE.Group>(null);
-  const overlayContainerRef = useRef<HTMLDivElement>(null);
-  const svgRef = useRef<SVGSVGElement>(null);
-  const lineRef = useRef<SVGLineElement>(null);
-  const labelDivRef = useRef<HTMLDivElement>(null);
 
   const cachedSelectedPinRef = useRef<{ pin: any; object: THREE.Object3D; id: string } | null>(null);
 
@@ -597,18 +636,23 @@ const HoverOverlay: React.FC<{
     };
   }, [isInteracting, camera, size, gl, rayHoveredPin, hoveredMarkerId, groupRef]);
 
+  const prevActivePinIdRef = useRef<string | null>(null);
+
   useFrame((state) => {
     const distance = state.camera.position.length();
     const isOSMDetailActive = distance <= OSM_DETAIL_THRESHOLD;
-
-    if (overlayContainerRef.current) {
-      overlayContainerRef.current.style.display = isOSMDetailActive ? 'none' : 'block';
-    }
 
     if (isOSMDetailActive) {
       if (rayHoveredPin) {
         setRayHoveredPin(null);
         setRayHoveredObject(null);
+      }
+      if (prevActivePinIdRef.current) {
+        const prevSvg = document.getElementById(`connector-${prevActivePinIdRef.current}`);
+        if (prevSvg) prevSvg.style.display = 'none';
+        const prevLabel = document.getElementById(`label-${prevActivePinIdRef.current}`);
+        if (prevLabel) prevLabel.style.display = 'none';
+        prevActivePinIdRef.current = null;
       }
       return;
     }
@@ -637,9 +681,13 @@ const HoverOverlay: React.FC<{
       }
     }
 
-    if (!activePin || !activeObject || !containerGroupRef.current || typeof activeObject.getWorldPosition !== 'function') {
-      if (overlayContainerRef.current) {
-        overlayContainerRef.current.style.display = 'none';
+    if (!activePin || !activeObject || typeof activeObject.getWorldPosition !== 'function') {
+      if (prevActivePinIdRef.current) {
+        const prevSvg = document.getElementById(`connector-${prevActivePinIdRef.current}`);
+        if (prevSvg) prevSvg.style.display = 'none';
+        const prevLabel = document.getElementById(`label-${prevActivePinIdRef.current}`);
+        if (prevLabel) prevLabel.style.display = 'none';
+        prevActivePinIdRef.current = null;
       }
       return;
     }
@@ -650,17 +698,23 @@ const HoverOverlay: React.FC<{
 
     const isFacingCam = isGlobePointVisible(wp, camera.position);
     if (!isFacingCam) {
-      if (overlayContainerRef.current) {
-        overlayContainerRef.current.style.display = 'none';
+      if (prevActivePinIdRef.current) {
+        const prevSvg = document.getElementById(`connector-${prevActivePinIdRef.current}`);
+        if (prevSvg) prevSvg.style.display = 'none';
+        const prevLabel = document.getElementById(`label-${prevActivePinIdRef.current}`);
+        if (prevLabel) prevLabel.style.display = 'none';
       }
       return;
     }
 
-    if (overlayContainerRef.current) {
-      overlayContainerRef.current.style.display = 'block';
+    // Hide previous if changed
+    if (prevActivePinIdRef.current && prevActivePinIdRef.current !== activePin.id) {
+      const prevSvg = document.getElementById(`connector-${prevActivePinIdRef.current}`);
+      if (prevSvg) prevSvg.style.display = 'none';
+      const prevLabel = document.getElementById(`label-${prevActivePinIdRef.current}`);
+      if (prevLabel) prevLabel.style.display = 'none';
     }
-
-    containerGroupRef.current.position.copy(wp);
+    prevActivePinIdRef.current = activePin.id;
 
     // 2. Compute dynamic pin radius in screen pixels
     const markerVisualSize = (activeObject.userData.visualSize || 0.01) * 1.2;
@@ -714,11 +768,12 @@ const HoverOverlay: React.FC<{
       });
     }
 
-    // 4. Measure actual rendered label dimensions
+    // 4. Measure actual rendered label dimensions directly from DOM
     let labelWidth = 140;
     let labelHeight = 32;
-    if (labelDivRef.current) {
-      const rect = labelDivRef.current.getBoundingClientRect();
+    const activeLabel = document.getElementById(`label-${activePin.id}`);
+    if (activeLabel) {
+      const rect = activeLabel.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
         labelWidth = rect.width;
         labelHeight = rect.height;
@@ -741,133 +796,32 @@ const HoverOverlay: React.FC<{
       { width: size.width, height: size.height }
     );
 
-    // 6. Update SVG and Label positions
-    if (svgRef.current) {
-      svgRef.current.style.left = `${bestLayout.svgBox.left}px`;
-      svgRef.current.style.top = `${bestLayout.svgBox.top}px`;
-      svgRef.current.style.width = `${bestLayout.svgBox.width}px`;
-      svgRef.current.style.height = `${bestLayout.svgBox.height}px`;
+    // 6. Update SVG and Label positions directly in DOM
+    const activeSvg = document.getElementById(`connector-${activePin.id}`);
+    if (activeSvg) {
+      activeSvg.style.display = 'block';
+      activeSvg.style.left = `${bestLayout.svgBox.left + 20}px`;
+      activeSvg.style.top = `${bestLayout.svgBox.top + 20}px`;
+      activeSvg.style.width = `${bestLayout.svgBox.width}px`;
+      activeSvg.style.height = `${bestLayout.svgBox.height}px`;
+      
+      const activeLine = document.getElementById(`connector-line-${activePin.id}`);
+      if (activeLine) {
+        activeLine.setAttribute('x1', bestLayout.svgLine.x1.toString());
+        activeLine.setAttribute('y1', bestLayout.svgLine.y1.toString());
+        activeLine.setAttribute('x2', bestLayout.svgLine.x2.toString());
+        activeLine.setAttribute('y2', bestLayout.svgLine.y2.toString());
+      }
     }
 
-    if (lineRef.current) {
-      lineRef.current.setAttribute('x1', bestLayout.svgLine.x1.toString());
-      lineRef.current.setAttribute('y1', bestLayout.svgLine.y1.toString());
-      lineRef.current.setAttribute('x2', bestLayout.svgLine.x2.toString());
-      lineRef.current.setAttribute('y2', bestLayout.svgLine.y2.toString());
-    }
-
-    if (labelDivRef.current) {
-      labelDivRef.current.style.left = `${bestLayout.labelOffset.left}px`;
-      labelDivRef.current.style.top = `${bestLayout.labelOffset.top}px`;
+    if (activeLabel) {
+      activeLabel.style.display = 'block';
+      activeLabel.style.left = `${bestLayout.labelOffset.left + 20}px`;
+      activeLabel.style.top = `${bestLayout.labelOffset.top + 20}px`;
     }
   });
 
-  const currentDist = camera.position.length();
-  const isOSMDetailActive = currentDist <= OSM_DETAIL_THRESHOLD;
-  if (isOSMDetailActive) return null;
-
-  let activePin = null;
-  let activeObject = null;
-
-  if (hoveredMarkerId) {
-    const match = findPinObjectById(hoveredMarkerId);
-    if (match) {
-      activePin = match.pin;
-      activeObject = match.object;
-    }
-  }
-
-  if (!activePin && rayHoveredPin) {
-    activePin = rayHoveredPin;
-    activeObject = rayHoveredObject;
-  }
-
-  if (!activePin && selectedMarkerId) {
-    const match = findPinObjectById(selectedMarkerId);
-    if (match) {
-      activePin = match.pin;
-      activeObject = match.object;
-    }
-  }
-
-  if (!activePin || !activeObject) return null;
-
-  // Resolve world position directly for the group position prop
-  const initWorldPos = new THREE.Vector3();
-  if (typeof activeObject.getWorldPosition === 'function') {
-    activeObject.getWorldPosition(initWorldPos);
-  }
-
-  const isWaypoint = activeObject?.userData?.isWaypoint;
-  const isMultiLocation = activeObject?.userData?.isMultiLocation;
-  const waypointIndex = activeObject?.userData?.waypointIndex;
-
-  return (
-    <group ref={containerGroupRef} position={initWorldPos}>
-      <Html 
-        portal={portalRef as any}
-        center 
-        zIndexRange={[100, 0]} 
-        style={{ 
-          pointerEvents: 'none',
-          userSelect: 'none'
-        }}
-      >
-        <div 
-          ref={overlayContainerRef}
-          style={{ 
-            position: 'relative', 
-            pointerEvents: 'none',
-            userSelect: 'none',
-            display: isOSMDetailActive ? 'none' : 'block'
-          }}
-        >
-          {/* Dynamic Connector Line */}
-          <svg 
-            ref={svgRef}
-            style={{ 
-              position: 'absolute', 
-              top: '-32px', 
-              left: '0px', 
-              width: '32px', 
-              height: '32px', 
-              overflow: 'visible', 
-              pointerEvents: 'none',
-              userSelect: 'none'
-            }}
-          >
-            <line 
-              ref={lineRef}
-              x1="0" y1="0"
-              x2="32" y2="-32"
-              stroke={isModern ? "rgba(255,255,255,0.7)" : outlineColor} 
-              strokeWidth="1.5" 
-            />
-          </svg>
-
-          {/* Dynamic Label Content (pointer-events: none) */}
-          <div 
-            ref={labelDivRef}
-            style={{ 
-              position: 'absolute', 
-              left: '32px', 
-              top: '-32px', 
-              pointerEvents: 'none', 
-              userSelect: 'none'
-            }}
-            className={`px-3 py-1.5 rounded-lg whitespace-nowrap text-sm font-bold shadow-xl border backdrop-blur-md transition-opacity duration-150
-            ${isModern 
-                ? 'bg-black/75 text-white border-white/20' 
-                : isAmber
-                  ? 'bg-black text-amber-300 border-amber-400 font-mono'
-                  : 'bg-black text-green-300 border-green-400 font-mono'}`}
-          >
-            {(activePin as any).displayName || activePin.name || 'Unknown Location'}
-          </div>
-        </div>
-      </Html>
-    </group>
-  );
+  return null;
 };
 
 const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
