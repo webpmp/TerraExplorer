@@ -1,4 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useCameraMetrics } from '../hooks/useCameraMetrics';
+import { OSMTransitionFog } from './OSMTransitionFog';
+import { ParchmentGlobeMarkerArtwork } from './ParchmentGlobeMarkerArtwork';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
@@ -1979,45 +1982,93 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                       }}
                     >
                       {/* Small Geographic Visual Pin (strictly 1:1 circular geometry) */}
-                      <div
-                        style={{
-                          width: `${pinSize}px`,
-                          height: `${pinSize}px`,
-                          minWidth: `${pinSize}px`,
-                          minHeight: `${pinSize}px`,
-                          flexShrink: 0,
-                          aspectRatio: '1 / 1',
-                          boxSizing: 'border-box',
-                          backgroundColor: color,
-                          borderRadius: '50%',
-                          border: `2px solid ${outlineColor}`,
-                          boxShadow,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          pointerEvents: 'none',
-                          userSelect: 'none',
-                          opacity: isDeparting ? (isDepartingFading ? 0.7 : 1) : 1,
-                          transition: isDeparting
-                            ? 'opacity 350ms ease-out, transform 0.15s ease-out, box-shadow 0.15s ease-out'
-                            : 'transform 0.15s ease-out, box-shadow 0.15s ease-out'
-                        }}
-                      >
-                        {showMarkerNumber && (
-                          <span
-                            style={{
-                              fontSize: `${numberFontSize}px`,
-                              fontWeight: numberStyle.fontWeight,
-                              color: numberStyle.color,
-                              lineHeight: numberStyle.lineHeight,
-                              textShadow: numberStyle.textShadow,
-                              pointerEvents: 'none'
-                            }}
-                          >
-                            {marker.index + 1}
-                          </span>
-                        )}
-                      </div>
+                      {skin === 'parchment' ? (
+                        <div
+                          style={{
+                            position: 'relative',
+                            width: `${pinSize * 2}px`,
+                            height: `${pinSize * 2}px`,
+                            minWidth: `${pinSize * 2}px`,
+                            minHeight: `${pinSize * 2}px`,
+                            flexShrink: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            pointerEvents: 'none',
+                            userSelect: 'none',
+                            opacity: isDeparting ? (isDepartingFading ? 0.7 : 1) : 1,
+                            transition: isDeparting
+                              ? 'opacity 350ms ease-out, transform 0.15s ease-out, box-shadow 0.15s ease-out'
+                              : 'transform 0.15s ease-out, box-shadow 0.15s ease-out',
+                            background: 'transparent',
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            outline: 'none',
+                            boxShadow: 'none'
+                          }}
+                        >
+                          <ParchmentGlobeMarkerArtwork markerId={`osm-${marker.id}`} />
+                          {showMarkerNumber && (
+                            <span
+                              style={{
+                                position: 'absolute',
+                                top: '43%',
+                                left: '50%',
+                                transform: 'translate(-50%, -50%)',
+                                zIndex: 1,
+                                fontSize: `${numberFontSize}px`,
+                                fontWeight: numberStyle.fontWeight,
+                                color: '#ffffff', // ensure contrast over emerald
+                                lineHeight: '1',
+                                textShadow: '0px 1px 2px rgba(0,0,0,0.8)',
+                                pointerEvents: 'none'
+                              }}
+                            >
+                              {marker.index + 1}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <div
+                          style={{
+                            width: `${pinSize}px`,
+                            height: `${pinSize}px`,
+                            minWidth: `${pinSize}px`,
+                            minHeight: `${pinSize}px`,
+                            flexShrink: 0,
+                            aspectRatio: '1 / 1',
+                            boxSizing: 'border-box',
+                            backgroundColor: color,
+                            borderRadius: '50%',
+                            border: `2px solid ${outlineColor}`,
+                            boxShadow,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            pointerEvents: 'none',
+                            userSelect: 'none',
+                            opacity: isDeparting ? (isDepartingFading ? 0.7 : 1) : 1,
+                            transition: isDeparting
+                              ? 'opacity 350ms ease-out, transform 0.15s ease-out, box-shadow 0.15s ease-out'
+                              : 'transform 0.15s ease-out, box-shadow 0.15s ease-out'
+                          }}
+                        >
+                          {showMarkerNumber && (
+                            <span
+                              style={{
+                                fontSize: `${numberFontSize}px`,
+                                fontWeight: numberStyle.fontWeight,
+                                color: numberStyle.color,
+                                lineHeight: numberStyle.lineHeight,
+                                textShadow: numberStyle.textShadow,
+                                pointerEvents: 'none'
+                              }}
+                            >
+                              {marker.index + 1}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {/* Co-located OSM Marker Label (Visible on Hover, Selection, or Departing Fade, strictly pointer-events: none) */}

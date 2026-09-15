@@ -103,7 +103,7 @@ export const MedievalEmeraldBronzePinIcon: React.FC<{ width?: number; height?: n
         rx="5"
         ry="3"
         fill="#ffffff"
-        opacity="0.16"
+        opacity="0.1"
       />
     </g>
   </svg>

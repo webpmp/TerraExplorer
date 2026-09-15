@@ -46,6 +46,7 @@ import {
   getMarkerBoxShadow,
   getThemeMarkerScale
 } from '../utils/markerStyleUtils';
+import { ParchmentGlobeMarkerArtwork } from './ParchmentGlobeMarkerArtwork';
 
 // Custom Shader for Retro Effect
 const RetroShader = {
@@ -248,11 +249,19 @@ const UniversalMarker: React.FC<{
           const strokeWidth = calculateMarkerBorderWidth(diameter, skin);
 
           // Update visual marker size inside 40px hit area
-          domPinRef.current.style.width = `${diameter}px`;
-          domPinRef.current.style.height = `${diameter}px`;
-          domPinRef.current.style.minWidth = `${diameter}px`;
-          domPinRef.current.style.minHeight = `${diameter}px`;
-          domPinRef.current.style.borderWidth = `${strokeWidth}px`;
+          if (skin === 'parchment') {
+            const parchmentSize = diameter * 2;
+            domPinRef.current.style.width = `${parchmentSize}px`;
+            domPinRef.current.style.height = `${parchmentSize}px`;
+            domPinRef.current.style.minWidth = `${parchmentSize}px`;
+            domPinRef.current.style.minHeight = `${parchmentSize}px`;
+          } else {
+            domPinRef.current.style.width = `${diameter}px`;
+            domPinRef.current.style.height = `${diameter}px`;
+            domPinRef.current.style.minWidth = `${diameter}px`;
+            domPinRef.current.style.minHeight = `${diameter}px`;
+            domPinRef.current.style.borderWidth = `${strokeWidth}px`;
+          }
 
           // Dynamically scale waypoint number font size proportionally with the marker diameter
           if (domNumberRef.current) {
@@ -363,46 +372,93 @@ const UniversalMarker: React.FC<{
           </svg>
 
           {/* Visual Marker Pin (strictly pointer-events: none, rigid 1:1 circular geometry) */}
-          <div 
-            ref={domPinRef}
-            className="rounded-full"
-            style={{
-              zIndex: 2,
-              position: 'relative',
-              flexShrink: 0,
-              aspectRatio: '1 / 1',
-              boxSizing: 'border-box',
-              borderRadius: '50%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: colorStr,
-              borderColor: outlineStr,
-              borderStyle: 'solid',
-              boxShadow,
-              opacity: isWaypoint && waypointRole === 'administrative' ? 0.6 : 1.0,
-              pointerEvents: 'none',
-              transformOrigin: 'center center',
-              userSelect: 'none'
-            }}
-          >
-            {isWaypoint && isMultiLocation && waypointIndex !== undefined && (
-              <span 
-                ref={domNumberRef}
-                style={{
-                  fontSize: `${initialFontSize}px`,
-                  fontWeight: numberStyle.fontWeight,
-                  color: numberStyle.color,
-                  lineHeight: numberStyle.lineHeight,
-                  textShadow: numberStyle.textShadow,
-                  userSelect: 'none',
-                  pointerEvents: 'none'
-                }}
-              >
-                {waypointIndex + 1}
-              </span>
-            )}
-          </div>
+          {skin === 'parchment' ? (
+            <div
+              ref={domPinRef}
+              style={{
+                zIndex: 2,
+                position: 'relative',
+                flexShrink: 0,
+                width: '0px',
+                height: '0px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: isWaypoint && waypointRole === 'administrative' ? 0.6 : 1.0,
+                pointerEvents: 'none',
+                transformOrigin: 'center center',
+                userSelect: 'none',
+                background: 'transparent',
+                backgroundColor: 'transparent',
+                border: 'none',
+                outline: 'none',
+                boxShadow: 'none'
+              }}
+            >
+              <ParchmentGlobeMarkerArtwork markerId={`globe-${markerId}`} />
+              {isWaypoint && isMultiLocation && waypointIndex !== undefined && (
+                <span 
+                  ref={domNumberRef}
+                  style={{
+                    position: 'absolute',
+                    top: '43%',
+                    left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    zIndex: 1,
+                    fontWeight: numberStyle.fontWeight,
+                    color: '#ffffff', // ensure contrast over emerald
+                    lineHeight: '1',
+                    textShadow: '0px 1px 2px rgba(0,0,0,0.8)',
+                    userSelect: 'none',
+                    pointerEvents: 'none'
+                  }}
+                >
+                  {waypointIndex + 1}
+                </span>
+              )}
+            </div>
+          ) : (
+            <div 
+              ref={domPinRef}
+              className="rounded-full"
+              style={{
+                zIndex: 2,
+                position: 'relative',
+                flexShrink: 0,
+                aspectRatio: '1 / 1',
+                boxSizing: 'border-box',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: colorStr,
+                borderColor: outlineStr,
+                borderStyle: 'solid',
+                boxShadow,
+                opacity: isWaypoint && waypointRole === 'administrative' ? 0.6 : 1.0,
+                pointerEvents: 'none',
+                transformOrigin: 'center center',
+                userSelect: 'none'
+              }}
+            >
+              {isWaypoint && isMultiLocation && waypointIndex !== undefined && (
+                <span 
+                  ref={domNumberRef}
+                  style={{
+                    fontSize: `${initialFontSize}px`,
+                    fontWeight: numberStyle.fontWeight,
+                    color: numberStyle.color,
+                    lineHeight: numberStyle.lineHeight,
+                    textShadow: numberStyle.textShadow,
+                    userSelect: 'none',
+                    pointerEvents: 'none'
+                  }}
+                >
+                  {waypointIndex + 1}
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Dynamic Label Content (z-index: 3) */}
           <div 
