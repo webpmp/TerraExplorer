@@ -1188,7 +1188,8 @@ describe('Lightbox Metadata Integration', () => {
           routeNav={multiLocationNav}
         />
       );
-      expect(parchmentHtml).toMatch(/class="[^"]*text-xs[^"]*font-bold[^"]*uppercase[^"]*tracking-widest[^"]*"[^>]*>\s*Waypoint 3 of 9/);
+      expect(parchmentHtml).toMatch(/>\s*WAYPOINT\s*</);
+      expect(parchmentHtml).toMatch(/>\s*3 OF 9\s*</);
     });
 
     it('displays route-local "WAYPOINT X OF Y" without repeating route name in waypoint navigation control', () => {

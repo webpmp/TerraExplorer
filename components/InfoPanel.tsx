@@ -146,7 +146,17 @@ export const VoyagerCeremonialBanner: React.FC<{
   onFavoriteClick: () => void;
   favoriteTitle: string;
   favoriteDialog?: React.ReactNode;
-}> = ({ isFavorite, onFavoriteClick, favoriteTitle, favoriteDialog }) => {
+  routeNav?: {
+    current: number;
+    total: number;
+    routeGroupName?: string;
+    routeGroupId?: string;
+    routeLocalCurrent?: number;
+    routeLocalTotal?: number;
+    onNext: () => void;
+    onPrev: () => void;
+  };
+}> = ({ isFavorite, onFavoriteClick, favoriteTitle, favoriteDialog, routeNav }) => {
   return (
     <div className="relative w-full px-1 py-0 flex items-center justify-center select-none" data-testid="voyager-ceremonial-banner">
       {/* Option 3: THE VOYAGER Horizontal Banner SVG Artwork */}
@@ -249,12 +259,50 @@ export const VoyagerCeremonialBanner: React.FC<{
       <button
         type="button"
         onClick={onFavoriteClick}
-        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full flex items-center justify-center cursor-pointer transition-transform hover:scale-110 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] z-10"
+        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full flex items-center justify-center cursor-pointer transition-transform hover:scale-110 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] z-20"
         title={favoriteTitle}
         aria-label={favoriteTitle}
       >
         <span className="sr-only">{favoriteTitle}</span>
       </button>
+
+      {/* Waypoint Navigation Overlay */}
+      {routeNav && (
+        <div className="absolute inset-0 flex items-center justify-between px-4 sm:px-6 z-10 pointer-events-none">
+          {/* Left Side: Prev + WAYPOINT */}
+          <div className="flex-1 flex items-center justify-between pointer-events-auto pr-6 sm:pr-8">
+            <button
+              onClick={routeNav.onPrev}
+              className="ml-[10px] p-1 hover:text-white text-[#F3E5AB] opacity-80 hover:opacity-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] rounded"
+              aria-label="Previous waypoint"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-[#F3E5AB] opacity-90 drop-shadow-sm select-none">
+              WAYPOINT
+            </span>
+          </div>
+
+          {/* Center gap for the emblem */}
+          <div className="w-[50px] shrink-0" />
+
+          {/* Right Side: N OF M + Next */}
+          <div className="flex-1 flex items-center justify-between pointer-events-auto pl-6 sm:pl-8">
+            <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-[#F3E5AB] opacity-90 drop-shadow-sm select-none">
+              {routeNav.routeGroupName && routeNav.routeLocalCurrent !== undefined && routeNav.routeLocalTotal !== undefined
+                ? `${routeNav.routeLocalCurrent} OF ${routeNav.routeLocalTotal}`
+                : `${routeNav.current} OF ${routeNav.total}`}
+            </span>
+            <button
+              onClick={routeNav.onNext}
+              className="mr-[10px] p-1 hover:text-white text-[#F3E5AB] opacity-80 hover:opacity-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] rounded"
+              aria-label="Next waypoint"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Dialog Popover if open */}
       {favoriteDialog}
@@ -2913,6 +2961,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
               isFavorite={isFavorite}
               onFavoriteClick={handleFavoriteClick}
               favoriteTitle={isFavorite ? "Edit Favorite" : (routeNav ? "Save Route" : "Save Location")}
+              routeNav={routeNav}
               favoriteDialog={
                 showFavoriteDialog ? (
                   <div className={`absolute top-full mt-2 w-64 p-3 z-50 flex flex-col gap-3 left-1/2 -translate-x-1/2 ${theme.popover}`}>
@@ -2962,8 +3011,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             />
           )}
 
-          {/* Route Navigation */}
-          {isMultiLocation && routeNav && (
+          {/* Route Navigation for non-Parchment themes */}
+          {isMultiLocation && routeNav && !isParchment && (
              <div className={`relative z-[1] ${isParchment ? 'px-3 py-1 bg-transparent' : isRetro ? 'px-3 py-1.5 border-b border-current opacity-80' : 'px-3 py-1.5 border-b border-white/10 bg-white/5'} flex items-center justify-between min-w-0`}>
                 <button onClick={routeNav.onPrev} className={`p-1.5 rounded-full ${theme.navBtn} pointer-events-auto shrink-0`} aria-label="Previous waypoint">
                     <ChevronLeft size={16} />
@@ -2978,7 +3027,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                 <button onClick={routeNav.onNext} className={`p-1.5 rounded-full ${theme.navBtn} pointer-events-auto shrink-0`} aria-label="Next waypoint">
                     <ChevronRight size={16} />
                 </button>
-            </div>
+             </div>
           )}
 
 
