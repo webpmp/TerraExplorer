@@ -6,7 +6,7 @@
 
 
 
-TerraExplorer
+# TerraExplorer
 
 Terra Explorer is an interactive 3D globe application that lets users freely navigate the planet or quickly jump to cities, states, landmarks, and unique points of interest through a powerful search experience. It supports rich data layers including shipwrecks, natural wonders, and historical sites, provides overlays with location overviews, current news, and notable people associated with each place, and includes the Trace Route feature that extracts locations from any article, URL, or text block to build a connected journey across them.
 
@@ -38,7 +38,7 @@ Terra Explorer is an interactive 3D globe application that lets users freely nav
 </p>
 
 
-Features
+## Features
 
 * Interactive 3D Globe: Seamlessly rotate, zoom, and explore a high-fidelity 3D model of the Earth.
 * OpenStreetMap Street Data: Zoom from the 3D globe into detailed street-level map data using CARTO vector maps based on OpenStreetMap data. CARTO vector maps require a CARTO API key to access the map services. OpenStreetMap attribution requirements are preserved and displayed within the application.
@@ -72,11 +72,11 @@ Environment Variables
 
 Copy .env.example to .env and configure your API keys:
 
-# Required for AI-powered location insights and smart search
+### Required for AI-powered location insights and smart search
 GEMINI_API_KEY=your_gemini_api_key
-# Required for CARTO vector and raster map services
+### Required for CARTO vector and raster map services
 VITE_CARTO_API_KEY=your_carto_api_key
-# Optional news providers for real-time location news
+### Optional news providers for real-time location news
 VITE_NYT_API_KEY=your_nytimes_api_key
 VITE_NEWS_API_KEY=your_newsapi_org_key
 VITE_NEWS_DATA_API_KEY=your_newsdata_io_key
@@ -85,11 +85,11 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key
 
 Installation & Running
 
-# Install dependencies
+### Install dependencies
 npm install
-# Start the development server
+### Start the development server
 npm run dev
-# Build for production
+### Build for production
 npm run build
 
 Usage
