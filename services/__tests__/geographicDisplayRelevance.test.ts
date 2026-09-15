@@ -240,4 +240,64 @@ describe('Geographic Display Relevance & Marker Filtering Suite', () => {
     expect(result.accepted.length).toBe(2);
     expect(result.rejected.length).toBe(2);
   });
+
+  it('5. Accepts legitimate fallback populated places discovered during expanded search radius (up to 200km) in remote/oceanic areas', () => {
+    const blackSeaOrigin: ScanOrigin = {
+      lat: 44.7432,
+      lng: 31.6281
+    };
+
+    const candidates: Candidate[] = [
+      {
+        id: 'chernomorskoe',
+        name: 'Chernomorskoe',
+        displayName: 'Черноморское',
+        coordinates: { lat: 45.5039, lng: 32.7011 }, // ~119.8 km
+        type: 'town',
+        rankingClass: 'POPULATED_PLACE',
+        tier: 2,
+        searchRadiusKm: 200,
+        pipelineStatus: 'selected',
+        providers: ['osm'],
+        rawProviders: {}
+      },
+      {
+        id: 'yevpatoria',
+        name: 'Yevpatoria',
+        displayName: 'Евпатория',
+        coordinates: { lat: 45.1904, lng: 33.3668 }, // ~145.6 km
+        type: 'city',
+        rankingClass: 'POPULATED_PLACE',
+        tier: 1,
+        searchRadiusKm: 200,
+        pipelineStatus: 'selected',
+        providers: ['osm'],
+        rawProviders: {}
+      },
+      {
+        id: 'too-far',
+        name: 'Too Far City',
+        coordinates: { lat: 46.8, lng: 33.5 }, // ~260 km
+        type: 'city',
+        rankingClass: 'POPULATED_PLACE',
+        tier: 1,
+        searchRadiusKm: 200,
+        pipelineStatus: 'selected',
+        providers: ['osm'],
+        rawProviders: {}
+      }
+    ];
+
+    const result = filterCandidatesByDisplayRelevance(candidates, blackSeaOrigin);
+    expect(result.accepted.length).toBe(2);
+    expect(result.rejected.length).toBe(1);
+
+    const acceptedNames = result.accepted.map(c => c.name);
+    expect(acceptedNames).toContain('Chernomorskoe');
+    expect(acceptedNames).toContain('Yevpatoria');
+
+    const rejected = result.rejected.find(r => r.candidate.name === 'Too Far City');
+    expect(rejected).toBeDefined();
+    expect(rejected?.reason).toBe('OUTSIDE_DISPLAY_RADIUS');
+  });
 });

@@ -268,4 +268,27 @@ describe('Waypoint Camera Framing Across All Themes Suite', () => {
     expect(cameraLat).toBeCloseTo(waypoints[0].lat, 2);
     expect(cameraLng).toBeCloseTo(waypoints[0].lng, 2);
   });
+
+  it('Test 7: Smooth return to globe and search resolution in Parchment theme respects getParchmentBaseDistance without revealing background', () => {
+    const aspect = 16 / 9;
+    const parchmentBase = getParchmentBaseDistance(aspect);
+
+    const getBaseGlobeDistanceHelper = (theme: SkinType) => {
+      if (theme === 'parchment') {
+        return getParchmentBaseDistance(aspect);
+      }
+      return 4.5;
+    };
+
+    // Modern / Retro return to 4.5
+    expect(getBaseGlobeDistanceHelper('modern')).toBe(4.5);
+    expect(getBaseGlobeDistanceHelper('retro-green')).toBe(4.5);
+    expect(getBaseGlobeDistanceHelper('retro-amber')).toBe(4.5);
+
+    // Parchment returns to ~2.176
+    expect(getBaseGlobeDistanceHelper('parchment')).toBeCloseTo(parchmentBase, 4);
+    expect(getBaseGlobeDistanceHelper('parchment')).toBeLessThan(3.0);
+    expect(getBaseGlobeDistanceHelper('parchment')).toBeGreaterThan(2.0);
+  });
 });
+

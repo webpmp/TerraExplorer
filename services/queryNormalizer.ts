@@ -1,3 +1,5 @@
+import { detectImageIntentCategory, ImageIntentCategory } from './imageService';
+
 import { getAuthoritativeEventModel } from './geographic/historicalRouteRegistry';
 import { toCanonicalTitleCase, getHistoricalEntityKnowledge } from './geographic/historicalCoordinateValidator';
 
@@ -15,6 +17,49 @@ export interface NormalizedEntityResult {
  * Removes natural language interrogative query scaffolding (e.g. "where was ... take place?",
  * "where did ... happen?", "tell me about ...", "show me ...") to isolate the core entity candidate.
  */
+
+export interface MediaSeparationResult {
+  originalQuery: string;
+  cleanEntity: string;
+  imageIntent: ImageIntentCategory;
+  explicitMediaIntent: boolean;
+}
+
+export function extractMediaIntentAndCleanEntity(rawQuery: string, entityCandidate: string): MediaSeparationResult {
+  if (!rawQuery) {
+    return {
+      originalQuery: '',
+      cleanEntity: '',
+      imageIntent: 'PHYSICAL_LOCATION',
+      explicitMediaIntent: false
+    };
+  }
+
+  // 1. Detect media intent from the raw query
+  const intentResult = detectImageIntentCategory(rawQuery, '', '', '');
+  
+  let cleanEntity = entityCandidate;
+
+  // 2. If explicit media intent is detected, cleanly separate it
+  if (intentResult.explicitMediaIntent) {
+    // We only strip these if they are a clean prefix ending in " of " or a clean suffix.
+    const MEDIA_PREFIXES = /^\s*(?:show\s+me\s+)?(?:some\s+)?(?:historical\s+)?(?:photos?|photographs?|pictures?|images?|maps?|paintings?|illustrations?|drawings?|sketches?|coats?\s+of\s+arms|flags?|seals?|logos?|emblems?)\s+of\s+/i;
+    const MEDIA_SUFFIXES = /\s+(?:photos?|photographs?|pictures?|images?|maps?|paintings?|illustrations?|drawings?|sketches?|coat\s+of\s+arms|coats\s+of\s+arms|flags?|seals?|logos?|emblems?)\s*$/i;
+
+    cleanEntity = cleanEntity.replace(MEDIA_PREFIXES, '');
+    cleanEntity = cleanEntity.replace(MEDIA_SUFFIXES, '');
+  }
+
+  
+
+  return {
+    originalQuery: rawQuery,
+    cleanEntity: cleanEntity,
+    imageIntent: intentResult.category,
+    explicitMediaIntent: intentResult.explicitMediaIntent
+  };
+}
+
 export function normalizeQueryScaffolding(query: string): string {
   if (!query) return '';
   let text = query.trim();
@@ -255,7 +300,7 @@ export function formatTitleWithMinorWords(str: string): string {
 
   const formatWord = (w: string) => {
     if (!w) return '';
-    if (/^(?:II|III|IV|VI|VII|VIII|IX|X|USA|UK|DFW|SS|USS|HMS|RMS|NASA|UNESCO|JPL)$/i.test(w)) {
+    if (/^(?:II|III|IV|VI|VII|VIII|IX|X|USA|UK|DFW|SS|USS|HMS|RMS|NASA|UNESCO|JPL|MV|HMAS|USNS|CSS|IJN|SMS|RV|SV|MS|TSS|PS)$/i.test(w)) {
       return w.toUpperCase();
     }
     if (w.length >= 2 && /^[A-Z0-9]+$/.test(w)) {

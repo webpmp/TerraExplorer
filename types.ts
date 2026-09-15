@@ -129,6 +129,10 @@ export interface LocationInfo {
   imageCredit?: string;
   imageSource?: string;
   imageSearchTerm?: string;
+  rawQuery?: string;
+  query?: string;
+  originalQuery?: string;
+  imageIntent?: any;
   discoverySignals?: string[];
   relatedEntities?: any[];
   metadataMode?: 'historical_site' | 'modern_place' | 'natural_feature';
@@ -258,6 +262,7 @@ export interface Candidate {
   selectionReason?: string;
   settlementTier?: 'A' | 'B' | 'C' | 'D' | 'E';
   relevanceScore?: number;
+  searchRadiusKm?: number;
   relevanceThreshold?: number;
   originalProviderType?: string;
   normalizedEntityType?: string;

@@ -71,7 +71,19 @@ const ALIAS_DB: Record<string, string> = {
     "lusitania found": "rms lusitania sinking site",
     "the lusitania found": "rms lusitania sinking site",
     "rms lusitania found": "rms lusitania sinking site",
-    "the rms lusitania found": "rms lusitania sinking site"
+    "the rms lusitania found": "rms lusitania sinking site",
+
+    // Batavia
+    "batavia": "batavia shipwreck site",
+    "the batavia": "batavia shipwreck site",
+    "batavia wreck": "batavia shipwreck site",
+    "the batavia wreck": "batavia shipwreck site",
+    "batavia wreck site": "batavia shipwreck site",
+    "the batavia wreck site": "batavia shipwreck site",
+    "batavia shipwreck": "batavia shipwreck site",
+    "the batavia shipwreck": "batavia shipwreck site",
+    "batavia shipwreck site": "batavia shipwreck site",
+    "the batavia shipwreck site": "batavia shipwreck site"
 };
 
 export function resolveAlias(normalizedQuery: string): AliasResolution {

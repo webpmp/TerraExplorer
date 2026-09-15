@@ -33,18 +33,64 @@ export type ImageValidationPolicy =
 
 export type ImageRelevanceTier = 1 | 2 | 3 | 4;
 
+export type ImageIntentCategory =
+  | 'PHYSICAL_LOCATION'
+  | 'PHOTOGRAPH'
+  | 'HISTORICAL_PHOTOGRAPH'
+  | 'HISTORICAL_EVENT'
+  | 'MAP'
+  | 'COAT_OF_ARMS'
+  | 'FLAG'
+  | 'SEAL'
+  | 'LOGO'
+  | 'PAINTING'
+  | 'ILLUSTRATION'
+  | 'DIAGRAM'
+  | 'PORTRAIT'
+  | 'SYMBOLIC_GRAPHIC'
+  | 'ARCHITECTURAL_DRAWING'
+  | 'GENERAL_VISUAL'
+  | 'UNKNOWN';
+
+export type CandidateMediaType =
+  | 'PHOTOGRAPH'
+  | 'HISTORICAL_PHOTOGRAPH'
+  | 'PANORAMA_PHOTOGRAPH'
+  | 'LOCATION_VIEW'
+  | 'ILLUSTRATION'
+  | 'MAP'
+  | 'DIAGRAM'
+  | 'LOGO'
+  | 'COAT_OF_ARMS'
+  | 'SEAL'
+  | 'FLAG'
+  | 'ICON'
+  | 'PORTRAIT'
+  | 'ORGANIZATION_GRAPHIC'
+  | 'ARCHITECTURAL_DRAWING'
+  | 'PAINTING'
+  | 'OTHER_NON_PHOTOGRAPH'
+  | 'UNKNOWN';
+
 export interface ImageValidationResult {
   score: number;
   decision: 'ACCEPT' | 'REJECT';
   reason: string;
   candidate: ImageCandidate;
   tier?: ImageRelevanceTier;
+  mediaType?: CandidateMediaType;
+  photographicSuitability?: 'HIGH' | 'MEDIUM' | 'NONE';
+  intentCompatibility?: 'HIGH' | 'MEDIUM' | 'LOW' | 'INCOMPATIBLE';
 }
 
 export type ResolvedImageIntentType = 'ENTITY_SPECIFIC' | 'GENERIC_TOPIC' | 'UNRESOLVED';
 
 export interface ResolvedImageIntent {
   type: ResolvedImageIntentType;
+  category?: ImageIntentCategory;
+  explicitMediaIntent?: boolean;
+  intentReason?: string;
+  query?: string;
   topic?: string;
   entity?: string;
   entityRequired: boolean;
@@ -110,9 +156,46 @@ fallbackPolicy="${params.fallbackPolicy}"
 fallbackAcceptedCount=${params.fallbackAcceptedCount}`);
 }
 
+export function logImageMediaValidation(params: {
+  candidate: string;
+  mediaType: CandidateMediaType;
+  mediaTypeEvidence?: string;
+  photographicSuitability: 'HIGH' | 'MEDIUM' | 'NONE';
+  intentCompatibility: 'HIGH' | 'MEDIUM' | 'LOW' | 'INCOMPATIBLE';
+  decision: 'ACCEPT' | 'REJECT';
+  reason?: string;
+  rejectionReason?: string;
+  imageIntent?: ImageIntentCategory;
+}): void {
+  const lines = [
+    '[IMAGE MEDIA VALIDATION]',
+    `candidate="${params.candidate}"`,
+    `mediaType=${params.mediaType}`
+  ];
+  if (params.imageIntent) {
+    lines.push(`imageIntent=${params.imageIntent}`);
+  }
+  if (params.mediaTypeEvidence) {
+    lines.push(`mediaTypeEvidence="${params.mediaTypeEvidence}"`);
+  }
+  lines.push(`photographicSuitability=${params.photographicSuitability}`);
+  lines.push(`intentCompatibility=${params.intentCompatibility}`);
+  lines.push(`decision=${params.decision}`);
+  if (params.decision === 'REJECT' && params.rejectionReason) {
+    lines.push(`rejectionReason=${params.rejectionReason}`);
+  } else if (params.reason) {
+    lines.push(`reason=${params.reason}`);
+  }
+  console.log(lines.join('\n'));
+}
+
 export function logImageIntent(intent: ResolvedImageIntent): void {
   const lines = [
     '[IMAGE INTENT]',
+    `query="${intent.query || intent.entity || intent.topic || 'none'}"`,
+    `intent=${intent.category || intent.type}`,
+    `explicitMediaIntent=${Boolean(intent.explicitMediaIntent)}`,
+    `reason="${intent.intentReason || (intent.explicitMediaIntent ? 'Explicit media type detected' : (intent.category === 'HISTORICAL_EVENT' ? 'Historical event context' : 'Default physical-location search'))}"`,
     `type=${intent.type}`,
     `shape=${intent.shape || 'none'}`,
     `policy=${intent.policy || 'none'}`,
@@ -130,6 +213,492 @@ export function logImageIntent(intent: ResolvedImageIntent): void {
     lines.push(`source=${intent.source}`);
   }
   console.log(lines.join('\n'));
+}
+
+/**
+ * Detects the user's visual image intent category from the query, entity name, and context.
+ */
+export function detectImageIntentCategory(
+  query: string = '',
+  name: string = '',
+  entityType: string = '',
+  context: string = ''
+): {
+  category: ImageIntentCategory;
+  explicitMediaIntent: boolean;
+  reason: string;
+} {
+  const queryLower = query.toLowerCase().trim();
+  const nameLower = name.toLowerCase().trim();
+  const contextLower = context.toLowerCase().trim();
+
+  // 1. Explicit Media Request Detection from Query or Name
+  // Coat of Arms
+  if (/\b(?:coats?\s+of\s+arms|arms\s+of|heraldic\s+arms|heraldry|blazon|armoiries|escudo\s+de|stemma\s+di|wappen)\b/i.test(queryLower || nameLower)) {
+    return {
+      category: 'COAT_OF_ARMS',
+      explicitMediaIntent: true,
+      reason: 'Explicit media type detected'
+    };
+  }
+
+  // Flag
+  if (/\b(?:flags?|national\s+flag|state\s+flag|civil\s+flag|ensign|standard|pennant|bandera|drapeau|flaggen)\b/i.test(queryLower || nameLower)) {
+    return {
+      category: 'FLAG',
+      explicitMediaIntent: true,
+      reason: 'Explicit media type detected'
+    };
+  }
+
+  // Seal
+  if (/\b(?:seals?|state\s+seal|great\s+seal|official\s+seal|papal\s+seal|sceau|sello)\b/i.test(queryLower || nameLower)) {
+    return {
+      category: 'SEAL',
+      explicitMediaIntent: true,
+      reason: 'Explicit media type detected'
+    };
+  }
+
+  // Logo / Emblem
+  if (/\b(?:logos?|emblems?|insignia|crests?|badges?)\b/i.test(queryLower || nameLower)) {
+    return {
+      category: 'LOGO',
+      explicitMediaIntent: true,
+      reason: 'Explicit media type detected'
+    };
+  }
+
+  // Map
+  if (/\b(?:maps?|mapping|cartography|battle\s+map|topographic\s+map|atlas|karte|carte|mappa|planta)\b/i.test(queryLower || nameLower)) {
+    return {
+      category: 'MAP',
+      explicitMediaIntent: true,
+      reason: 'Explicit media type detected'
+    };
+  }
+
+  // Painting
+  if (/\b(?:paintings?|oil\s+painting|watercolors?|frescoes?|fresco|canvas\s+art|fine\s+art)\b/i.test(queryLower || nameLower)) {
+    return {
+      category: 'PAINTING',
+      explicitMediaIntent: true,
+      reason: 'Explicit media type detected'
+    };
+  }
+
+  // Illustration / Drawing
+  if (/\b(?:illustrations?|historical\s+illustrations?|drawings?|sketches?|engravings?|etchings?|woodcuts?|lithographs?)\b/i.test(queryLower || nameLower)) {
+    return {
+      category: 'ILLUSTRATION',
+      explicitMediaIntent: true,
+      reason: 'Explicit media type detected'
+    };
+  }
+
+  // Diagram
+  if (/\b(?:diagrams?|charts?|schematics?|infographics?|cross[- ]sections?|graphs?)\b/i.test(queryLower || nameLower)) {
+    return {
+      category: 'DIAGRAM',
+      explicitMediaIntent: true,
+      reason: 'Explicit media type detected'
+    };
+  }
+
+  // Architectural Drawing / Blueprint
+  if (/\b(?:architectural\s+drawings?|blueprints?|elevations?|floor\s+plans?|section\s+drawings?)\b/i.test(queryLower || nameLower)) {
+    return {
+      category: 'ARCHITECTURAL_DRAWING',
+      explicitMediaIntent: true,
+      reason: 'Explicit media type detected'
+    };
+  }
+
+  // Portrait
+  if (/\b(?:portraits?|self[- ]portraits?|busts?)\b/i.test(queryLower || nameLower)) {
+    return {
+      category: 'PORTRAIT',
+      explicitMediaIntent: true,
+      reason: 'Explicit media type detected'
+    };
+  }
+
+  // Historical Photograph (e.g. "historical photos of Vatican City", "what did Vatican City look like in 1944?")
+  if (
+    /\b(?:historical\s+(?:photos?|photographs?|pictures?|images?)|vintage\s+(?:photos?|photographs?|pictures?)|archival\s+(?:photos?|photographs?)|what\s+did\s+.+?\s+look\s+like\s+in\s+\d{4}|old\s+photos?\s+of|\b(?:18|19)\d{2}s?\s+(?:photos?|photographs?))\b/i.test(queryLower || nameLower)
+  ) {
+    return {
+      category: 'HISTORICAL_PHOTOGRAPH',
+      explicitMediaIntent: true,
+      reason: 'Explicit media type detected'
+    };
+  }
+
+  // Photograph (explicit "photos of ...", "pictures of ...", "photographs", "photography", "battlefield photos")
+  if (
+    /\b(?:photos?|photographs?|pictures?|pics?|photography|aerial\s+photos?|street\s+view|battlefield\s+photos?)\b/i.test(queryLower) ||
+    /^\s*(?:photos?|pictures?|images?)\s+of\b/i.test(nameLower)
+  ) {
+    return {
+      category: 'PHOTOGRAPH',
+      explicitMediaIntent: true,
+      reason: 'Explicit media type detected'
+    };
+  }
+
+  // 2. Historical Event Context (Non-Explicit Media)
+  const isHistoricalEvent =
+    /\b(?:battle\s+of|siege\s+of|treaty\s+of|expedition\s+of|voyage\s+of|crusade|campaign\s+of|war\s+of|revolution\s+of)\b/i.test(queryLower || nameLower || contextLower) ||
+    /battle|historical_event|expedition|siege/i.test(entityType || '');
+
+  if (isHistoricalEvent) {
+    return {
+      category: 'HISTORICAL_EVENT',
+      explicitMediaIntent: false,
+      reason: 'Historical event context'
+    };
+  }
+
+  // 3. Default Physical Location Search
+  return {
+    category: 'PHYSICAL_LOCATION',
+    explicitMediaIntent: false,
+    reason: 'Default physical-location search'
+  };
+}
+
+/**
+ * Classifies candidate media based on metadata, title, caption, description, and file characteristics.
+ */
+export function classifyCandidateMedia(candidate: ImageCandidate): {
+  mediaType: CandidateMediaType;
+  evidence: string;
+} {
+  const title = (candidate.title || '').trim();
+  const desc = (candidate.description || candidate.caption || '').trim();
+  const url = (candidate.url || '').toLowerCase();
+  const fullText = `${title} ${desc} ${url}`.toLowerCase();
+  const isSvg = url.includes('.svg') || fullText.includes('.svg');
+
+  // 1. Coat of Arms / Heraldry
+  if (
+    /\b(?:coats?\s+of\s+arms|arms\s+of|escudo\s+de|armoiries\s+de|wappen|stemma\s+di|blason\s+de|heraldic\s+arms|heraldry|lesser\s+coat\s+of\s+arms|greater\s+coat\s+of\s+arms)\b/i.test(fullText) ||
+    /coat_of_arms|arms_of|escudo_de|wappen/i.test(url)
+  ) {
+    return {
+      mediaType: 'COAT_OF_ARMS',
+      evidence: 'Title, description, or filename indicates coat of arms / heraldic emblem'
+    };
+  }
+
+  // 2. Flag / Standard / Ensign
+  if (
+    /\b(?:flags?\s+of|national\s+flag|state\s+flag|civil\s+flag|bandera\s+de|drapeau\s+de|flagge\s+von|naval\s+ensign|royal\s+standard|presidential\s+standard)\b/i.test(fullText) ||
+    /flag_of|bandera_de|drapeau_de/i.test(url)
+  ) {
+    return {
+      mediaType: 'FLAG',
+      evidence: 'Title, description, or filename indicates national, state, or civil flag'
+    };
+  }
+
+  // 3. Seal
+  if (
+    /\b(?:seals?\s+of|state\s+seal|great\s+seal|official\s+seal|papal\s+seal|sceau\s+de|sello\s+de|siegel\s+von)\b/i.test(fullText) ||
+    /seal_of|state_seal|great_seal/i.test(url)
+  ) {
+    return {
+      mediaType: 'SEAL',
+      evidence: 'Title, description, or filename indicates official seal'
+    };
+  }
+
+  // 4. Logo / Organization Graphic / Unit Insignia
+  if (
+    /\b(?:official\s+logo|team\s+logo|sports?\s+logo|wordmark|insignia|emblem\s+of|badge\s+of|football\s+team\s+logo|national\s+football\s+team)\b/i.test(fullText) ||
+    /\b(?:pontifical\s+commission|corps\s+of\s+gendarmerie|gendarmerie\s+corps|swiss\s+guard\s+uniform|swiss\s+guard\s+insignia|organization\s+graphic|organizational\s+chart)\b/i.test(fullText) ||
+    /_logo\./i.test(url) || /_emblem\./i.test(url)
+  ) {
+    const isOrg = /\b(?:pontifical\s+commission|corps\s+of\s+gendarmerie|gendarmerie\s+corps|organization\s+graphic)\b/i.test(fullText);
+    return {
+      mediaType: isOrg ? 'ORGANIZATION_GRAPHIC' : 'LOGO',
+      evidence: isOrg
+        ? 'Title or metadata indicates organizational graphic / administrative unit graphic'
+        : 'Title, description, or filename indicates organization, team, or brand logo/emblem'
+    };
+  }
+
+  // 5. Map / Cartography
+  if (
+    /\b(?:maps?\s+of|locator\s+map|location\s+map|route\s+map|topographic\s+map|orthographic\s+map|cartography|relief\s+map|karte\s+von|carte\s+de|mappa\s+di|battle\s+map|geographic\s+map|papal\s+states\s+map|geographic\s+diagram)\b/i.test(fullText) ||
+    /_map[._]|_in_.*_locator|locator_map/i.test(url)
+  ) {
+    return {
+      mediaType: 'MAP',
+      evidence: 'Title, description, or filename indicates geographic map or plan'
+    };
+  }
+
+  // 6. Diagram / Technical Chart
+  if (/\b(?:diagram|flowchart|schematic|infographic|cross[- ]section|graph\s+of|histogram|organigram|schema)\b/i.test(fullText)) {
+    return {
+      mediaType: 'DIAGRAM',
+      evidence: 'Title or metadata indicates technical diagram, chart, or infographic'
+    };
+  }
+
+  // 7. Architectural Drawing / Blueprint
+  if (/\b(?:architectural\s+drawing|blueprint|elevation\s+drawing|floor\s+plan|cross-section\s+drawing|section\s+drawing)\b/i.test(fullText)) {
+    return {
+      mediaType: 'ARCHITECTURAL_DRAWING',
+      evidence: 'Title or metadata indicates architectural drawing / blueprint'
+    };
+  }
+
+  // 8. Icon
+  if (/\b(?:icon\b|favicon|pictogram|symbol\s+icon|bullet\s+icon)\b/i.test(fullText)) {
+    return {
+      mediaType: 'ICON',
+      evidence: 'Title or metadata indicates icon or pictogram'
+    };
+  }
+
+  // 9. Portrait (unrelated person / painted portrait / bust)
+  if (
+    /\b(?:portrait\s+of|oil\s+portrait|painted\s+portrait|self[- ]portrait|bust\s+of)\b/i.test(fullText)
+  ) {
+    return {
+      mediaType: 'PORTRAIT',
+      evidence: 'Title or metadata indicates portrait of an individual'
+    };
+  }
+
+  // 10. Painting / Fresco / Tapestry
+  if (
+    /\b(?:paintings?\s+by|historical\s+painting|oil\s+on\s+canvas|fresco\s+by|fresco\b|tempera\s+on|acrylic\s+on|canvas\s+painting|painted\s+by|bayeux\s+tapestry|\bpainting\b)\b/i.test(fullText) ||
+    /^\s*painting\s+of\b/i.test(title)
+  ) {
+    return {
+      mediaType: 'PAINTING',
+      evidence: 'Title or metadata indicates artistic painting, fresco, canvas, or tapestry'
+    };
+  }
+
+  // 11. Historical Illustration / Engraving / Woodcut
+  if (
+    /\b(?:historical\s+illustration|woodcut|engraving|etching|lithograph|sketch\s+of|drawing\s+of|miniature\s+illustration|artistic\s+depiction)\b/i.test(fullText)
+  ) {
+    return {
+      mediaType: 'ILLUSTRATION',
+      evidence: 'Title or metadata indicates historical illustration, engraving, woodcut, or drawing'
+    };
+  }
+
+  // 12. Historical Photograph (e.g. 1944 photograph in Vatican City, 19th-century photo)
+  if (
+    /\b(?:historical\s+photo|vintage\s+photo|archival\s+photo|taken\s+in\s+(?:18\d{2}|19[0-7]\d)|\b(?:18|19)\d{2}\s+(?:photo|photograph)|c\.\s*19\d{2}|circa\s+19\d{2}|daguerreotype|gelatin\s+silver|black\s+and\s+white\s+photograph\s+from\s+(?:18|19)\d\d)\b/i.test(fullText)
+  ) {
+    return {
+      mediaType: 'HISTORICAL_PHOTOGRAPH',
+      evidence: 'Metadata indicates historical / vintage / archival photograph'
+    };
+  }
+
+  // 13. Panorama Photograph
+  if (/\b(?:panorama\s+of|panoramic\s+view|panoramic\s+photo|wide-angle\s+view)\b/i.test(fullText)) {
+    return {
+      mediaType: 'PANORAMA_PHOTOGRAPH',
+      evidence: 'Metadata indicates panoramic photograph'
+    };
+  }
+
+  // 14. Non-photographic SVG Fallback
+  if (isSvg) {
+    return {
+      mediaType: 'OTHER_NON_PHOTOGRAPH',
+      evidence: 'Vector SVG graphic without confirmed photographic subject'
+    };
+  }
+
+  // 15. Physical Landmark / Location View / Photograph
+  if (
+    /\b(?:basilica|cathedral|square|piazza|gardens?|park|palace|castle|tower|monument|obelisk|building|facade|interior|street|bridge|river|mountain|canyon|waterfall|ruins|view|aerial|harbor|skyline)\b/i.test(fullText)
+  ) {
+    return {
+      mediaType: 'LOCATION_VIEW',
+      evidence: 'Photograph of physical landmark / location / architecture'
+    };
+  }
+
+  return {
+    mediaType: 'PHOTOGRAPH',
+    evidence: 'Standard photograph / raster image'
+  };
+}
+
+/**
+ * Returns the photographic suitability level for location viewing.
+ */
+export function getPhotographicSuitability(mediaType: CandidateMediaType): 'HIGH' | 'MEDIUM' | 'NONE' {
+  switch (mediaType) {
+    case 'PHOTOGRAPH':
+    case 'HISTORICAL_PHOTOGRAPH':
+    case 'PANORAMA_PHOTOGRAPH':
+    case 'LOCATION_VIEW':
+      return 'HIGH';
+    case 'UNKNOWN':
+      return 'MEDIUM';
+    case 'COAT_OF_ARMS':
+    case 'FLAG':
+    case 'SEAL':
+    case 'LOGO':
+    case 'ORGANIZATION_GRAPHIC':
+    case 'MAP':
+    case 'DIAGRAM':
+    case 'ICON':
+    case 'ARCHITECTURAL_DRAWING':
+    case 'PORTRAIT':
+    case 'PAINTING':
+    case 'ILLUSTRATION':
+    case 'OTHER_NON_PHOTOGRAPH':
+    default:
+      return 'NONE';
+  }
+}
+
+/**
+ * Evaluates the compatibility between user image intent and candidate media type.
+ */
+export function getIntentMediaCompatibility(
+  intentCategory: ImageIntentCategory,
+  mediaType: CandidateMediaType
+): {
+  compatibility: 'HIGH' | 'MEDIUM' | 'LOW' | 'INCOMPATIBLE';
+  isExplicitMatch: boolean;
+} {
+  if (intentCategory === 'COAT_OF_ARMS') {
+    if (mediaType === 'COAT_OF_ARMS') return { compatibility: 'HIGH', isExplicitMatch: true };
+    if (mediaType === 'SEAL' || mediaType === 'LOGO') return { compatibility: 'MEDIUM', isExplicitMatch: false };
+    if (mediaType === 'PHOTOGRAPH' || mediaType === 'LOCATION_VIEW') return { compatibility: 'LOW', isExplicitMatch: false };
+    return { compatibility: 'INCOMPATIBLE', isExplicitMatch: false };
+  }
+
+  if (intentCategory === 'FLAG') {
+    if (mediaType === 'FLAG') return { compatibility: 'HIGH', isExplicitMatch: true };
+    if (mediaType === 'COAT_OF_ARMS' || mediaType === 'SEAL') return { compatibility: 'MEDIUM', isExplicitMatch: false };
+    if (mediaType === 'PHOTOGRAPH' || mediaType === 'LOCATION_VIEW') return { compatibility: 'LOW', isExplicitMatch: false };
+    return { compatibility: 'INCOMPATIBLE', isExplicitMatch: false };
+  }
+
+  if (intentCategory === 'MAP') {
+    if (mediaType === 'MAP') return { compatibility: 'HIGH', isExplicitMatch: true };
+    if (mediaType === 'ARCHITECTURAL_DRAWING' || mediaType === 'DIAGRAM') return { compatibility: 'MEDIUM', isExplicitMatch: false };
+    if (mediaType === 'PHOTOGRAPH' || mediaType === 'LOCATION_VIEW') return { compatibility: 'LOW', isExplicitMatch: false };
+    return { compatibility: 'INCOMPATIBLE', isExplicitMatch: false };
+  }
+
+  if (intentCategory === 'SEAL') {
+    if (mediaType === 'SEAL') return { compatibility: 'HIGH', isExplicitMatch: true };
+    if (mediaType === 'COAT_OF_ARMS' || mediaType === 'LOGO') return { compatibility: 'MEDIUM', isExplicitMatch: false };
+    if (mediaType === 'PHOTOGRAPH' || mediaType === 'LOCATION_VIEW') return { compatibility: 'LOW', isExplicitMatch: false };
+    return { compatibility: 'INCOMPATIBLE', isExplicitMatch: false };
+  }
+
+  if (intentCategory === 'LOGO') {
+    if (mediaType === 'LOGO' || mediaType === 'ORGANIZATION_GRAPHIC') return { compatibility: 'HIGH', isExplicitMatch: true };
+    if (mediaType === 'SEAL' || mediaType === 'COAT_OF_ARMS') return { compatibility: 'MEDIUM', isExplicitMatch: false };
+    if (mediaType === 'PHOTOGRAPH' || mediaType === 'LOCATION_VIEW') return { compatibility: 'LOW', isExplicitMatch: false };
+    return { compatibility: 'INCOMPATIBLE', isExplicitMatch: false };
+  }
+
+  if (intentCategory === 'PAINTING') {
+    if (mediaType === 'PAINTING') return { compatibility: 'HIGH', isExplicitMatch: true };
+    if (mediaType === 'ILLUSTRATION') return { compatibility: 'MEDIUM', isExplicitMatch: false };
+    if (mediaType === 'PHOTOGRAPH' || mediaType === 'LOCATION_VIEW') return { compatibility: 'LOW', isExplicitMatch: false };
+    return { compatibility: 'INCOMPATIBLE', isExplicitMatch: false };
+  }
+
+  if (intentCategory === 'ILLUSTRATION') {
+    if (mediaType === 'ILLUSTRATION') return { compatibility: 'HIGH', isExplicitMatch: true };
+    if (mediaType === 'PAINTING' || mediaType === 'ARCHITECTURAL_DRAWING') return { compatibility: 'MEDIUM', isExplicitMatch: false };
+    if (mediaType === 'PHOTOGRAPH' || mediaType === 'LOCATION_VIEW') return { compatibility: 'LOW', isExplicitMatch: false };
+    return { compatibility: 'INCOMPATIBLE', isExplicitMatch: false };
+  }
+
+  if (intentCategory === 'DIAGRAM') {
+    if (mediaType === 'DIAGRAM' || mediaType === 'ARCHITECTURAL_DRAWING') return { compatibility: 'HIGH', isExplicitMatch: true };
+    if (mediaType === 'MAP') return { compatibility: 'MEDIUM', isExplicitMatch: false };
+    return { compatibility: 'INCOMPATIBLE', isExplicitMatch: false };
+  }
+
+  if (intentCategory === 'ARCHITECTURAL_DRAWING') {
+    if (mediaType === 'ARCHITECTURAL_DRAWING') return { compatibility: 'HIGH', isExplicitMatch: true };
+    if (mediaType === 'DIAGRAM' || mediaType === 'MAP') return { compatibility: 'MEDIUM', isExplicitMatch: false };
+    return { compatibility: 'INCOMPATIBLE', isExplicitMatch: false };
+  }
+
+  if (intentCategory === 'PORTRAIT') {
+    if (mediaType === 'PORTRAIT') return { compatibility: 'HIGH', isExplicitMatch: true };
+    if (mediaType === 'PAINTING' || mediaType === 'PHOTOGRAPH') return { compatibility: 'MEDIUM', isExplicitMatch: false };
+    return { compatibility: 'INCOMPATIBLE', isExplicitMatch: false };
+  }
+
+  if (intentCategory === 'HISTORICAL_PHOTOGRAPH') {
+    if (mediaType === 'HISTORICAL_PHOTOGRAPH') return { compatibility: 'HIGH', isExplicitMatch: true };
+    if (mediaType === 'PHOTOGRAPH' || mediaType === 'PANORAMA_PHOTOGRAPH' || mediaType === 'LOCATION_VIEW') return { compatibility: 'MEDIUM', isExplicitMatch: false };
+    return { compatibility: 'INCOMPATIBLE', isExplicitMatch: false };
+  }
+
+  if (intentCategory === 'PHOTOGRAPH') {
+    if (mediaType === 'PHOTOGRAPH' || mediaType === 'HISTORICAL_PHOTOGRAPH' || mediaType === 'PANORAMA_PHOTOGRAPH' || mediaType === 'LOCATION_VIEW') {
+      return { compatibility: 'HIGH', isExplicitMatch: true };
+    }
+    return { compatibility: 'INCOMPATIBLE', isExplicitMatch: false };
+  }
+
+  if (intentCategory === 'HISTORICAL_EVENT') {
+    if (
+      mediaType === 'PHOTOGRAPH' ||
+      mediaType === 'HISTORICAL_PHOTOGRAPH' ||
+      mediaType === 'LOCATION_VIEW' ||
+      mediaType === 'PAINTING' ||
+      mediaType === 'ILLUSTRATION' ||
+      mediaType === 'MAP'
+    ) {
+      return { compatibility: 'HIGH', isExplicitMatch: false };
+    }
+    if (mediaType === 'DIAGRAM' || mediaType === 'ARCHITECTURAL_DRAWING') {
+      return { compatibility: 'MEDIUM', isExplicitMatch: false };
+    }
+    return { compatibility: 'INCOMPATIBLE', isExplicitMatch: false };
+  }
+
+  if (intentCategory === 'PHYSICAL_LOCATION') {
+    if (
+      mediaType === 'PHOTOGRAPH' ||
+      mediaType === 'HISTORICAL_PHOTOGRAPH' ||
+      mediaType === 'PANORAMA_PHOTOGRAPH' ||
+      mediaType === 'LOCATION_VIEW'
+    ) {
+      return { compatibility: 'HIGH', isExplicitMatch: false };
+    }
+    if (mediaType === 'UNKNOWN') {
+      return { compatibility: 'MEDIUM', isExplicitMatch: false };
+    }
+    return { compatibility: 'INCOMPATIBLE', isExplicitMatch: false };
+  }
+
+  // GENERAL_VISUAL or UNKNOWN
+  if (
+    mediaType === 'PHOTOGRAPH' ||
+    mediaType === 'HISTORICAL_PHOTOGRAPH' ||
+    mediaType === 'LOCATION_VIEW' ||
+    mediaType === 'PAINTING' ||
+    mediaType === 'ILLUSTRATION'
+  ) {
+    return { compatibility: 'HIGH', isExplicitMatch: false };
+  }
+  return { compatibility: 'MEDIUM', isExplicitMatch: false };
 }
 
 export function resolveImageIntent(input: string | {
@@ -153,12 +722,25 @@ export function resolveImageIntent(input: string | {
   const intentString = typeof input === 'string' ? '' : (input.intent || '').trim();
   const routeTitleString = typeof input === 'string' ? '' : (input.routeTitle || input.waypoint?.routeTitle || '').trim();
   const contextString = typeof input === 'string' ? '' : (input.historicalContext || input.context || input.waypoint?.context || '').trim();
+  const entityTypeString = typeof input === 'string' ? '' : (input.entityType || input.type || '').trim();
+
+  // Detect image intent category
+  const detectedIntent = detectImageIntentCategory(
+    queryString,
+    nameString,
+    entityTypeString,
+    contextString || routeTitleString
+  );
 
   // 1. Explicit Unknown / Unresolved Intent
   if (intentString.toLowerCase() === 'unknown') {
     const hasMeaningfulQuery = Boolean(queryString && queryString.length > 3);
     const intent: ResolvedImageIntent = {
       type: 'UNRESOLVED',
+      category: detectedIntent.category,
+      explicitMediaIntent: detectedIntent.explicitMediaIntent,
+      intentReason: detectedIntent.reason,
+      query: queryString || undefined,
       topic: hasMeaningfulQuery ? queryString : undefined,
       entity: nameString || undefined,
       entityRequired: false,
@@ -228,6 +810,10 @@ export function resolveImageIntent(input: string | {
 
     return {
       type: 'GENERIC_TOPIC',
+      category: detectedIntent.category,
+      explicitMediaIntent: detectedIntent.explicitMediaIntent,
+      intentReason: detectedIntent.reason,
+      query: queryString || undefined,
       topic: finalTopic,
       entity: nameString || undefined,
       entityRequired: false,
@@ -239,17 +825,28 @@ export function resolveImageIntent(input: string | {
   }
 
   // 3. Entity-Specific Requests ("Show me pictures of Kingston Upon Mersey", "Show me images of X", or specific place)
-  const isEntityPictureQuery = /^\s*(?:show\s+me\s+(?:pictures|images|photos)\s+of|pictures\s+of|images\s+of|photos\s+of)\s+(.+?)\s*[.?!]?\s*$/i.test(queryString);
-  if (isEntityPictureQuery || nameString || intentString === 'DIRECT' || intentString === 'NATURAL_LOCATION' || intentString === 'specific_location') {
+  const isEntityPictureQuery = /^\s*(?:show\s+me\s+(?:pictures|images|photos|the\s+coat\s+of\s+arms|the\s+flag|the\s+map|the\s+seal)\s+of|pictures\s+of|images\s+of|photos\s+of|paintings\s+of|map\s+of)\s+(.+?)\s*[.?!]?\s*$/i.test(queryString);
+  if (isEntityPictureQuery || nameString || intentString === 'DIRECT' || intentString === 'NATURAL_LOCATION' || intentString === 'specific_location' || detectedIntent.explicitMediaIntent || queryString) {
     let targetEntity = nameString;
     if (isEntityPictureQuery) {
-      const match = queryString.match(/^\s*(?:show\s+me\s+(?:pictures|images|photos)\s+of|pictures\s+of|images\s+of|photos\s+of)\s+(.+?)\s*[.?!]?\s*$/i);
+      const match = queryString.match(/^\s*(?:show\s+me\s+(?:pictures|images|photos|the\s+coat\s+of\s+arms|the\s+flag|the\s+map|the\s+seal)\s+of|pictures\s+of|images\s+of|photos\s+of|paintings\s+of|map\s+of)\s+(.+?)\s*[.?!]?\s*$/i);
       if (match && match[1]) {
         targetEntity = match[1].trim();
       }
     }
 
-    const effectiveTarget = targetEntity || nameString;
+    // Clean entity query terms if user typed "Vatican City coat of arms", "Battle of Hastings painting"
+    if (!targetEntity && queryString) {
+      targetEntity = queryString
+        .replace(/^\s*(?:show\s+me\s+(?:the\s+)?|find\s+(?:the\s+)?|search\s+(?:for\s+)?(?:the\s+)?)/i, '')
+        .replace(/\b(?:coat\s+of\s+arms|coats\s+of\s+arms|arms\s+of|state\s+seal|official\s+seal|seal\s+of|flags?\s+of|national\s+flag|state\s+flag|logos?\s+of|emblem\s+of|maps?\s+of|battle\s+map\s+of|paintings?\s+of|historical\s+illustrations?\s+of|illustrations?\s+of|historical\s+photos?\s+of|photos?\s+of|pictures?\s+of|images?\s+of)\b/gi, '')
+        .replace(/\b(?:coat\s+of\s+arms|coats\s+of\s+arms|flags?|state\s+seal|seals?|logos?|emblems?|maps?|paintings?|illustrations?|drawings?|historical\s+photos?|historical\s+photographs?|photographs?|photos?|pictures?|images?|blueprints?)\b/gi, '')
+        .replace(/^\s*(?:of|for|in|at)\s+/i, '')
+        .replace(/[?.,!]+$/, '')
+        .trim();
+    }
+
+    const effectiveTarget = targetEntity || nameString || queryString;
     const rawTarget = typeof input === 'object' ? input : { name: effectiveTarget };
 
     // Determine Subject Shape & Validation Policy Hierarchy:
@@ -266,6 +863,10 @@ export function resolveImageIntent(input: string | {
       });
       return {
         type: 'ENTITY_SPECIFIC',
+        category: detectedIntent.category,
+        explicitMediaIntent: detectedIntent.explicitMediaIntent,
+        intentReason: detectedIntent.reason,
+        query: queryString || undefined,
         topic: undefined,
         entity: effectiveTarget,
         entityRequired: true,
@@ -386,6 +987,10 @@ export function resolveImageIntent(input: string | {
 
     return {
       type: 'ENTITY_SPECIFIC',
+      category: detectedIntent.category,
+      explicitMediaIntent: detectedIntent.explicitMediaIntent,
+      intentReason: detectedIntent.reason,
+      query: queryString || undefined,
       topic: undefined,
       entity: effectiveTarget,
       entityRequired,
@@ -401,6 +1006,10 @@ export function resolveImageIntent(input: string | {
   // 4. Fallback if cannot resolve
   return {
     type: 'UNRESOLVED',
+    category: detectedIntent.category,
+    explicitMediaIntent: detectedIntent.explicitMediaIntent,
+    intentReason: detectedIntent.reason,
+    query: queryString || undefined,
     topic: queryString || undefined,
     entity: nameString || undefined,
     entityRequired: false,
@@ -515,7 +1124,23 @@ export function getEntityDistanceToleranceKm(entityType?: string): number {
   return 50;
 }
 
-export function isGenericFlagOrEmblem(title: string = '', description: string = '', entityName: string = ''): boolean {
+export function isGenericFlagOrEmblem(
+  title: string = '',
+  description: string = '',
+  entityName: string = '',
+  imageIntent?: ResolvedImageIntent
+): boolean {
+  if (
+    imageIntent &&
+    (imageIntent.category === 'FLAG' ||
+      imageIntent.category === 'COAT_OF_ARMS' ||
+      imageIntent.category === 'SEAL' ||
+      imageIntent.category === 'LOGO' ||
+      imageIntent.category === 'SYMBOLIC_GRAPHIC' ||
+      imageIntent.explicitMediaIntent)
+  ) {
+    return false;
+  }
   const entityLower = entityName.toLowerCase();
   if (
     entityLower.includes('flag') ||
@@ -2240,8 +2865,14 @@ decision=${decision}`);
     coordinateStatus = 'VERIFIED';
   }
 
+  // 1b. Candidate Media Classification & Intent Compatibility
+  const mediaClassification = classifyCandidateMedia(candidate);
+  const candidateMediaType = mediaClassification.mediaType;
+  const photographicSuitability = getPhotographicSuitability(candidateMediaType);
+  const intentCompatibility = getIntentMediaCompatibility(imageIntent.category, candidateMediaType);
+
   // 2. Check for generic flags/emblems
-  const isFlag = isGenericFlagOrEmblem(title, desc, entityName);
+  const isFlag = isGenericFlagOrEmblem(title, desc, entityName, imageIntent);
 
   // 3. Generic topic detection
   const isGenericTopic = isGenericTopicCandidate(title, desc);
@@ -2354,16 +2985,39 @@ decision=${decision}`);
   const isProvisionalGeoConflict = isGeoConflicting && coordinateStatus === 'PROVISIONAL';
   const conflictEvidenceTrusted = isTrustedGeoConflict;
 
+  // Media / Intent Compatibility Checks
+  const isNonPhotographicForPhysicalLocation =
+    (imageIntent.category === 'PHYSICAL_LOCATION' || (!imageIntent.explicitMediaIntent && imageIntent.category === 'UNKNOWN')) &&
+    (candidateMediaType === 'COAT_OF_ARMS' ||
+      candidateMediaType === 'FLAG' ||
+      candidateMediaType === 'SEAL' ||
+      candidateMediaType === 'LOGO' ||
+      candidateMediaType === 'ORGANIZATION_GRAPHIC' ||
+      candidateMediaType === 'MAP' ||
+      candidateMediaType === 'DIAGRAM' ||
+      candidateMediaType === 'ICON' ||
+      candidateMediaType === 'OTHER_NON_PHOTOGRAPH');
+
+  const isIncompatibleForExplicitIntent =
+    imageIntent.explicitMediaIntent &&
+    intentCompatibility.compatibility === 'INCOMPATIBLE';
+
   // Hard Rejections across all policies:
   if (isFlag) {
     decision = 'REJECT';
     reason = 'Generic national flag, insufficient entity relevance';
-  } else if (entityTypeMatchLevel === 'INCOMPATIBLE') {
-    decision = 'REJECT';
-    reason = 'Semantic entity-type mismatch';
   } else if (isDifferentEntity) {
     decision = 'REJECT';
     reason = 'DIFFERENT_ENTITY';
+  } else if (isIncompatibleForExplicitIntent) {
+    decision = 'REJECT';
+    reason = 'INCOMPATIBLE_MEDIA_FOR_EXPLICIT_INTENT';
+  } else if (isNonPhotographicForPhysicalLocation) {
+    decision = 'REJECT';
+    reason = 'NON_PHOTOGRAPHIC_MEDIA_FOR_LOCATION_INTENT';
+  } else if (entityTypeMatchLevel === 'INCOMPATIBLE') {
+    decision = 'REJECT';
+    reason = 'Semantic entity-type mismatch';
   } else if (isTrustedGeoConflict) {
     decision = 'REJECT';
     reason = 'GEOGRAPHIC_CONFLICT';
@@ -2566,6 +3220,25 @@ decision=${decision}`);
       score += 15;
     }
 
+    // Media Intent Bonus / Suitability Scoring
+    if (imageIntent.explicitMediaIntent && intentCompatibility.isExplicitMatch) {
+      score += 60; // Huge boost for explicit media match
+      tier = 1;
+      reason = 'EXPLICIT_MEDIA_INTENT';
+    } else if (imageIntent.explicitMediaIntent && intentCompatibility.compatibility === 'MEDIUM') {
+      score += 30;
+    } else if (imageIntent.explicitMediaIntent && intentCompatibility.compatibility === 'LOW') {
+      score -= 20;
+    } else if (imageIntent.category === 'PHYSICAL_LOCATION' || imageIntent.category === 'PHOTOGRAPH') {
+      if (candidateMediaType === 'PHOTOGRAPH' || candidateMediaType === 'LOCATION_VIEW' || candidateMediaType === 'PANORAMA_PHOTOGRAPH') {
+        score += 20; // Photographic suitability boost for location intent
+      }
+    } else if (imageIntent.category === 'HISTORICAL_EVENT') {
+      if (candidateMediaType === 'PAINTING' || candidateMediaType === 'ILLUSTRATION' || candidateMediaType === 'MAP' || candidateMediaType === 'HISTORICAL_PHOTOGRAPH') {
+        score += 20; // Historical media suitability boost
+      }
+    }
+
     if (entity.city && (fullText.includes(entity.city.toLowerCase()) || normFullText.includes(stripDiacritics(entity.city).toLowerCase()))) {
       score += 15;
     }
@@ -2582,6 +3255,17 @@ decision=${decision}`);
       score -= 10;
     }
   }
+
+  // Log detailed media validation
+  logImageMediaValidation({
+    candidate: title || 'Untitled',
+    mediaType: candidateMediaType,
+    intentCategory: imageIntent.category,
+    compatibility: intentCompatibility.compatibility,
+    photographicSuitability,
+    accepted: decision === 'ACCEPT',
+    rejectionReason: decision === 'REJECT' ? reason : undefined
+  });
 
   // 10. Emitting diagnostic candidate validation logs
   console.log(`[IMAGE GEOGRAPHIC EVIDENCE]
@@ -2623,6 +3307,12 @@ rejectionReason=${decision === 'REJECT' ? reason : 'none'}`);
 
   console.log(`[IMAGE CANDIDATE]
 Title=${title ? `"${title}"` : '"Untitled"'}
+ImageIntent=${imageIntent.category}
+ExplicitMediaIntent=${imageIntent.explicitMediaIntent || false}
+MediaType=${candidateMediaType}
+MediaEvidence=${mediaClassification.evidence}
+PhotographicSuitability=${photographicSuitability}
+IntentCompatibility=${intentCompatibility.compatibility}
 TopicMatch=${topicMatch}
 EntityMatch=${entityMatchLevel}
 GeographicEvidence=${geoEvidence}
@@ -2796,6 +3486,59 @@ export function buildEntityImageQueries(info: {
       }
     }
     return Array.from(new Set(queries.filter(Boolean)));
+  }
+
+  // Explicit Media Request Query Generation
+  if (imageIntent.explicitMediaIntent) {
+    if (imageIntent.category === 'COAT_OF_ARMS') {
+      queries.push(`Coat of arms of ${cleanName}`);
+      queries.push(`${cleanName} coat of arms`);
+      queries.push(`Emblem of ${cleanName}`);
+      queries.push(`Arms of ${cleanName}`);
+    } else if (imageIntent.category === 'FLAG') {
+      queries.push(`Flag of ${cleanName}`);
+      queries.push(`${cleanName} flag`);
+      queries.push(`National flag of ${cleanName}`);
+    } else if (imageIntent.category === 'SEAL') {
+      queries.push(`Seal of ${cleanName}`);
+      queries.push(`Great seal of ${cleanName}`);
+      queries.push(`${cleanName} seal`);
+    } else if (imageIntent.category === 'LOGO') {
+      queries.push(`${cleanName} logo`);
+      queries.push(`Logo of ${cleanName}`);
+    } else if (imageIntent.category === 'MAP') {
+      queries.push(`Map of ${cleanName}`);
+      queries.push(`${cleanName} map`);
+      queries.push(`${cleanName} locator map`);
+    } else if (imageIntent.category === 'PAINTING') {
+      queries.push(`${cleanName} painting`);
+      queries.push(`Painting of ${cleanName}`);
+      queries.push(`${cleanName} artwork`);
+    } else if (imageIntent.category === 'ILLUSTRATION') {
+      queries.push(`${cleanName} illustration`);
+      queries.push(`${cleanName} historical illustration`);
+      queries.push(`${cleanName} engraving`);
+    } else if (imageIntent.category === 'HISTORICAL_PHOTOGRAPH') {
+      queries.push(`Historical photograph ${cleanName}`);
+      queries.push(`Historic photo ${cleanName}`);
+      queries.push(`Old photo ${cleanName}`);
+      queries.push(`${cleanName} archival photo`);
+    } else if (imageIntent.category === 'PHOTOGRAPH') {
+      queries.push(`${cleanName} photograph`);
+      queries.push(`${cleanName} photo`);
+      queries.push(`View of ${cleanName}`);
+    }
+  }
+
+  // Historical Event Intent Query Generation
+  if (imageIntent.category === 'HISTORICAL_EVENT') {
+    queries.push(cleanName);
+    queries.push(`${cleanName} painting`);
+    queries.push(`${cleanName} illustration`);
+    queries.push(`${cleanName} battle map`);
+    queries.push(`${cleanName} map`);
+    queries.push(`${cleanName} historical`);
+    queries.push(`${cleanName} battlefield`);
   }
 
   // Stage 1: Exact unconstrained entity name alone

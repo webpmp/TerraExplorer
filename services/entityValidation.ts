@@ -1,7 +1,7 @@
 import { ResolvedEntity } from '../domain';
 import { isValidCoordinates } from '../types';
 import { validateEarthGeography } from './celestialCapabilities';
-import { getHistoricalEntityKnowledge } from './geographic/historicalCoordinateValidator';
+import { getHistoricalEntityKnowledge, isMaritimeHistoricalEntity } from './geographic/historicalCoordinateValidator';
 import { isInvalidCanonicalName } from './geographic/entityIdentityValidator';
 import { isPlaceholderString } from '../components/InfoPanel';
 
@@ -279,14 +279,7 @@ valid: ${coordinatesValid}`);
   if (canonicalName && coords) {
     const histKnowledge = getHistoricalEntityKnowledge(canonicalName);
     if (histKnowledge) {
-      const isMarineEntity = 
-        entityType === 'shipwreck_site' || 
-        entityType === 'shipwreck' || 
-        entityType === 'submerged_archaeological_site' || 
-        entityType === 'maritime_disaster_site' ||
-        entityType === 'underwater_cultural_heritage' ||
-        entityType === 'naval_wreck' ||
-        entityType === 'aircraft_wreck_at_sea';
+      const isMarineEntity = isMaritimeHistoricalEntity(entityType);
 
       if (isMarineEntity) {
         let regionalCompatibility = true;

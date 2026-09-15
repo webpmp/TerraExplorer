@@ -21,7 +21,7 @@ import { isGenericPlaceholderDescription, isEnglishText } from './entityValidati
 import { isPlaceholderString } from '../components/InfoPanel';
 import { validateEarthGeography } from './celestialCapabilities';
 import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
-import { validateHistoricalCoordinate, getHistoricalEntityKnowledge, toCanonicalTitleCase } from './geographic/historicalCoordinateValidator';
+import { validateHistoricalCoordinate, getHistoricalEntityKnowledge, toCanonicalTitleCase, isMaritimeHistoricalEntity } from './geographic/historicalCoordinateValidator';
 import { determineHistoricalEventScope, logHistoricalEventScope } from './geographic/historicalEventScope';
 import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation, validateEntityCoordinates, logAiCoordinateTrust, logEntityCoordinateValidation, CoordinateTrustLevel } from './geographic/entityIdentityValidator';
 import { buildCanonicalEventTopology, getAuthoritativeEventModel } from './geographic/historicalRouteRegistry';
@@ -417,68 +417,7 @@ export const normalizeCoordinates = (coordsData: any): { lat: number, lng: numbe
  */
 export const normalizeLocationEntity = (entity: string | null | undefined | any): string => {
   if (!entity || typeof entity !== 'string') return "";
-  let str = entity.trim();
-  
-  // State abbreviation mapping
-  const stateMap: Record<string, string> = {
-    "al": "Alabama", "ak": "Alaska", "az": "Arizona", "ar": "Arkansas", "ca": "California",
-    "co": "Colorado", "ct": "Connecticut", "de": "Delaware", "fl": "Florida", "ga": "Georgia",
-    "hi": "Hawaii", "id": "Idaho", "il": "Illinois", "in": "Indiana", "ia": "Iowa",
-    "ks": "Kansas", "ky": "Kentucky", "la": "Louisiana", "me": "Maine", "md": "Maryland",
-    "ma": "Massachusetts", "mi": "Michigan", "mn": "Minnesota", "ms": "Mississippi", "mo": "Missouri",
-    "mt": "Montana", "ne": "Nebraska", "nv": "Nevada", "nh": "New Hampshire", "nj": "New Jersey",
-    "nm": "New Mexico", "ny": "New York", "nc": "North Carolina", "nd": "North Dakota", "oh": "Ohio",
-    "ok": "Oklahoma", "or": "Oregon", "pa": "Pennsylvania", "ri": "Rhode Island", "sc": "South Carolina",
-    "sd": "South Dakota", "tn": "Tennessee", "tx": "Texas", "ut": "Utah", "vt": "Vermont",
-    "va": "Virginia", "wa": "Washington", "wv": "West Virginia", "wi": "Wisconsin", "wy": "Wyoming"
-  };
-
-  // Capitalize words helper
-  const capitalizeWords = (s: string) => {
-    return s.split(/\s+/).map(word => {
-      if (!word) return "";
-      if (word.length <= 2 && stateMap[word.toLowerCase()]) {
-        return word.toUpperCase();
-      }
-      const formatted = word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-      return formatted.replace(/([a-zA-Z])'([a-zA-Z]+)/g, (_, before, after) => {
-        return `${before}'${after.toLowerCase()}`;
-      });
-    }).join(' ');
-  };
-
-  // Handle patterns like "plano, texas" or "plano texas" or "plano tx"
-  const commaMatch = str.match(/^(.+?),\s*(.+)$/);
-  if (commaMatch) {
-    const city = capitalizeWords(commaMatch[1].trim());
-    let stateOrCountry = commaMatch[2].trim().toLowerCase();
-    if (stateMap[stateOrCountry]) {
-      stateOrCountry = stateMap[stateOrCountry];
-    } else {
-      stateOrCountry = capitalizeWords(stateOrCountry);
-    }
-    return `${city}, ${stateOrCountry}`;
-  }
-
-  // Handle "plano tx" or "boston ma" without comma
-  const spaceStateMatch = str.match(/^(.+?)\s+([a-zA-Z]{2})$/);
-  if (spaceStateMatch && stateMap[spaceStateMatch[2].toLowerCase()]) {
-    const city = capitalizeWords(spaceStateMatch[1].trim());
-    const state = stateMap[spaceStateMatch[2].toLowerCase()];
-    return `${city}, ${state}`;
-  }
-
-  // Handle "boston massachusetts" without comma
-  for (const [stAbbr, stName] of Object.entries(stateMap)) {
-    const regex = new RegExp(`^(.+?)\\s+${stName}$`, 'i');
-    const match = str.match(regex);
-    if (match) {
-      const city = capitalizeWords(match[1].trim());
-      return `${city}, ${stName}`;
-    }
-  }
-
-  return capitalizeWords(str);
+  return toCanonicalTitleCase(entity.trim());
 };
 
 export const resolveLocationQuery = async (query: string, intent?: QueryIntent, rawQuery?: string): Promise<SearchResult | null> => {
@@ -848,8 +787,10 @@ Return only JSON:
 
          // Explicitly retain AI provenance
          data.coordinateSource = "ai" as CoordinateSource;
-         data.identityStatus = "unverified" as GeographicIdentityStatus;
+         data.coordinateTrust = "provisional" as any;
+         data.identityStatus = (entityCheck && entityCheck.matches) ? ("verified" as GeographicIdentityStatus) : ("unverified" as GeographicIdentityStatus);
          data.coordinates.source = "ai" as CoordinateSource;
+         data.coordinates.coordinateTrust = "provisional";
 
          // Historical Coordinate Geographic Consistency Guard
          const isHistoricalQuery = 
@@ -857,6 +798,7 @@ Return only JSON:
            intent === 'DISCOVERY_OBJECT_LOCATION' || 
            intent === 'HISTORICAL_EVENT' ||
            data.entityType === 'shipwreck' ||
+           data.entityType === 'shipwreck_site' ||
            data.entityType === 'historical_site' ||
            data.entityType === 'archaeological_site';
 
@@ -872,6 +814,9 @@ Return only JSON:
                expectedRegion: data.locationString
              }
            );
+
+           data.historicalValidation = histValidation;
+           data.historicalCorroborated = histValidation.valid && (histValidation.reason === 'MARITIME_LOCATION_SUPPORTED' || histValidation.reason === 'MATCHES_EXPECTED_HISTORICAL_REGION' || histValidation.reason === 'AUTHORITATIVE_PROVIDER_COORDINATE');
 
            if (!histValidation.valid) {
              console.warn(`[HISTORICAL COORDINATE REJECTED] ${targetSearchTerm} coordinates rejected (${histValidation.reason}). Expected region: ${histValidation.expectedRegion}`);
@@ -2011,6 +1956,9 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
                     if (candidate.distanceKm !== undefined && (existing.distanceKm === undefined || candidate.distanceKm < existing.distanceKm)) {
                         existing.distanceKm = candidate.distanceKm;
                     }
+                    if (candidate.searchRadiusKm !== undefined && (existing.searchRadiusKm === undefined || candidate.searchRadiusKm > existing.searchRadiusKm)) {
+                        existing.searchRadiusKm = candidate.searchRadiusKm;
+                    }
                     merged = true;
                     break;
                 }
@@ -2156,7 +2104,8 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
                         identifiers: item.identifiers || {},
                         distanceBand: distanceBand,
                         distanceKm: distKm,
-                        settlementConfidence: item.settlementConfidence
+                        settlementConfidence: item.settlementConfidence,
+                        searchRadiusKm: currentRadius
                     };
                     if (!candidate.name) continue;
                     passRawCandidates.push(candidate);
@@ -2263,7 +2212,8 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
                     identifiers: item.identifiers || {},
                     distanceBand: distanceBand,
                     distanceKm: distKm,
-                    settlementConfidence: item.settlementConfidence
+                    settlementConfidence: item.settlementConfidence,
+                    searchRadiusKm: featureContext.radiusKm
                 };
                 if (!candidate.name) continue;
                 featureRawCandidates.push(candidate);
@@ -3228,6 +3178,12 @@ export const recoverCoordinatesFromAi = async (rawQuery: string, intent: string,
     return null;
   }
 
+  const isMaritime = isMaritimeHistoricalEntity({
+    name: entity,
+    intent,
+    rawQuery
+  });
+
   let promptText = `You are performing coordinate recovery for a strictly locked entity identity.
 Requested Entity: "${entity}" (extracted from query: "${rawQuery}", intent: ${intent}).
 
@@ -3241,6 +3197,9 @@ Return a strictly valid JSON object:
 {
   "requestedEntity": "${entity}",
   "resolvedEntity": "${entity}",
+  "entityType": "${isMaritime ? 'shipwreck_site' : 'string'}",
+  "expectedRegion": "string describing geographic region, ocean, coast, or country",
+  "locationDescription": "string describing the physical location or discovery/wreck site",
   "lat": 0.000,
   "lng": 0.000,
   "confidence": "high"
@@ -3256,7 +3215,7 @@ Output ONLY the JSON object.`;
       model: modelName,
       contents: promptText,
       config: {
-        maxOutputTokens: 200, 
+        maxOutputTokens: 300, 
       }
     });
 
@@ -3265,6 +3224,11 @@ Output ONLY the JSON object.`;
     let valid = false;
     
     const resolvedEntityName = (data && ((data as any).resolvedEntity || (data as any).name || (data as any).entity)) || entity;
+    const rawEntityType = (data && ((data as any).entityType || (data as any).type)) || (isMaritime ? 'shipwreck_site' : undefined);
+    const candidateEntityType = rawEntityType === 'shipwreck' ? 'shipwreck_site' : rawEntityType;
+    const expectedRegion = (data && ((data as any).expectedRegion || (data as any).region || (data as any).locationDescription)) || undefined;
+    const locationDescription = (data && ((data as any).locationDescription || (data as any).description)) || undefined;
+
     let parsedCoords = normalizeCoordinates(data) || (data && normalizeCoordinates((data as any).coordinates));
     
     if (parsedCoords) {
@@ -3301,11 +3265,19 @@ Output ONLY the JSON object.`;
          }
       }
 
-      if (valid && (intent === 'DISCOVERY_OBJECT_LOCATION' || intent === 'HISTORICAL_EVENT')) {
+      if (valid && (intent === 'DISCOVERY_OBJECT_LOCATION' || intent === 'HISTORICAL_EVENT' || isMaritime)) {
           const histValidation = await validateHistoricalCoordinate(
             entity,
             parsedCoords,
-            { rawQuery, intent, coordinateSource: 'ai_recovery' }
+            {
+              rawQuery,
+              intent,
+              entityType: candidateEntityType,
+              candidateEntityType,
+              expectedRegion,
+              locationDescription,
+              coordinateSource: 'ai_recovery'
+            }
           );
 
           if (!histValidation.valid) {
@@ -3322,6 +3294,7 @@ Output ONLY the JSON object.`;
                   confidence: histKnowledge.confidence || (coordSource === 'deterministic' ? 'high' : 'low'),
                   recoveredEntity: histKnowledge.entity,
                   canonicalName: histKnowledge.entity,
+                  entityType: histKnowledge.entityType === 'shipwreck' ? 'shipwreck_site' : histKnowledge.entityType,
                   coordinateTrust: coordSource === 'deterministic' ? 'verified' : 'provisional',
                   identityStatus: 'verified'
                 } as any;
@@ -3331,7 +3304,7 @@ Output ONLY the JSON object.`;
       }
     }
 
-    const identityCheck = validateEntityIdentity(entity, resolvedEntityName, { rawQuery, intent, coordinatesValid: valid });
+    const identityCheck = validateEntityIdentity(entity, resolvedEntityName, { rawQuery, intent, candidateEntityType, coordinatesValid: valid });
     
     // Geographic entity coordinate validation & trust model
     let coordinateTrust: CoordinateTrustLevel = 'unverified';
@@ -3413,7 +3386,12 @@ Output ONLY the JSON object.`;
          recoveredEntity: resolvedEntityName,
          resolvedEntity: resolvedEntityName,
          name: resolvedEntityName,
-         canonicalName: resolvedEntityName
+         canonicalName: resolvedEntityName,
+         entityType: candidateEntityType,
+         expectedRegion,
+         locationDescription,
+         historicalValidation: (typeof histValidation !== 'undefined' ? histValidation : undefined),
+         historicalCorroborated: (typeof histValidation !== 'undefined' && histValidation?.valid && (histValidation.reason === 'MARITIME_LOCATION_SUPPORTED' || histValidation.reason === 'MATCHES_EXPECTED_HISTORICAL_REGION' || histValidation.reason === 'AUTHORITATIVE_PROVIDER_COORDINATE'))
        };
     }
     

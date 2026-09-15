@@ -11,11 +11,11 @@ import { getEstimatedClimate, getClimateDescription, isClimateConflicting } from
 import { reverseGeocode, enrichSettlementPopulation, isPopulationBearingEntity } from './geographic/geographicResolver';
 import { isPlaceholderString } from '../components/InfoPanel';
 import { validateEarthGeography } from './celestialCapabilities';
-import { getHistoricalEntityKnowledge, toCanonicalTitleCase } from './geographic/historicalCoordinateValidator';
+import { getHistoricalEntityKnowledge, toCanonicalTitleCase, isMaritimeHistoricalEntity } from './geographic/historicalCoordinateValidator';
 import { determineHistoricalEventScope, logHistoricalEventScope } from './geographic/historicalEventScope';
 import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
 import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation, isInvalidCanonicalName } from './geographic/entityIdentityValidator';
-import { detectHistoricalRouteEvent, normalizeSemanticEntityTitle } from './queryNormalizer';
+import { detectHistoricalRouteEvent, normalizeSemanticEntityTitle, extractMediaIntentAndCleanEntity } from './queryNormalizer';
 import { getAuthoritativeEventModel } from './geographic/historicalRouteRegistry';
 import { resolveAlias } from './geographic/geographicAliases';
 
@@ -36,6 +36,8 @@ export interface IntentResult {
   normalized: NormalizedQuery;
   intent: QueryIntent;
   queryShape?: string;
+  imageIntent?: any;
+  explicitMediaIntent?: boolean;
 }
 
 export interface EntityResolutionResult {
@@ -64,9 +66,23 @@ export interface FinalLocationResult {
 
 export const SearchStage = (request: SearchRequest | string): EntityResolutionResult => {
   const reqObj: SearchRequest = typeof request === 'string' ? { rawQuery: request } : request;
+  
+  // 1. Separate Media Intent from Geographic Entity
+  // 1. Initial extraction using the raw query (to get correct intent e.g. NATURAL_LOCATION)
   const extracted = routeIntentAndExtractEntity(reqObj.rawQuery);
   const intent = reqObj.intent || extracted.intent;
-  const entity = reqObj.entity || extracted.entity;
+  const initialEntityCandidate = reqObj.entity || extracted.entity;
+
+  // 2. Separate Media Intent from the already intent-stripped entity candidate
+  const mediaSeparation = extractMediaIntentAndCleanEntity(reqObj.rawQuery, initialEntityCandidate);
+  const entity = mediaSeparation.cleanEntity;
+
+  if (mediaSeparation.explicitMediaIntent) {
+    console.log("[QUERY MEDIA SEPARATION]");
+    console.log(`originalQuery: "${mediaSeparation.originalQuery}"`);
+    console.log(`imageIntent: "${mediaSeparation.imageIntent}"`);
+    console.log(`cleanEntity: "${entity}"`);
+  }
   const queryShape = (extracted as any).queryShape || 'DIRECT';
 
   console.log("=== PIPELINE STAGE: SEARCH REQUEST ===");
@@ -85,7 +101,9 @@ export const SearchStage = (request: SearchRequest | string): EntityResolutionRe
   const intentResult: IntentResult = {
     normalized,
     intent,
-    queryShape
+    queryShape,
+    imageIntent: mediaSeparation.imageIntent,
+    explicitMediaIntent: mediaSeparation.explicitMediaIntent
   };
   console.log("=== PIPELINE STAGE: INTENT ===");
   console.log(`Classified Intent: ${intentResult.intent}`);
@@ -145,6 +163,13 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   let error = rawResolverResult.error;
   let resolvedData = rawResolverResult.locationInfo;
   const suggestedZoom = rawResolverResult.suggestedZoom;
+
+  // Map the media separation intent data into the resolved LocationInfo
+  if (resolvedData) {
+    resolvedData.originalQuery = entityResult.intentResult.normalized.request.rawQuery;
+    resolvedData.rawQuery = entityResult.intentResult.normalized.request.rawQuery;
+    delete resolvedData.imageIntent;
+  }
   let recoveryUsed = false;
 
   console.log(`=== COORDINATE RECOVERY TRACE ===`);
@@ -168,17 +193,20 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
       coordinatesValid: Boolean(resolvedData.coordinates)
     });
 
+    const isIdentityValid = initialIdentityCheck.matches;
+    const computedIdentityStatus: GeographicIdentityStatus = isIdentityValid ? 'verified' : 'unverified';
+
     logEntityIdentityValidation({
       requestedEntity: resolvedEntityName,
       candidateName: resolvedData.name,
       candidateEntityType: (resolvedData as any).entityType,
       intent: entityResult.intentResult.intent,
-      identityValid: initialIdentityCheck.matches,
-      identityStatus: initialIdentityCheck.matches ? ((resolvedData as any).identityStatus || 'verified') : 'unverified',
-      rejectionReason: initialIdentityCheck.matches ? undefined : initialIdentityCheck.rejectionReason
+      identityValid: isIdentityValid,
+      identityStatus: computedIdentityStatus,
+      rejectionReason: isIdentityValid ? undefined : initialIdentityCheck.rejectionReason
     });
 
-    if (!initialIdentityCheck.matches) {
+    if (!isIdentityValid) {
       logCoordinateRecoveryIdentityCheck({
         requestedEntity: resolvedEntityName,
         recoveredEntity: resolvedData.name,
@@ -193,7 +221,7 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
       resolvedData.coordinates = undefined;
       error = "NO_GEOGRAPHIC_DATA";
     } else {
-      (resolvedData as any).identityStatus = (resolvedData as any).identityStatus || 'verified';
+      (resolvedData as any).identityStatus = computedIdentityStatus;
       if (resolvedData.name && resolvedData.name !== 'Unknown') {
         resolvedData.canonicalName = resolvedData.canonicalName || resolvedData.name;
       }
@@ -275,8 +303,15 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
           resolvedData.canonicalName = resolvedData.canonicalName || resolvedData.name || resolvedEntityName;
         }
         (resolvedData as any).coordinateSource = incoming.source;
+        if ((recoveryCoords as any).entityType) {
+          (resolvedData as any).entityType = (recoveryCoords as any).entityType;
+        }
         const incomingTrust: string = (recoveryCoords as any).coordinateTrust || 'provisional';
         (resolvedData as any).coordinateTrust = incomingTrust;
+        if ((recoveryCoords as any).historicalValidation) {
+          (resolvedData as any).historicalValidation = (recoveryCoords as any).historicalValidation;
+          (resolvedData as any).historicalCorroborated = (recoveryCoords as any).historicalCorroborated;
+        }
         const recoveredIdentityMatches = validateEntityIdentity(resolvedEntityName, resolvedData.name, {
           rawQuery: entityResult.intentResult.normalized.request.rawQuery,
           intent: entityResult.intentResult.intent,
@@ -291,7 +326,7 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
         // prove its coordinates are correct — see trust gate below.
         (resolvedData as any).identityStatus = incomingTrust === 'verified'
           ? 'verified'
-          : (recoveredIdentityMatches ? ((resolvedData as any).identityStatus || 'verified') : 'unverified');
+          : (recoveredIdentityMatches ? 'verified' : 'unverified');
         error = undefined;
         recoveryUsed = true;
         recoveredValid = true;
@@ -413,6 +448,15 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
          getHistoricalEntityKnowledge(resolvedData.name || '') ||
          getHistoricalEntityKnowledge(resolvedEntityName)
        );
+
+       const isMaritime = isMaritimeHistoricalEntity({
+         entityType: (resolvedData as any).entityType,
+         entity: resolvedData.name || resolvedEntityName,
+         query: entityResult.intentResult.normalized.request.rawQuery
+       });
+       const histValidation = (resolvedData as any).historicalValidation;
+       const histCorroborated = Boolean((resolvedData as any).historicalCorroborated || histValidation?.valid);
+
        // Reject provisional when entity is in the KB (has deterministic coords),
        // OR when identity is also unverified (both name AND coordinates unknown).
        const isUnverifiedAi = isAiSource && (
@@ -420,6 +464,15 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
          (finalTrust === 'provisional' && entityInKb) ||
          (finalTrust === 'provisional' && finalStatus === 'unverified')
        );
+
+       console.log(`[COORDINATE TRUST DIAGNOSTICS]
+incomingValidationResult: ${coordinatesValid}
+identityStatus: ${finalStatus}
+coordinateTrust: ${finalTrust}
+maritimeClassification: ${isMaritime}
+historicalValidationReason: ${histValidation?.reason || 'none'}
+corroborationPresent: ${histCorroborated}
+trustGateDecision: ${isUnverifiedAi ? 'REJECT' : 'PASS'}`);
 
        if (isUnverifiedAi) {
          const rejectedProposal = {
@@ -1175,6 +1228,8 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
       const finalHierarchy = [finalCity, finalState, finalCountry].filter(Boolean).filter((val, idx, arr) => arr.indexOf(val) === idx).join(', ');
 
       (locationResult as any).finalData = {
+          rawQuery: request.rawQuery,
+          originalQuery: request.rawQuery,
           name: e.subject.identity.canonicalName,
           canonicalName: e.subject.identity.canonicalName,
           displayName: e.subject.identity.canonicalName,

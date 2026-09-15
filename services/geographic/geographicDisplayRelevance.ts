@@ -25,32 +25,38 @@ export function getCategoryDisplayRadius(candidate: Candidate): number {
   
   const tier = candidate.tier ?? 3;
 
+  let baseRadius = 50;
+
   if (rankingClass === 'POPULATED_PLACE') {
     // Populated places:
     // Tier 1: Major city / regional capital (e.g. Siak Sri Indrapura, Abilene) -> 100 km
     // Tier 2: Town / intermediate municipality (e.g. Eugene, Cottage Grove, Pangkalan Kerinci) -> 80 km
     // Tier 3: Small town / village / hamlet (e.g. Dorena, Pangkalan Bunut) -> 50 km
-    if (tier === 1) return 100;
-    if (tier === 2) return 80;
-    return 50;
-  }
-
-  if (rankingClass === 'GEOGRAPHIC_FEATURE') {
+    if (tier === 1) baseRadius = 100;
+    else if (tier === 2) baseRadius = 80;
+    else baseRadius = 50;
+  } else if (rankingClass === 'GEOGRAPHIC_FEATURE') {
     // Geographic features:
     // Tier 1: Prominent national park, major mountain, lake, etc. (e.g. Zamrud NP, Tesso Nilo NP) -> 110 km
     // Tier 2: Regional park / natural feature -> 75 km
     // Tier 3: Local landmark / hill / stream -> 50 km
-    if (tier === 1) return 110;
-    if (tier === 2) return 75;
-    return 50;
+    if (tier === 1) baseRadius = 110;
+    else if (tier === 2) baseRadius = 75;
+    else baseRadius = 50;
+  } else if (rankingClass === 'POI') {
+    baseRadius = 35;
+  } else {
+    // Generic fallback
+    baseRadius = 50;
   }
 
-  if (rankingClass === 'POI') {
-    return 35;
+  // If candidate was legitimately discovered in an expanded search pass (e.g. 150km or 200km in rural/oceanic fallback),
+  // expand the allowable display radius up to candidate.searchRadiusKm (capped at max search radius 200km)
+  if (typeof candidate.searchRadiusKm === 'number' && candidate.searchRadiusKm > baseRadius) {
+    return Math.min(200, candidate.searchRadiusKm);
   }
 
-  // Generic fallback
-  return 50;
+  return baseRadius;
 }
 
 /**

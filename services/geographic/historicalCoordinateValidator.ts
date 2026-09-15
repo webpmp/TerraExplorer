@@ -6,8 +6,10 @@ export interface HistoricalValidationContext {
   rawQuery?: string;
   intent?: string;
   entityType?: string;
+  candidateEntityType?: string;
   coordinateSource?: CoordinateSource;
   expectedRegion?: string;
+  locationDescription?: string;
 }
 
 export interface HistoricalCoordinateValidationResult {
@@ -2024,8 +2026,310 @@ export const HISTORICAL_KNOWLEDGE_BASE: Record<string, HistoricalEntityKnowledge
     allowedCountries: [],
     exactLocationConfirmed: false,
     exactLocationKnown: false
+  },
+  "batavia shipwreck site": {
+    entity: "Batavia Shipwreck Site",
+    entityType: "shipwreck",
+    expectedRegion: "Houtman Abrolhos / Morning Reef, Wallabi Group, Western Australia (Indian Ocean)",
+    approximateRegion: "Morning Reef, Wallabi Group, Houtman Abrolhos, Western Australia",
+    country: "Australia",
+    state: "Western Australia",
+    region: "Houtman Abrolhos",
+    marineRegion: "Indian Ocean",
+    historicalContext: "Dutch East India Company (VOC) flagship Batavia wrecked on Morning Reef in the Wallabi Group of the Houtman Abrolhos off the coast of Western Australia on June 4, 1629; the survivors were subjected to a notorious mutiny and massacre led by Jeronimus Cornelisz before rescue by Commander Francisco Pelsaert.",
+    sourceRationale: "Shipwreck site located in 1963 on Morning Reef in the Wallabi Group, Houtman Abrolhos archipelago (approx. 28°29′25″S, 113°47′36″E); extensively surveyed and excavated by the Western Australian Museum.",
+    confidence: "high",
+    allowedCountries: ["Australia"],
+    forbiddenRegions: ["New South Wales", "Victoria", "Queensland", "Tasmania", "South Australia", "Northern Territory", "Atlantic Ocean", "Pacific Ocean", "Europe", "Africa", "Americas"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: -28.4903,
+      lng: 113.7933,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: -30.0, maxLat: -27.0, minLng: 112.5, maxLng: 115.5 }
+  },
+  "batavia": {
+    entity: "Batavia Shipwreck Site",
+    entityType: "shipwreck",
+    expectedRegion: "Houtman Abrolhos / Morning Reef, Wallabi Group, Western Australia (Indian Ocean)",
+    approximateRegion: "Morning Reef, Wallabi Group, Houtman Abrolhos, Western Australia",
+    country: "Australia",
+    state: "Western Australia",
+    region: "Houtman Abrolhos",
+    marineRegion: "Indian Ocean",
+    historicalContext: "Dutch East India Company (VOC) flagship Batavia wrecked on Morning Reef in the Wallabi Group of the Houtman Abrolhos off the coast of Western Australia on June 4, 1629; the survivors were subjected to a notorious mutiny and massacre led by Jeronimus Cornelisz before rescue by Commander Francisco Pelsaert.",
+    sourceRationale: "Shipwreck site located in 1963 on Morning Reef in the Wallabi Group, Houtman Abrolhos archipelago (approx. 28°29′25″S, 113°47′36″E); extensively surveyed and excavated by the Western Australian Museum.",
+    confidence: "high",
+    allowedCountries: ["Australia"],
+    forbiddenRegions: ["New South Wales", "Victoria", "Queensland", "Tasmania", "South Australia", "Northern Territory", "Atlantic Ocean", "Pacific Ocean", "Europe", "Africa", "Americas"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: -28.4903,
+      lng: 113.7933,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: -30.0, maxLat: -27.0, minLng: 112.5, maxLng: 115.5 }
+  },
+  "batavia shipwreck": {
+    entity: "Batavia Shipwreck Site",
+    entityType: "shipwreck",
+    expectedRegion: "Houtman Abrolhos / Morning Reef, Wallabi Group, Western Australia (Indian Ocean)",
+    approximateRegion: "Morning Reef, Wallabi Group, Houtman Abrolhos, Western Australia",
+    country: "Australia",
+    state: "Western Australia",
+    region: "Houtman Abrolhos",
+    marineRegion: "Indian Ocean",
+    historicalContext: "Dutch East India Company (VOC) flagship Batavia wrecked on Morning Reef in the Wallabi Group of the Houtman Abrolhos off the coast of Western Australia on June 4, 1629; the survivors were subjected to a notorious mutiny and massacre led by Jeronimus Cornelisz before rescue by Commander Francisco Pelsaert.",
+    sourceRationale: "Shipwreck site located in 1963 on Morning Reef in the Wallabi Group, Houtman Abrolhos archipelago (approx. 28°29′25″S, 113°47′36″E); extensively surveyed and excavated by the Western Australian Museum.",
+    confidence: "high",
+    allowedCountries: ["Australia"],
+    forbiddenRegions: ["New South Wales", "Victoria", "Queensland", "Tasmania", "South Australia", "Northern Territory", "Atlantic Ocean", "Pacific Ocean", "Europe", "Africa", "Americas"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: -28.4903,
+      lng: 113.7933,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: -30.0, maxLat: -27.0, minLng: 112.5, maxLng: 115.5 }
+  },
+  "batavia wreck": {
+    entity: "Batavia Shipwreck Site",
+    entityType: "shipwreck",
+    expectedRegion: "Houtman Abrolhos / Morning Reef, Wallabi Group, Western Australia (Indian Ocean)",
+    approximateRegion: "Morning Reef, Wallabi Group, Houtman Abrolhos, Western Australia",
+    country: "Australia",
+    state: "Western Australia",
+    region: "Houtman Abrolhos",
+    marineRegion: "Indian Ocean",
+    historicalContext: "Dutch East India Company (VOC) flagship Batavia wrecked on Morning Reef in the Wallabi Group of the Houtman Abrolhos off the coast of Western Australia on June 4, 1629; the survivors were subjected to a notorious mutiny and massacre led by Jeronimus Cornelisz before rescue by Commander Francisco Pelsaert.",
+    sourceRationale: "Shipwreck site located in 1963 on Morning Reef in the Wallabi Group, Houtman Abrolhos archipelago (approx. 28°29′25″S, 113°47′36″E); extensively surveyed and excavated by the Western Australian Museum.",
+    confidence: "high",
+    allowedCountries: ["Australia"],
+    forbiddenRegions: ["New South Wales", "Victoria", "Queensland", "Tasmania", "South Australia", "Northern Territory", "Atlantic Ocean", "Pacific Ocean", "Europe", "Africa", "Americas"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: -28.4903,
+      lng: 113.7933,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: -30.0, maxLat: -27.0, minLng: 112.5, maxLng: 115.5 }
+  },
+  "the batavia": {
+    entity: "Batavia Shipwreck Site",
+    entityType: "shipwreck",
+    expectedRegion: "Houtman Abrolhos / Morning Reef, Wallabi Group, Western Australia (Indian Ocean)",
+    approximateRegion: "Morning Reef, Wallabi Group, Houtman Abrolhos, Western Australia",
+    country: "Australia",
+    state: "Western Australia",
+    region: "Houtman Abrolhos",
+    marineRegion: "Indian Ocean",
+    historicalContext: "Dutch East India Company (VOC) flagship Batavia wrecked on Morning Reef in the Wallabi Group of the Houtman Abrolhos off the coast of Western Australia on June 4, 1629; the survivors were subjected to a notorious mutiny and massacre led by Jeronimus Cornelisz before rescue by Commander Francisco Pelsaert.",
+    sourceRationale: "Shipwreck site located in 1963 on Morning Reef in the Wallabi Group, Houtman Abrolhos archipelago (approx. 28°29′25″S, 113°47′36″E); extensively surveyed and excavated by the Western Australian Museum.",
+    confidence: "high",
+    allowedCountries: ["Australia"],
+    forbiddenRegions: ["New South Wales", "Victoria", "Queensland", "Tasmania", "South Australia", "Northern Territory", "Atlantic Ocean", "Pacific Ocean", "Europe", "Africa", "Americas"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: -28.4903,
+      lng: 113.7933,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: -30.0, maxLat: -27.0, minLng: 112.5, maxLng: 115.5 }
   }
 };
+
+export interface MaritimeRegionBounds {
+  names: string[];
+  minLat: number;
+  maxLat: number;
+  minLng: number;
+  maxLng: number;
+  description?: string;
+}
+
+export const MAJOR_MARITIME_REGIONS: MaritimeRegionBounds[] = [
+  {
+    names: ['north atlantic', 'atlantic ocean', 'atlantic', 'western atlantic', 'eastern atlantic', 'sargasso sea', 'caribbean', 'gulf of mexico', 'straits of florida', 'florida coast', 'georgia coast', 'carolina coast', 'celtic sea', 'english channel', 'north sea', 'irish sea', 'cape hatteras', 'outer banks', 'newfoundland', 'nova scotia', 'savannah', 'charleston'],
+    minLat: 0,
+    maxLat: 75,
+    minLng: -100,
+    maxLng: 15,
+    description: 'North Atlantic Ocean & Marginal Seas'
+  },
+  {
+    names: ['south atlantic', 'south atlantic ocean', 'falkland', 'falklands'],
+    minLat: -65,
+    maxLat: 5,
+    minLng: -70,
+    maxLng: 25,
+    description: 'South Atlantic Ocean'
+  },
+  {
+    names: ['caribbean', 'caribbean sea', 'hispaniola', 'cuba', 'bahamas', 'antilles', 'jamaica', 'haiti', 'dominican republic', 'puerto rico'],
+    minLat: 8,
+    maxLat: 28,
+    minLng: -90,
+    maxLng: -58,
+    description: 'Caribbean Sea'
+  },
+  {
+    names: ['gulf of mexico'],
+    minLat: 18,
+    maxLat: 31,
+    minLng: -98,
+    maxLng: -80,
+    description: 'Gulf of Mexico'
+  },
+  {
+    names: ['mediterranean', 'mediterranean sea', 'aegean', 'aegean sea', 'adriatic', 'adriatic sea', 'tyrrhenian', 'ionian', 'ionian sea', 'levantine'],
+    minLat: 30,
+    maxLat: 46,
+    minLng: -6,
+    maxLng: 37,
+    description: 'Mediterranean Sea'
+  },
+  {
+    names: ['baltic', 'baltic sea', 'gulf of finland', 'stockholm harbor', 'kattegat', 'skagerrak'],
+    minLat: 53,
+    maxLat: 66,
+    minLng: 9,
+    maxLng: 31,
+    description: 'Baltic Sea'
+  },
+  {
+    names: ['great lakes', 'lake superior', 'lake michigan', 'lake huron', 'lake erie', 'lake ontario', 'whitefish bay', 'whitefish point'],
+    minLat: 41,
+    maxLat: 49,
+    minLng: -93,
+    maxLng: -75,
+    description: 'North American Great Lakes'
+  },
+  {
+    names: ['indian ocean', 'houtman abrolhos', 'wallabi group', 'western australia', 'arabian sea', 'bay of bengal', 'red sea', 'persian gulf', 'strait of malacca'],
+    minLat: -55,
+    maxLat: 30,
+    minLng: 20,
+    maxLng: 130,
+    description: 'Indian Ocean'
+  },
+  {
+    names: ['north pacific', 'pacific ocean', 'pacific', 'bering sea', 'sea of japan', 'east china sea', 'south china sea', 'philippine sea', 'coral sea', 'great barrier reef', 'yellow sea', 'gulf of alaska', 'hawaii', 'pearl harbor'],
+    minLat: 0,
+    maxLat: 68,
+    minLng: 100,
+    maxLng: -110,
+    description: 'North Pacific Ocean'
+  },
+  {
+    names: ['south pacific', 'south pacific ocean', 'tasman sea', 'great barrier reef', 'queensland coast', 'bowling green bay'],
+    minLat: -65,
+    maxLat: 5,
+    minLng: 140,
+    maxLng: -70,
+    description: 'South Pacific Ocean'
+  },
+  {
+    names: ['arctic', 'arctic ocean', 'barents sea', 'greenland sea', 'denmark strait', 'beaufort sea', 'terror bay', 'king william island', 'victoria strait', 'wilmot and crampton bay', 'nunavut', 'northwest passage'],
+    minLat: 60,
+    maxLat: 90,
+    minLng: -180,
+    maxLng: 180,
+    description: 'Arctic Ocean & Northern Passages'
+  },
+  {
+    names: ['southern ocean', 'antarctic ocean', 'drake passage', 'weddell sea', 'ross sea', 'antarctica'],
+    minLat: -90,
+    maxLat: -50,
+    minLng: -180,
+    maxLng: 180,
+    description: 'Southern / Antarctic Ocean'
+  }
+];
+
+/**
+ * Authoritative centralized helper to determine if an entity, type, or query context represents a historical maritime entity.
+ */
+export function isMaritimeHistoricalEntity(entityOrContext: any): boolean {
+  if (!entityOrContext) return false;
+
+  if (typeof entityOrContext === 'string') {
+    const str = entityOrContext.toLowerCase().trim();
+    if (
+      str === 'shipwreck_site' || 
+      str === 'shipwreck' || 
+      str === 'maritime_wreck' || 
+      str === 'submerged_site' || 
+      str === 'wreck_site' ||
+      str === 'naval_wreck' ||
+      str === 'submerged_archaeological_site' ||
+      str === 'maritime_disaster_site' ||
+      str === 'underwater_cultural_heritage' ||
+      str === 'aircraft_wreck_at_sea'
+    ) {
+      return true;
+    }
+    const kb = getHistoricalEntityKnowledge(str);
+    if (kb && (kb.entityType === 'shipwreck' || (kb as any).entityType === 'shipwreck_site')) {
+      return true;
+    }
+    return false;
+  }
+
+  const entityType = entityOrContext.entityType || entityOrContext.candidateEntityType;
+  if (entityType) {
+    const typeStr = String(entityType).toLowerCase().trim();
+    if (
+      typeStr === 'shipwreck_site' || 
+      typeStr === 'shipwreck' || 
+      typeStr === 'maritime_wreck' || 
+      typeStr === 'submerged_site' || 
+      typeStr === 'wreck_site' ||
+      typeStr === 'naval_wreck' ||
+      typeStr === 'submerged_archaeological_site' ||
+      typeStr === 'maritime_disaster_site' ||
+      typeStr === 'underwater_cultural_heritage' ||
+      typeStr === 'aircraft_wreck_at_sea'
+    ) {
+      return true;
+    }
+  }
+
+  const name = entityOrContext.name || entityOrContext.entityName || entityOrContext.canonicalName || entityOrContext.entity;
+  if (name && typeof name === 'string') {
+    const kb = getHistoricalEntityKnowledge(name);
+    if (kb && (kb.entityType === 'shipwreck' || (kb as any).entityType === 'shipwreck_site')) {
+      return true;
+    }
+    if (/^(?:SS|RMS|HMS|USS|MV|HMAS|USNS|CSS|IJN|SMS|RV|SV|MS)\b/i.test(name) && entityOrContext.intent === 'DISCOVERY_OBJECT_LOCATION') {
+      return true;
+    }
+  }
+
+  if (entityOrContext.intent === 'DISCOVERY_OBJECT_LOCATION') {
+    const rawQ = entityOrContext.rawQuery;
+    if (rawQ && /\b(shipwreck|wreck|sunken ship|sunken vessel)\b/i.test(rawQ)) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 /**
  * Validates whether candidate coordinates are geographically consistent with a historical entity.
@@ -2066,6 +2370,14 @@ export async function validateHistoricalCoordinate(
   ].filter(Boolean);
   const revSummary = revSummaryParts.length > 0 ? revSummaryParts.join(' / ') : (revGeo?.displayName || 'Water / Open Area');
 
+  const isMaritimeEntity = isMaritimeHistoricalEntity({
+    entityName,
+    entityType: context?.entityType,
+    candidateEntityType: context?.candidateEntityType,
+    intent: context?.intent,
+    rawQuery: context?.rawQuery
+  });
+
   // 3. Match against known historical knowledge base
   const kbEntry = HISTORICAL_KNOWLEDGE_BASE[normEntity] || HISTORICAL_KNOWLEDGE_BASE[entityName.toLowerCase().trim()];
   if (kbEntry) {
@@ -2080,7 +2392,7 @@ export async function validateHistoricalCoordinate(
           expectedRegion: kbEntry.expectedRegion,
           reverseGeocodeSummary: revSummary
         };
-        logValidation(entityName, candidateCoords, candidateSource, revSummary, res);
+        logValidation(entityName, candidateCoords, candidateSource, revSummary, res, isMaritimeEntity, 'knowledge_base_bounding_box_mismatch', context?.entityType);
         return res;
       }
     }
@@ -2096,7 +2408,7 @@ export async function validateHistoricalCoordinate(
             expectedRegion: kbEntry.expectedRegion,
             reverseGeocodeSummary: revSummary
           };
-          logValidation(entityName, candidateCoords, candidateSource, revSummary, res);
+          logValidation(entityName, candidateCoords, candidateSource, revSummary, res, isMaritimeEntity, 'forbidden_region_conflict', context?.entityType);
           return res;
         }
       }
@@ -2115,7 +2427,7 @@ export async function validateHistoricalCoordinate(
           expectedRegion: kbEntry.expectedRegion,
           reverseGeocodeSummary: revSummary
         };
-        logValidation(entityName, candidateCoords, candidateSource, revSummary, res);
+        logValidation(entityName, candidateCoords, candidateSource, revSummary, res, isMaritimeEntity, 'country_mismatch', context?.entityType);
         return res;
       }
     }
@@ -2128,34 +2440,156 @@ export async function validateHistoricalCoordinate(
       reverseGeocodeSummary: revSummary,
       isApproximate: !kbEntry.exactLocationConfirmed
     };
-    logValidation(entityName, candidateCoords, candidateSource, revSummary, res);
+    logValidation(entityName, candidateCoords, candidateSource, revSummary, res, isMaritimeEntity, 'authoritative_knowledge_base_corroboration', context?.entityType);
     return res;
   }
 
-  // 4. Heuristic validation for generic historical queries
+  // 4. Maritime Entity Validation Path (for arbitrary shipwrecks not in the fixed KB)
+  if (isMaritimeEntity) {
+    const effectiveExpectedRegion = context?.expectedRegion || context?.locationDescription;
+
+    if (effectiveExpectedRegion) {
+      const expLower = effectiveExpectedRegion.toLowerCase();
+      const revLower = revSummary.toLowerCase();
+
+      // Check for direct contradiction (e.g. expected ocean, but coordinate landed inland in landlocked county)
+      if ((expLower.includes('ocean') || expLower.includes('sea')) && revGeo?.county && !revLower.includes('coastal') && !revLower.includes('island') && !revLower.includes('water')) {
+        const res: HistoricalCoordinateValidationResult = {
+          valid: false,
+          reason: 'GEOGRAPHIC_MISMATCH',
+          expectedRegion: effectiveExpectedRegion,
+          reverseGeocodeSummary: revSummary
+        };
+        logValidation(entityName, candidateCoords, candidateSource, revSummary, res, true, 'inland_county_contradiction', context?.entityType);
+        return res;
+      }
+
+      // Check A: Token match against reverse geocode (e.g. coastal state, nearby country, coastal island)
+      const expTokens = expLower.split(/[\s,/–-]+/).filter(t => t.length >= 3);
+      const revTokens = revLower.split(/[\s,/–-]+/).filter(t => t.length >= 3);
+      const hasTokenMatch = expTokens.some(t => revTokens.includes(t));
+      if (hasTokenMatch) {
+        const res: HistoricalCoordinateValidationResult = {
+          valid: true,
+          reason: 'MARITIME_LOCATION_SUPPORTED',
+          expectedRegion: effectiveExpectedRegion,
+          reverseGeocodeSummary: revSummary
+        };
+        logValidation(entityName, candidateCoords, candidateSource, revSummary, res, true, `token_corroboration (${revSummary})`, context?.entityType);
+        return res;
+      }
+
+      // Check B: Match against major maritime regions bounding boxes
+      let matchingMaritimeRegion: MaritimeRegionBounds | undefined;
+      let contradictedMaritimeRegion: MaritimeRegionBounds | undefined;
+
+      for (const region of MAJOR_MARITIME_REGIONS) {
+        const regionNameMatch = region.names.some(n => expLower.includes(n));
+        if (regionNameMatch) {
+          const inRegionBox = region.minLng <= region.maxLng
+            ? (lat >= region.minLat && lat <= region.maxLat && lng >= region.minLng && lng <= region.maxLng)
+            : (lat >= region.minLat && lat <= region.maxLat && (lng >= region.minLng || lng <= region.maxLng)); // crosses 180
+          
+          if (inRegionBox) {
+            matchingMaritimeRegion = region;
+            break;
+          } else {
+            contradictedMaritimeRegion = region;
+          }
+        }
+      }
+
+      if (matchingMaritimeRegion) {
+        const res: HistoricalCoordinateValidationResult = {
+          valid: true,
+          reason: 'MARITIME_LOCATION_SUPPORTED',
+          expectedRegion: effectiveExpectedRegion,
+          reverseGeocodeSummary: revSummary
+        };
+        logValidation(entityName, candidateCoords, candidateSource, revSummary, res, true, `regional_maritime_bounds (${matchingMaritimeRegion.description || matchingMaritimeRegion.names[0]})`, context?.entityType);
+        return res;
+      }
+
+      if (contradictedMaritimeRegion) {
+        const res: HistoricalCoordinateValidationResult = {
+          valid: false,
+          reason: 'GEOGRAPHIC_MISMATCH',
+          expectedRegion: effectiveExpectedRegion,
+          reverseGeocodeSummary: revSummary
+        };
+        logValidation(entityName, candidateCoords, candidateSource, revSummary, res, true, `geographic_mismatch_with_expected_basin (${contradictedMaritimeRegion.description || contradictedMaritimeRegion.names[0]})`, context?.entityType);
+        return res;
+      }
+
+      // If candidate is in water and source is authoritative deterministic/geocoder
+      if (candidateSource === 'deterministic' || candidateSource === 'geocoder') {
+        const res: HistoricalCoordinateValidationResult = {
+          valid: true,
+          reason: 'AUTHORITATIVE_PROVIDER_COORDINATE',
+          expectedRegion: effectiveExpectedRegion,
+          reverseGeocodeSummary: revSummary
+        };
+        logValidation(entityName, candidateCoords, candidateSource, revSummary, res, true, 'authoritative_provider_water_coordinate', context?.entityType);
+        return res;
+      }
+
+      // Uncorroborated AI recovery in arbitrary ocean
+      const res: HistoricalCoordinateValidationResult = {
+        valid: false,
+        reason: 'INSUFFICIENT_HISTORICAL_GEOGRAPHIC_EVIDENCE',
+        expectedRegion: effectiveExpectedRegion,
+        reverseGeocodeSummary: revSummary
+      };
+      logValidation(entityName, candidateCoords, candidateSource, revSummary, res, true, 'insufficient_evidence', context?.entityType);
+      return res;
+    }
+
+    // No expected region provided
+    if (candidateSource === 'deterministic' || candidateSource === 'geocoder') {
+      const res: HistoricalCoordinateValidationResult = {
+        valid: true,
+        reason: 'AUTHORITATIVE_PROVIDER_COORDINATE',
+        expectedRegion: undefined,
+        reverseGeocodeSummary: revSummary
+      };
+      logValidation(entityName, candidateCoords, candidateSource, revSummary, res, true, 'authoritative_provider', context?.entityType);
+      return res;
+    }
+
+    const res: HistoricalCoordinateValidationResult = {
+      valid: false,
+      reason: 'INSUFFICIENT_HISTORICAL_GEOGRAPHIC_EVIDENCE',
+      expectedRegion: undefined,
+      reverseGeocodeSummary: revSummary
+    };
+    logValidation(entityName, candidateCoords, candidateSource, revSummary, res, true, 'insufficient_evidence_no_expected_region', context?.entityType);
+    return res;
+  }
+
+  // 5. Terrestrial Historical Entities Validation Path
   const isHistoricalQuery = 
     context?.intent === 'DISCOVERY_OBJECT_LOCATION' || 
     context?.intent === 'HISTORICAL_EVENT' ||
     context?.entityType === 'historical_site' ||
-    context?.entityType === 'shipwreck' ||
     context?.entityType === 'archaeological_site';
 
   if (isHistoricalQuery) {
-    if (context?.expectedRegion) {
-      const expLower = context.expectedRegion.toLowerCase();
+    const effectiveExpectedRegion = context?.expectedRegion;
+
+    if (effectiveExpectedRegion) {
+      const expLower = effectiveExpectedRegion.toLowerCase();
       const revLower = revSummary.toLowerCase();
 
       // Check for direct contradiction between expected region and reverse geocode
       if ((expLower.includes('ocean') || expLower.includes('sea')) && revGeo?.county) {
-        // Expected ocean, but landed in a specific inland county
         if (!revLower.includes('coastal') && !revLower.includes('island')) {
           const res: HistoricalCoordinateValidationResult = {
             valid: false,
             reason: 'GEOGRAPHIC_MISMATCH',
-            expectedRegion: context.expectedRegion,
+            expectedRegion: effectiveExpectedRegion,
             reverseGeocodeSummary: revSummary
           };
-          logValidation(entityName, candidateCoords, candidateSource, revSummary, res);
+          logValidation(entityName, candidateCoords, candidateSource, revSummary, res, false, 'county_contradiction', context?.entityType);
           return res;
         }
       }
@@ -2168,10 +2602,10 @@ export async function validateHistoricalCoordinate(
         const res: HistoricalCoordinateValidationResult = {
           valid: true,
           reason: 'MATCHES_EXPECTED_HISTORICAL_REGION',
-          expectedRegion: context.expectedRegion,
+          expectedRegion: effectiveExpectedRegion,
           reverseGeocodeSummary: revSummary
         };
-        logValidation(entityName, candidateCoords, candidateSource, revSummary, res);
+        logValidation(entityName, candidateCoords, candidateSource, revSummary, res, false, `token_match (${revSummary})`, context?.entityType);
         return res;
       }
     }
@@ -2183,7 +2617,7 @@ export async function validateHistoricalCoordinate(
         expectedRegion: context?.expectedRegion,
         reverseGeocodeSummary: revSummary
       };
-      logValidation(entityName, candidateCoords, candidateSource, revSummary, res);
+      logValidation(entityName, candidateCoords, candidateSource, revSummary, res, false, 'authoritative_provider', context?.entityType);
       return res;
     }
 
@@ -2195,9 +2629,22 @@ export async function validateHistoricalCoordinate(
         expectedRegion: context?.expectedRegion,
         reverseGeocodeSummary: revSummary
       };
-      logValidation(entityName, candidateCoords, candidateSource, revSummary, res);
+      logValidation(entityName, candidateCoords, candidateSource, revSummary, res, false, 'insufficient_evidence', context?.entityType);
       return res;
     }
+  }
+
+  // AI-recovered coordinates in open water for non-maritime entities must be rejected
+  const isWaterLocation = revSummary.includes('Water') || revSummary.includes('Open Area') || revSummary.includes('Ocean') || revSummary.includes('Sea');
+  if (isWaterLocation && !isMaritimeEntity && (candidateSource === 'ai_recovery' || candidateSource === 'ai')) {
+    const res: HistoricalCoordinateValidationResult = {
+      valid: false,
+      reason: 'INSUFFICIENT_HISTORICAL_GEOGRAPHIC_EVIDENCE',
+      expectedRegion: context?.expectedRegion,
+      reverseGeocodeSummary: revSummary
+    };
+    logValidation(entityName, candidateCoords, candidateSource, revSummary, res, false, 'land_entity_in_water', context?.entityType);
+    return res;
   }
 
   const res: HistoricalCoordinateValidationResult = {
@@ -2206,7 +2653,7 @@ export async function validateHistoricalCoordinate(
     expectedRegion: context?.expectedRegion,
     reverseGeocodeSummary: revSummary
   };
-  logValidation(entityName, candidateCoords, candidateSource, revSummary, res);
+  logValidation(entityName, candidateCoords, candidateSource, revSummary, res, false, 'no_contradiction', context?.entityType);
   return res;
 }
 
@@ -2215,14 +2662,22 @@ function logValidation(
   coords: GeoCoordinates | null | undefined,
   source: string,
   revSummary: string,
-  result: HistoricalCoordinateValidationResult
+  result: HistoricalCoordinateValidationResult,
+  isMaritimeEntity?: boolean,
+  historicalEvidence?: string,
+  entityType?: string
 ) {
   const coordStr = coords ? `${coords.lat},${coords.lng}` : 'None';
+  const effectiveType = entityType || (isMaritimeEntity ? 'shipwreck_site' : 'unknown');
   console.log(`[HISTORICAL COORDINATE VALIDATION]
 entity: ${entity}
+entityType: ${effectiveType}
+maritimeEntity: ${isMaritimeEntity ?? false}
 candidate: ${coordStr}
 candidateSource: ${source}
 reverseGeocode: ${revSummary}
+waterExpected: ${isMaritimeEntity ?? false}
+historicalEvidence: ${historicalEvidence || (result.valid ? 'corroborated' : 'insufficient')}
 expectedRegion: ${result.expectedRegion || 'Unknown'}
 result: ${result.valid ? 'ACCEPT' : 'REJECT'}
 reason: ${result.reason}`);
@@ -2243,25 +2698,65 @@ export function getHistoricalEntityKnowledge(entityName: string): HistoricalEnti
 
   // Search by diacritic-equivalence
   for (const [key, val] of Object.entries(HISTORICAL_KNOWLEDGE_BASE)) {
-    if (areEntitiesMatchingWithDiacritics(key, normEntity) || areEntitiesMatchingWithDiacritics(val.entity, entityName)) {
+    if (stripDiacritics(key) === strippedNorm || stripDiacritics(key) === strippedTrimmed) {
       return val;
     }
   }
-
   return undefined;
 }
 
 const US_STATE_MAP: Record<string, string> = {
-  "al": "Alabama", "ak": "Alaska", "az": "Arizona", "ar": "Arkansas", "ca": "California",
-  "co": "Colorado", "ct": "Connecticut", "de": "Delaware", "fl": "Florida", "ga": "Georgia",
-  "hi": "Hawaii", "id": "Idaho", "il": "Illinois", "in": "Indiana", "ia": "Iowa",
-  "ks": "Kansas", "ky": "Kentucky", "la": "Louisiana", "me": "Maine", "md": "Maryland",
-  "ma": "Massachusetts", "mi": "Michigan", "mn": "Minnesota", "ms": "Mississippi", "mo": "Missouri",
-  "mt": "Montana", "ne": "Nebraska", "nv": "Nevada", "nh": "New Hampshire", "nj": "New Jersey",
-  "nm": "New Mexico", "ny": "New York", "nc": "North Carolina", "nd": "North Dakota", "oh": "Ohio",
-  "ok": "Oklahoma", "or": "Oregon", "pa": "Pennsylvania", "ri": "Rhode Island", "sc": "South Carolina",
-  "sd": "South Dakota", "tn": "Tennessee", "tx": "Texas", "ut": "Utah", "vt": "Vermont",
-  "va": "Virginia", "wa": "Washington", "wv": "West Virginia", "wi": "Wisconsin", "wy": "Wyoming"
+  'al': 'Alabama', 'alabama': 'Alabama',
+  'ak': 'Alaska', 'alaska': 'Alaska',
+  'az': 'Arizona', 'arizona': 'Arizona',
+  'ar': 'Arkansas', 'arkansas': 'Arkansas',
+  'ca': 'California', 'california': 'California',
+  'co': 'Colorado', 'colorado': 'Colorado',
+  'ct': 'Connecticut', 'connecticut': 'Connecticut',
+  'de': 'Delaware', 'delaware': 'Delaware',
+  'fl': 'Florida', 'florida': 'Florida',
+  'ga': 'Georgia', 'georgia': 'Georgia',
+  'hi': 'Hawaii', 'hawaii': 'Hawaii',
+  'id': 'Idaho', 'idaho': 'Idaho',
+  'il': 'Illinois', 'illinois': 'Illinois',
+  'in': 'Indiana', 'indiana': 'Indiana',
+  'ia': 'Iowa', 'iowa': 'Iowa',
+  'ks': 'Kansas', 'kansas': 'Kansas',
+  'ky': 'Kentucky', 'kentucky': 'Kentucky',
+  'la': 'Louisiana', 'louisiana': 'Louisiana',
+  'me': 'Maine', 'maine': 'Maine',
+  'md': 'Maryland', 'maryland': 'Maryland',
+  'ma': 'Massachusetts', 'massachusetts': 'Massachusetts',
+  'mi': 'Michigan', 'michigan': 'Michigan',
+  'mn': 'Minnesota', 'minnesota': 'Minnesota',
+  'ms': 'Mississippi', 'mississippi': 'Mississippi',
+  'mo': 'Missouri', 'missouri': 'Missouri',
+  'mt': 'Montana', 'montana': 'Montana',
+  'ne': 'Nebraska', 'nebraska': 'Nebraska',
+  'nv': 'Nevada', 'nevada': 'Nevada',
+  'nh': 'New Hampshire', 'new hampshire': 'New Hampshire',
+  'nj': 'New Jersey', 'new jersey': 'New Jersey',
+  'nm': 'New Mexico', 'new mexico': 'New Mexico',
+  'ny': 'New York', 'new york': 'New York',
+  'nc': 'North Carolina', 'north carolina': 'North Carolina',
+  'nd': 'North Dakota', 'north dakota': 'North Dakota',
+  'oh': 'Ohio', 'ohio': 'Ohio',
+  'ok': 'Oklahoma', 'oklahoma': 'Oklahoma',
+  'or': 'Oregon', 'oregon': 'Oregon',
+  'pa': 'Pennsylvania', 'pennsylvania': 'Pennsylvania',
+  'ri': 'Rhode Island', 'rhode island': 'Rhode Island',
+  'sc': 'South Carolina', 'south carolina': 'South Carolina',
+  'sd': 'South Dakota', 'south dakota': 'South Dakota',
+  'tn': 'Tennessee', 'tennessee': 'Tennessee',
+  'tx': 'Texas', 'texas': 'Texas',
+  'ut': 'Utah', 'utah': 'Utah',
+  'vt': 'Vermont', 'vermont': 'Vermont',
+  'va': 'Virginia', 'virginia': 'Virginia',
+  'wa': 'Washington', 'washington': 'Washington',
+  'wv': 'West Virginia', 'west virginia': 'West Virginia',
+  'wi': 'Wisconsin', 'wisconsin': 'Wisconsin',
+  'wy': 'Wyoming', 'wyoming': 'Wyoming',
+  'dc': 'District of Columbia', 'district of columbia': 'District of Columbia'
 };
 
 export function toCanonicalTitleCase(str: string): string {
@@ -2273,8 +2768,8 @@ export function toCanonicalTitleCase(str: string): string {
   const isInputAllUpper = raw === raw.toUpperCase();
   const formatWord = (w: string) => {
     if (!w) return '';
-    // If word is Roman numeral or standard initialism, preserve uppercase
-    if (/^(?:II|III|IV|VI|VII|VIII|IX|X|USA|UK|DFW|SS|USS|HMS|RMS|NASA|UNESCO|JPL)$/i.test(w)) {
+    // If word is Roman numeral or standard initialism / naval prefix, preserve uppercase
+    if (/^(?:II|III|IV|VI|VII|VIII|IX|X|USA|UK|DFW|SS|USS|HMS|RMS|NASA|UNESCO|JPL|MV|HMAS|USNS|CSS|IJN|SMS|RV|SV|MS|TSS|PS)$/i.test(w)) {
       return w.toUpperCase();
     }
     // If word is already all-caps (acronym / initialism) and length >= 2 in a mixed-case input, preserve
@@ -2305,9 +2800,12 @@ export function toCanonicalTitleCase(str: string): string {
   // Handle space-separated city and state abbreviation (e.g. "dallas tx", "DALLAS TX")
   const spaceAbbrMatch = raw.match(/^(.+?)\s+([a-zA-Z]{2})$/);
   if (spaceAbbrMatch && US_STATE_MAP[spaceAbbrMatch[2].toLowerCase()]) {
-    const city = titleCasePhrase(spaceAbbrMatch[1].trim());
-    const state = US_STATE_MAP[spaceAbbrMatch[2].toLowerCase()];
-    return `${city}, ${state}`;
+    const prefix = spaceAbbrMatch[1].trim();
+    if (!/^(?:SS|USS|HMS|RMS|MV|HMAS|USNS|CSS|IJN|SMS|RV|SV|MS|TSS|PS)$/i.test(prefix)) {
+      const city = titleCasePhrase(prefix);
+      const state = US_STATE_MAP[spaceAbbrMatch[2].toLowerCase()];
+      return `${city}, ${state}`;
+    }
   }
 
   // Handle space-separated city and full state name (e.g. "dallas texas", "DALLAS TEXAS", "Dallas Texas")
@@ -2315,11 +2813,13 @@ export function toCanonicalTitleCase(str: string): string {
     const regex = new RegExp(`^(.+?)\\s+${stName}$`, 'i');
     const match = raw.match(regex);
     if (match) {
-      const city = titleCasePhrase(match[1].trim());
-      return `${city}, ${stName}`;
+      const prefix = match[1].trim();
+      if (!/^(?:SS|USS|HMS|RMS|MV|HMAS|USNS|CSS|IJN|SMS|RV|SV|MS|TSS|PS)$/i.test(prefix)) {
+        const city = titleCasePhrase(prefix);
+        return `${city}, ${stName}`;
+      }
     }
   }
 
   return titleCasePhrase(raw);
 }
-
