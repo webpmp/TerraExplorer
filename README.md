@@ -1,40 +1,42 @@
-<p align="center" style="background-color:black; padding:20px;">
-  <a href="assets/machu-picchu-parchment.png">
-    <img src="assets/machu-picchu-parchment.png"
-         alt="Terra Explorer Parchment Theme"
-         width="240"
-         style="margin:5px;">
-  </a>
-  <a href="assets/machu-picchu-modern.png">
-    <img src="assets/machu-picchu-modern.png"
-         alt="Terra Explorer Modern Theme"
-         width="240"
-         style="margin:5px;">
-  </a>
-  <a href="assets/machu-picchu-crt-green.png">
-    <img src="assets/machu-picchu-crt-green.png"
-         alt="Terra Explorer CRT Green Theme"
-         width="240"
-         style="margin:5px;">
-  </a>
-  <a href="assets/machu-picchu-crt-amber.png">
-    <img src="assets/machu-picchu-crt-amber.png"
-         alt="Terra Explorer CRT Amber Theme"
-         width="240"
-         style="margin:5px;">
-  </a>
-</p>
+<div align="center">
+  <img src="assets/multi-waypoint-results.png"
+       alt="TerraExplorer Multi-Waypoint Route Results"
+       width="900">
+</div>
+
 
 
 TerraExplorer
 
 Terra Explorer is an interactive 3D globe application that lets users freely navigate the planet or quickly jump to cities, states, landmarks, and unique points of interest through a powerful search experience. It supports rich data layers including shipwrecks, natural wonders, and historical sites, provides overlays with location overviews, current news, and notable people associated with each place, and includes the Trace Route feature that extracts locations from any article, URL, or text block to build a connected journey across them.
 
-<div align="center">
-  <img src="assets/multi-waypoint-results.png"
-       alt="TerraExplorer Multi-Waypoint Route Results"
-       width="900">
-</div>
+<p align="center" style="background-color:black; padding:20px;">
+  <a href="assets/machu-picchu-parchment.png">
+    <img src="assets/machu-picchu-parchment.png"
+         alt="Terra Explorer Parchment Theme"
+         width="200"
+         style="margin:5px;">
+  </a>
+  <a href="assets/machu-picchu-modern.png">
+    <img src="assets/machu-picchu-modern.png"
+         alt="Terra Explorer Modern Theme"
+         width="200"
+         style="margin:5px;">
+  </a>
+  <a href="assets/machu-picchu-crt-green.png">
+    <img src="assets/machu-picchu-crt-green.png"
+         alt="Terra Explorer CRT Green Theme"
+         width="200"
+         style="margin:5px;">
+  </a>
+  <a href="assets/machu-picchu-crt-amber.png">
+    <img src="assets/machu-picchu-crt-amber.png"
+         alt="Terra Explorer CRT Amber Theme"
+         width="200"
+         style="margin:5px;">
+  </a>
+</p>
+
 
 Features
 
