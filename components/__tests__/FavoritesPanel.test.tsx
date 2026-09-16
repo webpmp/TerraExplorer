@@ -176,4 +176,31 @@ describe('FavoritesPanel - Selected Route Chevron Border', () => {
     expect(threeHtml).not.toContain('3 waypoints •');
     expect(threeHtml).not.toContain('Delhi');
   });
+
+  it('7. EDIT ROUTE modal renders text-only "Save Changes" with theme-specific button styling', () => {
+    const retroAmberHtml = renderToStaticMarkup(
+      <FavoritesPanel {...defaultProps} skin="retro-amber" initialEditingRoute={sampleFavorites[0]} />
+    );
+    expect(retroAmberHtml).toContain('Save Changes');
+    expect(retroAmberHtml).toContain('bg-amber-400 text-black hover:opacity-90');
+    expect(retroAmberHtml).toMatch(/<button[^>]*class="[^"]*bg-amber-400 text-black hover:opacity-90[^"]*"[^>]*>\s*Save Changes\s*<\/button>/);
+
+    const retroGreenHtml = renderToStaticMarkup(
+      <FavoritesPanel {...defaultProps} skin="retro-green" initialEditingRoute={sampleFavorites[0]} />
+    );
+    expect(retroGreenHtml).toContain('bg-green-400 text-black hover:opacity-90');
+    expect(retroGreenHtml).toMatch(/<button[^>]*class="[^"]*bg-green-400 text-black hover:opacity-90[^"]*"[^>]*>\s*Save Changes\s*<\/button>/);
+
+    const modernHtml = renderToStaticMarkup(
+      <FavoritesPanel {...defaultProps} skin="modern" initialEditingRoute={sampleFavorites[0]} />
+    );
+    expect(modernHtml).toContain('bg-cyan-600 hover:bg-cyan-500 rounded-lg shadow-lg shadow-cyan-900/50');
+    expect(modernHtml).toMatch(/<button[^>]*class="[^"]*bg-cyan-600 hover:bg-cyan-500[^"]*"[^>]*>\s*Save Changes\s*<\/button>/);
+
+    const parchmentHtml = renderToStaticMarkup(
+      <FavoritesPanel {...defaultProps} skin="parchment" initialEditingRoute={sampleFavorites[0]} />
+    );
+    expect(parchmentHtml).toContain('text-[#3e2723] hover:text-[#1a0f07]');
+    expect(parchmentHtml).toMatch(/<button[^>]*class="[^"]*text-\[#3e2723\] hover:text-\[#1a0f07\][^"]*"[^>]*>\s*Save Changes\s*<\/button>/);
+  });
 });

@@ -2272,20 +2272,14 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     : 'bg-black/40 border border-white/20 focus:border-cyan-400 text-white placeholder-gray-400 rounded-lg';
 
   const noteSaveBtnThemeClass = isParchment
-    ? 'text-[#8b5a2b] hover:text-[#3e2723]'
+    ? 'text-[#3e2723] hover:text-[#1a0f07]'
     : skin === 'retro-amber'
-    ? 'text-amber-400 hover:text-amber-200'
+    ? 'bg-amber-400 text-black hover:opacity-90'
     : isRetro
-    ? 'text-green-400 hover:text-green-200'
-    : 'text-cyan-400 hover:text-cyan-200';
+    ? 'bg-green-400 text-black hover:opacity-90'
+    : 'bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg shadow-lg shadow-cyan-900/50';
 
-  const noteCancelBtnThemeClass = isParchment
-    ? 'text-[#8b5a2b] hover:text-[#3e2723]'
-    : skin === 'retro-amber'
-    ? 'text-amber-400 hover:text-red-400'
-    : isRetro
-    ? 'text-green-400 hover:text-red-400'
-    : 'text-gray-400 hover:text-red-400';
+  const noteCancelBtnThemeClass = 'opacity-70 hover:opacity-100';
 
   const noteEditBtnThemeClass = isParchment
     ? 'text-[#8b5a2b] hover:text-[#3e2723]'
@@ -2393,7 +2387,15 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                   isRetro={isRetro}
                   isParchment={isParchment}
                 />
-                <p className={`${bodyTextStyle} mb-3 border-b ${isRetro ? 'border-current/30' : isParchment ? 'border-[#8b5a2b]/30' : 'border-white/10'} pb-3`}>
+                <p className={`${bodyTextStyle} mb-3 border-b ${
+                  skin === 'retro-green'
+                    ? 'border-green-400/50'
+                    : skin === 'retro-amber'
+                    ? 'border-amber-400/50'
+                    : isParchment
+                    ? 'border-[#8b5a2b]/30'
+                    : 'border-white/10'
+                } pb-3`}>
                   {info.routeContext.text}
                 </p>
               </div>
@@ -3198,21 +3200,21 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                              <button
                                type="button"
                                onClick={handleCancelNewNote}
-                               className={`p-1.5 transition-colors ${noteCancelBtnThemeClass}`}
+                               className={`px-3 py-1 text-sm transition-opacity ${noteCancelBtnThemeClass}`}
                                title="Cancel"
                                aria-label="Cancel"
                              >
-                               <X size={14} />
+                               CANCEL
                              </button>
                              <button
                                type="button"
                                onClick={handleSaveNewNote}
                                disabled={!newNoteText.trim()}
-                               className={`p-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${noteSaveBtnThemeClass}`}
+                               className={`px-4 py-1 text-sm font-bold uppercase transition-all disabled:opacity-40 disabled:cursor-not-allowed ${noteSaveBtnThemeClass}`}
                                title="Save note"
                                aria-label="Save note"
                              >
-                               {isParchment ? <AntiqueBookIcon size={14} /> : <Save size={14} />}
+                               SAVE NOTE
                              </button>
                            </div>
                          </div>
@@ -3245,21 +3247,21 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                                              <button
                                                type="button"
                                                onClick={handleCancelEdit}
-                                               className={`p-1.5 transition-colors ${noteCancelBtnThemeClass}`}
+                                               className={`px-3 py-1 text-sm transition-opacity ${noteCancelBtnThemeClass}`}
                                                title="Cancel edit"
                                                aria-label="Cancel edit"
                                              >
-                                                 <X size={14} />
+                                                 CANCEL
                                              </button>
                                              <button
                                                type="button"
                                                onClick={() => handleSaveEdit(note.id)}
                                                disabled={!editingNoteText.trim()}
-                                               className={`p-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${noteSaveBtnThemeClass}`}
+                                               className={`px-4 py-1 text-sm font-bold uppercase transition-all disabled:opacity-40 disabled:cursor-not-allowed ${noteSaveBtnThemeClass}`}
                                                title="Save changes"
                                                aria-label="Save changes"
                                              >
-                                                 {isParchment ? <AntiqueBookIcon size={14} /> : <Save size={14} />}
+                                                 SAVE NOTE
                                              </button>
                                          </div>
                                      </div>

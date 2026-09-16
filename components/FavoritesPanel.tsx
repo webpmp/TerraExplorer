@@ -56,7 +56,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
       deleteBtn: "hover:bg-red-900/50 text-gray-400 hover:text-red-400 rounded p-1.5 transition-colors",
       closeBtn: "hover:bg-white/20 text-white rounded-full p-1",
       emptyState: "text-gray-500",
-      modal: "bg-black/95 backdrop-blur-xl border border-cyan-400/30 rounded-xl text-white shadow-2xl",
+      modal: "bg-black/75 backdrop-blur-md border border-cyan-400/30 rounded-xl text-white",
       input: "bg-white/5 border border-white/20 text-white rounded p-2 text-sm focus:border-cyan-400 outline-none"
     },
     'retro-green': {
@@ -72,8 +72,8 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
       deleteBtn: "hover:bg-green-400 hover:text-black text-green-300 rounded-none p-1.5",
       closeBtn: "hover:bg-green-400 hover:text-black text-green-300 rounded-none p-1",
       emptyState: "text-green-400/50",
-      modal: "bg-black border-2 border-green-400 text-green-300 font-retro shadow-none rounded-none",
-      input: "bg-black border border-green-400 text-green-300 rounded-none p-2 text-sm focus:bg-green-900/20 outline-none font-retro"
+      modal: "bg-black/85 backdrop-blur-sm border-2 border-green-400 text-green-300 font-retro shadow-none rounded-none",
+      input: "bg-black border border-green-400 text-green-300 placeholder-green-400/50 rounded-none p-2 text-sm focus:bg-green-900/20 outline-none font-retro"
     },
     'retro-amber': {
       container: "bg-black/85 backdrop-blur-sm border-2 border-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.2)] text-amber-300 font-retro tracking-widest",
@@ -88,8 +88,8 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
       deleteBtn: "hover:bg-amber-400 hover:text-black text-amber-300 rounded-none p-1.5",
       closeBtn: "hover:bg-amber-400 hover:text-black text-amber-300 rounded-none p-1",
       emptyState: "text-amber-400/50",
-      modal: "bg-black border-2 border-amber-400 text-amber-300 font-retro shadow-none rounded-none",
-      input: "bg-black border border-amber-400 text-amber-300 rounded-none p-2 text-sm focus:bg-amber-900/20 outline-none font-retro"
+      modal: "bg-black/85 backdrop-blur-sm border-2 border-amber-400 text-amber-300 font-retro shadow-none rounded-none",
+      input: "bg-black border border-amber-400 text-amber-300 placeholder-amber-400/50 rounded-none p-2 text-sm focus:bg-amber-900/20 outline-none font-retro"
     },
     'parchment': {
       container: "text-[#3e2723] font-sans",
@@ -104,7 +104,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
       deleteBtn: "hover:bg-[#8b0000]/20 hover:text-[#8b0000] text-[#8b5a2b] rounded-sm p-1.5 transition-colors",
       closeBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] rounded p-1",
       emptyState: "text-[#8b5a2b]/70",
-      modal: "text-[#3e2723] font-sans shadow-[0_4px_15px_rgba(0,0,0,0.4)] rounded-sm",
+      modal: "text-[#3e2723] font-sans rounded-sm",
       input: "bg-[#f4ead5] text-[#522B07] placeholder-[#522B07] shadow-[inset_1px_1px_3px_rgba(0,0,0,0.1)] rounded-sm p-2 text-sm outline-none"
     }
   };
@@ -368,7 +368,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
                  <div className="parchment-background" aria-hidden="true" />
                )}
                <div className="relative z-[1] flex flex-col flex-1 shrink min-h-0 overflow-hidden">
-                 <div className={`p-4 flex items-center justify-between shrink-0 ${skin === 'parchment' ? '' : isRetro ? 'border-b border-current' : 'border-b border-white/10'}`}>
+                 <div className={`p-4 flex items-center justify-between shrink-0 ${theme.header}`}>
                      <h3 className={`text-xl font-bold uppercase ${theme.headerTitle}`}>Edit Route</h3>
                      <button onClick={() => setEditingRoute(null)} className={theme.closeBtn}><X size={20} /></button>
                  </div>
@@ -475,9 +475,9 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
                    <button onClick={() => { setEditingRoute(null); onClearInitialEditingRoute?.(); }} className="px-4 py-2 text-sm opacity-70 hover:opacity-100">Cancel</button>
                     <button 
                         onClick={saveEditedRoute} 
-                        className={`px-6 py-2 font-bold uppercase flex items-center gap-2 ${skin === 'parchment' ? 'text-[#3e2723] hover:text-[#1a0f07]' : isRetro ? 'bg-green-400 text-black hover:opacity-90' : 'bg-cyan-600 hover:bg-cyan-500 rounded-lg shadow-lg shadow-cyan-900/50'}`}
+                        className={`px-6 py-2 font-bold uppercase ${skin === 'parchment' ? 'text-[#3e2723] hover:text-[#1a0f07]' : skin === 'retro-amber' ? 'bg-amber-400 text-black hover:opacity-90' : isRetro ? 'bg-green-400 text-black hover:opacity-90' : 'bg-cyan-600 hover:bg-cyan-500 rounded-lg shadow-lg shadow-cyan-900/50'}`}
                     >
-                        {skin === 'parchment' ? <AntiqueBookIcon size={16} /> : <Save size={16} />} Save Changes
+                        Save Changes
                     </button>
                 </div>
                </div>
