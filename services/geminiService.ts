@@ -83,18 +83,32 @@ export const isGeminiConfigured = (): boolean => {
 };
 
 // Helper for calling Gemini with exponential backoff retry
-export const callGeminiWithRetry = async (params: any, retries = 3): Promise<any> => {
+export const callGeminiWithRetry = async (params: any, retries = 3, signal?: AbortSignal): Promise<any> => {
   const requestUrl = `https://generativelanguage.googleapis.com/v1beta/models/${params.model || modelName}:generateContent`;
   console.log("=== GEMINI API REQUEST START ===");
   console.log("Request URL:", requestUrl);
   console.log("Request Payload:", JSON.stringify(params, null, 2));
+  
+  if (signal?.aborted || params.signal?.aborted) {
+    const abortErr = new DOMException('Aborted', 'AbortError');
+    throw abortErr;
+  }
+
   try {
     const response = await ai.models.generateContent(params);
+    if (signal?.aborted || params.signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
     console.log("Response Status Code: 200 OK");
     console.log("Response Body:", JSON.stringify(response, null, 2));
     console.log("=== GEMINI API REQUEST END ===");
     return response;
   } catch (error: any) {
+    if (error?.name === 'AbortError' || signal?.aborted || params.signal?.aborted) {
+      console.log("=== GEMINI API REQUEST ABORTED ===");
+      throw error?.name === 'AbortError' ? error : new DOMException('Aborted', 'AbortError');
+    }
+
     console.error("=== GEMINI API REQUEST ERROR ===");
     console.error("Request URL:", requestUrl);
     console.error("Error Name:", error?.name);
@@ -119,7 +133,7 @@ export const callGeminiWithRetry = async (params: any, retries = 3): Promise<any
       const delayMs = 4000 * (4 - retries); 
       console.warn(`Quota exceeded (429). Retrying in ${delayMs}ms...`);
       await new Promise(resolve => setTimeout(resolve, delayMs));
-      return callGeminiWithRetry(params, retries - 1);
+      return callGeminiWithRetry(params, retries - 1, signal);
     }
     
     throw error;
@@ -127,19 +141,27 @@ export const callGeminiWithRetry = async (params: any, retries = 3): Promise<any
 };
 
 // Helper for exponential backoff retry
-export const generateContentWithRetry = async (params: any, retries = 3): Promise<any> => {
+export const generateContentWithRetry = async (params: any, retries = 3, signal?: AbortSignal): Promise<any> => {
+  const activeSignal = signal || params.signal;
+  if (activeSignal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
+
   const settings = getUserSettings();
   
   if (settings.aiProvider === 'lmstudio' && !params.config?.tools?.some((t: any) => t.googleSearch)) {
     console.log('[AI Provider] LM Studio generation started');
     try {
-      return await generateLocalLMStudioContent(params, settings.lmStudioUrl, settings.lmStudioModel);
+      return await generateLocalLMStudioContent(params, settings.lmStudioUrl, settings.lmStudioModel, activeSignal);
     } catch (err: any) {
+      if (err?.name === 'AbortError' || activeSignal?.aborted) {
+        throw err?.name === 'AbortError' ? err : new DOMException('Aborted', 'AbortError');
+      }
       if (isLMStudioNoModelError(err)) {
         console.warn('[AI Provider] LM Studio has no loaded model');
         if (isGeminiConfigured()) {
           console.log('[AI Provider] Attempting Gemini fallback');
-          const response = await callGeminiWithRetry(params, retries);
+          const response = await callGeminiWithRetry(params, retries, activeSignal);
           console.log('[AI Provider] Gemini fallback successful');
           return response;
         }
@@ -149,7 +171,7 @@ export const generateContentWithRetry = async (params: any, retries = 3): Promis
     }
   }
 
-  return callGeminiWithRetry(params, retries);
+  return callGeminiWithRetry(params, retries, activeSignal);
 };
 
 export const LM_STUDIO_NO_MODEL_MESSAGE = "No AI model is currently loaded. Please load a model and try again.";
@@ -197,8 +219,12 @@ export const formatLMStudioNoModelError = () => ({
   errorInstruction: LM_STUDIO_NO_MODEL_INSTRUCTION
 });
 
-const generateLocalLMStudioContent = async (params: any, baseUrl: string, model: string = "local-model"): Promise<any> => {
+const generateLocalLMStudioContent = async (params: any, baseUrl: string, model: string = "local-model", signal?: AbortSignal): Promise<any> => {
   try {
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+
     // Basic translation from Gemini format to OpenAI format
     const messages = [];
     const isJson = params.config?.responseMimeType === "application/json";
@@ -251,7 +277,8 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal
     });
 
     if (!response.ok) {
@@ -420,9 +447,12 @@ export const normalizeLocationEntity = (entity: string | null | undefined | any)
   return toCanonicalTitleCase(entity.trim());
 };
 
-export const resolveLocationQuery = async (query: string, intent?: QueryIntent, rawQuery?: string): Promise<SearchResult | null> => {
+export const resolveLocationQuery = async (query: string, intent?: QueryIntent, rawQuery?: string, signal?: AbortSignal): Promise<SearchResult | null> => {
   let normalizedQuery = query;
   try {
+    if (signal?.aborted) {
+      return null;
+    }
     // Step 0: Celestial Body Validation Guard (Earth-only support)
     const celestialValidation = validateEarthGeography({ query: rawQuery || query, name: query });
     if (!celestialValidation.isValid) {
@@ -667,7 +697,7 @@ Return only JSON:
                   model: modelName,
                   contents: histPrompt,
                   config: { responseMimeType: "application/json" }
-              }, 1);
+              }, 1, signal);
               const histParsed = parseAndExtract(histRes.text);
               if (histParsed.success) {
                   const val = histParsed.value as any;
@@ -677,7 +707,8 @@ Return only JSON:
                       console.log(`[HISTORICAL LOCATION RESOLUTION]\n{\n  "entity": "${targetSearchTerm}",\n  "resolved location": "${val.location}",\n  "coordinates": ${JSON.stringify(historicalCoords)},\n  "confidence": "${val.confidence}"\n}`);
                   }
               }
-          } catch (e) {
+          } catch (e: any) {
+              if (e?.name === 'AbortError' || signal?.aborted) throw e;
               console.error("Historical discovery pre-resolution failed", e);
           }
       }
@@ -691,7 +722,7 @@ Return only JSON:
             responseSchema: mainInfoSchemaConfig,
             maxOutputTokens: 4000, 
           }
-        });
+        }, 3, signal);
       };
 
       let mainResponse = await executeAiCall(mainPrompt);
@@ -1368,7 +1399,8 @@ const logInfoPanelTrace = (event: string, marker: any, elapsedMs?: number, state
 
 import { descriptionCache } from './cacheService';
 
-export const getInfoFromFeature = async (marker: MapMarker, queryContext?: string): Promise<LocationInfo | null> => {
+export const getInfoFromFeature = async (marker: MapMarker, queryContext?: string, signal?: AbortSignal): Promise<LocationInfo | null> => {
+  if (signal?.aborted) return null;
   const { name, lat, lng } = marker;
   const startTime = Date.now();
   const cacheKey = `${name}_${lat.toFixed(4)}_${lng.toFixed(4)}${queryContext ? '_' + queryContext.slice(0, 30) : ''}`;
@@ -1381,6 +1413,7 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
 
   const promise = (async () => {
     try {
+      if (signal?.aborted) return null;
     const country = marker.country || "Unknown Country";
     const region = marker.state || marker.region || "Unknown Region";
     const city = marker.city || marker.county || "Unknown City";
@@ -1439,7 +1472,7 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
         maxOutputTokens: 4000,
         temperature: 0.2
       }
-    });
+    }, 3, signal);
 
     let mainResponse = await mainRequest;
     
@@ -1505,7 +1538,7 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
                    maxOutputTokens: 4000,
                    temperature: 0.3
                  }
-               });
+               }, 3, signal);
                mainResponse = await retryRequest;
                parsed = parseAndExtract(mainResponse.text);
                logEnrichmentJsonPipeline(mainResponse.text, parsed, true);
@@ -1852,7 +1885,15 @@ Provide a JSON array of significant local places, natural features, landmarks, o
     }
 };
 
-export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: number = 50): Promise<{ places: MapMarker[]; status: "SUCCESS" | "NO_RESULTS" | "PROVIDER_FAILURE"; diagnostics?: any }> => {
+export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: number = 50, signal?: AbortSignal): Promise<{ places: MapMarker[]; status: "SUCCESS" | "NO_RESULTS" | "PROVIDER_FAILURE"; diagnostics?: any }> => {
+  if (signal?.aborted) {
+    return {
+      places: [],
+      status: "NO_RESULTS",
+      diagnostics: { providersAttempted: 0, providerFailures: 0, resultCount: 0 }
+    };
+  }
+
   if (typeof lat !== 'number' || isNaN(lat) || typeof lng !== 'number' || isNaN(lng)) {
     return {
       places: [],
@@ -1869,9 +1910,23 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
     
     // 1. Resolve Context for the clicked coordinate
     const geoContext: Partial<ReverseGeocodeContext> = await reverseGeocode(lat, lng).catch(() => ({})) || {};
+    if (signal?.aborted) {
+      return {
+        places: [],
+        status: "NO_RESULTS",
+        diagnostics: { providersAttempted: 0, providerFailures: 0, resultCount: 0 }
+      };
+    }
 
     // STAGE 1: Primary Geographic Entity Resolution
     const primaryEntity = await resolvePrimaryGeographicEntity(lat, lng, geoContext as any);
+    if (signal?.aborted) {
+      return {
+        places: [],
+        status: "NO_RESULTS",
+        diagnostics: { providersAttempted: 0, providerFailures: 0, resultCount: 0 }
+      };
+    }
 
     if (primaryEntity) {
         console.log(`[Discovery] ${lat.toFixed(2)}, ${lng.toFixed(2)} → 1 candidate`);
@@ -2327,15 +2382,32 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
 export const generateRoute = async (
   text: string,
   intent?: string,
-  generateFn: (params: any) => Promise<any> = generateContentWithRetry
+  generateFnOrSignal?: ((params: any) => Promise<any>) | AbortSignal,
+  signalParam?: AbortSignal
 ): Promise<Route> => {
   const isUrl = text.startsWith('http');
   const queryMeta = routeIntentAndExtractEntity(text);
   const effectiveIntent = intent || queryMeta.intent;
   const isFilmingQuery = queryMeta.discoveryTarget === 'filming locations' ||
     /\b(filmed|filming|shot|shooting|production locations?|locations? used|places used|places where)\b/i.test(text);
+
+  let generateFn: (params: any) => Promise<any> = generateContentWithRetry;
+  let activeSignal: AbortSignal | undefined = signalParam;
+
+  if (typeof generateFnOrSignal === 'function') {
+    generateFn = generateFnOrSignal;
+  } else if (generateFnOrSignal && typeof generateFnOrSignal === 'object' && 'aborted' in generateFnOrSignal) {
+    activeSignal = generateFnOrSignal as AbortSignal;
+  }
+
+  if (activeSignal?.aborted) {
+    return { waypoints: [] };
+  }
   
   const generateRawRoute = async (t: string, url: boolean): Promise<{ waypoints: any[], title?: string, routeConfidence?: any, routeType?: string, isSequential?: boolean, routeEvidenceMode?: any, routeGroups?: any[] }> => {
+    if (activeSignal?.aborted) {
+      return { waypoints: [] };
+    }
     // Check if query corresponds to a registered authoritative historical event
     const registeredEventModel = getAuthoritativeEventModel(t);
     const isMockOrCustomGenerate = generateFn !== generateContentWithRetry;
@@ -3150,7 +3222,8 @@ export const extractEntityFromQuery = (query: string): string => {
 
 import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck } from './geographic/entityIdentityValidator';
 
-export const recoverCoordinatesFromAi = async (rawQuery: string, intent: string, entity: string, attempt: number = 1): Promise<ResolvedCoordinates | null> => {
+export const recoverCoordinatesFromAi = async (rawQuery: string, intent: string, entity: string, attempt: number = 1, signal?: AbortSignal): Promise<ResolvedCoordinates | null> => {
+  if (signal?.aborted) return null;
   if (intent === 'MULTI_LOCATION_DISCOVERY' || intent === 'EXPLORATORY' || intent === 'route') {
     console.warn(`[Coordinate Recovery] Unsafe coordinate recovery blocked for multi-location intent "${intent}".`);
     return null;
@@ -3217,7 +3290,7 @@ Output ONLY the JSON object.`;
       config: {
         maxOutputTokens: 300, 
       }
-    });
+    }, 3, signal);
 
     const parsed = parseAndExtract(response.text);
     const data = parsed.success ? parsed.value : null;
@@ -3405,8 +3478,10 @@ Output ONLY the JSON object.`;
 export const recoverLocationMetadata = async (
   entityName: string, 
   coordinates: GeoCoordinates,
-  canonicalIdentity?: Partial<CanonicalGeographicEntity> & { country?: string; state?: string; city?: string; region?: string; county?: string; originalQuery?: string }
+  canonicalIdentity?: Partial<CanonicalGeographicEntity> & { country?: string; state?: string; city?: string; region?: string; county?: string; originalQuery?: string },
+  signal?: AbortSignal
 ): Promise<Partial<EnrichmentResult> | null> => {
+  if (signal?.aborted) return null;
   try {
     const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
     
@@ -3535,7 +3610,7 @@ export const recoverLocationMetadata = async (
           responseSchema: mainInfoSchemaConfig,
           maxOutputTokens: 4000,
         }
-      });
+      }, 3, signal);
       
       const rawText = response.text;
       const parsed = parseAndExtract(rawText);

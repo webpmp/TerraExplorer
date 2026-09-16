@@ -231,11 +231,36 @@ const Controls: React.FC<ControlsProps> = ({
     return () => clearInterval(interval);
   }, [scanningStatusText]);
 
+  const isScanStatusQuery = (q: string) => {
+    const upper = q.trim().toUpperCase();
+    return upper.startsWith("STARTING SCAN") ||
+           upper.startsWith("LOCATING AREA") ||
+           upper.startsWith("EXPANDING SEARCH") ||
+           upper.startsWith("CHECKING AREA") ||
+           upper.startsWith("REVIEWING RESULTS") ||
+           upper.startsWith("FINALIZING RESULTS") ||
+           upper.startsWith("LOCATING ") ||
+           upper.startsWith("TRACING ROUTE") ||
+           upper === "SCAN CANCELLED" ||
+           upper === "SCAN FAILED";
+  };
+
+  const handleCancelClick = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setQuery("");
+    if (onCancelScan) {
+      onCancelScan();
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     narrationService.prime();
-    if (scanningStatusText) {
-      if (onCancelScan) onCancelScan();
+    if (scanningStatusText || isScanStatusQuery(query)) {
+      handleCancelClick();
       return;
     }
     if (query.trim()) {
@@ -243,9 +268,11 @@ const Controls: React.FC<ControlsProps> = ({
       onSearch(query);
     } else if (placeholder !== "Search location..." && placeholder !== "SEARCH LOCATION...") {
       const cleanQuery = placeholder.replace(/\.\.\.$/, "");
-      console.log(`[SearchNarration] SEARCH_SUBMITTED query="${cleanQuery}"`);
-      setQuery(cleanQuery);
-      onSearch(cleanQuery);
+      if (!isScanStatusQuery(cleanQuery)) {
+        console.log(`[SearchNarration] SEARCH_SUBMITTED query="${cleanQuery}"`);
+        setQuery(cleanQuery);
+        onSearch(cleanQuery);
+      }
     }
   };
 
@@ -617,7 +644,7 @@ const Controls: React.FC<ControlsProps> = ({
 
                 <button
                   type={scanningStatusText ? "button" : "submit"}
-                  onClick={scanningStatusText ? onCancelScan : undefined}
+                  onClick={scanningStatusText ? handleCancelClick : undefined}
                   disabled={isSearching && !scanningStatusText}
                   className={`mr-2 px-4 py-2 transition-colors disabled:opacity-50 ${theme.submitBtn}`}
                 >
@@ -659,7 +686,7 @@ const Controls: React.FC<ControlsProps> = ({
 
             <button
               type={scanningStatusText ? "button" : "submit"}
-              onClick={scanningStatusText ? onCancelScan : undefined}
+              onClick={scanningStatusText ? handleCancelClick : undefined}
               disabled={isSearching && !scanningStatusText}
               className={`mr-2 px-4 py-2 transition-colors disabled:opacity-50 ${theme.submitBtn}`}
             >

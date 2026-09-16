@@ -15,6 +15,8 @@ interface FavoritesPanelProps {
   onFlyTo: (fav: FavoriteLocation) => void;
   skin: SkinType;
   dimmed?: boolean;
+  initialEditingRoute?: FavoriteLocation | null;
+  onClearInitialEditingRoute?: () => void;
 }
 
 const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
@@ -27,9 +29,17 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
   onUpdate,
   onFlyTo,
   skin,
-  dimmed = false
+  dimmed = false,
+  initialEditingRoute,
+  onClearInitialEditingRoute
 }) => {
-  const [editingRoute, setEditingRoute] = useState<FavoriteLocation | null>(null);
+  const [editingRoute, setEditingRoute] = useState<FavoriteLocation | null>(initialEditingRoute || null);
+
+  useEffect(() => {
+    if (initialEditingRoute) {
+      setEditingRoute(JSON.parse(JSON.stringify(initialEditingRoute)));
+    }
+  }, [initialEditingRoute]);
   const isRetro = skin !== 'modern';
 
   const themes = {
@@ -124,6 +134,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
       };
       onUpdate(syncedRoute);
       setEditingRoute(null);
+      onClearInitialEditingRoute?.();
     }
   };
 
@@ -347,11 +358,10 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
       {/* Route Editor Modal */}
       {editingRoute && (
          <div 
-           className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 pt-6 md:pt-8 pb-52 md:pb-56 bg-black/80 backdrop-blur-sm pointer-events-auto"
-           onClick={() => setEditingRoute(null)}
+           className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 pt-[281px] pb-52 md:pb-56 pointer-events-none"
          >
              <div 
-               className={`relative w-full max-w-2xl max-h-full flex flex-col shrink min-h-0 ${skin === 'parchment' ? '[isolation:isolate]' : 'overflow-hidden'} ${theme.modal}`}
+               className={`relative w-full max-w-2xl max-h-full flex flex-col shrink min-h-0 pointer-events-auto ${skin === 'parchment' ? '[isolation:isolate]' : 'overflow-hidden'} ${theme.modal}`}
                onClick={(e) => e.stopPropagation()}
              >
                 {skin === 'parchment' && (
@@ -402,27 +412,18 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
                                    </button>
                                </div>
                                 
-                               <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
-                                   <div>
-                                       <label className="text-[10px] uppercase opacity-50 block mb-1">Name</label>
-                                       <input 
-                                           type="text" 
-                                           value={wp.name} 
-                                           onChange={(e) => updateWaypoint(idx, 'name', e.target.value)}
-                                           className={`w-full ${theme.input}`}
-                                       />
-                                   </div>
-                                   <div>
-                                       <label className="text-[10px] uppercase opacity-50 block mb-1">Context / Description</label>
-                                       <input 
-                                           type="text" 
-                                           value={wp.context || ""} 
-                                           onChange={(e) => updateWaypoint(idx, 'context', e.target.value)}
-                                           className={`w-full ${theme.input}`}
-                                       />
-                                   </div>
-                                   <div className="flex gap-2">
-                                       <div className="flex-1">
+                               <div className="flex-1 flex flex-col gap-3 min-w-0">
+                                   <div className="grid grid-cols-1 sm:grid-cols-[1fr_120px] md:grid-cols-[1fr_140px] gap-3">
+                                       <div>
+                                           <label className="text-[10px] uppercase opacity-50 block mb-1">Name</label>
+                                           <input 
+                                               type="text" 
+                                               value={wp.name} 
+                                               onChange={(e) => updateWaypoint(idx, 'name', e.target.value)}
+                                               className={`w-full ${theme.input}`}
+                                           />
+                                       </div>
+                                       <div>
                                            <label className="text-[10px] uppercase opacity-50 block mb-1">Lat</label>
                                            <input 
                                                type="number" 
@@ -432,8 +433,19 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
                                                step="0.0001"
                                            />
                                        </div>
-                                       <div className="flex-1">
-                                           <label className="text-[10px] uppercase opacity-50 block mb-1">Lng</label>
+                                   </div>
+                                   <div className="grid grid-cols-1 sm:grid-cols-[1fr_120px] md:grid-cols-[1fr_140px] gap-3">
+                                       <div>
+                                           <label className="text-[10px] uppercase opacity-50 block mb-1">Context / Description</label>
+                                           <textarea 
+                                               rows={2}
+                                               value={wp.context || ""} 
+                                               onChange={(e) => updateWaypoint(idx, 'context', e.target.value)}
+                                               className={`w-full ${theme.input} resize-none`}
+                                           />
+                                       </div>
+                                       <div>
+                                           <label className="text-[10px] uppercase opacity-50 block mb-1">Long</label>
                                            <input 
                                                type="number" 
                                                value={wp.lng} 
@@ -460,10 +472,10 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
                </div>
 
                  <div className={`p-4 flex justify-end gap-3 shrink-0 ${skin === 'parchment' ? '' : isRetro ? 'border-t border-current' : 'border-t border-white/10 bg-white/5'}`}>
-                   <button onClick={() => setEditingRoute(null)} className="px-4 py-2 text-sm opacity-70 hover:opacity-100">Cancel</button>
+                   <button onClick={() => { setEditingRoute(null); onClearInitialEditingRoute?.(); }} className="px-4 py-2 text-sm opacity-70 hover:opacity-100">Cancel</button>
                     <button 
                         onClick={saveEditedRoute} 
-                        className={`px-6 py-2 font-bold uppercase flex items-center gap-2 ${skin === 'parchment' ? 'bg-[#d2b48c] text-[#3e2723] hover:bg-[#e8d5b5]' : isRetro ? 'bg-green-400 text-black hover:opacity-90' : 'bg-cyan-600 hover:bg-cyan-500 rounded-lg shadow-lg shadow-cyan-900/50'}`}
+                        className={`px-6 py-2 font-bold uppercase flex items-center gap-2 ${skin === 'parchment' ? 'text-[#3e2723] hover:text-[#1a0f07]' : isRetro ? 'bg-green-400 text-black hover:opacity-90' : 'bg-cyan-600 hover:bg-cyan-500 rounded-lg shadow-lg shadow-cyan-900/50'}`}
                     >
                         {skin === 'parchment' ? <AntiqueBookIcon size={16} /> : <Save size={16} />} Save Changes
                     </button>

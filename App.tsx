@@ -1082,6 +1082,7 @@ const App: React.FC = () => {
 
   const activeMarkerRequestRef = useRef<number>(0);
   const activeSearchRequestIdRef = useRef<number>(0);
+  const activeSearchAbortControllerRef = useRef<AbortController | null>(null);
   const activeSelectionIdRef = useRef<string | null>(null);
   const processingMarkerRef = useRef<string | null>(null);
   const isManualControlActiveRef = useRef<boolean>(false);
@@ -1106,6 +1107,7 @@ const App: React.FC = () => {
   const [isFavoritesPanelOpen, setIsFavoritesPanelOpen] = useState(false);
   const [visibleFavoriteIds, setVisibleFavoriteIds] = useState<string[]>([]);
   const [activeRouteId, setActiveRouteId] = useState<string | null>(null);
+  const [editingRouteForModal, setEditingRouteForModal] = useState<FavoriteLocation | null>(null);
 
   // Settings State
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -2595,9 +2597,21 @@ const App: React.FC = () => {
   }, [setScanStatus]);
 
    const handleCancelScan = useCallback(() => {
+      if (activeSearchAbortControllerRef.current) {
+        activeSearchAbortControllerRef.current.abort();
+        activeSearchAbortControllerRef.current = null;
+      }
+      activeSearchRequestIdRef.current++;
+      activeMarkerRequestRef.current++;
+      activeScanIdRef.current++;
       scanFullyProcessedRef.current = true;
       setIsDiscoveryLoading(false);
+      setScanningStatusText(null);
       setScanStatus(null);
+      setScanningArea(null);
+      setIsScanningArea(false);
+      setSearchError(null);
+      setInteractionState((prev) => (prev === 'PIN_SELECTED' ? 'PIN_SELECTED' : 'GLOBE_IDLE'));
       console.log("[Scan Lifecycle] DISCOVERY_CANCELLED");
       failScan("Scan cancelled");
    }, [failScan, setScanStatus]);
@@ -2629,6 +2643,13 @@ const App: React.FC = () => {
         return;
      }
 
+     // Cancel previous in-flight operation
+     if (activeSearchAbortControllerRef.current) {
+       activeSearchAbortControllerRef.current.abort();
+     }
+     const abortController = new AbortController();
+     activeSearchAbortControllerRef.current = abortController;
+
      // Non-waypoint flow: Do NOT open any overlay under any condition. Set scanning state.
      const currentScanId = activeScanIdRef.current + 1; // Anticipate the scan ID
      startScan({ lat, lng });
@@ -2640,7 +2661,7 @@ const App: React.FC = () => {
          // 1. Progress Animation Loop (runs gradually, 600-1000ms per step)
          const progressPromise = (async () => {
             for (let i = 0; i < steps.length; i++) {
-               if (currentScanId !== activeScanIdRef.current) return;
+               if (currentScanId !== activeScanIdRef.current || abortController.signal.aborted) return;
                setScanStatus(steps[i]);
                await new Promise(resolve => setTimeout(resolve, 600 + Math.random() * 400));
             }
@@ -2649,24 +2670,24 @@ const App: React.FC = () => {
          // 2. Parallel API Fetch
          try {
             console.log("scan_data_requested");
-            let result = await getNearbyPlaces(lat, lng, 100);
+            let result = await getNearbyPlaces(lat, lng, 100, abortController.signal);
             console.log("[App] Raw getNearbyPlaces result", result);
             let places = result.places || [];
 
-            if (currentScanId !== activeScanIdRef.current) return;
+            if (currentScanId !== activeScanIdRef.current || abortController.signal.aborted) return;
 
             // Wait for the visual progress animation (up to "Checking area") to finish first to enforce visual pacing
             await progressPromise;
-            if (currentScanId !== activeScanIdRef.current) return;
+            if (currentScanId !== activeScanIdRef.current || abortController.signal.aborted) return;
 
             // Explicit "Processing results" phase
             setScanStatus("Reviewing results");
             await new Promise(resolve => setTimeout(resolve, 800));
-            if (currentScanId !== activeScanIdRef.current) return;
+            if (currentScanId !== activeScanIdRef.current || abortController.signal.aborted) return;
 
             setScanStatus("Finalizing results");
             await new Promise(resolve => setTimeout(resolve, 500));
-            if (currentScanId !== activeScanIdRef.current) return;
+            if (currentScanId !== activeScanIdRef.current || abortController.signal.aborted) return;
 
             // Pipeline fully complete - trigger completion gate
             scanFullyProcessedRef.current = true;
@@ -2693,14 +2714,14 @@ const App: React.FC = () => {
              }
 
          } catch (err: any) {
-            if (currentScanId !== activeScanIdRef.current) return;
+            if (currentScanId !== activeScanIdRef.current || abortController.signal.aborted || err?.name === 'AbortError') return;
 
             await progressPromise;
-            if (currentScanId !== activeScanIdRef.current) return;
+            if (currentScanId !== activeScanIdRef.current || abortController.signal.aborted) return;
 
             setScanStatus("Finalizing results");
             await new Promise(resolve => setTimeout(resolve, 600));
-            if (currentScanId !== activeScanIdRef.current) return;
+            if (currentScanId !== activeScanIdRef.current || abortController.signal.aborted) return;
 
             scanFullyProcessedRef.current = true;
 
@@ -2714,7 +2735,7 @@ const App: React.FC = () => {
 
          // 3. Fallback resolution guard (10s total limit)
          setTimeout(async () => {
-            if (currentScanId !== activeScanIdRef.current) return;
+            if (currentScanId !== activeScanIdRef.current || abortController.signal.aborted) return;
             if (scanResolvedRef.current) return;
             if (scanStatusRef.current === "Finalizing results" || scanStatusRef.current === "Reviewing results") return; // Grace window for active processing!
             console.warn("Scan fallback guard triggered!");
@@ -2726,6 +2747,28 @@ const App: React.FC = () => {
   const handleSearch = async (query: string) => {
     const cleanQuery = query.trim();
     if (!cleanQuery) return;
+
+    const upper = cleanQuery.toUpperCase();
+    if (
+      upper.startsWith("STARTING SCAN") ||
+      upper.startsWith("LOCATING AREA") ||
+      upper.startsWith("EXPANDING SEARCH") ||
+      upper.startsWith("CHECKING AREA") ||
+      upper.startsWith("REVIEWING RESULTS") ||
+      upper.startsWith("FINALIZING RESULTS") ||
+      upper === "SCAN CANCELLED" ||
+      upper === "SCAN FAILED"
+    ) {
+      console.warn(`[handleSearch] Blocked scan status string from being searched: "${cleanQuery}"`);
+      return;
+    }
+
+    if (activeSearchAbortControllerRef.current) {
+      activeSearchAbortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    activeSearchAbortControllerRef.current = abortController;
+
     const currentSearchId = ++activeSearchRequestIdRef.current;
     console.log(`[SearchNarration] SEARCH_SUBMITTED query="${cleanQuery}"`);
     console.log('[Camera] SEARCH_STARTED rotation preserved');
@@ -2748,7 +2791,7 @@ const App: React.FC = () => {
     const parsedQuery = routeIntentAndExtractEntity(cleanQuery);
 
     if (parsedQuery.intent === 'EXPLORATORY' || parsedQuery.intent === 'MULTI_LOCATION_DISCOVERY' || parsedQuery.resolutionMode === 'MULTI_LOCATION_EXPLORATION') {
-        handleTraceRoute(cleanQuery, currentSearchId);
+        handleTraceRoute(cleanQuery, currentSearchId, abortController);
         return;
     }
 
@@ -2780,10 +2823,11 @@ const App: React.FC = () => {
       const pipelineResult = await runSearchPipeline({
           rawQuery: cleanQuery,
           intent: parsedQuery.intent,
-          entity: parsedQuery.entity
+          entity: parsedQuery.entity,
+          signal: abortController.signal
       });
 
-      if (currentSearchId !== activeSearchRequestIdRef.current) {
+      if (currentSearchId !== activeSearchRequestIdRef.current || abortController.signal.aborted) {
         return;
       }
 
@@ -2956,8 +3000,8 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         setIsDiscoveryLoading(false);
         console.log('[Scan Lifecycle] DISCOVERY_FAILED');
       }
-    } catch (err) {
-      if (currentSearchId !== activeSearchRequestIdRef.current) return;
+    } catch (err: any) {
+      if (currentSearchId !== activeSearchRequestIdRef.current || abortController.signal.aborted || err?.name === 'AbortError') return;
       setScanningStatusText(null);
       console.error('[Search] PIPELINE_ERROR during search execution:', err);
       console.log('[Camera] SEARCH_ERROR rotation preserved');
@@ -2972,7 +3016,18 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
     }
   };
 
-  const handleTraceRoute = async (text: string, searchRequestId?: number) => {
+  const handleTraceRoute = async (text: string, searchRequestId?: number, existingController?: AbortController) => {
+      let abortController: AbortController;
+      if (existingController) {
+        abortController = existingController;
+      } else {
+        if (activeSearchAbortControllerRef.current) {
+          activeSearchAbortControllerRef.current.abort();
+        }
+        abortController = new AbortController();
+        activeSearchAbortControllerRef.current = abortController;
+      }
+
       const currentSearchId = searchRequestId || ++activeSearchRequestIdRef.current;
 
       // Invalidate active camera animations and transitions
@@ -2991,6 +3046,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
       setInteractionState('GLOBE_SEARCHING');
       setIsDiscoveryLoading(true);
+      setScanningStatusText("TRACING ROUTE");
       console.log('[Scan Lifecycle] DISCOVERY_STARTED');
       setSearchError(null);
       setLocationInfo(null);
@@ -3003,8 +3059,9 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
       const searchId = searchImageRegistry.createSearchSession(text);
       try {
-        const route = await generateRoute(text);
-        if (currentSearchId !== activeSearchRequestIdRef.current) return;
+        const route = await generateRoute(text, undefined, abortController.signal);
+        if (currentSearchId !== activeSearchRequestIdRef.current || abortController.signal.aborted) return;
+        setScanningStatusText(null);
 
         if (route.waypoints && route.waypoints.length > 0) {
             console.log('[Camera] DESTINATION_COMMITTED ownership transferred');
@@ -3029,8 +3086,9 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
             setIsDiscoveryLoading(false);
             console.log('[Scan Lifecycle] DISCOVERY_FAILED');
         }
-      } catch (err) {
-        if (currentSearchId !== activeSearchRequestIdRef.current) return;
+      } catch (err: any) {
+        if (currentSearchId !== activeSearchRequestIdRef.current || abortController.signal.aborted || err?.name === 'AbortError') return;
+        setScanningStatusText(null);
         if (isLMStudioNoModelError(err)) {
           setInteractionState('GLOBE_IDLE');
           setSearchError(`${LM_STUDIO_NO_MODEL_MESSAGE} ${LM_STUDIO_NO_MODEL_INSTRUCTION}`);
@@ -3457,6 +3515,23 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       }
   };
 
+  const handleEditActiveRoute = useCallback(() => {
+    const routeToEdit = (activeRouteId ? favorites.find(f => f.id === activeRouteId) : null)
+      || (currentFavorite && currentFavorite.type === 'route' ? currentFavorite : null)
+      || (routeWaypoints.length > 0 ? {
+          id: activeRouteId || `route-${Date.now()}`,
+          name: routeWaypoints[0]?.routeGroupName || routeWaypoints[0]?.routeTitle || 'Active Route',
+          type: 'route' as const,
+          waypoints: routeWaypoints.map(wp => ({ ...wp })),
+          createdAt: Date.now()
+         } : null);
+
+    if (routeToEdit) {
+      setEditingRouteForModal(JSON.parse(JSON.stringify(routeToEdit)));
+      setIsFavoritesPanelOpen(true);
+    }
+  }, [activeRouteId, favorites, currentFavorite, routeWaypoints]);
+
   const handleFetchNews = useCallback(async () => {
     if (!locationInfo || userSettingsRef.current.showNews === false) return;
     const appStart = Date.now();
@@ -3745,7 +3820,10 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         {isFavoritesPanelOpen && (
           <FavoritesPanel
               favorites={favorites}
-              onClose={() => setIsFavoritesPanelOpen(false)}
+              onClose={() => {
+                setIsFavoritesPanelOpen(false);
+                setEditingRouteForModal(null);
+              }}
               visibleFavoriteIds={visibleFavoriteIds}
               activeRouteId={activeRouteId}
               onToggleVisibility={handleToggleFavoriteVisibility}
@@ -3753,6 +3831,8 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
               onDelete={handleRemoveFavorite}
               onFlyTo={handleFavoriteFlyTo}
               skin={skin}
+              initialEditingRoute={editingRouteForModal}
+              onClearInitialEditingRoute={() => setEditingRouteForModal(null)}
           />
         )}
 
@@ -3806,6 +3886,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           onFetchNews={handleFetchNews}
           onLoadMoreNews={handleLoadMoreNews}
           onOpenSettingsTab={handleOpenSettingsTab}
+          onEditRoute={handleEditActiveRoute}
           routeNav={(routeWaypoints.length > 1 && currentWaypointIndex !== -1) ? (() => {
               const currentWp = routeWaypoints[currentWaypointIndex];
               const currentRoute = activeRouteId ? favorites.find(f => f.id === activeRouteId) : undefined;

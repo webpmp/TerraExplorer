@@ -144,8 +144,7 @@ export const AntiqueBookIcon: React.FC<{ size?: number; className?: string }> = 
 export const VoyagerCeremonialBanner: React.FC<{
   isFavorite: boolean;
   onFavoriteClick: () => void;
-  favoriteTitle: string;
-  favoriteDialog?: React.ReactNode;
+  favoriteTitle?: string;
   routeNav?: {
     current: number;
     total: number;
@@ -156,7 +155,7 @@ export const VoyagerCeremonialBanner: React.FC<{
     onNext: () => void;
     onPrev: () => void;
   };
-}> = ({ isFavorite, onFavoriteClick, favoriteTitle, favoriteDialog, routeNav }) => {
+}> = ({ isFavorite, onFavoriteClick, favoriteTitle = "Edit Route", routeNav }) => {
   return (
     <div className="relative w-full px-1 py-0 flex items-center justify-center select-none" data-testid="voyager-ceremonial-banner">
       {/* Option 3: THE VOYAGER Horizontal Banner SVG Artwork */}
@@ -313,9 +312,6 @@ export const VoyagerCeremonialBanner: React.FC<{
           </div>
         </div>
       )}
-
-      {/* Dialog Popover if open */}
-      {favoriteDialog}
     </div>
   );
 };
@@ -1089,6 +1085,7 @@ interface InfoPanelProps {
   errorMessage?: string;
   onRetry?: () => void;
   onOpenSettingsTab?: (tab: 'providers' | 'general' | 'appearance' | 'audio') => void;
+  onEditRoute?: () => void;
 }
 
 interface Note {
@@ -1422,7 +1419,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   isError,
   errorMessage,
   onRetry,
-  onOpenSettingsTab
+  onOpenSettingsTab,
+  onEditRoute
 }: InfoPanelProps) => {
   const isMultiLocation = Boolean(routeNav?.total && routeNav.total > 1);
   const isSingleLocation = !isMultiLocation;
@@ -3012,55 +3010,15 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           {isParchment && isMultiLocation && (
             <VoyagerCeremonialBanner
               isFavorite={isFavorite}
-              onFavoriteClick={handleFavoriteClick}
-              favoriteTitle={isFavorite ? "Edit Favorite" : (routeNav ? "Save Route" : "Save Location")}
+              onFavoriteClick={() => {
+                if (onEditRoute) {
+                  onEditRoute();
+                } else {
+                  handleFavoriteClick();
+                }
+              }}
+              favoriteTitle="Edit Route"
               routeNav={routeNav}
-              favoriteDialog={
-                showFavoriteDialog ? (
-                  <div className={`absolute top-full mt-2 w-64 p-3 z-50 flex flex-col gap-3 left-1/2 -translate-x-1/2 ${theme.popover}`}>
-                    <h3 className={`text-xs text-left font-bold uppercase tracking-wider text-[#8b5a2b]`}>
-                      {isFavorite ? 'Edit Favorite' : (routeNav ? 'Save Route' : 'Save Location')}
-                    </h3>
-                    <form onSubmit={submitFavorite} className="flex flex-col gap-2">
-                      <input
-                        type="text"
-                        value={favoriteNameInput}
-                        onChange={(e) => setFavoriteNameInput(e.target.value)}
-                        placeholder="Enter name..."
-                        className={`w-full p-2 text-sm bg-transparent border outline-none ${theme.notesInput} border-[#8b5a2b]/30 focus:border-[#8b5a2b]`}
-                        autoFocus
-                      />
-                      <div className="flex gap-2 justify-end">
-                        {isFavorite && (
-                          <button
-                            type="button"
-                            onClick={() => { onRemoveFavorite(); setShowFavoriteDialog(false); }}
-                            className="p-1.5 hover:text-red-400 transition-colors"
-                            title="Remove"
-                            aria-label="Remove favorite"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => setShowFavoriteDialog(false)}
-                          className="px-2 py-1 text-xs opacity-70 hover:opacity-100 rounded transition-colors text-[#5c3a21] hover:bg-[#e8d5b5]/50"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="submit"
-                          disabled={!favoriteNameInput.trim()}
-                          className="px-3 py-1 text-xs font-bold uppercase transition-colors disabled:opacity-50 bg-[#8b5a2b] text-[#f4ead5] hover:bg-[#5c3a21] rounded-sm shadow-sm"
-                        >
-                          Save
-                        </button>
-                      </div>
-                    </form>
-                  </div>
-                ) : null
-              }
             />
           )}
 

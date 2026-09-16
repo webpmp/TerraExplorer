@@ -25,6 +25,7 @@ export interface SearchRequest {
   rawQuery: string;
   intent?: QueryIntent;
   entity?: string;
+  signal?: AbortSignal;
 }
 
 export interface NormalizedQuery {
@@ -121,6 +122,15 @@ export const SearchStage = (request: SearchRequest | string): EntityResolutionRe
 export const IntentStage = SearchStage;
 
 export const ResolutionStage = async (entityResult: EntityResolutionResult): Promise<FinalLocationResult> => {
+  const signal = entityResult.intentResult.normalized.request.signal;
+  if (signal?.aborted) {
+    return {
+      mode: 'location',
+      isValid: false,
+      error: 'ABORTED'
+    };
+  }
+
   console.log("=== PIPELINE STAGE: COORDINATE RESOLUTION ===");
 
   // ─── STEP -1: ENTITY ALIAS RESOLUTION ────────────────────────────────────
@@ -157,8 +167,17 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   const rawResolverResult = await resolveLocationQuery(
     resolvedEntityName,
     entityResult.intentResult.intent,
-    entityResult.intentResult.normalized.request.rawQuery
+    entityResult.intentResult.normalized.request.rawQuery,
+    signal
   );
+
+  if (signal?.aborted) {
+    return {
+      mode: 'location',
+      isValid: false,
+      error: 'ABORTED'
+    };
+  }
 
   let error = rawResolverResult.error;
   let resolvedData = rawResolverResult.locationInfo;
@@ -275,8 +294,17 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
       const recoveryCoords = await recoverCoordinatesFromAi(
         entityResult.intentResult.normalized.request.rawQuery,
         entityResult.intentResult.intent,
-        recoveryTarget
+        recoveryTarget,
+        signal
       );
+
+      if (signal?.aborted) {
+        return {
+          mode: 'location',
+          isValid: false,
+          error: 'ABORTED'
+        };
+      }
 
       let recoveredValid = false;
       let source: CoordinateSource = "ai_recovery";
@@ -708,7 +736,14 @@ locationLabel="${locationLabel || 'none'}"`);
           region: (resolvedData as any).region,
           climate: (resolvedData as any).climate,
           originalQuery: entityResult.intentResult.normalized.request.rawQuery
-        });
+        }, signal);
+        if (signal?.aborted) {
+          return {
+            mode: 'location',
+            isValid: false,
+            error: 'ABORTED'
+          };
+        }
         if (metadataRecovery) {
            console.log(`=== RECOVERY ENRICHMENT TRACE ===`);
            console.log(`Metadata Present: true`);
@@ -971,6 +1006,14 @@ locationLabel="${locationLabel || 'none'}"`);
 };
 
 export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLocationResult> => {
+  if (request.signal?.aborted) {
+    return {
+      mode: "location",
+      isValid: false,
+      error: "ABORTED"
+    };
+  }
+
   const entityResult = IntentStage(request);
 
   // 1. Celestial Body Validation Guard (Earth-only support across ALL intents)
@@ -1129,7 +1172,15 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
   ) {
      console.log(`[Pipeline] Routing Guard activated for intent: ${entityResult.intentResult.intent}`);
       try {
-        const route = await generateRoute(request.rawQuery, isHistoricalMatch ? 'route' : entityResult.intentResult.intent);
+        const route = await generateRoute(request.rawQuery, isHistoricalMatch ? 'route' : entityResult.intentResult.intent, request.signal);
+        if (request.signal?.aborted) {
+          return {
+            mode: "route",
+            isValid: false,
+            error: "ABORTED",
+            waypoints: []
+          };
+        }
         const waypoints = route.waypoints;
         console.log(`[Pipeline] WAYPOINTS AFTER GENERATEROUTE (Main guard):`);
         waypoints.forEach(wp => console.log(`  - ${wp.name} (ID: ${wp.id}, parentId: ${wp.parentId})`));
@@ -1147,19 +1198,49 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
             waypoints: []
           };
         }
+        if ((error as any)?.name === 'AbortError' || request.signal?.aborted) {
+          return {
+            mode: "route",
+            isValid: false,
+            error: "ABORTED",
+            waypoints: []
+          };
+        }
         throw error;
       }
+  }
+
+  if (request.signal?.aborted) {
+    return {
+      mode: "location",
+      isValid: false,
+      error: "ABORTED"
+    };
   }
 
   let locationResult: FinalLocationResult;
   try {
     locationResult = await ResolutionStage(entityResult);
+    if (request.signal?.aborted) {
+      return {
+        mode: "location",
+        isValid: false,
+        error: "ABORTED"
+      };
+    }
   } catch (error) {
     if (isLMStudioNoModelError(error)) {
       return {
         mode: "location",
         isValid: false,
         error: "LM_STUDIO_NO_MODEL"
+      };
+    }
+    if ((error as any)?.name === 'AbortError' || request.signal?.aborted) {
+      return {
+        mode: "location",
+        isValid: false,
+        error: "ABORTED"
       };
     }
     throw error;
@@ -1183,7 +1264,15 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
       console.log(`Recovery: generateRoute()`);
       
       try {
-        const route = await generateRoute(request.rawQuery, 'route');
+        const route = await generateRoute(request.rawQuery, 'route', request.signal);
+        if (request.signal?.aborted) {
+          return {
+            mode: "route",
+            isValid: false,
+            error: "ABORTED",
+            waypoints: []
+          };
+        }
         const waypoints = route.waypoints;
         console.log(`[Pipeline] WAYPOINTS AFTER GENERATEROUTE (Intent fallback):`);
         waypoints.forEach(wp => console.log(`  - ${wp.name} (ID: ${wp.id}, parentId: ${wp.parentId})`));
@@ -1198,6 +1287,14 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
             mode: "route",
             isValid: false,
             error: "LM_STUDIO_NO_MODEL",
+            waypoints: []
+          };
+        }
+        if ((error as any)?.name === 'AbortError' || request.signal?.aborted) {
+          return {
+            mode: "route",
+            isValid: false,
+            error: "ABORTED",
             waypoints: []
           };
         }
