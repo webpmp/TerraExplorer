@@ -268,34 +268,44 @@ export const VoyagerCeremonialBanner: React.FC<{
 
       {/* Waypoint Navigation Overlay */}
       {routeNav && (
-        <div className="absolute inset-0 flex items-center justify-between px-4 sm:px-6 z-10 pointer-events-none">
-          {/* Left Side: Prev + WAYPOINT */}
-          <div className="flex-1 flex items-center justify-between pointer-events-auto pr-6 sm:pr-8">
+        <div className="absolute inset-0 flex items-center px-4 sm:px-6 z-10 pointer-events-none">
+          {/* Left Region: extends from Left Arrow to Center */}
+          <div className="relative flex-1 h-full flex items-center">
+            {/* Previous Waypoint Button */}
             <button
               onClick={routeNav.onPrev}
-              className="ml-[10px] p-1 hover:text-white text-[#F3E5AB] opacity-80 hover:opacity-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] rounded"
+              className="pointer-events-auto ml-[10px] p-1 hover:text-white text-[#F3E5AB] opacity-80 hover:opacity-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] rounded z-10"
               aria-label="Previous waypoint"
             >
               <ChevronLeft size={16} />
             </button>
-            <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-[#F3E5AB] opacity-90 drop-shadow-sm select-none">
-              WAYPOINT
-            </span>
+
+            {/* Geometrically centered WAYPOINT text */}
+            <div className="absolute left-[34px] right-0 inset-y-0 flex items-center justify-center pointer-events-none pr-3">
+              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-[#F3E5AB] opacity-90 drop-shadow-sm select-none text-center truncate">
+                WAYPOINT
+              </span>
+            </div>
           </div>
 
-          {/* Center gap for the emblem */}
+          {/* Center clearance anchor for emblem */}
           <div className="w-[50px] shrink-0" />
 
-          {/* Right Side: N OF M + Next */}
-          <div className="flex-1 flex items-center justify-between pointer-events-auto pl-6 sm:pl-8">
-            <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-[#F3E5AB] opacity-90 drop-shadow-sm select-none">
-              {routeNav.routeGroupName && routeNav.routeLocalCurrent !== undefined && routeNav.routeLocalTotal !== undefined
-                ? `${routeNav.routeLocalCurrent} OF ${routeNav.routeLocalTotal}`
-                : `${routeNav.current} OF ${routeNav.total}`}
-            </span>
+          {/* Right Region: extends from Center to Right Arrow */}
+          <div className="relative flex-1 h-full flex items-center justify-end">
+            {/* Geometrically centered N OF M text */}
+            <div className="absolute left-0 right-[34px] inset-y-0 flex items-center justify-center pointer-events-none pl-3">
+              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-[#F3E5AB] opacity-90 drop-shadow-sm select-none text-center truncate">
+                {routeNav.routeGroupName && routeNav.routeLocalCurrent !== undefined && routeNav.routeLocalTotal !== undefined
+                  ? `${routeNav.routeLocalCurrent} OF ${routeNav.routeLocalTotal}`
+                  : `${routeNav.current} OF ${routeNav.total}`}
+              </span>
+            </div>
+
+            {/* Next Waypoint Button */}
             <button
               onClick={routeNav.onNext}
-              className="mr-[10px] p-1 hover:text-white text-[#F3E5AB] opacity-80 hover:opacity-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] rounded"
+              className="pointer-events-auto mr-[10px] p-1 hover:text-white text-[#F3E5AB] opacity-80 hover:opacity-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] rounded z-10"
               aria-label="Next waypoint"
             >
               <ChevronRight size={16} />
@@ -1374,7 +1384,25 @@ export const getCleanDescriptionLines = (info: any) => {
         }
     }
 
-    return lines;
+    // Strip orphan headings that have no following content lines
+    const cleanedLines: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.startsWith('#')) {
+        let hasContent = false;
+        for (let j = i + 1; j < lines.length; j++) {
+          if (lines[j].startsWith('#')) break;
+          if (lines[j].trim().length > 0) {
+            hasContent = true;
+            break;
+          }
+        }
+        if (!hasContent) continue;
+      }
+      cleanedLines.push(line);
+    }
+
+    return cleanedLines;
 };
 
 const InfoPanel: React.FC<InfoPanelProps> = ({
@@ -1511,6 +1539,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       if (combinedDescParts.some(p => p.includes(snippet))) {
         continue;
       }
+      if (routeContextText && (snippet === routeContextText || routeContextText.includes(snippet) || snippet.includes(routeContextText))) {
+        continue;
+      }
 
       const res = classifyContext(snippet);
       if (res.category && res.isMeaningful) {
@@ -1528,7 +1559,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       if (snippets && snippets.length > 0) {
         const heading = CONTEXT_CATEGORY_HEADINGS[category];
         const mergedText = snippets.join(' ');
-        if (mergedText && !combinedDescParts.some(p => p.includes(mergedText))) {
+        if (mergedText && !combinedDescParts.some(p => p.includes(mergedText)) && (!routeContextText || (!routeContextText.includes(mergedText) && !mergedText.includes(routeContextText)))) {
           combinedDescParts.push(`## ${heading}\n\n${mergedText}`);
         }
       }
@@ -2377,7 +2408,24 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                 <div className={`pr-8 space-y-3`}>
                   {(() => {
                     const allLines = getCleanDescriptionLines(info);
-                    const lines = renderRouteContext ? allLines.filter(l => l.trim() !== routeText) : allLines;
+                    const rawFiltered = renderRouteContext ? allLines.filter(l => l.trim() !== routeText) : allLines;
+                    const lines: string[] = [];
+                    for (let i = 0; i < rawFiltered.length; i++) {
+                      const l = rawFiltered[i];
+                      if (l.startsWith('#')) {
+                        let hasContent = false;
+                        for (let j = i + 1; j < rawFiltered.length; j++) {
+                          if (rawFiltered[j].startsWith('#')) break;
+                          if (rawFiltered[j].trim().length > 0) {
+                            hasContent = true;
+                            break;
+                          }
+                        }
+                        if (!hasContent) continue;
+                      }
+                      lines.push(l);
+                    }
+
                     const blocks: React.ReactNode[] = [];
                     let currentList: string[] = [];
 
@@ -2420,7 +2468,12 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                         return;
                       }
 
-                      const isHeuristicHeading = cleanedText.split(' ').length <= 8 && cleanedText.length < 60 && !cleanedText.match(/[.!?:;]$/) && !cleanedText.match(/^[a-z]/) && lines[i+1] && !lines[i+1].match(/^[-*]\s/);
+                      const hasSubsequentContent = lines.slice(i + 1).some(subLine => {
+                        const cleanSub = subLine.replace(/^#{1,3}\s/, '').trim().toLowerCase();
+                        return !subLine.startsWith('#') && !redundantHeadings.includes(cleanSub);
+                      });
+
+                      const isHeuristicHeading = hasSubsequentContent && cleanedText.split(' ').length <= 8 && cleanedText.length < 60 && !cleanedText.match(/[.!?:;]$/) && !cleanedText.match(/^[a-z]/) && lines[i+1] && !lines[i+1].match(/^[-*]\s/);
 
                       if (isMarkdownHeading || isHeuristicHeading) {
                         blocks.push(

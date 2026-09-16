@@ -260,6 +260,806 @@ const VisibilityTracker: React.FC<{
 
 
 
+export const DEFAULT_SHACKLETON_ROUTE: FavoriteLocation = {
+    id: 'default-shackleton',
+    name: "Ernest Shackleton's Endurance Expedition",
+    lat: 50.3755,
+    lng: -4.1427,
+    type: 'route',
+    waypoints: [
+        {
+            id: 'wp-shackleton-1',
+            name: "Plymouth, England",
+            canonicalName: "Plymouth",
+            lat: 50.3755,
+            lng: -4.1427,
+            sequence: 1,
+            globalSequence: 1,
+            routeGroupId: 'shackleton-endurance',
+            routeGroupName: "Ernest Shackleton's Endurance Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            role: 'origin',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "August 8, 1914: The Endurance departs for Buenos Aires.",
+            description: "Plymouth served as the final departure point in Great Britain for Ernest Shackleton's Imperial Trans-Antarctic Expedition aboard the Endurance. Departing on the eve of World War I after Winston Churchill authorized the journey to proceed, the expedition aimed to achieve the first land crossing of Antarctica.",
+            routeTitle: "Endurance Expedition"
+        },
+        {
+            id: 'wp-shackleton-2',
+            name: "Buenos Aires, Argentina",
+            canonicalName: "Buenos Aires",
+            lat: -34.6037,
+            lng: -58.3816,
+            sequence: 2,
+            globalSequence: 2,
+            routeGroupId: 'shackleton-endurance',
+            routeGroupName: "Ernest Shackleton's Endurance Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "October 9, 1914: The ship arrives to pick up supplies and crew.",
+            description: "Buenos Aires was the primary South American staging ground for the Endurance. Here the expedition completed final outfitting, took on vital cold-weather supplies, and recruited photographer Frank Hurley and stowaway Perce Blackborow before heading into the Southern Ocean.",
+            routeTitle: "Endurance Expedition"
+        },
+        {
+            id: 'wp-shackleton-3',
+            name: "Grytviken, South Georgia",
+            canonicalName: "Grytviken",
+            lat: -54.2811,
+            lng: -36.5092,
+            sequence: 3,
+            globalSequence: 3,
+            routeGroupId: 'shackleton-endurance',
+            routeGroupName: "Ernest Shackleton's Endurance Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "December 5, 1914: The expedition departs the whaling station for the Weddell Sea.",
+            description: "Grytviken was a remote Norwegian whaling station on South Georgia Island. Whalers warned Shackleton of unusually heavy pack ice further south in the Weddell Sea, advice that prompted a month-long delay while the crew waited for favorable sea ice conditions.",
+            routeTitle: "Endurance Expedition"
+        },
+        {
+            id: 'wp-shackleton-4',
+            name: "Weddell Sea (Ice Trap)",
+            canonicalName: "Weddell Sea",
+            lat: -76.5,
+            lng: -35.0,
+            sequence: 4,
+            globalSequence: 4,
+            routeGroupId: 'shackleton-endurance',
+            routeGroupName: "Ernest Shackleton's Endurance Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "January 1915: The Endurance becomes frozen fast in the pack ice.",
+            description: "Deep in the Weddell Sea, the Endurance encountered impassable pack ice and was frozen solid into an ice floe just miles from the Antarctic mainland. For ten months the ship drifted helplessly northward with the ice floe in sub-zero polar conditions.",
+            routeTitle: "Endurance Expedition"
+        },
+        {
+            id: 'wp-shackleton-5',
+            name: "Endurance Sinks",
+            canonicalName: "Endurance Sinks",
+            lat: -69.08,
+            lng: -51.5,
+            sequence: 5,
+            globalSequence: 5,
+            routeGroupId: 'shackleton-endurance',
+            routeGroupName: "Ernest Shackleton's Endurance Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "November 21, 1915: Crushed by ice, the ship sinks, stranding the crew.",
+            description: "Under enormous pressure from shifting pack ice, the hull of the Endurance was crushed beyond repair. Shackleton ordered the crew to abandon ship, salvaging food, dog teams, and three wooden lifeboats before the ship slipped beneath the icy waters.",
+            routeTitle: "Endurance Expedition"
+        },
+        {
+            id: 'wp-shackleton-6',
+            name: "Elephant Island",
+            canonicalName: "Elephant Island",
+            lat: -61.1417,
+            lng: -55.2333,
+            sequence: 6,
+            globalSequence: 6,
+            routeGroupId: 'shackleton-endurance',
+            routeGroupName: "Ernest Shackleton's Endurance Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "April 1916: The crew reaches solid land for the first time in 497 days.",
+            description: "After perilous open-boat navigation through turbulent Antarctic seas, the 28 exhausted crew members landed on the desolate spit of Elephant Island. It marked their first footing on solid ground in over sixteen months, though rescue remained thousands of miles away.",
+            routeTitle: "Endurance Expedition"
+        },
+        {
+            id: 'wp-shackleton-7',
+            name: "King Haakon Bay",
+            canonicalName: "King Haakon Bay",
+            lat: -54.1500,
+            lng: -37.2333,
+            sequence: 7,
+            globalSequence: 7,
+            routeGroupId: 'shackleton-endurance',
+            routeGroupName: "Ernest Shackleton's Endurance Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "May 1916: Shackleton and five men land after the perilous voyage of the James Caird.",
+            description: "In one of history's greatest feats of small-boat navigation, Shackleton and five companions sailed 800 miles across the treacherous Drake Passage in the 22-foot James Caird lifeboat, making a miraculous landing on the uninhabited southern coast of South Georgia.",
+            routeTitle: "Endurance Expedition"
+        },
+        {
+            id: 'wp-shackleton-8',
+            name: "Stromness Whaling Station",
+            canonicalName: "Stromness",
+            lat: -54.1600,
+            lng: -36.7110,
+            sequence: 8,
+            globalSequence: 8,
+            routeGroupId: 'shackleton-endurance',
+            routeGroupName: "Ernest Shackleton's Endurance Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "May 20, 1916: Shackleton, Worsley, and Crean reach safety after crossing the mountains.",
+            description: "Lacking climbing equipment, Shackleton, Frank Worsley, and Tom Crean trekked non-stop across South Georgia's uncharted glaciers and alpine ridges for 36 hours, finally reaching the managers at Stromness Whaling Station to organize rescue operations.",
+            routeTitle: "Endurance Expedition"
+        },
+        {
+            id: 'wp-shackleton-9',
+            name: "Punta Arenas, Chile",
+            canonicalName: "Punta Arenas",
+            lat: -53.1638,
+            lng: -70.9171,
+            sequence: 9,
+            globalSequence: 9,
+            routeGroupId: 'shackleton-endurance',
+            routeGroupName: "Ernest Shackleton's Endurance Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            role: 'destination',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "August 30, 1916: The tug Yelcho, commanded by Luis Pardo, finally rescues the remaining crew from Elephant Island.",
+            description: "From Punta Arenas, Shackleton mounted four rescue attempts before securing the Chilean steam tug Yelcho under Captain Luis Pardo. They successfully breached the winter ice at Elephant Island, rescuing all 22 stranded crewmen without a single loss of life.",
+            routeTitle: "Endurance Expedition"
+        }
+    ]
+};
+
+export const DEFAULT_GENGHIS_ROUTE: FavoriteLocation = {
+    id: 'default-genghis',
+    name: "The Campaigns of Genghis Khan",
+    lat: 48.9,
+    lng: 109.0,
+    type: 'route',
+    waypoints: [
+        {
+            id: 'wp-genghis-1',
+            name: "Burkhan Khaldun (Mongolia)",
+            canonicalName: "Burkhan Khaldun",
+            lat: 48.9,
+            lng: 109.0,
+            sequence: 1,
+            globalSequence: 1,
+            routeGroupId: 'genghis-khan',
+            routeGroupName: "The Campaigns of Genghis Khan",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "1206: Temüjin unites the Mongol tribes and is proclaimed Genghis Khan.",
+            description: "Burkhan Khaldun is a sacred mountain in northeastern Mongolia where Temüjin sought spiritual refuge in his youth. Following decades of inter-tribal warfare, he convened a grand kurultai here in 1206, uniting the nomadic confederations and proclaiming the Mongol Empire.",
+            routeTitle: "Campaigns of Genghis Khan"
+        },
+        {
+            id: 'wp-genghis-2',
+            name: "Yinchuan (Western Xia)",
+            canonicalName: "Yinchuan",
+            lat: 38.4872,
+            lng: 106.2309,
+            sequence: 2,
+            globalSequence: 2,
+            routeGroupId: 'genghis-khan',
+            routeGroupName: "The Campaigns of Genghis Khan",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "1209: The Mongols force the Western Xia emperor to submit.",
+            description: "Yinchuan was the fortified capital of the Tangut Western Xia dynasty. In 1209, Genghis Khan launched his first major external campaign, surrounding the capital and diverting the Yellow River to breach defenses, successfully forcing Western Xia into tribute and vassalage.",
+            routeTitle: "Campaigns of Genghis Khan"
+        },
+        {
+            id: 'wp-genghis-3',
+            name: "Zhongdu (Beijing)",
+            canonicalName: "Zhongdu",
+            lat: 39.9042,
+            lng: 116.4074,
+            sequence: 3,
+            globalSequence: 3,
+            routeGroupId: 'genghis-khan',
+            routeGroupName: "The Campaigns of Genghis Khan",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "1215: The Jin capital is captured and sacked after a long siege.",
+            description: "Zhongdu was the formidable northern capital of the Jurchen Jin dynasty. The Mongol army laid siege to the city in 1214, cutting off supply lines and capturing the metropolis in 1215, giving the Mongols complete strategic dominance over the North China Plain.",
+            routeTitle: "Campaigns of Genghis Khan"
+        },
+        {
+            id: 'wp-genghis-4',
+            name: "Balasagun",
+            canonicalName: "Balasagun",
+            lat: 42.746,
+            lng: 75.25,
+            sequence: 4,
+            globalSequence: 4,
+            routeGroupId: 'genghis-khan',
+            routeGroupName: "The Campaigns of Genghis Khan",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "1218: General Jebe conquers the Qara Khitai empire.",
+            description: "Balasagun was an ancient Silk Road trading center in modern Kyrgyzstan. In 1218, Mongol general Jebe pursued the usurper Kuchlug, granting religious freedom to the local Muslim population and annexing the vast Qara Khitai realm without prolonged bloodshed.",
+            routeTitle: "Campaigns of Genghis Khan"
+        },
+        {
+            id: 'wp-genghis-5',
+            name: "Otrar",
+            canonicalName: "Otrar",
+            lat: 42.85,
+            lng: 68.3,
+            sequence: 5,
+            globalSequence: 5,
+            routeGroupId: 'genghis-khan',
+            routeGroupName: "The Campaigns of Genghis Khan",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "1219: The Khwarazmian governor executes Mongol envoys, triggering invasion.",
+            description: "Otrar was a key commercial oasis on the Silk Road along the Syr Darya. When its governor executed a 500-camel Mongol trade delegation, Genghis Khan retaliated with a massive western expedition, besieging and destroying the city in a five-month siege.",
+            routeTitle: "Campaigns of Genghis Khan"
+        },
+        {
+            id: 'wp-genghis-6',
+            name: "Bukhara",
+            canonicalName: "Bukhara",
+            lat: 39.7681,
+            lng: 64.4556,
+            sequence: 6,
+            globalSequence: 6,
+            routeGroupId: 'genghis-khan',
+            routeGroupName: "The Campaigns of Genghis Khan",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "1220: Genghis Khan captures the city and addresses the populace in the mosque.",
+            description: "Bukhara was one of the intellectual and spiritual capitals of the Islamic Golden Age. Genghis Khan led a surprise attack across the Kyzylkum Desert, capturing the city and assembling the civic leaders in the Great Mosque before advancing along the Zeravshan Valley.",
+            routeTitle: "Campaigns of Genghis Khan"
+        },
+        {
+            id: 'wp-genghis-7',
+            name: "Samarkand",
+            canonicalName: "Samarkand",
+            lat: 39.6542,
+            lng: 66.9597,
+            sequence: 7,
+            globalSequence: 7,
+            routeGroupId: 'genghis-khan',
+            routeGroupName: "The Campaigns of Genghis Khan",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "1220: The capital of the Khwarazmian Empire falls.",
+            description: "Samarkand was the grand, heavily fortified imperial capital of the Khwarazmian Empire. Despite formidable walls and war elephants, the city fell within days under coordinated Mongol assaults and advanced Chinese siege engineers.",
+            routeTitle: "Campaigns of Genghis Khan"
+        },
+        {
+            id: 'wp-genghis-8',
+            name: "Indus River",
+            canonicalName: "Indus River",
+            lat: 33.9,
+            lng: 72.2,
+            sequence: 8,
+            globalSequence: 8,
+            routeGroupId: 'genghis-khan',
+            routeGroupName: "The Campaigns of Genghis Khan",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "1221: Genghis Khan defeats Jalal ad-Din Mingburnu on the banks of the Indus.",
+            description: "At the Battle of the Indus, Genghis Khan surrounded the last Khwarazmian ruler, Jalal ad-Din. After a desperate last stand, Jalal ad-Din galloped his stallion off a steep cliff into the swollen river, escaping to India while Genghis Khan ordered his archers to spare his life in tribute to his valor.",
+            routeTitle: "Campaigns of Genghis Khan"
+        },
+        {
+            id: 'wp-genghis-9',
+            name: "Liupan Mountains",
+            canonicalName: "Liupan Mountains",
+            lat: 35.6,
+            lng: 106.2,
+            sequence: 9,
+            globalSequence: 9,
+            routeGroupId: 'genghis-khan',
+            routeGroupName: "The Campaigns of Genghis Khan",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "1227: Genghis Khan dies during the final campaign against Western Xia.",
+            description: "The cool highlands of the Liupan Mountains in northwestern China served as the summer headquarters for Genghis Khan's final punitive campaign against Western Xia. The great conqueror passed away here in August 1227, leaving an empire spanning from the Pacific to the Caspian.",
+            routeTitle: "Campaigns of Genghis Khan"
+        }
+    ]
+};
+
+export const DEFAULT_LEWIS_CLARK_ROUTE: FavoriteLocation = {
+    id: 'default-lewisclark',
+    name: "Lewis and Clark Expedition",
+    lat: 38.8027,
+    lng: -90.1012,
+    type: 'route',
+    waypoints: [
+        {
+            id: 'wp-lc-1',
+            name: "Camp Dubois",
+            canonicalName: "Camp Dubois",
+            lat: 38.802722,
+            lng: -90.10125,
+            sequence: 1,
+            globalSequence: 1,
+            routeGroupId: 'lewis-clark',
+            routeGroupName: "Lewis and Clark Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "May 14, 1804: The Corps of Discovery departs their winter camp to begin the journey up the Missouri.",
+            description: "Camp Dubois in Illinois served as the winter training and staging base for the Corps of Discovery. Meriwether Lewis and William Clark trained soldiers, gathered equipment, and finalized navigation instruments before launching their expedition up the Missouri River.",
+            routeTitle: "Lewis and Clark Expedition"
+        },
+        {
+            id: 'wp-lc-2',
+            name: "St. Charles",
+            canonicalName: "St. Charles",
+            lat: 38.7758,
+            lng: -90.4851,
+            sequence: 2,
+            globalSequence: 2,
+            routeGroupId: 'lewis-clark',
+            routeGroupName: "Lewis and Clark Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "May 16-21, 1804: The expedition makes final preparations and recruits the last crew members.",
+            description: "St. Charles was the last major European-American settlement on the Missouri River. The expedition paused here for several days to recruit experienced French-Canadian boatmen, adjust cargo balances, and wait for Captain Lewis to arrive from St. Louis.",
+            routeTitle: "Lewis and Clark Expedition"
+        },
+        {
+            id: 'wp-lc-3',
+            name: "Kaw Point",
+            canonicalName: "Kaw Point",
+            lat: 39.117,
+            lng: -94.606,
+            sequence: 3,
+            globalSequence: 3,
+            routeGroupId: 'lewis-clark',
+            routeGroupName: "Lewis and Clark Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "June 26, 1804: The explorers reach the confluence of the Kansas and Missouri rivers.",
+            description: "Kaw Point, situated at the junction of the Kansas and Missouri rivers in modern-day Kansas City, provided a strategic rest stop where Clark took celestial observations and the crew repaired their keelboat and pirogues.",
+            routeTitle: "Lewis and Clark Expedition"
+        },
+        {
+            id: 'wp-lc-4',
+            name: "Sergeant Floyd Monument",
+            canonicalName: "Sergeant Floyd Monument",
+            lat: 42.4631,
+            lng: -96.3838,
+            sequence: 4,
+            globalSequence: 4,
+            routeGroupId: 'lewis-clark',
+            routeGroupName: "Lewis and Clark Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "August 20, 1804: Sergeant Charles Floyd dies of appendicitis, the expedition's only fatality.",
+            description: "On a high bluff overlooking the Missouri River near present-day Sioux City, Sergeant Charles Floyd succumbed to probable appendicitis. He was buried with military honors, remaining the sole fatality of the entire two-and-a-half-year transcontinental expedition.",
+            routeTitle: "Lewis and Clark Expedition"
+        },
+        {
+            id: 'wp-lc-5',
+            name: "Council Bluff",
+            canonicalName: "Council Bluff",
+            lat: 41.434,
+            lng: -96.009,
+            sequence: 5,
+            globalSequence: 5,
+            routeGroupId: 'lewis-clark',
+            routeGroupName: "Lewis and Clark Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "August 3, 1804: Lewis and Clark hold their first formal council with the Oto and Missouri tribes.",
+            description: "Council Bluff in eastern Nebraska was the site of the expedition's first diplomatic meeting with indigenous leaders. Lewis delivered a speech announcing United States sovereignty and distributed peace medals to chiefs of the Oto and Missouri tribes.",
+            routeTitle: "Lewis and Clark Expedition"
+        },
+        {
+            id: 'wp-lc-6',
+            name: "Spirit Mound",
+            canonicalName: "Spirit Mound",
+            lat: 42.8425,
+            lng: -96.942,
+            sequence: 6,
+            globalSequence: 6,
+            routeGroupId: 'lewis-clark',
+            routeGroupName: "Lewis and Clark Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "August 25, 1804: The captains climb this mound to investigate local legends of 'little people'.",
+            description: "Spirit Mound is a prominent geological landmark in South Dakota that local Native American tribes believed was inhabited by diminutive spirit-beings. Lewis, Clark, and several men hiked to the summit to map the expansive prairie views and observe wildlife.",
+            routeTitle: "Lewis and Clark Expedition"
+        },
+        {
+            id: 'wp-lc-7',
+            name: "Fort Mandan",
+            canonicalName: "Fort Mandan",
+            lat: 47.297926,
+            lng: -101.08726,
+            sequence: 7,
+            globalSequence: 7,
+            routeGroupId: 'lewis-clark',
+            routeGroupName: "Lewis and Clark Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "Winter 1804-1805: The expedition builds a fort for the winter and meets Sacagawea.",
+            description: "Fort Mandan was constructed near the Mandan and Hidatsa villages in North Dakota. During their winter stay, Lewis and Clark forged friendly diplomatic ties, hired French-Canadian fur trapper Toussaint Charbonneau, and met his Shoshone wife, Sacagawea.",
+            routeTitle: "Lewis and Clark Expedition"
+        },
+        {
+            id: 'wp-lc-8',
+            name: "Knife River Indian Villages",
+            canonicalName: "Knife River Indian Villages",
+            lat: 47.375,
+            lng: -101.405,
+            sequence: 8,
+            globalSequence: 8,
+            routeGroupId: 'lewis-clark',
+            routeGroupName: "Lewis and Clark Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "Major trade hub where the captains gathered vital geographical information from the Hidatsa.",
+            description: "The Knife River Villages comprised thriving agricultural and trade centers on the Upper Missouri. Hidatsa and Mandan elders provided the captains with detailed geographical descriptions and hand-drawn maps of the Rocky Mountains ahead.",
+            routeTitle: "Lewis and Clark Expedition"
+        },
+        {
+            id: 'wp-lc-9',
+            name: "Great Falls (Lower Portage)",
+            canonicalName: "Great Falls",
+            lat: 47.516,
+            lng: -111.378,
+            sequence: 9,
+            globalSequence: 9,
+            routeGroupId: 'lewis-clark',
+            routeGroupName: "Lewis and Clark Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "June 1805: The expedition faces a grueling month-long portage around the massive waterfalls.",
+            description: "The Great Falls of the Missouri presented a series of five cascading waterfalls over an 18-mile stretch. The crew undertook an arduous overland portage through cactus and intense heat, hauling canoes and heavy cargo by hand across rough terrain.",
+            routeTitle: "Lewis and Clark Expedition"
+        },
+        {
+            id: 'wp-lc-10',
+            name: "Three Forks of the Missouri",
+            canonicalName: "Three Forks of the Missouri",
+            lat: 45.894,
+            lng: -111.927,
+            sequence: 10,
+            globalSequence: 10,
+            routeGroupId: 'lewis-clark',
+            routeGroupName: "Lewis and Clark Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "July 1805: The explorers discover the headwaters of the Missouri River.",
+            description: "At Three Forks in Montana, the expedition reached the headwaters of the Missouri River where three major rivers converge. Captains Lewis and Clark named them the Jefferson, Madison, and Gallatin rivers in honor of prominent leaders.",
+            routeTitle: "Lewis and Clark Expedition"
+        },
+        {
+            id: 'wp-lc-11',
+            name: "Lemhi Pass",
+            canonicalName: "Lemhi Pass",
+            lat: 44.975833,
+            lng: -113.441944,
+            sequence: 11,
+            globalSequence: 11,
+            routeGroupId: 'lewis-clark',
+            routeGroupName: "Lewis and Clark Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "August 12, 1805: Meriwether Lewis crosses the Continental Divide, leaving US territory.",
+            description: "Lemhi Pass on the Montana-Idaho border marks the point where Meriwether Lewis crossed the Continental Divide. Standing at the pass, Lewis looked west expecting a navigable river to the Pacific, only to see endless rows of snow-capped mountains.",
+            routeTitle: "Lewis and Clark Expedition"
+        },
+        {
+            id: 'wp-lc-12',
+            name: "Fort Clatsop",
+            canonicalName: "Fort Clatsop",
+            lat: 46.133611,
+            lng: -123.880278,
+            sequence: 12,
+            globalSequence: 12,
+            routeGroupId: 'lewis-clark',
+            routeGroupName: "Lewis and Clark Expedition",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "Winter 1805-1806: The Corps achieves their goal, wintering on the Pacific Coast.",
+            description: "Fort Clatsop was established near the mouth of the Columbia River in Oregon after the expedition reached the Pacific Ocean. The crew spent the rainy winter documenting new species, drawing maps, and preparing for their return journey home.",
+            routeTitle: "Lewis and Clark Expedition"
+        }
+    ]
+};
+
+export const DEFAULT_FRANKLIN_ROUTE: FavoriteLocation = {
+    id: 'default-franklin',
+    name: "Franklin Expedition Route",
+    lat: 74.716,
+    lng: -91.833,
+    type: 'route',
+    notes: "Waypoints from https://www.coolantarctica.com/Antarctica%20fact%20file/History/antarctic_ships/Franklin-north-west-passage-map.php",
+    waypoints: [
+        {
+            id: 'wp-fr-1',
+            name: "Greenhithe, England",
+            canonicalName: "Greenhithe",
+            lat: 51.448,
+            lng: 0.283,
+            sequence: 1,
+            globalSequence: 1,
+            routeGroupId: 'franklin-expedition',
+            routeGroupName: "Franklin Expedition Route",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "May 19, 1845: The HMS Erebus and HMS Terror depart England.",
+            description: "Sir John Franklin's lost expedition set sail from Greenhithe on the Thames with 129 officers and crew aboard HMS Erebus and HMS Terror. Outfitted with auxiliary steam engines and three years of provisions, the mission was tasked with discovering the Northwest Passage.",
+            routeTitle: "Franklin Expedition Route"
+        },
+        {
+            id: 'wp-fr-2',
+            name: "Stromness, Orkney",
+            canonicalName: "Stromness",
+            lat: 58.965,
+            lng: -3.296,
+            sequence: 2,
+            globalSequence: 2,
+            routeGroupId: 'franklin-expedition',
+            routeGroupName: "Franklin Expedition Route",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "Final port of call in the UK.",
+            description: "Stromness in the Orkney Islands served as the expedition's last stop in the British Isles. The ships took on fresh water, cattle, and supplies before heading west across the North Atlantic toward Greenland.",
+            routeTitle: "Franklin Expedition Route"
+        },
+        {
+            id: 'wp-fr-3',
+            name: "Whalefish Islands, Greenland",
+            canonicalName: "Whalefish Islands",
+            lat: 69.25,
+            lng: -53.53,
+            sequence: 3,
+            globalSequence: 3,
+            routeGroupId: 'franklin-expedition',
+            routeGroupName: "Franklin Expedition Route",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "July 1845: Five men sent home, provisions loaded. Last letters sent.",
+            description: "In the Whalefish Islands off the western coast of Greenland, the expedition transferred additional coal and preserved rations from escort transport ships. Five crew members were discharged and sent home, carrying the expedition's final letters to families.",
+            routeTitle: "Franklin Expedition Route"
+        },
+        {
+            id: 'wp-fr-4',
+            name: "Lancaster Sound",
+            canonicalName: "Lancaster Sound",
+            lat: 74.25,
+            lng: -84.0,
+            sequence: 4,
+            globalSequence: 4,
+            routeGroupId: 'franklin-expedition',
+            routeGroupName: "Franklin Expedition Route",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "Late July 1845: Last spotted by European whalers waiting for ice to clear.",
+            description: "Lancaster Sound was the eastern gateway to the Northwest Passage in northern Canada. Two whaling ships, the Prince of Wales and Enterprise, spotted the Erebus and Terror tethered to an iceberg waiting for open leads in the pack ice—the last Europeans to see Franklin alive.",
+            routeTitle: "Franklin Expedition Route"
+        },
+        {
+            id: 'wp-fr-5',
+            name: "Beechey Island",
+            canonicalName: "Beechey Island",
+            lat: 74.716,
+            lng: -91.833,
+            sequence: 5,
+            globalSequence: 5,
+            routeGroupId: 'franklin-expedition',
+            routeGroupName: "Franklin Expedition Route",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "Winter 1845-1846: Expedition camps here. Three crewmen die and are buried.",
+            description: "Beechey Island provided a sheltered harbor where the expedition spent their first Arctic winter. Three crewmen (John Torrington, John Hartnell, and William Braine) died here of illness and were buried on the windswept shore.",
+            routeTitle: "Franklin Expedition Route"
+        },
+        {
+            id: 'wp-fr-6',
+            name: "Cornwallis Island",
+            canonicalName: "Cornwallis Island",
+            lat: 75.15,
+            lng: -95.0,
+            sequence: 6,
+            globalSequence: 6,
+            routeGroupId: 'franklin-expedition',
+            routeGroupName: "Franklin Expedition Route",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "1846: The ships circumnavigated this island before heading south.",
+            description: "During the summer thaw of 1846, Franklin navigated north around Cornwallis Island via Wellington Channel, proving it was an island before steering south into Peel Sound toward King William Island.",
+            routeTitle: "Franklin Expedition Route"
+        },
+        {
+            id: 'wp-fr-7',
+            name: "Peel Sound",
+            canonicalName: "Peel Sound",
+            lat: 73.0,
+            lng: -96.5,
+            sequence: 7,
+            globalSequence: 7,
+            routeGroupId: 'franklin-expedition',
+            routeGroupName: "Franklin Expedition Route",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "Summer 1846: Sailed south towards King William Island.",
+            description: "Peel Sound is an icy strait in Nunavut between Somerset Island and Prince of Wales Island. The ships sailed south through its freezing waters before becoming hopelessly trapped by multi-year pack ice off the northwestern tip of King William Island in September 1846.",
+            routeTitle: "Franklin Expedition Route"
+        },
+        {
+            id: 'wp-fr-8',
+            name: "Point Victory",
+            canonicalName: "Point Victory",
+            lat: 69.63,
+            lng: -98.81,
+            sequence: 8,
+            globalSequence: 8,
+            routeGroupId: 'franklin-expedition',
+            routeGroupName: "Franklin Expedition Route",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "Sept 1846: Ships beset in ice. April 1848: Ships abandoned by survivors.",
+            description: "At Point Victory on King William Island, searchers later found the sole written record left by the expedition. The note recorded Sir John Franklin's death on June 11, 1847, and the abandonment of the iced-in ships by the remaining 105 survivors in April 1848.",
+            routeTitle: "Franklin Expedition Route"
+        },
+        {
+            id: 'wp-fr-9',
+            name: "Terror Bay",
+            canonicalName: "Terror Bay",
+            lat: 68.89,
+            lng: -98.94,
+            sequence: 9,
+            globalSequence: 9,
+            routeGroupId: 'franklin-expedition',
+            routeGroupName: "Franklin Expedition Route",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "Resting place of the HMS Terror, discovered in 2016.",
+            description: "Terror Bay on the southwestern coast of King William Island is the resting place of HMS Terror. Discovered in 2016 in pristine condition beneath 80 feet of water, the wreck confirmed Inuit oral history that the ship had drifted south before foundering.",
+            routeTitle: "Franklin Expedition Route"
+        },
+        {
+            id: 'wp-fr-10',
+            name: "Queen Maud Gulf",
+            canonicalName: "Queen Maud Gulf",
+            lat: 68.25,
+            lng: -98.9,
+            sequence: 10,
+            globalSequence: 10,
+            routeGroupId: 'franklin-expedition',
+            routeGroupName: "Franklin Expedition Route",
+            isSequential: true,
+            waypointType: 'route_waypoint',
+            segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
+            context: "Resting place of the HMS Erebus, discovered in 2014.",
+            description: "Queen Maud Gulf in the Canadian Arctic waters south of King William Island contains the wreck of HMS Erebus. Located by Parks Canada underwater archaeologists in 2014, the flagship's discovery resolved one of the greatest mysteries in maritime exploration history.",
+            routeTitle: "Franklin Expedition Route"
+        }
+    ]
+};
+
+export const DEFAULT_SAVED_ROUTES: FavoriteLocation[] = [
+    DEFAULT_SHACKLETON_ROUTE,
+    DEFAULT_GENGHIS_ROUTE,
+    DEFAULT_LEWIS_CLARK_ROUTE,
+    DEFAULT_FRANKLIN_ROUTE
+];
+
+export const defaultWaypointMap = new Map<string, Waypoint>();
+DEFAULT_SAVED_ROUTES.forEach(r => {
+    r.waypoints?.forEach(wp => {
+        defaultWaypointMap.set(wp.id, wp);
+    });
+});
+
+export function hydrateFavoritesList(parsed: any[]): FavoriteLocation[] {
+    return parsed
+        .filter((f: any) => f && typeof f.lat === 'number' && typeof f.lng === 'number' && typeof f.name === 'string' && f.name.trim() !== '')
+        .map((f: FavoriteLocation) => {
+            const canonicalName = (typeof f.name === 'string' && f.name.trim()) ? f.name.trim() : f.name;
+            if ((f.type === 'route' || Array.isArray(f.waypoints)) && Array.isArray(f.waypoints)) {
+                const updatedWaypoints = f.waypoints.map(wp => {
+                    const defaultMatch = defaultWaypointMap.get(wp.id);
+                    if (defaultMatch) {
+                        return {
+                            ...defaultMatch,
+                            ...wp,
+                            description: (wp.description && wp.description.trim() !== '') ? wp.description : defaultMatch.description,
+                            context: (wp.context !== undefined && wp.context !== null) ? wp.context : defaultMatch.context,
+                            sequence: wp.sequence ?? defaultMatch.sequence,
+                            globalSequence: wp.globalSequence ?? defaultMatch.globalSequence,
+                            routeGroupId: wp.routeGroupId ?? defaultMatch.routeGroupId,
+                            routeGroupName: canonicalName || wp.routeGroupName || defaultMatch.routeGroupName,
+                            routeTitle: canonicalName || wp.routeTitle || defaultMatch.routeTitle,
+                            isSequential: wp.isSequential ?? defaultMatch.isSequential,
+                            waypointType: wp.waypointType ?? defaultMatch.waypointType,
+                            segmentEvidence: wp.segmentEvidence ?? defaultMatch.segmentEvidence
+                        };
+                    }
+                    return {
+                        ...wp,
+                        routeGroupName: canonicalName || wp.routeGroupName,
+                        routeTitle: canonicalName || wp.routeTitle
+                    };
+                });
+                return { ...f, name: canonicalName, waypoints: updatedWaypoints };
+            }
+            return { ...f, name: canonicalName };
+        });
+}
+
+export function loadInitialFavorites(): FavoriteLocation[] {
+    if (typeof localStorage !== 'undefined') {
+        try {
+            const savedFavorites = localStorage.getItem('terraexplorer_favorites');
+            if (savedFavorites) {
+                const parsed = JSON.parse(savedFavorites);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    const hydrated = hydrateFavoritesList(parsed);
+                    if (hydrated.length > 0) {
+                        return hydrated;
+                    }
+                }
+            }
+        } catch (e) {
+            console.error("Failed to parse favorites", e);
+        }
+    }
+    return DEFAULT_SAVED_ROUTES;
+}
+
 const App: React.FC = () => {
   const [worldDimensions, setWorldDimensions] = useState({
     width: window.innerWidth,
@@ -300,7 +1100,7 @@ const App: React.FC = () => {
 
   const [locationInfo, setLocationInfo] = useState<LocationInfo | null>(null);
   const [markers, setMarkers] = useState<MapMarker[]>([]);
-  const [favorites, setFavorites] = useState<FavoriteLocation[]>([]);
+  const [favorites, setFavorites] = useState<FavoriteLocation[]>(loadInitialFavorites);
 
   // Favorites UI State
   const [isFavoritesPanelOpen, setIsFavoritesPanelOpen] = useState(false);
@@ -860,807 +1660,15 @@ const App: React.FC = () => {
       targetCameraPosRef.current = worldCameraPos.clone();
   }, []);
 
-  // Load favorites from local storage on mount
-  useEffect(() => {
-    const savedFavorites = localStorage.getItem('terraexplorer_favorites');
-    if (savedFavorites) {
-      try {
-        const parsed = JSON.parse(savedFavorites);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-            // Robustly filter favorites to ensure no corrupt data crashes the app
-            setFavorites(parsed.filter((f: any) => f && typeof f.lat === 'number' && typeof f.lng === 'number' && f.name));
-            return;
-        }
-      } catch (e) {
-        console.error("Failed to parse favorites", e);
-      }
-    }
-
-    // Default routes if nothing in local storage
-    const shackletonRoute: FavoriteLocation = {
-        id: 'default-shackleton',
-        name: "Ernest Shackleton's Endurance Expedition",
-        lat: 50.3755,
-        lng: -4.1427,
-        type: 'route',
-        waypoints: [
-            {
-                id: 'wp-shackleton-1',
-                name: "Plymouth, England",
-                canonicalName: "Plymouth",
-                lat: 50.3755,
-                lng: -4.1427,
-                sequence: 1,
-                globalSequence: 1,
-                routeGroupId: 'shackleton-endurance',
-                routeGroupName: "Ernest Shackleton's Endurance Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                role: 'origin',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "August 8, 1914: The Endurance departs for Buenos Aires.",
-                description: "Plymouth served as the final departure point in Great Britain for Ernest Shackleton's Imperial Trans-Antarctic Expedition aboard the Endurance. Departing on the eve of World War I after Winston Churchill authorized the journey to proceed, the expedition aimed to achieve the first land crossing of Antarctica.",
-                routeTitle: "Endurance Expedition"
-            },
-            {
-                id: 'wp-shackleton-2',
-                name: "Buenos Aires, Argentina",
-                canonicalName: "Buenos Aires",
-                lat: -34.6037,
-                lng: -58.3816,
-                sequence: 2,
-                globalSequence: 2,
-                routeGroupId: 'shackleton-endurance',
-                routeGroupName: "Ernest Shackleton's Endurance Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                role: 'transit',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "October 9, 1914: The ship arrives to pick up supplies and crew.",
-                description: "Buenos Aires was the primary South American staging ground for the Endurance. Here the expedition completed final outfitting, took on vital cold-weather supplies, and recruited photographer Frank Hurley and stowaway Perce Blackborow before heading into the Southern Ocean.",
-                routeTitle: "Endurance Expedition"
-            },
-            {
-                id: 'wp-shackleton-3',
-                name: "Grytviken, South Georgia",
-                canonicalName: "Grytviken",
-                lat: -54.2811,
-                lng: -36.5092,
-                sequence: 3,
-                globalSequence: 3,
-                routeGroupId: 'shackleton-endurance',
-                routeGroupName: "Ernest Shackleton's Endurance Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                role: 'transit',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "December 5, 1914: The expedition departs the whaling station for the Weddell Sea.",
-                description: "Grytviken was a remote Norwegian whaling station on South Georgia Island. Whalers warned Shackleton of unusually heavy pack ice further south in the Weddell Sea, advice that prompted a month-long delay while the crew waited for favorable sea ice conditions.",
-                routeTitle: "Endurance Expedition"
-            },
-            {
-                id: 'wp-shackleton-4',
-                name: "Weddell Sea (Ice Trap)",
-                canonicalName: "Weddell Sea",
-                lat: -76.5,
-                lng: -35.0,
-                sequence: 4,
-                globalSequence: 4,
-                routeGroupId: 'shackleton-endurance',
-                routeGroupName: "Ernest Shackleton's Endurance Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                role: 'transit',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "January 1915: The Endurance becomes frozen fast in the pack ice.",
-                description: "Deep in the Weddell Sea, the Endurance encountered impassable pack ice and was frozen solid into an ice floe just miles from the Antarctic mainland. For ten months the ship drifted helplessly northward with the ice floe in sub-zero polar conditions.",
-                routeTitle: "Endurance Expedition"
-            },
-            {
-                id: 'wp-shackleton-5',
-                name: "Endurance Sinks",
-                canonicalName: "Endurance Sinks",
-                lat: -69.08,
-                lng: -51.5,
-                sequence: 5,
-                globalSequence: 5,
-                routeGroupId: 'shackleton-endurance',
-                routeGroupName: "Ernest Shackleton's Endurance Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                role: 'transit',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "November 21, 1915: Crushed by ice, the ship sinks, stranding the crew.",
-                description: "Under enormous pressure from shifting pack ice, the hull of the Endurance was crushed beyond repair. Shackleton ordered the crew to abandon ship, salvaging food, dog teams, and three wooden lifeboats before the ship slipped beneath the icy waters.",
-                routeTitle: "Endurance Expedition"
-            },
-            {
-                id: 'wp-shackleton-6',
-                name: "Elephant Island",
-                canonicalName: "Elephant Island",
-                lat: -61.1417,
-                lng: -55.2333,
-                sequence: 6,
-                globalSequence: 6,
-                routeGroupId: 'shackleton-endurance',
-                routeGroupName: "Ernest Shackleton's Endurance Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                role: 'transit',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "April 1916: The crew reaches solid land for the first time in 497 days.",
-                description: "After perilous open-boat navigation through turbulent Antarctic seas, the 28 exhausted crew members landed on the desolate spit of Elephant Island. It marked their first footing on solid ground in over sixteen months, though rescue remained thousands of miles away.",
-                routeTitle: "Endurance Expedition"
-            },
-            {
-                id: 'wp-shackleton-7',
-                name: "King Haakon Bay",
-                canonicalName: "King Haakon Bay",
-                lat: -54.1500,
-                lng: -37.2333,
-                sequence: 7,
-                globalSequence: 7,
-                routeGroupId: 'shackleton-endurance',
-                routeGroupName: "Ernest Shackleton's Endurance Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                role: 'transit',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "May 1916: Shackleton and five men land after the perilous voyage of the James Caird.",
-                description: "In one of history's greatest feats of small-boat navigation, Shackleton and five companions sailed 800 miles across the treacherous Drake Passage in the 22-foot James Caird lifeboat, making a miraculous landing on the uninhabited southern coast of South Georgia.",
-                routeTitle: "Endurance Expedition"
-            },
-            {
-                id: 'wp-shackleton-8',
-                name: "Stromness Whaling Station",
-                canonicalName: "Stromness",
-                lat: -54.1600,
-                lng: -36.7110,
-                sequence: 8,
-                globalSequence: 8,
-                routeGroupId: 'shackleton-endurance',
-                routeGroupName: "Ernest Shackleton's Endurance Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                role: 'transit',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "May 20, 1916: Shackleton, Worsley, and Crean reach safety after crossing the mountains.",
-                description: "Lacking climbing equipment, Shackleton, Frank Worsley, and Tom Crean trekked non-stop across South Georgia's uncharted glaciers and alpine ridges for 36 hours, finally reaching the managers at Stromness Whaling Station to organize rescue operations.",
-                routeTitle: "Endurance Expedition"
-            },
-             {
-                id: 'wp-shackleton-9',
-                name: "Punta Arenas, Chile",
-                canonicalName: "Punta Arenas",
-                lat: -53.1638,
-                lng: -70.9171,
-                sequence: 9,
-                globalSequence: 9,
-                routeGroupId: 'shackleton-endurance',
-                routeGroupName: "Ernest Shackleton's Endurance Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                role: 'destination',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "August 30, 1916: The tug Yelcho, commanded by Luis Pardo, finally rescues the remaining crew from Elephant Island.",
-                description: "From Punta Arenas, Shackleton mounted four rescue attempts before securing the Chilean steam tug Yelcho under Captain Luis Pardo. They successfully breached the winter ice at Elephant Island, rescuing all 22 stranded crewmen without a single loss of life.",
-                routeTitle: "Endurance Expedition"
-            }
-        ]
-    };
-
-    const genghisRoute: FavoriteLocation = {
-        id: 'default-genghis',
-        name: "The Campaigns of Genghis Khan",
-        lat: 48.9,
-        lng: 109.0,
-        type: 'route',
-        waypoints: [
-            {
-                id: 'wp-genghis-1',
-                name: "Burkhan Khaldun (Mongolia)",
-                canonicalName: "Burkhan Khaldun",
-                lat: 48.9,
-                lng: 109.0,
-                sequence: 1,
-                globalSequence: 1,
-                routeGroupId: 'genghis-khan',
-                routeGroupName: "The Campaigns of Genghis Khan",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "1206: Temüjin unites the Mongol tribes and is proclaimed Genghis Khan.",
-                description: "Burkhan Khaldun is a sacred mountain in northeastern Mongolia where Temüjin sought spiritual refuge in his youth. Following decades of inter-tribal warfare, he convened a grand kurultai here in 1206, uniting the nomadic confederations and proclaiming the Mongol Empire.",
-                routeTitle: "Campaigns of Genghis Khan"
-            },
-            {
-                id: 'wp-genghis-2',
-                name: "Yinchuan (Western Xia)",
-                canonicalName: "Yinchuan",
-                lat: 38.4872,
-                lng: 106.2309,
-                sequence: 2,
-                globalSequence: 2,
-                routeGroupId: 'genghis-khan',
-                routeGroupName: "The Campaigns of Genghis Khan",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "1209: The Mongols force the Western Xia emperor to submit.",
-                description: "Yinchuan was the fortified capital of the Tangut Western Xia dynasty. In 1209, Genghis Khan launched his first major external campaign, surrounding the capital and diverting the Yellow River to breach defenses, successfully forcing Western Xia into tribute and vassalage.",
-                routeTitle: "Campaigns of Genghis Khan"
-            },
-            {
-                id: 'wp-genghis-3',
-                name: "Zhongdu (Beijing)",
-                canonicalName: "Zhongdu",
-                lat: 39.9042,
-                lng: 116.4074,
-                sequence: 3,
-                globalSequence: 3,
-                routeGroupId: 'genghis-khan',
-                routeGroupName: "The Campaigns of Genghis Khan",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "1215: The Jin capital is captured and sacked after a long siege.",
-                description: "Zhongdu was the formidable northern capital of the Jurchen Jin dynasty. The Mongol army laid siege to the city in 1214, cutting off supply lines and capturing the metropolis in 1215, giving the Mongols complete strategic dominance over the North China Plain.",
-                routeTitle: "Campaigns of Genghis Khan"
-            },
-            {
-                id: 'wp-genghis-4',
-                name: "Balasagun",
-                canonicalName: "Balasagun",
-                lat: 42.746,
-                lng: 75.25,
-                sequence: 4,
-                globalSequence: 4,
-                routeGroupId: 'genghis-khan',
-                routeGroupName: "The Campaigns of Genghis Khan",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "1218: General Jebe conquers the Qara Khitai empire.",
-                description: "Balasagun was an ancient Silk Road trading center in modern Kyrgyzstan. In 1218, Mongol general Jebe pursued the usurper Kuchlug, granting religious freedom to the local Muslim population and annexing the vast Qara Khitai realm without prolonged bloodshed.",
-                routeTitle: "Campaigns of Genghis Khan"
-            },
-            {
-                id: 'wp-genghis-5',
-                name: "Otrar",
-                canonicalName: "Otrar",
-                lat: 42.85,
-                lng: 68.3,
-                sequence: 5,
-                globalSequence: 5,
-                routeGroupId: 'genghis-khan',
-                routeGroupName: "The Campaigns of Genghis Khan",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "1219: The Khwarazmian governor executes Mongol envoys, triggering invasion.",
-                description: "Otrar was a key commercial oasis on the Silk Road along the Syr Darya. When its governor executed a 500-camel Mongol trade delegation, Genghis Khan retaliated with a massive western expedition, besieging and destroying the city in a five-month siege.",
-                routeTitle: "Campaigns of Genghis Khan"
-            },
-            {
-                id: 'wp-genghis-6',
-                name: "Bukhara",
-                canonicalName: "Bukhara",
-                lat: 39.7681,
-                lng: 64.4556,
-                sequence: 6,
-                globalSequence: 6,
-                routeGroupId: 'genghis-khan',
-                routeGroupName: "The Campaigns of Genghis Khan",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "1220: Genghis Khan captures the city and addresses the populace in the mosque.",
-                description: "Bukhara was one of the intellectual and spiritual capitals of the Islamic Golden Age. Genghis Khan led a surprise attack across the Kyzylkum Desert, capturing the city and assembling the civic leaders in the Great Mosque before advancing along the Zeravshan Valley.",
-                routeTitle: "Campaigns of Genghis Khan"
-            },
-            {
-                id: 'wp-genghis-7',
-                name: "Samarkand",
-                canonicalName: "Samarkand",
-                lat: 39.6542,
-                lng: 66.9597,
-                sequence: 7,
-                globalSequence: 7,
-                routeGroupId: 'genghis-khan',
-                routeGroupName: "The Campaigns of Genghis Khan",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "1220: The capital of the Khwarazmian Empire falls.",
-                description: "Samarkand was the grand, heavily fortified imperial capital of the Khwarazmian Empire. Despite formidable walls and war elephants, the city fell within days under coordinated Mongol assaults and advanced Chinese siege engineers.",
-                routeTitle: "Campaigns of Genghis Khan"
-            },
-             {
-                id: 'wp-genghis-8',
-                name: "Indus River",
-                canonicalName: "Indus River",
-                lat: 33.9,
-                lng: 72.2,
-                sequence: 8,
-                globalSequence: 8,
-                routeGroupId: 'genghis-khan',
-                routeGroupName: "The Campaigns of Genghis Khan",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "1221: Genghis Khan defeats Jalal ad-Din Mingburnu on the banks of the Indus.",
-                description: "At the Battle of the Indus, Genghis Khan surrounded the last Khwarazmian ruler, Jalal ad-Din. After a desperate last stand, Jalal ad-Din galloped his stallion off a steep cliff into the swollen river, escaping to India while Genghis Khan ordered his archers to spare his life in tribute to his valor.",
-                routeTitle: "Campaigns of Genghis Khan"
-            },
-            {
-                id: 'wp-genghis-9',
-                name: "Liupan Mountains",
-                canonicalName: "Liupan Mountains",
-                lat: 35.6,
-                lng: 106.2,
-                sequence: 9,
-                globalSequence: 9,
-                routeGroupId: 'genghis-khan',
-                routeGroupName: "The Campaigns of Genghis Khan",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "1227: Genghis Khan dies during the final campaign against Western Xia.",
-                description: "The cool highlands of the Liupan Mountains in northwestern China served as the summer headquarters for Genghis Khan's final punitive campaign against Western Xia. The great conqueror passed away here in August 1227, leaving an empire spanning from the Pacific to the Caspian.",
-                routeTitle: "Campaigns of Genghis Khan"
-            }
-        ]
-    };
-
-    const lewisClarkRoute: FavoriteLocation = {
-        id: 'default-lewisclark',
-        name: "Lewis and Clark Expedition",
-        lat: 38.8027,
-        lng: -90.1012,
-        type: 'route',
-        waypoints: [
-            {
-                id: 'wp-lc-1',
-                name: "Camp Dubois",
-                canonicalName: "Camp Dubois",
-                lat: 38.802722,
-                lng: -90.10125,
-                sequence: 1,
-                globalSequence: 1,
-                routeGroupId: 'lewis-clark',
-                routeGroupName: "Lewis and Clark Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "May 14, 1804: The Corps of Discovery departs their winter camp to begin the journey up the Missouri.",
-                description: "Camp Dubois in Illinois served as the winter training and staging base for the Corps of Discovery. Meriwether Lewis and William Clark trained soldiers, gathered equipment, and finalized navigation instruments before launching their expedition up the Missouri River.",
-                routeTitle: "Lewis and Clark Expedition"
-            },
-            {
-                id: 'wp-lc-2',
-                name: "St. Charles",
-                canonicalName: "St. Charles",
-                lat: 38.7758,
-                lng: -90.4851,
-                sequence: 2,
-                globalSequence: 2,
-                routeGroupId: 'lewis-clark',
-                routeGroupName: "Lewis and Clark Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "May 16-21, 1804: The expedition makes final preparations and recruits the last crew members.",
-                description: "St. Charles was the last major European-American settlement on the Missouri River. The expedition paused here for several days to recruit experienced French-Canadian boatmen, adjust cargo balances, and wait for Captain Lewis to arrive from St. Louis.",
-                routeTitle: "Lewis and Clark Expedition"
-            },
-            {
-                id: 'wp-lc-3',
-                name: "Kaw Point",
-                canonicalName: "Kaw Point",
-                lat: 39.117,
-                lng: -94.606,
-                sequence: 3,
-                globalSequence: 3,
-                routeGroupId: 'lewis-clark',
-                routeGroupName: "Lewis and Clark Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "June 26, 1804: The explorers reach the confluence of the Kansas and Missouri rivers.",
-                description: "Kaw Point, situated at the junction of the Kansas and Missouri rivers in modern-day Kansas City, provided a strategic rest stop where Clark took celestial observations and the crew repaired their keelboat and pirogues.",
-                routeTitle: "Lewis and Clark Expedition"
-            },
-            {
-                id: 'wp-lc-4',
-                name: "Sergeant Floyd Monument",
-                canonicalName: "Sergeant Floyd Monument",
-                lat: 42.4631,
-                lng: -96.3838,
-                sequence: 4,
-                globalSequence: 4,
-                routeGroupId: 'lewis-clark',
-                routeGroupName: "Lewis and Clark Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "August 20, 1804: Sergeant Charles Floyd dies of appendicitis, the expedition's only fatality.",
-                description: "On a high bluff overlooking the Missouri River near present-day Sioux City, Sergeant Charles Floyd succumbed to probable appendicitis. He was buried with military honors, remaining the sole fatality of the entire two-and-a-half-year transcontinental expedition.",
-                routeTitle: "Lewis and Clark Expedition"
-            },
-            {
-                id: 'wp-lc-5',
-                name: "Council Bluff",
-                canonicalName: "Council Bluff",
-                lat: 41.434,
-                lng: -96.009,
-                sequence: 5,
-                globalSequence: 5,
-                routeGroupId: 'lewis-clark',
-                routeGroupName: "Lewis and Clark Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "August 3, 1804: Lewis and Clark hold their first formal council with the Oto and Missouri tribes.",
-                description: "Council Bluff in eastern Nebraska was the site of the expedition's first diplomatic meeting with indigenous leaders. Lewis delivered a speech announcing United States sovereignty and distributed peace medals to chiefs of the Oto and Missouri tribes.",
-                routeTitle: "Lewis and Clark Expedition"
-            },
-            {
-                id: 'wp-lc-6',
-                name: "Spirit Mound",
-                canonicalName: "Spirit Mound",
-                lat: 42.8425,
-                lng: -96.942,
-                sequence: 6,
-                globalSequence: 6,
-                routeGroupId: 'lewis-clark',
-                routeGroupName: "Lewis and Clark Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "August 25, 1804: The captains climb this mound to investigate local legends of 'little people'.",
-                description: "Spirit Mound is a prominent geological landmark in South Dakota that local Native American tribes believed was inhabited by diminutive spirit-beings. Lewis, Clark, and several men hiked to the summit to map the expansive prairie views and observe wildlife.",
-                routeTitle: "Lewis and Clark Expedition"
-            },
-            {
-                id: 'wp-lc-7',
-                name: "Fort Mandan",
-                canonicalName: "Fort Mandan",
-                lat: 47.297926,
-                lng: -101.08726,
-                sequence: 7,
-                globalSequence: 7,
-                routeGroupId: 'lewis-clark',
-                routeGroupName: "Lewis and Clark Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "Winter 1804-1805: The expedition builds a fort for the winter and meets Sacagawea.",
-                description: "Fort Mandan was constructed near the Mandan and Hidatsa villages in North Dakota. During their winter stay, Lewis and Clark forged friendly diplomatic ties, hired French-Canadian fur trapper Toussaint Charbonneau, and met his Shoshone wife, Sacagawea.",
-                routeTitle: "Lewis and Clark Expedition"
-            },
-            {
-                id: 'wp-lc-8',
-                name: "Knife River Indian Villages",
-                canonicalName: "Knife River Indian Villages",
-                lat: 47.375,
-                lng: -101.405,
-                sequence: 8,
-                globalSequence: 8,
-                routeGroupId: 'lewis-clark',
-                routeGroupName: "Lewis and Clark Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "Major trade hub where the captains gathered vital geographical information from the Hidatsa.",
-                description: "The Knife River Villages comprised thriving agricultural and trade centers on the Upper Missouri. Hidatsa and Mandan elders provided the captains with detailed geographical descriptions and hand-drawn maps of the Rocky Mountains ahead.",
-                routeTitle: "Lewis and Clark Expedition"
-            },
-            {
-                id: 'wp-lc-9',
-                name: "Great Falls (Lower Portage)",
-                canonicalName: "Great Falls",
-                lat: 47.516,
-                lng: -111.378,
-                sequence: 9,
-                globalSequence: 9,
-                routeGroupId: 'lewis-clark',
-                routeGroupName: "Lewis and Clark Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "June 1805: The expedition faces a grueling month-long portage around the massive waterfalls.",
-                description: "The Great Falls of the Missouri presented a series of five cascading waterfalls over an 18-mile stretch. The crew undertook an arduous overland portage through cactus and intense heat, hauling canoes and heavy cargo by hand across rough terrain.",
-                routeTitle: "Lewis and Clark Expedition"
-            },
-            {
-                id: 'wp-lc-10',
-                name: "Three Forks of the Missouri",
-                canonicalName: "Three Forks of the Missouri",
-                lat: 45.894,
-                lng: -111.927,
-                sequence: 10,
-                globalSequence: 10,
-                routeGroupId: 'lewis-clark',
-                routeGroupName: "Lewis and Clark Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "July 1805: The explorers discover the headwaters of the Missouri River.",
-                description: "At Three Forks in Montana, the expedition reached the headwaters of the Missouri River where three major rivers converge. Captains Lewis and Clark named them the Jefferson, Madison, and Gallatin rivers in honor of prominent leaders.",
-                routeTitle: "Lewis and Clark Expedition"
-            },
-            {
-                id: 'wp-lc-11',
-                name: "Lemhi Pass",
-                canonicalName: "Lemhi Pass",
-                lat: 44.975833,
-                lng: -113.441944,
-                sequence: 11,
-                globalSequence: 11,
-                routeGroupId: 'lewis-clark',
-                routeGroupName: "Lewis and Clark Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "August 12, 1805: Meriwether Lewis crosses the Continental Divide, leaving US territory.",
-                description: "Lemhi Pass on the Montana-Idaho border marks the point where Meriwether Lewis crossed the Continental Divide. Standing at the pass, Lewis looked west expecting a navigable river to the Pacific, only to see endless rows of snow-capped mountains.",
-                routeTitle: "Lewis and Clark Expedition"
-            },
-            {
-                id: 'wp-lc-12',
-                name: "Fort Clatsop",
-                canonicalName: "Fort Clatsop",
-                lat: 46.133611,
-                lng: -123.880278,
-                sequence: 12,
-                globalSequence: 12,
-                routeGroupId: 'lewis-clark',
-                routeGroupName: "Lewis and Clark Expedition",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "Winter 1805-1806: The Corps achieves their goal, wintering on the Pacific Coast.",
-                description: "Fort Clatsop was established near the mouth of the强烈Columbia River in Oregon after the expedition reached the Pacific Ocean. The crew spent the rainy winter documenting new species, drawing maps, and preparing for their return journey home.",
-                routeTitle: "Lewis and Clark Expedition"
-            }
-        ]
-    };
-
-    const franklinRoute: FavoriteLocation = {
-        id: 'default-franklin',
-        name: "Franklin Expedition Route",
-        lat: 74.716,
-        lng: -91.833,
-        type: 'route',
-        notes: "Waypoints from https://www.coolantarctica.com/Antarctica%20fact%20file/History/antarctic_ships/Franklin-north-west-passage-map.php",
-        waypoints: [
-            {
-                id: 'wp-fr-1',
-                name: "Greenhithe, England",
-                canonicalName: "Greenhithe",
-                lat: 51.448,
-                lng: 0.283,
-                sequence: 1,
-                globalSequence: 1,
-                routeGroupId: 'franklin-expedition',
-                routeGroupName: "Franklin Expedition Route",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "May 19, 1845: The HMS Erebus and HMS Terror depart England.",
-                description: "Sir John Franklin's lost expedition set sail from Greenhithe on the Thames with 129 officers and crew aboard HMS Erebus and HMS Terror. Outfitted with auxiliary steam engines and three years of provisions, the mission was tasked with discovering the Northwest Passage.",
-                routeTitle: "Franklin Expedition Route"
-            },
-            {
-                id: 'wp-fr-2',
-                name: "Stromness, Orkney",
-                canonicalName: "Stromness",
-                lat: 58.965,
-                lng: -3.296,
-                sequence: 2,
-                globalSequence: 2,
-                routeGroupId: 'franklin-expedition',
-                routeGroupName: "Franklin Expedition Route",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "Final port of call in the UK.",
-                description: "Stromness in the Orkney Islands served as the expedition's last stop in the British Isles. The ships took on fresh water, cattle, and supplies before heading west across the North Atlantic toward Greenland.",
-                routeTitle: "Franklin Expedition Route"
-            },
-            {
-                id: 'wp-fr-3',
-                name: "Whalefish Islands, Greenland",
-                canonicalName: "Whalefish Islands",
-                lat: 69.25,
-                lng: -53.53,
-                sequence: 3,
-                globalSequence: 3,
-                routeGroupId: 'franklin-expedition',
-                routeGroupName: "Franklin Expedition Route",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "July 1845: Five men sent home, provisions loaded. Last letters sent.",
-                description: "In the Whalefish Islands off the western coast of Greenland, the expedition transferred additional coal and preserved rations from escort transport ships. Five crew members were discharged and sent home, carrying the expedition's final letters to families.",
-                routeTitle: "Franklin Expedition Route"
-            },
-            {
-                id: 'wp-fr-4',
-                name: "Lancaster Sound",
-                canonicalName: "Lancaster Sound",
-                lat: 74.25,
-                lng: -84.0,
-                sequence: 4,
-                globalSequence: 4,
-                routeGroupId: 'franklin-expedition',
-                routeGroupName: "Franklin Expedition Route",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "Late July 1845: Last spotted by European whalers waiting for ice to clear.",
-                description: "Lancaster Sound was the eastern gateway to the Northwest Passage in northern Canada. Two whaling ships, the Prince of Wales and Enterprise, spotted the Erebus and Terror tethered to an iceberg waiting for open leads in the pack ice—the last Europeans to see Franklin alive.",
-                routeTitle: "Franklin Expedition Route"
-            },
-            {
-                id: 'wp-fr-5',
-                name: "Beechey Island",
-                canonicalName: "Beechey Island",
-                lat: 74.716,
-                lng: -91.833,
-                sequence: 5,
-                globalSequence: 5,
-                routeGroupId: 'franklin-expedition',
-                routeGroupName: "Franklin Expedition Route",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "Winter 1845-1846: Expedition camps here. Three crewmen die and are buried.",
-                description: "Beechey Island provided a sheltered harbor where the expedition spent their first Arctic winter. Three crewmen (John Torrington, John Hartnell, and William Braine) died here of illness and were buried on the windswept shore.",
-                routeTitle: "Franklin Expedition Route"
-            },
-            {
-                id: 'wp-fr-6',
-                name: "Cornwallis Island",
-                canonicalName: "Cornwallis Island",
-                lat: 75.15,
-                lng: -95.0,
-                sequence: 6,
-                globalSequence: 6,
-                routeGroupId: 'franklin-expedition',
-                routeGroupName: "Franklin Expedition Route",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "1846: The ships circumnavigated this island before heading south.",
-                description: "During the summer thaw of 1846, Franklin navigated north around Cornwallis Island via Wellington Channel, proving it was an island before steering south into Peel Sound toward King William Island.",
-                routeTitle: "Franklin Expedition Route"
-            },
-            {
-                id: 'wp-fr-7',
-                name: "Peel Sound",
-                canonicalName: "Peel Sound",
-                lat: 73.0,
-                lng: -96.5,
-                sequence: 7,
-                globalSequence: 7,
-                routeGroupId: 'franklin-expedition',
-                routeGroupName: "Franklin Expedition Route",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "Summer 1846: Sailed south towards King William Island.",
-                description: "Peel Sound is an icy strait in Nunavut between Somerset Island and Prince of Wales Island. The ships sailed south through its freezing waters before becoming hopelessly trapped by multi-year pack ice off the northwestern tip of King William Island in September 1846.",
-                routeTitle: "Franklin Expedition Route"
-            },
-            {
-                id: 'wp-fr-8',
-                name: "Point Victory",
-                canonicalName: "Point Victory",
-                lat: 69.63,
-                lng: -98.81,
-                sequence: 8,
-                globalSequence: 8,
-                routeGroupId: 'franklin-expedition',
-                routeGroupName: "Franklin Expedition Route",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "Sept 1846: Ships beset in ice. April 1848: Ships abandoned by survivors.",
-                description: "At Point Victory on King William Island, searchers later found the sole written record left by the expedition. The note recorded Sir John Franklin's death on June 11, 1847, and the abandonment of the iced-in ships by the remaining 105 survivors in April 1848.",
-                routeTitle: "Franklin Expedition Route"
-            },
-            {
-                id: 'wp-fr-9',
-                name: "Terror Bay",
-                canonicalName: "Terror Bay",
-                lat: 68.89,
-                lng: -98.94,
-                sequence: 9,
-                globalSequence: 9,
-                routeGroupId: 'franklin-expedition',
-                routeGroupName: "Franklin Expedition Route",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "Resting place of the HMS Terror, discovered in 2016.",
-                description: "Terror Bay on the southwestern coast of King William Island is the resting place of HMS Terror. Discovered in 2016 in pristine condition beneath 80 feet of water, the wreck confirmed Inuit oral history that the ship had drifted south before foundering.",
-                routeTitle: "Franklin Expedition Route"
-            },
-            {
-                id: 'wp-fr-10',
-                name: "Queen Maud Gulf",
-                canonicalName: "Queen Maud Gulf",
-                lat: 68.25,
-                lng: -98.9,
-                sequence: 10,
-                globalSequence: 10,
-                routeGroupId: 'franklin-expedition',
-                routeGroupName: "Franklin Expedition Route",
-                isSequential: true,
-                waypointType: 'route_waypoint',
-                segmentEvidence: 'DOCUMENTED_ROUTE_SEGMENT',
-                context: "Resting place of the HMS Erebus, discovered in 2014.",
-                description: "Queen Maud Gulf in the Canadian Arctic waters south of King William Island contains the wreck of HMS Erebus. Located by Parks Canada underwater archaeologists in 2014, the flagship's discovery resolved one of the greatest mysteries in maritime exploration history.",
-                routeTitle: "Franklin Expedition Route"
-            }
-        ]
-    };
-
-    const defaultRoutes = [shackletonRoute, genghisRoute, lewisClarkRoute, franklinRoute];
-
-    // Build lookup for default waypoint descriptions to hydrate legacy cached favorites
-    const defaultWaypointMap = new Map<string, Waypoint>();
-    defaultRoutes.forEach(r => {
-      r.waypoints?.forEach(wp => {
-        defaultWaypointMap.set(wp.id, wp);
-      });
-    });
-
-    if (savedFavorites) {
-      try {
-        const parsed = JSON.parse(savedFavorites);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-            const hydratedFavorites = parsed
-              .filter((f: any) => f && typeof f.lat === 'number' && typeof f.lng === 'number' && f.name)
-              .map((f: FavoriteLocation) => {
-                if (f.type === 'route' && Array.isArray(f.waypoints)) {
-                  const updatedWaypoints = f.waypoints.map(wp => {
-                    const defaultMatch = defaultWaypointMap.get(wp.id);
-                    if (defaultMatch) {
-                      return {
-                        ...defaultMatch,
-                        ...wp,
-                        description: (wp.description && wp.description.trim() !== '') ? wp.description : defaultMatch.description,
-                        sequence: wp.sequence ?? defaultMatch.sequence,
-                        globalSequence: wp.globalSequence ?? defaultMatch.globalSequence,
-                        routeGroupId: wp.routeGroupId ?? defaultMatch.routeGroupId,
-                        routeGroupName: wp.routeGroupName ?? defaultMatch.routeGroupName,
-                        isSequential: wp.isSequential ?? defaultMatch.isSequential,
-                        waypointType: wp.waypointType ?? defaultMatch.waypointType,
-                        segmentEvidence: wp.segmentEvidence ?? defaultMatch.segmentEvidence
-                      };
-                    }
-                    return wp;
-                  });
-                  return { ...f, waypoints: updatedWaypoints };
-                }
-                return f;
-              });
-            setFavorites(hydratedFavorites);
-            return;
-        }
-      } catch (e) {
-        console.error("Failed to parse favorites", e);
-      }
-    }
-
-    setFavorites(defaultRoutes);
-  }, []);
-
   // Save favorites to local storage whenever they change
   useEffect(() => {
-    localStorage.setItem('terraexplorer_favorites', JSON.stringify(favorites));
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('terraexplorer_favorites', JSON.stringify(favorites));
+      } catch (e) {
+        console.error("Failed to save favorites to localStorage", e);
+      }
+    }
   }, [favorites]);
 
   // Sync activeRouteId with routeWaypoints if route is cleared externally
@@ -1943,12 +1951,17 @@ const App: React.FC = () => {
      setIsNewsFetching(false);
      console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_STARTED');
 
+     const routeLabel = wp.routeGroupName || wp.routeTitle || "Route Context";
      const initialWaypointPayload: any = {
          id: stableId,
          name: wp.name,
          coordinates: { lat: wp.lat, lng: wp.lng },
          waypoint: wp,
          description: wp.description || "",
+         routeContext: wp.context ? {
+             title: routeLabel,
+             text: wp.context
+         } : undefined,
          significance: wp.significance,
          highlights: wp.highlights,
          historicalPeriod: wp.historicalPeriod,
@@ -2074,6 +2087,7 @@ const App: React.FC = () => {
      let data: any = {
          id: geoMarker.id || stableId,
          name: wp.name, // Protected
+         canonicalName: wp.canonicalName,
          coordinates: { lat: wp.lat, lng: wp.lng }, // Protected
          waypoint: wp, // Protected
          country: geoMarker.country,
@@ -2088,6 +2102,9 @@ const App: React.FC = () => {
          significance: wp.significance,
          highlights: wp.highlights,
          historicalPeriod: wp.historicalPeriod,
+         historicalContext: wp.context || wp.historicalContext,
+         routeTitle: wp.routeTitle || wp.routeGroupName,
+         routeGroupId: wp.routeGroupId,
          entities: wp.entities,
          entityType: wp.entityType || geoMarker.type || "historical_waypoint",
          searchId: (wp as any).searchId,
@@ -3242,27 +3259,63 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
   const isCurrentLocationFavorite = !!currentFavorite;
 
   const handleSaveFavorite = (name: string) => {
+    const trimmedName = name.trim() || name;
     if (currentFavorite) {
         // Edit existing
-        setFavorites(prev => prev.map(f => f.id === currentFavorite.id ? { ...f, name: name } : f));
+        if (currentFavorite.type === 'route' && currentFavorite.waypoints) {
+            const updatedFav: FavoriteLocation = {
+                ...currentFavorite,
+                name: trimmedName,
+                waypoints: currentFavorite.waypoints.map(wp => ({
+                    ...wp,
+                    routeGroupName: trimmedName,
+                    routeTitle: trimmedName
+                }))
+            };
+            handleUpdateFavorite(updatedFav);
+        } else {
+            setFavorites(prev => prev.map(f => f.id === currentFavorite.id ? { ...f, name: trimmedName } : f));
+            if (locationInfo && locationInfo.name === currentFavorite.name) {
+                setLocationInfo(prev => prev ? { ...prev, name: trimmedName } : null);
+            }
+        }
     } else {
         // Create new
         if (routeWaypoints.length > 0 && currentWaypointIndex !== -1) {
             const start = routeWaypoints[0];
+            const syncedWaypoints = routeWaypoints.map(wp => ({
+                ...wp,
+                routeGroupName: trimmedName,
+                routeTitle: trimmedName
+            }));
             const newFav: FavoriteLocation = {
                 id: `fav-route-${Date.now()}`,
-                name: name,
+                name: trimmedName,
                 lat: start.lat,
                 lng: start.lng,
                 type: 'route',
-                waypoints: routeWaypoints
+                waypoints: syncedWaypoints
             };
             setFavorites(prev => [...prev, newFav]);
             setActiveRouteId(newFav.id); // Automatically set as active
+            setRouteWaypoints(syncedWaypoints);
+            setLocationInfo(prev => {
+                if (!prev) return prev;
+                return {
+                    ...prev,
+                    routeContext: prev.routeContext ? {
+                        ...prev.routeContext,
+                        title: trimmedName
+                    } : {
+                        title: trimmedName,
+                        text: prev.description || ""
+                    }
+                };
+            });
         } else if (locationInfo) {
             const newFav: FavoriteLocation = {
                 id: `fav-loc-${Date.now()}`,
-                name: name,
+                name: trimmedName,
                 lat: locationInfo.coordinates.lat,
                 lng: locationInfo.coordinates.lng,
                 type: 'location'
@@ -3275,15 +3328,57 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
   };
 
   const handleUpdateFavorite = (updatedFav: FavoriteLocation) => {
-      setFavorites(prev => prev.map(f => f.id === updatedFav.id ? updatedFav : f));
+      const trimmedName = updatedFav.name.trim() || updatedFav.name;
+      const syncedFav: FavoriteLocation = updatedFav.type === 'route' && updatedFav.waypoints
+        ? {
+            ...updatedFav,
+            name: trimmedName,
+            waypoints: updatedFav.waypoints.map(wp => ({
+              ...wp,
+              routeGroupName: trimmedName,
+              routeTitle: trimmedName
+            }))
+          }
+        : {
+            ...updatedFav,
+            name: trimmedName
+          };
 
-      // If this route is currently active, update the map immediately
-      if (activeRouteId === updatedFav.id && updatedFav.type === 'route' && updatedFav.waypoints) {
-          setRouteWaypoints(updatedFav.waypoints);
-          if (updatedFav.waypoints.length === 0) {
+      setFavorites(prev => prev.map(f => f.id === syncedFav.id ? syncedFav : f));
+
+      // If this route is currently active, update the map and info panel immediately
+      if (activeRouteId === syncedFav.id && syncedFav.type === 'route' && syncedFav.waypoints) {
+          setRouteWaypoints(syncedFav.waypoints);
+          if (syncedFav.waypoints.length === 0) {
              setCurrentWaypointIndex(-1);
-          } else if (currentWaypointIndex >= updatedFav.waypoints.length) {
-              setCurrentWaypointIndex(updatedFav.waypoints.length - 1);
+             setLocationInfo(null);
+          } else {
+             const newIndex = (currentWaypointIndex >= 0 && currentWaypointIndex < syncedFav.waypoints.length)
+               ? currentWaypointIndex
+               : 0;
+             setCurrentWaypointIndex(newIndex);
+             const currentWp = syncedFav.waypoints[newIndex];
+             if (currentWp) {
+               setLocationInfo(prev => {
+                 if (!prev) return prev;
+                 return {
+                   ...prev,
+                   name: currentWp.name,
+                   coordinates: { lat: currentWp.lat, lng: currentWp.lng },
+                   waypoint: currentWp,
+                   routeContext: currentWp.context ? {
+                     title: syncedFav.name,
+                     text: currentWp.context
+                   } : prev.routeContext ? {
+                     ...prev.routeContext,
+                     title: syncedFav.name
+                   } : {
+                     title: syncedFav.name,
+                     text: currentWp.description || prev.description || ""
+                   }
+                 };
+               });
+             }
           }
       }
   };
@@ -3713,6 +3808,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           onOpenSettingsTab={handleOpenSettingsTab}
           routeNav={(routeWaypoints.length > 1 && currentWaypointIndex !== -1) ? (() => {
               const currentWp = routeWaypoints[currentWaypointIndex];
+              const currentRoute = activeRouteId ? favorites.find(f => f.id === activeRouteId) : undefined;
               const groupWps = currentWp?.routeGroupId
                 ? routeWaypoints.filter(w => w.routeGroupId === currentWp.routeGroupId)
                 : [];
@@ -3724,7 +3820,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
               return {
                 current: currentWaypointIndex + 1,
                 total: routeWaypoints.length,
-                routeGroupName: currentWp?.routeGroupName || (currentWp?.routeGroupId ? `Route ${currentWp.routeGroupId}` : undefined),
+                routeGroupName: currentRoute?.name || currentWp?.routeGroupName || (currentWp?.routeGroupId ? `Route ${currentWp.routeGroupId}` : undefined),
                 routeGroupId: currentWp?.routeGroupId,
                 routeLocalCurrent: groupCurrent,
                 routeLocalTotal: groupTotal > 0 ? groupTotal : undefined,

@@ -112,7 +112,17 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
 
   const saveEditedRoute = () => {
     if (editingRoute) {
-      onUpdate(editingRoute);
+      const trimmedName = editingRoute.name.trim() || editingRoute.name;
+      const syncedRoute: FavoriteLocation = {
+        ...editingRoute,
+        name: trimmedName,
+        waypoints: editingRoute.waypoints?.map(wp => ({
+          ...wp,
+          routeGroupName: trimmedName,
+          routeTitle: trimmedName
+        }))
+      };
+      onUpdate(syncedRoute);
       setEditingRoute(null);
     }
   };
@@ -336,18 +346,24 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
 
       {/* Route Editor Modal */}
       {editingRoute && (
-         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm pointer-events-auto">
-             <div className={`relative w-full max-w-2xl max-h-[85vh] flex flex-col ${skin === 'parchment' ? '[isolation:isolate]' : 'overflow-hidden'} ${theme.modal}`}>
+         <div 
+           className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 pt-6 md:pt-8 pb-52 md:pb-56 bg-black/80 backdrop-blur-sm pointer-events-auto"
+           onClick={() => setEditingRoute(null)}
+         >
+             <div 
+               className={`relative w-full max-w-2xl max-h-full flex flex-col shrink min-h-0 ${skin === 'parchment' ? '[isolation:isolate]' : 'overflow-hidden'} ${theme.modal}`}
+               onClick={(e) => e.stopPropagation()}
+             >
                 {skin === 'parchment' && (
                  <div className="parchment-background" aria-hidden="true" />
                )}
-               <div className="relative z-[1] flex flex-col flex-1 overflow-hidden">
-                 <div className={`p-4 flex items-center justify-between ${skin === 'parchment' ? '' : isRetro ? 'border-b border-current' : 'border-b border-white/10'}`}>
+               <div className="relative z-[1] flex flex-col flex-1 shrink min-h-0 overflow-hidden">
+                 <div className={`p-4 flex items-center justify-between shrink-0 ${skin === 'parchment' ? '' : isRetro ? 'border-b border-current' : 'border-b border-white/10'}`}>
                      <h3 className={`text-xl font-bold uppercase ${theme.headerTitle}`}>Edit Route</h3>
                      <button onClick={() => setEditingRoute(null)} className={theme.closeBtn}><X size={20} /></button>
                  </div>
                
-               <div className={`p-6 overflow-y-auto ${skin === 'parchment' ? 'parchment-scrollbar' : 'custom-scrollbar'} flex-1`}>
+               <div className={`p-6 overflow-y-auto ${skin === 'parchment' ? 'parchment-scrollbar' : 'custom-scrollbar'} flex-1 min-h-0`}>
                    <div className="mb-6">
                        <label className={`block text-xs uppercase font-bold mb-2 opacity-70 ${theme.text}`}>Route Name</label>
                        <input 
@@ -385,7 +401,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
                                        <ChevronDown size={16} />
                                    </button>
                                </div>
-                               
+                                
                                <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
                                    <div>
                                        <label className="text-[10px] uppercase opacity-50 block mb-1">Name</label>
@@ -443,7 +459,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
                    </div>
                </div>
 
-                <div className={`p-4 flex justify-end gap-3 ${skin === 'parchment' ? '' : isRetro ? 'border-t border-current' : 'border-t border-white/10 bg-white/5'}`}>
+                 <div className={`p-4 flex justify-end gap-3 shrink-0 ${skin === 'parchment' ? '' : isRetro ? 'border-t border-current' : 'border-t border-white/10 bg-white/5'}`}>
                    <button onClick={() => setEditingRoute(null)} className="px-4 py-2 text-sm opacity-70 hover:opacity-100">Cancel</button>
                     <button 
                         onClick={saveEditedRoute} 

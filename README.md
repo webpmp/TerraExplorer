@@ -8,30 +8,30 @@
 
 # TerraExplorer
 
-Terra Explorer is an interactive 3D globe application that lets users freely navigate the planet or quickly jump to cities, states, landmarks, and unique points of interest through a powerful search experience. It supports rich data layers including shipwrecks, natural wonders, and historical sites, provides overlays with location overviews, current news, and notable people associated with each place, and includes the Trace Route feature that extracts locations from any article, URL, or text block to build a connected journey across them.
+TerraExplorer is an interactive 3D globe application that lets users freely navigate the planet or quickly jump to cities, states, landmarks, and unique points of interest through a powerful search experience. It supports rich data layers including shipwrecks, natural wonders, and historical sites, provides overlays with location overviews, current news, and notable people associated with each place, and includes the Trace Route feature that extracts locations from any article, URL, or text block to build a connected journey across them.
 
 <p align="center" style="background-color:black; padding:20px;">
   <a href="assets/machu-picchu-parchment.png">
     <img src="assets/machu-picchu-parchment.png"
-         alt="Terra Explorer Parchment Theme"
+         alt="TerraExplorer Parchment Theme"
          width="200"
          style="margin:5px;">
   </a>
   <a href="assets/machu-picchu-modern.png">
     <img src="assets/machu-picchu-modern.png"
-         alt="Terra Explorer Modern Theme"
+         alt="TerraExplorer Modern Theme"
          width="200"
          style="margin:5px;">
   </a>
   <a href="assets/machu-picchu-crt-green.png">
     <img src="assets/machu-picchu-crt-green.png"
-         alt="Terra Explorer CRT Green Theme"
+         alt="TerraExplorer CRT Green Theme"
          width="200"
          style="margin:5px;">
   </a>
   <a href="assets/machu-picchu-crt-amber.png">
     <img src="assets/machu-picchu-crt-amber.png"
-         alt="Terra Explorer CRT Amber Theme"
+         alt="TerraExplorer CRT Amber Theme"
          width="200"
          style="margin:5px;">
   </a>

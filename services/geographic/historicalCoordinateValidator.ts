@@ -227,6 +227,146 @@ export const HISTORICAL_KNOWLEDGE_BASE: Record<string, HistoricalEntityKnowledge
     },
     boundingBox: { minLat: 31.0, maxLat: 32.0, minLng: 30.0, maxLng: 31.0 }
   },
+  "burkhan khaldun": {
+    entity: "Burkhan Khaldun",
+    entityType: "historical_waypoint",
+    expectedRegion: "Khentii Province, Mongolia (Khentii Mountains)",
+    approximateRegion: "Khentii Mountains, Mongolia",
+    country: "Mongolia",
+    historicalContext: "Sacred mountain in northeastern Mongolia where Temüjin sought refuge in his youth and convened the 1206 kurultai proclaiming the Mongol Empire.",
+    sourceRationale: "Authoritative historical and geographic records for the sacred Burkhan Khaldun mountain in Khentii, Mongolia.",
+    confidence: "high",
+    allowedCountries: ["Mongolia"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 48.9000,
+      lng: 109.0000,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 47.5, maxLat: 50.0, minLng: 107.5, maxLng: 110.5 }
+  },
+  "burkhan khaldun (mongolia)": {
+    entity: "Burkhan Khaldun",
+    entityType: "historical_waypoint",
+    expectedRegion: "Khentii Province, Mongolia (Khentii Mountains)",
+    approximateRegion: "Khentii Mountains, Mongolia",
+    country: "Mongolia",
+    historicalContext: "Sacred mountain in northeastern Mongolia where Temüjin sought refuge in his youth and convened the 1206 kurultai proclaiming the Mongol Empire.",
+    sourceRationale: "Authoritative historical and geographic records for the sacred Burkhan Khaldun mountain in Khentii, Mongolia.",
+    confidence: "high",
+    allowedCountries: ["Mongolia"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 48.9000,
+      lng: 109.0000,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 47.5, maxLat: 50.0, minLng: 107.5, maxLng: 110.5 }
+  },
+  "yinchuan": {
+    entity: "Yinchuan",
+    entityType: "historical_waypoint",
+    expectedRegion: "Ningxia, China (Western Xia Capital Xingqing)",
+    approximateRegion: "Yinchuan, Ningxia, China",
+    country: "China",
+    historicalContext: "Fortified capital (Xingqing) of the Tangut Western Xia dynasty, besieged by Genghis Khan in 1209.",
+    sourceRationale: "Historical capital of Western Xia dynasty in modern Ningxia, China.",
+    confidence: "high",
+    allowedCountries: ["China"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 38.4872,
+      lng: 106.2309,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 37.5, maxLat: 39.5, minLng: 105.0, maxLng: 107.5 }
+  },
+  "yinchuan (western xia)": {
+    entity: "Yinchuan",
+    entityType: "historical_waypoint",
+    expectedRegion: "Ningxia, China (Western Xia Capital Xingqing)",
+    approximateRegion: "Yinchuan, Ningxia, China",
+    country: "China",
+    historicalContext: "Fortified capital (Xingqing) of the Tangut Western Xia dynasty, besieged by Genghis Khan in 1209.",
+    sourceRationale: "Historical capital of Western Xia dynasty in modern Ningxia, China.",
+    confidence: "high",
+    allowedCountries: ["China"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 38.4872,
+      lng: 106.2309,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 37.5, maxLat: 39.5, minLng: 105.0, maxLng: 107.5 }
+  },
+  "western xia": {
+    entity: "Western Xia",
+    entityType: "historical_waypoint",
+    expectedRegion: "Ningxia / Hexi Corridor, China",
+    approximateRegion: "Yinchuan, Ningxia, China",
+    country: "China",
+    historicalContext: "Tangut empire in northwestern China conquered during the campaigns of Genghis Khan.",
+    sourceRationale: "Historical Western Xia dynasty centered at Yinchuan (Xingqing).",
+    confidence: "high",
+    allowedCountries: ["China"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 38.4872,
+      lng: 106.2309,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 36.0, maxLat: 40.5, minLng: 103.0, maxLng: 108.5 }
+  },
+  "zhongdu": {
+    entity: "Zhongdu",
+    entityType: "historical_waypoint",
+    expectedRegion: "Beijing, China (Jurchen Jin Dynasty Capital)",
+    approximateRegion: "Beijing, China",
+    country: "China",
+    historicalContext: "Northern capital of the Jurchen Jin dynasty, captured and sacked by Genghis Khan in 1215 after a prolonged siege.",
+    sourceRationale: "Historical Jurchen Jin capital Zhongdu located in present-day Beijing, China.",
+    confidence: "high",
+    allowedCountries: ["China"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 39.9042,
+      lng: 116.4074,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 39.0, maxLat: 40.8, minLng: 115.5, maxLng: 117.5 }
+  },
+  "zhongdu (beijing)": {
+    entity: "Zhongdu",
+    entityType: "historical_waypoint",
+    expectedRegion: "Beijing, China (Jurchen Jin Dynasty Capital)",
+    approximateRegion: "Beijing, China",
+    country: "China",
+    historicalContext: "Northern capital of the Jurchen Jin dynasty, captured and sacked by Genghis Khan in 1215 after a prolonged siege.",
+    sourceRationale: "Historical Jurchen Jin capital Zhongdu located in present-day Beijing, China.",
+    confidence: "high",
+    allowedCountries: ["China"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 39.9042,
+      lng: 116.4074,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 39.0, maxLat: 40.8, minLng: 115.5, maxLng: 117.5 }
+  },
   "1715 treasure fleet": {
     entity: "1715 Treasure Fleet",
     entityType: "shipwreck",

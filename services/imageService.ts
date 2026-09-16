@@ -1089,7 +1089,8 @@ export function getEntityDistanceToleranceKm(entityType?: string): number {
     type.includes('monument') ||
     type.includes('building') ||
     type.includes('museum') ||
-    type.includes('poi') ||
+    type === 'poi' ||
+    /\bpoi\b/.test(type) ||
     type.includes('temple') ||
     type.includes('palace') ||
     type.includes('church') ||
@@ -1108,9 +1109,11 @@ export function getEntityDistanceToleranceKm(entityType?: string): number {
     type.includes('island') ||
     type.includes('beach') ||
     type.includes('park') ||
-    type.includes('natural')
+    type.includes('natural') ||
+    type.includes('waypoint') ||
+    type.includes('historical')
   ) {
-    return 85; // Feature-appropriate radius for natural features
+    return 85; // Feature-appropriate radius for natural features and historical waypoints
   }
   if (type.includes('city') || type.includes('town') || type.includes('village') || type.includes('settlement')) {
     return 50; // Broad radius for cities/towns
@@ -1675,7 +1678,20 @@ export function deriveEntityAliases(
     if (clean.length >= 2) componentSet.add(clean);
   };
 
-  const primaryNames = [entityName, canonicalName].filter(Boolean) as string[];
+  const rawPrimaryNames = [entityName, canonicalName].filter(Boolean) as string[];
+  const primaryNames: string[] = [];
+  for (const name of rawPrimaryNames) {
+    primaryNames.push(name);
+    const stripped = name.replace(/\s*\([^)]*\)/g, '').trim();
+    if (stripped && stripped.toLowerCase() !== name.toLowerCase()) {
+      primaryNames.push(stripped);
+    }
+    const parenMatch = name.match(/\(([^)]+)\)/);
+    if (parenMatch && parenMatch[1].trim()) {
+      addAlternate(parenMatch[1].trim());
+    }
+  }
+
   for (const name of primaryNames) {
     addExact(name);
     addCanonical(name);
@@ -1786,6 +1802,31 @@ export function deriveEntityAliases(
     addComponent('beijing imperial palace');
     addComponent('forbidden city meridian gate');
     addComponent('meridian gate');
+  }
+
+  if (combined.includes('burkhan khaldun') || combined.includes('burqan qaldun')) {
+    addCanonical('burkhan khaldun');
+    addCanonical('mount burkhan khaldun');
+    addAlternate('burqan qaldun');
+    addAlternate('khentii mountains');
+    addAlternate('sacred mountain burkhan khaldun');
+  }
+
+  if (combined.includes('western xia') || combined.includes('yinchuan') || combined.includes('xixia') || combined.includes('xingqing')) {
+    addCanonical('yinchuan');
+    addAlternate('western xia');
+    addAlternate('western xia tombs');
+    addAlternate('xixia');
+    addAlternate('xingqing');
+  }
+
+  if (combined.includes('zhongdu') || combined.includes('jin zhongdu')) {
+    addCanonical('zhongdu');
+    addCanonical('jin zhongdu');
+    addAlternate('zhongdu of jin');
+    addAlternate('jin dynasty zhongdu');
+    addAlternate('zhongdu city wall');
+    addAlternate('beijing');
   }
 
   return {
@@ -2136,8 +2177,12 @@ export function isHistoricalWaypointEntity(entity: {
   const hasWaypointContext =
     Boolean(entity.waypoint) ||
     Boolean(entity.historicalContext) ||
+    Boolean((entity as any).context) ||
+    Boolean((entity as any).routeContext) ||
     Boolean(entity.significance) ||
-    eType.includes('battlefield');
+    Boolean((entity as any).waypointType === 'route_waypoint') ||
+    eType.includes('battlefield') ||
+    eType.includes('historic');
 
   if (isExplicitHistoricalWaypointType) {
     return true;
@@ -2152,7 +2197,7 @@ export function isHistoricalWaypointEntity(entity: {
 
 export function extractHistoricalImageContext(info: any): HistoricalImageContext {
   const wp = info?.waypoint || {};
-  let exploration = (info?.routeTitle || wp?.routeTitle || info?.routeContext?.title || info?.historicalContext || '').trim();
+  let exploration = (info?.routeTitle || wp?.routeTitle || info?.routeGroupName || wp?.routeGroupName || info?.routeContext?.title || info?.historicalContext || '').trim();
   // Filter out UI placeholder labels from leaking into search context
   if (/^(from route|route context|historical significance|notable facts|image|none)$/i.test(exploration)) {
     exploration = (info?.historicalContext || '').trim();
@@ -2160,18 +2205,18 @@ export function extractHistoricalImageContext(info: any): HistoricalImageContext
       exploration = '';
     }
   }
-  const rawEvent = (info?.significance || wp?.significance || '').trim();
+  const rawEvent = (info?.significance || wp?.significance || info?.context || wp?.context || '').trim();
   // Sanitize event: take only short topic/phrase (at most 3-4 words or clean title), not full prose sentences
   let event: string | undefined = undefined;
   if (rawEvent) {
-    const isProse = /^(it|this|the|they|he|she|in|at|a|an)\s+(marks|serves|was|is|took|were|became|occurred|started|began)\b/i.test(rawEvent) ||
+    const isProse = /^(it|this|the|they|he|she|in|at|a|an|[0-9]{3,4}:?)\s+/i.test(rawEvent) ||
                     rawEvent.includes('.') ||
                     rawEvent.split(/\s+/).length > 6;
     if (!isProse) {
       event = rawEvent;
     } else {
-      // If it mentions specific historical terms like treaty, battle, siege, council, extract just the noun phrase
-      const eventNounMatch = rawEvent.match(/\b(treaty of [a-z0-9\s'-]+|battle of [a-z0-9\s'-]+|siege of [a-z0-9\s'-]+|council of [a-z0-9\s'-]+)\b/i);
+      // If it mentions specific historical terms like treaty, battle, siege, council, kurultai, extract just the noun phrase
+      const eventNounMatch = rawEvent.match(/\b(treaty of [a-z0-9\s'-]+|battle of [a-z0-9\s'-]+|siege of [a-z0-9\s'-]+|council of [a-z0-9\s'-]+|kurultai of [a-z0-9\s'-]+)\b/i);
       if (eventNounMatch) {
         event = eventNounMatch[1].trim();
       }
@@ -2181,7 +2226,7 @@ export function extractHistoricalImageContext(info: any): HistoricalImageContext
   
   // Extract 4-digit year or period mention (e.g. "1804", "19th century", "1804-1806")
   let year: string | undefined = undefined;
-  const yearMatch = (period + ' ' + (info?.description || '') + ' ' + (wp?.description || '')).match(/\b(1[0-9]{3}|20[0-2][0-9])\b/);
+  const yearMatch = (period + ' ' + (info?.description || '') + ' ' + (wp?.description || '') + ' ' + (info?.context || '') + ' ' + (wp?.context || '') + ' ' + (info?.historicalContext || '')).match(/\b(1[0-9]{3}|20[0-2][0-9])\b/);
   if (yearMatch) {
     year = yearMatch[1];
   } else {
@@ -2191,9 +2236,12 @@ export function extractHistoricalImageContext(info: any): HistoricalImageContext
     }
   }
 
-  const waypointName = (info?.name || wp?.name || '').trim();
-  // Clean location name: "St. Charles, Missouri" -> "St. Charles"
-  const cleanLocationName = waypointName.split(/[,–-]/)[0].trim() || waypointName;
+  const rawWaypointName = (info?.canonicalName || wp?.canonicalName || info?.name || wp?.name || '').trim();
+  // Clean location name: "Burkhan Khaldun (Mongolia)" -> "Burkhan Khaldun", "St. Charles, Missouri" -> "St. Charles"
+  const cleanLocationName = rawWaypointName
+    .replace(/\s*\([^)]*\)/g, '')
+    .split(/[,–-]/)[0]
+    .trim() || rawWaypointName;
   const region = (info?.state || info?.region || wp?.historicalRegion || wp?.modernLocation || '').trim();
   const country = (info?.country || wp?.country || '').trim();
 
@@ -2235,7 +2283,7 @@ export function extractHistoricalImageContext(info: any): HistoricalImageContext
     event: event || undefined,
     period: period || undefined,
     year,
-    waypointName,
+    waypointName: rawWaypointName,
     cleanLocationName,
     region: region || undefined,
     country: country || undefined,
@@ -2700,15 +2748,22 @@ Reason=${reason}`);
     let entityMatch = 'NONE';
     let entityScore = 0;
     const cleanLoc = (histContext.cleanLocationName || '').toLowerCase();
-    const canonName = (entity.canonicalName || '').toLowerCase();
+    const canonName = (entity.canonicalName || entity.waypoint?.canonicalName || '').toLowerCase();
     const eName = (entityName || '').toLowerCase();
+    const cleanEName = eName.replace(/\s*\([^)]*\)/g, '').trim();
+    const derivedAliasesObj = deriveEntityAliases(entityName, entity.canonicalName || entity.waypoint?.canonicalName, entity.aliases);
     const rawAliases = [
       cleanLoc,
       canonName,
       eName,
+      cleanEName,
       cleanLoc.split(',')[0].trim(),
       canonName.split(',')[0].trim(),
       eName.split(',')[0].trim(),
+      cleanEName.split(',')[0].trim(),
+      ...derivedAliasesObj.exactAliases,
+      ...derivedAliasesObj.canonicalAliases,
+      ...derivedAliasesObj.alternateAliases,
       ...(entity.aliases || []).map(a => a.toLowerCase())
     ].filter(Boolean);
     const entityAliases = Array.from(new Set(rawAliases));
