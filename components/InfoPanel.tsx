@@ -2130,6 +2130,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     }
   };
 
+  const activeImageFetchIdRef = useRef<number>(0);
+
   useEffect(() => {
     if (!info?.name) {
       setImages([]);
@@ -2137,6 +2139,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       return;
     }
 
+    const currentFetchId = ++activeImageFetchIdRef.current;
     const fetchImages = async () => {
       try {
         const searchContext = {
@@ -2145,9 +2148,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           relatedWaypoints: (info as any)?.relatedWaypoints
         };
         const foundImages = await fetchAndValidateImages(info, searchContext);
+        if (currentFetchId !== activeImageFetchIdRef.current) return;
         setImages(foundImages);
         setWikiImage(foundImages[0]?.url || null);
       } catch (e) {
+        if (currentFetchId !== activeImageFetchIdRef.current) return;
         console.error("Failed to fetch image", e);
         setImages([]);
         setWikiImage(null);
@@ -2871,6 +2876,14 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const contextItems = info?.contextNotes;
 
   if (!rawInfo && !isLoading && !isError) {
+    return null;
+  }
+
+  // Guard against partial image-only records without canonical textual identity
+  const canonicalTitle = (rawInfo?.name && rawInfo.name !== 'Unknown Location') 
+    ? rawInfo.name 
+    : (rawInfo?.waypoint?.name || rawInfo?.canonicalName || null);
+  if (!isLoading && !isError && !canonicalTitle) {
     return null;
   }
 
