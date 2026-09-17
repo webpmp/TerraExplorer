@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Settings as SettingsIcon, X, Server, Newspaper, Film, Volume2, KeyRound, ExternalLink, Map as MapIcon, Palette, Sliders, Sparkles } from 'lucide-react';
 import { SkinType, UserSettings, AIProvider, NewsProvider } from '../types';
-import { narrationService } from '../services/narrationService';
+import { narrationService, ORPHEUS_VOICES } from '../services/narrationService';
 
 interface SettingsPanelProps {
   settings: UserSettings;
@@ -411,24 +411,31 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
       return;
     }
     setIsVoiceTesting(true);
-    setVoiceTestMessage('Playing sample...');
+    setVoiceTestMessage('Generating test sample...');
+    const testTitle = "TerraExplorer";
+    const testDesc = "Voice volume and narration preview at current settings.";
+    console.log(`[OrpheusTTS] TEST VOICE START provider="${settings.narrationProvider || 'system'}" voice="${settings.orpheusVoice || 'tara'}" speed=${settings.narrationSpeed ?? 0.9} volume=${Math.round((settings.narrationVolume ?? 1.0) * 100)} scriptLength=${testTitle.length + testDesc.length}`);
     narrationService.speakStructured({
-      title: "TerraExplorer",
-      description: "Voice volume and narration preview at current settings.",
+      title: testTitle,
+      description: testDesc,
+      provider: settings.narrationProvider || 'system',
       voiceURI: settings.narrationVoice,
+      orpheusVoice: settings.orpheusVoice || 'tara',
+      limit: settings.narrationLimit || 600,
       speed: settings.narrationSpeed,
       volume: settings.narrationVolume,
       onStart: () => {
         setIsVoiceTesting(true);
-        setVoiceTestMessage('Playing sample...');
+        setVoiceTestMessage('Playing test sample...');
       },
       onEnd: () => {
         setIsVoiceTesting(false);
         setVoiceTestMessage('');
       },
-      onError: () => {
+      onError: (err: any) => {
         setIsVoiceTesting(false);
-        setVoiceTestMessage('');
+        const errorMsg = err?.message || (settings.narrationProvider === 'orpheus' ? 'Orpheus TTS bridge error' : 'Voice test failed');
+        setVoiceTestMessage(errorMsg);
       }
     });
   };
@@ -1250,21 +1257,57 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
               }`}
             >
               <div>
-                <label className={labelClasses}>Voice</label>
+                <label className={labelClasses}>Provider</label>
                 <select
-                  value={settings.narrationVoice || ''}
-                  onChange={(e) => onUpdateSettings({ ...settings, narrationVoice: e.target.value })}
+                  value={settings.narrationProvider || 'system'}
+                  onChange={(e) =>
+                    onUpdateSettings({
+                      ...settings,
+                      narrationProvider: e.target.value as NarrationProviderType
+                    })
+                  }
                   disabled={!settings.narrationEnabled}
                   className={inputClasses}
                 >
-                  <option value="">System Default Voice</option>
-                  {availableVoices.map((voice) => (
-                    <option key={voice.name} value={voice.name}>
-                      {voice.name} ({voice.lang})
-                    </option>
-                  ))}
+                  <option value="system">SYSTEM VOICE</option>
+                  <option value="orpheus">ORPHEUS TTS (LOCAL)</option>
                 </select>
               </div>
+
+              {(settings.narrationProvider === 'orpheus') ? (
+                <div>
+                  <label className={labelClasses}>Voice</label>
+                  <select
+                    value={settings.orpheusVoice || 'tara'}
+                    onChange={(e) => onUpdateSettings({ ...settings, orpheusVoice: e.target.value })}
+                    disabled={!settings.narrationEnabled}
+                    className={inputClasses}
+                  >
+                    {ORPHEUS_VOICES.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label className={labelClasses}>Voice</label>
+                  <select
+                    value={settings.narrationVoice || ''}
+                    onChange={(e) => onUpdateSettings({ ...settings, narrationVoice: e.target.value })}
+                    disabled={!settings.narrationEnabled}
+                    className={inputClasses}
+                  >
+                    <option value="">System Default Voice</option>
+                    {availableVoices.map((voice) => (
+                      <option key={voice.name} value={voice.name}>
+                        {voice.name} ({voice.lang})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <div className="flex justify-between text-xs mb-1">
@@ -1313,6 +1356,48 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                   }}
                   disabled={!settings.narrationEnabled}
                   className={sliderClasses}
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between text-xs mb-1">
+                  <label className={labelClasses}>Narration Character Limit</label>
+                  <span className={`font-mono ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? 'text-current' : 'text-cyan-300'}`}>
+                    {settings.narrationLimit ?? 600} chars
+                  </span>
+                </div>
+                <input
+                  type="number"
+                  min={100}
+                  max={1000}
+                  value={settings.narrationLimit ?? 600}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '') {
+                      onUpdateSettings({
+                        ...settings,
+                        narrationLimit: 600
+                      });
+                      return;
+                    }
+                    const parsed = parseInt(val, 10);
+                    if (!isNaN(parsed)) {
+                      onUpdateSettings({
+                        ...settings,
+                        narrationLimit: parsed
+                      });
+                    }
+                  }}
+                  onBlur={(e) => {
+                    const parsed = parseInt(e.target.value, 10);
+                    const clamped = isNaN(parsed) ? 600 : Math.max(100, Math.min(1000, parsed));
+                    onUpdateSettings({
+                      ...settings,
+                      narrationLimit: clamped
+                    });
+                  }}
+                  disabled={!settings.narrationEnabled}
+                  className={`${inputClasses} [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
                 />
               </div>
 

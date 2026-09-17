@@ -3,6 +3,7 @@ import { describe, test, it, expect, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import SettingsPanel, { testNewsConnectionService, testMapConnectionService } from '../SettingsPanel';
 import { SkinType, UserSettings } from '../../types';
+import { narrationService } from '../../services/narrationService';
 
 describe('SettingsPanel - Top-Level Tab Reorganization', () => {
   const baseSettings: UserSettings = {
@@ -148,13 +149,16 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(html).toContain('Active');
   });
 
-  test('7. AUDIO tab contains Narration controls, voice selection, speed, volume, and test voice', () => {
+  test('7. AUDIO tab contains Provider selector, Voice selection, speed, volume, and test voice', () => {
     const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="audio" />);
 
     expect(html).toContain('id="settings-tabpanel-audio"');
     expect(html).toContain('Narration');
     expect(html).toContain('lucide-volume-2');
     expect(html).toContain("Narrates the selected location&#x27;s title and description using speech synthesis.");
+    expect(html).toContain('Provider');
+    expect(html).toContain('SYSTEM VOICE');
+    expect(html).toContain('ORPHEUS TTS (LOCAL)');
     expect(html).toContain('Voice');
     expect(html).toContain('System Default Voice');
     expect(html).toContain('Speed');
@@ -163,6 +167,31 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(html).toContain('75%');
     expect(html).toContain('Test Voice');
     expect(html).not.toContain('DOC MODE');
+  });
+
+  test('7c. AUDIO tab renders all 8 Orpheus voices and preserves selected voice when ORPHEUS TTS is selected', () => {
+    const orpheusSettings: UserSettings = {
+      ...baseSettings,
+      narrationProvider: 'orpheus',
+      orpheusVoice: 'dan'
+    };
+    const html = renderToStaticMarkup(<SettingsPanel {...baseProps} settings={orpheusSettings} initialTab="audio" />);
+
+    expect(html).toContain('Provider');
+    expect(html).toContain('SYSTEM VOICE');
+    expect(html).toContain('ORPHEUS TTS (LOCAL)');
+    // Verify all 8 voices are rendered
+    expect(html).toContain('Tara');
+    expect(html).toContain('Leah');
+    expect(html).toContain('Jess');
+    expect(html).toContain('Leo');
+    expect(html).toContain('Dan');
+    expect(html).toContain('Mia');
+    expect(html).toContain('Zac');
+    expect(html).toContain('Zoe');
+    // Verify saved voice preference is preserved
+    expect(html).toContain('value="dan"');
+    expect(html).not.toContain('System Default Voice');
   });
 
   test('7b. AUDIO tab toggle has muted retro background when OFF and bright theme background when ON in retro themes', () => {
@@ -746,6 +775,70 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
       );
       expect(amberHtml).toContain('PROJECTION');
       expect(amberHtml).toContain('aria-checked="false"');
+    });
+
+    test('12. Renders Narration Character Limit in AUDIO tab with default 600 chars, min 100, max 1000, and no step attribute', () => {
+      const html = renderToStaticMarkup(
+        <SettingsPanel
+          {...baseProps}
+          initialTab="audio"
+          settings={{ ...baseSettings, narrationLimit: 600 }}
+        />
+      );
+      expect(html).toContain('Narration Character Limit');
+      expect(html).toContain('600 chars');
+      expect(html).toContain('min="100"');
+      expect(html).toContain('max="1000"');
+      expect(html).toContain('value="600"');
+      // Verify no step attribute exists on the input
+      expect(html).not.toMatch(/min="100"\s+max="1000"\s+step=/);
+      expect(html).not.toMatch(/step="\d+"/);
+    });
+
+    test('13. AUDIO tab renders currently selected Orpheus voice, speed, volume, and limit', () => {
+      const customSettings: UserSettings = {
+        ...baseSettings,
+        narrationEnabled: true,
+        narrationProvider: 'orpheus',
+        orpheusVoice: 'leo',
+        narrationSpeed: 1.2,
+        narrationVolume: 0.75,
+        narrationLimit: 800
+      };
+
+      const html = renderToStaticMarkup(
+        <SettingsPanel
+          {...baseProps}
+          initialTab="audio"
+          settings={customSettings}
+        />
+      );
+
+      expect(html).toContain('value="leo"');
+      expect(html).toContain('1.2x');
+      expect(html).toContain('75%');
+      expect(html).toContain('value="800"');
+      expect(html).toContain('800 chars');
+      expect(html).toContain('Test Voice');
+    });
+
+    test('14. AUDIO tab accepts and renders arbitrary whole-number limit such as 743', () => {
+      const customSettings: UserSettings = {
+        ...baseSettings,
+        narrationEnabled: true,
+        narrationLimit: 743
+      };
+
+      const html = renderToStaticMarkup(
+        <SettingsPanel
+          {...baseProps}
+          initialTab="audio"
+          settings={customSettings}
+        />
+      );
+
+      expect(html).toContain('value="743"');
+      expect(html).toContain('743 chars');
     });
   });
 });

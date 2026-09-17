@@ -66,6 +66,12 @@ VITE_CARTO_API_KEY=your_carto_api_key
 
 OpenStreetMap and CARTO attribution requirements remain in effect and are presented within the application.
 
+Local Orpheus TTS
+
+TerraExplorer supports local neural speech narration using Orpheus TTS in addition to the browser's built-in System Voice. Running Orpheus requires a separate local service and LM Studio.
+
+For complete installation, LM Studio, bridge, voice, and troubleshooting instructions, see [local-services/orpheus-tts/README.md](local-services/orpheus-tts/README.md).
+
 Setup
 
 Environment Variables

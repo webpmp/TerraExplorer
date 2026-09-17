@@ -1124,6 +1124,13 @@ const App: React.FC = () => {
         parsed.showNews = parsed.showNews !== undefined ? !!parsed.showNews : true;
         parsed.retroGreenProjection = parsed.retroGreenProjection !== undefined ? !!parsed.retroGreenProjection : true;
         parsed.retroAmberProjection = parsed.retroAmberProjection !== undefined ? !!parsed.retroAmberProjection : true;
+        parsed.narrationProvider = parsed.narrationProvider === 'orpheus' ? 'orpheus' : 'system';
+        parsed.orpheusVoice = parsed.orpheusVoice || 'tara';
+        if (typeof parsed.narrationLimit === 'number' && !isNaN(parsed.narrationLimit) && parsed.narrationLimit >= 100 && parsed.narrationLimit <= 1000) {
+          parsed.narrationLimit = Math.round(parsed.narrationLimit);
+        } else {
+          parsed.narrationLimit = 600;
+        }
         if (typeof parsed.documentaryDuration === 'string') {
           const map: Record<string, number> = { short: 3.2, cinematic: 5.5, long: 8.0 };
           parsed.documentaryDuration = map[parsed.documentaryDuration] ?? 5.5;
@@ -1147,9 +1154,12 @@ const App: React.FC = () => {
       documentaryMode: false,
       documentaryDuration: 5.5,
       narrationEnabled: false,
+      narrationProvider: 'system',
       narrationVoice: '',
+      orpheusVoice: 'tara',
       narrationSpeed: 0.9,
       narrationVolume: 1.0,
+      narrationLimit: 600,
       retroGreenProjection: true,
       retroAmberProjection: true
     };
@@ -1756,19 +1766,39 @@ const App: React.FC = () => {
 
     console.log(`[SearchNarration] SPEAK_REQUEST name="${title}" descriptionType="${typeof desc}" descriptionLength=${desc.length}`);
     console.log(`[SearchNarration] SPEAK_CALLED id="${id}" title="${title}" descLength=${desc.length}`);
+    console.log(`[OrpheusTTS] NARRATION START provider="${currentSettings.narrationProvider || 'system'}" voice="${currentSettings.orpheusVoice || 'tara'}" speed=${currentSettings.narrationSpeed ?? 0.9} volume=${Math.round((currentSettings.narrationVolume ?? 1.0) * 100)} scriptLength=${title.length + desc.length}`);
 
     narrationService.speakStructured({
       title,
       description: desc,
+      provider: currentSettings.narrationProvider || 'system',
       voiceURI: currentSettings.narrationVoice,
+      orpheusVoice: currentSettings.orpheusVoice || 'tara',
+      limit: currentSettings.narrationLimit || 600,
       speed: currentSettings.narrationSpeed,
-      volume: currentSettings.narrationVolume
+      volume: currentSettings.narrationVolume,
+      onError: (err: any) => {
+        console.warn('[Narration] speakStructured error:', err);
+        if (currentSettings.narrationProvider === 'orpheus') {
+          const msg = err?.message || 'Orpheus TTS Bridge unavailable';
+          setSearchError(msg);
+        }
+      }
     });
+  }, []);
+
+  useEffect(() => {
+    narrationService.setProvider(userSettings.narrationProvider || 'system');
+    if (userSettings.orpheusVoice) narrationService.setOrpheusVoice(userSettings.orpheusVoice);
+    if (typeof userSettings.narrationVolume === 'number') narrationService.setVolume(userSettings.narrationVolume);
+    if (typeof userSettings.narrationSpeed === 'number') narrationService.setSpeed(userSettings.narrationSpeed);
+    if (userSettings.narrationVoice) narrationService.setVoiceURI(userSettings.narrationVoice);
   }, []);
 
   const handleUpdateSettings = useCallback((newSettings: UserSettings) => {
     const prevProvider = userSettingsRef.current.aiProvider;
     const prevNarration = userSettingsRef.current.narrationEnabled;
+    const prevNarrationProvider = userSettingsRef.current.narrationProvider;
     userSettingsRef.current = newSettings;
     setUserSettings(newSettings);
     localStorage.setItem('terraExplorerSettings', JSON.stringify(newSettings));
@@ -1799,6 +1829,12 @@ const App: React.FC = () => {
       });
     }
 
+    if (newSettings.narrationProvider && newSettings.narrationProvider !== prevNarrationProvider) {
+      narrationService.setProvider(newSettings.narrationProvider);
+    }
+    if (newSettings.orpheusVoice) {
+      narrationService.setOrpheusVoice(newSettings.orpheusVoice);
+    }
     if (typeof newSettings.narrationVolume === 'number') {
       narrationService.setVolume(newSettings.narrationVolume);
     }
@@ -1816,7 +1852,7 @@ const App: React.FC = () => {
     } else if (!prevNarration && newSettings.narrationEnabled && locationInfoRef.current) {
       maybeTriggerNarration(locationInfoRef.current);
     }
-  }, [maybeTriggerNarration]);
+  }, [maybeTriggerNarration, searchError]);
 
   const [activeOSMCoordinates, setActiveOSMCoordinates] = useState<{ lat: number; lng: number } | null>(null);
   const selectedMarkerCoordinatesRef = useRef<{ lat: number; lng: number } | null>(null);

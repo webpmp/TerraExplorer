@@ -304,6 +304,7 @@ export interface ResolverResult {
 export type AIProvider = 'gemini' | 'lmstudio';
 export type NewsProvider = 'gemini' | 'newsapi' | 'newsdata' | 'nyt';
 export type DocumentaryDuration = number | 'short' | 'cinematic' | 'long';
+export type NarrationProviderType = 'system' | 'orpheus';
 
 export interface UserSettings {
   aiProvider: AIProvider;
@@ -317,9 +318,12 @@ export interface UserSettings {
   documentaryMode?: boolean;
   documentaryDuration?: number;
   narrationEnabled?: boolean;
+  narrationProvider?: NarrationProviderType;
   narrationVoice?: string;
+  orpheusVoice?: string;
   narrationSpeed?: number;
   narrationVolume?: number;
+  narrationLimit?: number;
   retroGreenProjection?: boolean;
   retroAmberProjection?: boolean;
 }

@@ -3119,6 +3119,150 @@ describe('Lightbox Metadata Integration', () => {
       }
     });
   });
+
+  describe('Search & Image Asynchronous State Synchronization Guards', () => {
+    it('1. Does not render an InfoPanel for a partial image-only record missing canonical title/name', () => {
+      const partialImageOnly = {
+        image: 'https://upload.wikimedia.org/everest.jpg',
+        images: ['https://upload.wikimedia.org/everest.jpg']
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={partialImageOnly as any}
+          onClose={() => {}}
+          isLoading={false}
+          isNewsFetching={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toBe('');
+    });
+
+    it('2. Renders canonical title and description when image is missing or still loading', () => {
+      const canonicalTextualResult = {
+        name: 'First Ascent Of Everest',
+        canonicalName: 'First Ascent Of Everest',
+        description: 'The 1953 British Mount Everest expedition was the ninth mountaineering expedition to attempt the first ascent of Mount Everest.',
+        entityType: 'historical_event',
+        geographicScope: 'NON_GEOGRAPHIC_HISTORICAL_EVENT',
+        singleLocation: false,
+        news: []
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={canonicalTextualResult as any}
+          onClose={() => {}}
+          isLoading={false}
+          isNewsFetching={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('First Ascent Of Everest');
+      expect(html).toContain('1953 British Mount Everest expedition');
+      expect(html).toContain('HISTORICAL EVENT');
+      expect(html).toContain('Non-Geographic Event');
+    });
+
+    it('3. Renders normal point location with coordinates and description even if image is not yet loaded', () => {
+      const pointLocation = {
+        name: 'Mount Everest',
+        canonicalName: 'Mount Everest',
+        description: 'Earth highest mountain above sea level, located in the Mahalangur Himal sub-range of the Himalayas.',
+        coordinates: { lat: 27.9881, lng: 86.9250 },
+        entityType: 'mountain',
+        type: 'mountain',
+        news: []
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={pointLocation as any}
+          onClose={() => {}}
+          isLoading={false}
+          isNewsFetching={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('Mount Everest');
+      expect(html).toContain('Mahalangur Himal sub-range');
+      expect(html).toContain('27.99° N, 86.92° E');
+    });
+
+    it('4. Seamlessly renders image when populated on top of canonical textual result without hiding text', () => {
+      const pointLocationWithImage = {
+        name: 'Mount Everest',
+        canonicalName: 'Mount Everest',
+        description: 'Earth highest mountain above sea level, located in the Mahalangur Himal sub-range of the Himalayas.',
+        coordinates: { lat: 27.9881, lng: 86.9250 },
+        entityType: 'mountain',
+        image: 'https://upload.wikimedia.org/everest.jpg',
+        imageCaption: 'Mount Everest seen from Kala Patthar',
+        news: []
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={pointLocationWithImage as any}
+          onClose={() => {}}
+          isLoading={false}
+          isNewsFetching={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('Mount Everest');
+      expect(html).toContain('Mahalangur Himal sub-range');
+      expect(html).toContain('https://upload.wikimedia.org/everest.jpg');
+      expect(html).toContain('Mount Everest seen from Kala Patthar');
+    });
+
+    it('5. Historical non-point event (e.g. First Ascent Of Everest) renders properly with text when coordinates are absent', () => {
+      const nonPointEvent = {
+        name: 'First Ascent Of Everest',
+        canonicalName: 'First Ascent Of Everest',
+        description: 'Historical milestone describing the 1953 achievement by Edmund Hillary and Tenzing Norgay.',
+        entityType: 'historical_event',
+        geographicScope: 'NON_GEOGRAPHIC_HISTORICAL_EVENT',
+        singleLocation: false,
+        news: []
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={nonPointEvent as any}
+          onClose={() => {}}
+          isLoading={false}
+          isNewsFetching={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('First Ascent Of Everest');
+      expect(html).toContain('Edmund Hillary and Tenzing Norgay');
+      expect(html).toContain('Non-Geographic Event');
+      expect(html).not.toContain('Coordinates unavailable');
+    });
+  });
 });
 
 
