@@ -131,6 +131,174 @@ export function formatSourceBlock(params: { url?: string; title?: string; conten
 }
 
 /**
+ * Detects if a text block appears to be pasted from Wikipedia.
+ */
+export function isWikipediaPaste(text: string): boolean {
+  if (!text || typeof text !== 'string') return false;
+  const sample = text.slice(0, 5000) + ' ' + text.slice(-5000);
+  let score = 0;
+  if (/wikipedia/i.test(sample)) score += 2;
+  if (/the free encyclopedia/i.test(sample)) score += 3;
+  if (/contents\s*[\n\r]+\s*(?:hide|top)/i.test(sample) || /jump to content/i.test(sample)) score += 3;
+  if (/(?:article|talk)\s+read\s+edit\s+view history/i.test(sample) || /(?:read|edit|view history)/i.test(sample)) score += 2;
+  if (/appearance\s*[\n\r]+\s*text\s*[\n\r]+\s*small\s+standard\s+large/i.test(sample) || /appearance controls/i.test(sample)) score += 3;
+  if (/listen to this article/i.test(sample)) score += 2;
+  if (/donate\s+create account\s+log in/i.test(sample) || (/donate/i.test(sample) && /create account/i.test(sample))) score += 2;
+  if (/wikimedia/i.test(sample)) score += 1;
+  return score >= 4;
+}
+
+/**
+ * Strips Wikipedia page chrome, appearance controls, table of contents headers, and navigation UI.
+ */
+function cleanWikipediaPastedText(rawText: string): { title: string; content: string } {
+  const lines = rawText.split(/\r?\n/);
+  const cleanedLines: string[] = [];
+  let title = '';
+  let inAppearanceBlock = false;
+  let inTocBlock = false;
+  let inNavbox = false;
+  let leadFound = false;
+
+  // Regexes for lines that are strictly Wikipedia chrome / UI
+  const WIKI_UI_EXACT_REGEX = /^(?:wikipedia|the free encyclopedia|jump to content|main menu|search|search wikipedia|donate|create account|log in|personal tools|navigation|contribute|tools|print\/export|in other projects|languages|toggle the table of contents|contents\s*hide|contents\s*show|hide\s*top|show\s*top|view history|read\s*edit\s*view history|article\s*talk|talk\s*read\s*edit|edit this page|view history|appearance\s*hide|appearance\s*show|listen to this article|listen to this article\s*\(.*?\)|download as pdf|printable version|permanent link|page information|cite this page|get shortened url|download qr code|wikidata item|coordinate.*?\d+°\d+|coordinates|from wikipedia, the free encyclopedia|subsections)$/i;
+
+  const WIKI_APPEARANCE_START = /^(?:appearance|appearance\s*hide|appearance\s*show)$/i;
+  const WIKI_APPEARANCE_CONTROLS = /^(?:text\s*small\s*standard\s*large|width\s*standard\s*wide|color\s*automatic\s*light\s*dark|small\s*standard\s*large|standard\s*wide|automatic\s*light\s*dark|text|width|color)$/i;
+
+  const WIKI_FOOTER_START = /^(?:see also|references|external links|further reading|bibliography|notes|sources|navigation menu|retrieved from "https:\/\/en\.wikipedia\.org\/.*?)$/i;
+  const WIKI_NAV_CATEGORY = /^(?:categories\s*:|hidden categories\s*:|this page was last edited on|text is available under the creative commons|additional terms may apply|privacy policy|about wikipedia|disclaimers|contact wikipedia|code of conduct|developers|statistics|cookie statement|mobile view|wikimedia foundation|powered by mediawiki)$/i;
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const trimmed = rawLine.replace(/\s+/g, ' ').trim();
+    if (!trimmed) {
+      if (cleanedLines.length > 0 && cleanedLines[cleanedLines.length - 1] !== '') {
+        cleanedLines.push('');
+      }
+      continue;
+    }
+
+    const textWithoutLinks = trimmed.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').trim();
+    const lower = textWithoutLinks.toLowerCase();
+
+    // 1. Detect start of Appearance controls block
+    if (WIKI_APPEARANCE_START.test(textWithoutLinks) || lower === 'appearance') {
+      inAppearanceBlock = true;
+      continue;
+    }
+    if (inAppearanceBlock) {
+      if (
+        WIKI_APPEARANCE_CONTROLS.test(textWithoutLinks) ||
+        /^(?:text|small|standard|large|width|wide|color|automatic|light|dark|hide|show)$/i.test(textWithoutLinks)
+      ) {
+        continue;
+      } else {
+        inAppearanceBlock = false;
+      }
+    }
+
+    // 2. Detect and filter Table of Contents blocks if raw UI lines
+    if (/^(?:contents|table of contents)\s*(?:hide|show)?$/i.test(textWithoutLinks)) {
+      inTocBlock = true;
+      continue;
+    }
+    if (inTocBlock) {
+      // TOC lines usually look like "1 History", "1.1 Discovery", "2 Mechanism", "Top"
+      if (/^(?:\d+(?:\.\d+)*\s+[A-Za-z]|top|hide|show)$/i.test(textWithoutLinks)) {
+        continue;
+      } else if (textWithoutLinks.length < 50 && /^\d+\s+/i.test(textWithoutLinks)) {
+        continue;
+      } else {
+        inTocBlock = false;
+      }
+    }
+
+    // 3. Skip obvious exact UI lines
+    if (
+      WIKI_UI_EXACT_REGEX.test(textWithoutLinks) ||
+      /^(?:text|small|standard|large|width|wide|color|automatic|light|dark|tools)$/i.test(textWithoutLinks)
+    ) {
+      continue;
+    }
+
+    // 4. Skip combined menu UI lines
+    if (
+      (lower.includes('create account') && lower.includes('log in')) ||
+      (lower.includes('read') && lower.includes('edit') && lower.includes('view history')) ||
+      (lower.includes('article') && lower.includes('talk') && (lower.includes('read') || lower.includes('edit'))) ||
+      (lower.includes('wikipedia') && lower.includes('the free encyclopedia')) ||
+      lower.startsWith('jump to navigation') ||
+      lower.startsWith('jump to search') ||
+      lower.startsWith('listen to this article') ||
+      lower === 'from wikipedia, the free encyclopedia'
+    ) {
+      continue;
+    }
+
+    // 5. Skip map / Wikimedia / OpenStreetMap widget boilerplate
+    if (
+      lower.includes('interactive map') ||
+      lower.includes('openstreetmap contributors') ||
+      lower.includes('wikimedia commons has media related to') ||
+      lower.startsWith('map all coordinates using') ||
+      lower.startsWith('download coordinates as')
+    ) {
+      continue;
+    }
+
+    // 6. Skip bottom category / license boilerplate
+    if (
+      WIKI_NAV_CATEGORY.test(textWithoutLinks) ||
+      lower.startsWith('categories:') ||
+      lower.startsWith('hidden categories:') ||
+      lower.startsWith('retrieved from "http')
+    ) {
+      inNavbox = true;
+      continue;
+    }
+    if (inNavbox && (lower.includes('categories:') || lower.includes('wikipedia') || textWithoutLinks.length < 60)) {
+      continue;
+    }
+
+    // 7. Title extraction heuristic
+    if (!title && !leadFound) {
+      // If we encounter a prominent heading or bold subject before normal sentences
+      if (
+        textWithoutLinks.length >= 3 &&
+        textWithoutLinks.length <= 120 &&
+        !textWithoutLinks.endsWith('.') &&
+        !WIKI_UI_EXACT_REGEX.test(textWithoutLinks) &&
+        !/^(?:text|small|standard|large|width|wide|color|automatic|light|dark|tools|history|discovery|contents)$/i.test(textWithoutLinks)
+      ) {
+        title = textWithoutLinks.replace(/^#+\s*/, '').replace(/^["'“](.*)["'”]$/, '$1').trim();
+      }
+    }
+
+    if (textWithoutLinks.length > 50 && textWithoutLinks.includes('.')) {
+      leadFound = true;
+    }
+
+    // Clean inline reference markers like [1], [2], [citation needed]
+    const cleanedLine = trimmed
+      .replace(/\[\d+\]/g, '')
+      .replace(/\[citation needed\]/gi, '')
+      .replace(/\[edit\]/gi, '')
+      .trim();
+
+    if (cleanedLine) {
+      cleanedLines.push(cleanedLine);
+    }
+  }
+
+  const content = cleanedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return {
+    title: title || 'Wikipedia Article',
+    content: content || rawText.trim()
+  };
+}
+
+/**
  * Cleans pasted web article text that includes site chrome (e.g. "Skip to content", nav links, cookie text).
  * Extracts title and clean article body.
  */
@@ -144,7 +312,12 @@ export function cleanPastedArticleText(rawText: string): { title: string; conten
     return extractReadableArticleText(rawText);
   }
 
-  const rawLines = rawText.split('\n');
+  // If Wikipedia paste detected, use dedicated Wikipedia cleaner
+  if (isWikipediaPaste(rawText)) {
+    return cleanWikipediaPastedText(rawText);
+  }
+
+  const rawLines = rawText.split(/\r?\n/);
   const cleanedLines: string[] = [];
 
   const BOILERPLATE_LINE_REGEX = /^(skip to content|skip to site index|skip to main content|section navigation|site index|give the times|account|jump to:?|share full article|give this article|read in app|advertisement|ad|sponsored|subscribe|sign in|log in|all rights reserved|terms of service|privacy policy|cookie preferences|search|photo credit|credit\.\.\.|image credit)$/i;
@@ -153,7 +326,12 @@ export function cleanPastedArticleText(rawText: string): { title: string; conten
 
   for (let line of rawLines) {
     const trimmed = line.replace(/\s+/g, ' ').trim();
-    if (!trimmed) continue;
+    if (!trimmed) {
+      if (cleanedLines.length > 0 && cleanedLines[cleanedLines.length - 1] !== '') {
+        cleanedLines.push('');
+      }
+      continue;
+    }
 
     const textWithoutLinks = trimmed.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').trim();
     const lower = textWithoutLinks.toLowerCase();
@@ -186,8 +364,8 @@ export function cleanPastedArticleText(rawText: string): { title: string; conten
     cleanedLines.push(trimmed);
   }
 
-  const content = cleanedLines.join('\n');
-  return { title: title || 'Lake Como', content: content || rawText.trim() };
+  const content = cleanedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return { title: title || 'Article', content: content || rawText.trim() };
 }
 
 

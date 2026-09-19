@@ -26,6 +26,8 @@ import { determineHistoricalEventScope, logHistoricalEventScope } from './geogra
 import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation, validateEntityCoordinates, logAiCoordinateTrust, logEntityCoordinateValidation, CoordinateTrustLevel } from './geographic/entityIdentityValidator';
 import { buildCanonicalEventTopology, getAuthoritativeEventModel } from './geographic/historicalRouteRegistry';
 import { fetchSourceContent, formatSourceBlock, cleanPastedArticleText } from './sourceContentService';
+import { estimateTokens, checkContextBudget, DEFAULT_LM_STUDIO_CONTEXT_LIMIT } from './tokenEstimator';
+import { extractAndReduceLargeSource, formatCompactSourceRepresentation } from './largeSourceExtractor';
 
 export const EnrichmentMetrics = {
     retry: 0,
@@ -209,6 +211,49 @@ export const isLMStudioNoModelError = (error: any): boolean => {
   return false;
 };
 
+export const LM_STUDIO_CONTEXT_OVERFLOW_MESSAGE = "The source article is too large for the configured local AI context window.";
+export const LM_STUDIO_CONTEXT_OVERFLOW_INSTRUCTION = "(Please select a smaller excerpt or allow chunked extraction)";
+
+export class LMStudioContextOverflowError extends Error {
+  readonly isLMStudioContextOverflowError = true;
+  readonly errorType = "LM_STUDIO_CONTEXT_OVERFLOW";
+  constructor(message: string = LM_STUDIO_CONTEXT_OVERFLOW_MESSAGE) {
+    super(message);
+    this.name = "LMStudioContextOverflowError";
+    Object.setPrototypeOf(this, LMStudioContextOverflowError.prototype);
+  }
+}
+
+export const isLMStudioContextOverflowError = (error: any): boolean => {
+  if (!error) return false;
+  if (
+    error instanceof LMStudioContextOverflowError ||
+    error.isLMStudioContextOverflowError === true ||
+    error.name === 'LMStudioContextOverflowError' ||
+    error.errorType === 'LM_STUDIO_CONTEXT_OVERFLOW' ||
+    error.error === 'LM_STUDIO_CONTEXT_OVERFLOW'
+  ) {
+    return true;
+  }
+  const msg = typeof error === 'string'
+    ? error
+    : (typeof error?.message === 'string' ? error.message : (typeof error?.errorMessage === 'string' ? error.errorMessage : ''));
+  if (msg) {
+    const lower = msg.toLowerCase();
+    return (
+      lower.includes("exceeds the available context size") ||
+      lower.includes("exceed_context_size_error") ||
+      lower.includes("context size") ||
+      lower.includes("maximum context") ||
+      lower.includes("prompt too long") ||
+      lower.includes("token limit") ||
+      lower.includes("context_length_exceeded") ||
+      msg.includes("LMStudioContextOverflowError")
+    );
+  }
+  return false;
+};
+
 export const formatLMStudioNoModelError = () => ({
   errorType: "LM_STUDIO_NO_MODEL" as const,
   errorMessage: LM_STUDIO_NO_MODEL_MESSAGE,
@@ -287,6 +332,10 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
       const errorBody = await response.text();
       if (errorBody.toLowerCase().includes("no models loaded") || errorBody.includes("No models loaded")) {
         throw new LMStudioNoModelError();
+      }
+      if (isLMStudioContextOverflowError(errorBody)) {
+        console.warn(`[AI Provider] LM Studio request exceeded context size:`, errorBody);
+        throw new LMStudioContextOverflowError(`LM Studio context overflow: ${errorBody}`);
       }
       throw new Error(`LM Studio request failed\nStatus: ${response.status}\nBody: ${errorBody}`);
     }
@@ -384,6 +433,10 @@ export const streamLocalLMStudioContent = async (
     const errorBody = await response.text();
     if (errorBody.toLowerCase().includes("no models loaded") || errorBody.includes("No models loaded")) {
       throw new LMStudioNoModelError();
+    }
+    if (isLMStudioContextOverflowError(errorBody)) {
+      console.warn(`[AI Provider] LM Studio streaming request exceeded context size:`, errorBody);
+      throw new LMStudioContextOverflowError(`LM Studio context overflow: ${errorBody}`);
     }
     throw new Error(`LM Studio streaming request failed\nStatus: ${response.status}\nBody: ${errorBody}`);
   }
@@ -2647,8 +2700,9 @@ export const generateRoute = async (
   // Pre-acquisition: If input is a URL and AI provider is LM Studio, acquire readable source content
   let acquiredSourceContext: string | undefined = undefined;
   let acquiredSourceText: string | undefined = undefined;
+  let acquiredSourceTitle: string | undefined = undefined;
 
-  console.log(`[TRACE ROUTE Pipeline] Input length=${text.length}, preview="${text.slice(0, 100).replace(/\n/g, ' ')}"`);
+  console.log(`[TRACE ROUTE INPUT] Raw source length=${text.length}`);
 
   if (isUrl && isLMStudio) {
     const sourceResult = await fetchSourceContent(text, activeSignal);
@@ -2656,20 +2710,55 @@ export const generateRoute = async (
       throw new Error(SOURCE_RETRIEVAL_ERROR_MESSAGE);
     }
     acquiredSourceText = sourceResult.content;
+    acquiredSourceTitle = sourceResult.title;
     acquiredSourceContext = formatSourceBlock({
       url: text,
       title: sourceResult.title,
       content: sourceResult.content
     });
+    console.log(`[TRACE ROUTE INPUT] Cleaned source length=${acquiredSourceText.length}`);
   } else if (!isUrl && text.trim().length > 200) {
     // Pasted article content: clean site chrome, headers, navigation, cookie boilerplate
     const cleaned = cleanPastedArticleText(text);
     acquiredSourceText = cleaned.content;
-    acquiredSourceContext = formatSourceBlock({
-      title: cleaned.title || undefined,
-      content: cleaned.content
+    acquiredSourceTitle = cleaned.title;
+    console.log(`[TRACE ROUTE INPUT] Cleaned source length=${acquiredSourceText.length}`);
+  }
+
+  // Preflight token budget estimate for large sources
+  const isCustomGenerateFn = generateFn !== generateContentWithRetry;
+  const activeModel = isLMStudio ? (userSettings.lmStudioModel || 'local-model') : modelName;
+  const availableContext = (isLMStudio || isCustomGenerateFn) ? DEFAULT_LM_STUDIO_CONTEXT_LIMIT : 1048576;
+  const promptOverheadEstimate = 1200; // doc extraction prompt template tokens
+  const normalReservedOutputTokens = 4096;
+
+  const rawSourceTokens = acquiredSourceText ? estimateTokens(acquiredSourceText) : estimateTokens(text);
+  const estimatedPromptTokens = rawSourceTokens + promptOverheadEstimate;
+
+  console.log(`[TRACE ROUTE INPUT] Estimated prompt tokens=${estimatedPromptTokens}`);
+  console.log(`[TRACE ROUTE INPUT] Available context=${availableContext}`);
+
+  // Check if source requires chunked extraction
+  if (acquiredSourceText && (estimatedPromptTokens + normalReservedOutputTokens > availableContext)) {
+    console.log(`[TRACE ROUTE INPUT] Large source detected, switching to chunked extraction`);
+    const compactRep = await extractAndReduceLargeSource({
+      cleanedText: acquiredSourceText,
+      title: acquiredSourceTitle || 'Pasted Article',
+      generateFn,
+      model: activeModel,
+      signal: activeSignal
     });
-    console.log(`[TRACE ROUTE Pipeline] Cleaned pasted article length=${acquiredSourceText.length}, title="${cleaned.title || 'Untitled'}", preview="${acquiredSourceText.slice(0, 100).replace(/\n/g, ' ')}"`);
+
+    acquiredSourceText = compactRep.reducedContent;
+    acquiredSourceContext = formatSourceBlock({
+      title: compactRep.title,
+      content: compactRep.reducedContent
+    });
+  } else if (acquiredSourceText && !acquiredSourceContext) {
+    acquiredSourceContext = formatSourceBlock({
+      title: acquiredSourceTitle || undefined,
+      content: acquiredSourceText
+    });
   }
 
   const generateRawRoute = async (t: string, url: boolean, rawOptions?: { onCandidateProgress?: (rawCand: any, count: number) => void }): Promise<{ waypoints: any[], title?: string, routeConfidence?: any, routeType?: string, isSequential?: boolean, routeEvidenceMode?: any, routeGroups?: any[], metadata?: any }> => {
@@ -2677,10 +2766,10 @@ export const generateRoute = async (
       return { waypoints: [] };
     }
 
-    const userSettings = getUserSettings();
-    const isLMStudio = userSettings.aiProvider === 'lmstudio';
-    const activeModel = isLMStudio ? (userSettings.lmStudioModel || 'local-model') : modelName;
-    console.log(`[Route Generation] Using configured AI provider: ${isLMStudio ? 'LM Studio' : 'Gemini'} (model: ${activeModel})`);
+    const currentSettings = getUserSettings();
+    const currentIsLMStudio = currentSettings.aiProvider === 'lmstudio';
+    const currentActiveModel = currentIsLMStudio ? (currentSettings.lmStudioModel || 'local-model') : modelName;
+    console.log(`[Route Generation] Using configured AI provider: ${currentIsLMStudio ? 'LM Studio' : 'Gemini'} (model: ${currentActiveModel})`);
 
     // Check if query corresponds to a registered authoritative historical event
     const registeredEventModel = getAuthoritativeEventModel(t);
@@ -2724,7 +2813,7 @@ export const generateRoute = async (
 
         try {
           const enrichmentResponse = await generateFn({
-            model: activeModel,
+            model: currentActiveModel,
             contents: enrichmentPrompt,
             config: { maxOutputTokens: 4096 }
           });
@@ -2754,7 +2843,7 @@ export const generateRoute = async (
             }
           }
         } catch (enrichErr) {
-          if (isLMStudioNoModelError(enrichErr)) {
+          if (isLMStudioNoModelError(enrichErr) || isLMStudioContextOverflowError(enrichErr)) {
             throw enrichErr;
           }
           console.warn(`[Authoritative Event Bypass] AI enrichment failed, using canonical topology fallback:`, enrichErr);
@@ -2960,7 +3049,7 @@ export const generateRoute = async (
 
     const prompt = isSourceDoc ? docExtractionPrompt : historicalPrompt;
 
-    const tools = (url && !isLMStudio) ? [{ googleSearch: {} }] : undefined;
+    const tools = (url && !currentIsLMStudio) ? [{ googleSearch: {} }] : undefined;
 
     let rawText = "";
     const isDefaultGenerateFn = generateFn === generateContentWithRetry;
@@ -2970,12 +3059,12 @@ export const generateRoute = async (
 
     try {
       if (isDefaultGenerateFn) {
-        console.log(`[TRACE ROUTE] Stage 1 stream started (provider=${isLMStudio ? 'LM Studio' : 'Gemini'})`);
+        console.log(`[TRACE ROUTE] Stage 1 stream started (provider=${currentIsLMStudio ? 'LM Studio' : 'Gemini'})`);
         const incrementalParser = new IncrementalCandidateParser();
 
         const streamRes = await streamContentWithRetry(
           {
-            model: activeModel,
+            model: currentActiveModel,
             contents: prompt,
             config: {
               tools: tools,
@@ -3008,7 +3097,7 @@ export const generateRoute = async (
         console.log(`[TRACE ROUTE] Stage 1 stream completed in ${Date.now() - startTime}ms (totalStreamedChars=${rawText.length}, extractedCandidates=${streamedCandidateCount})`);
       } else {
         const response = await generateFn({
-          model: activeModel,
+          model: currentActiveModel,
           contents: prompt,
           config: {
             tools: tools,
@@ -3018,7 +3107,7 @@ export const generateRoute = async (
         rawText = response.text || "";
       }
     } catch (apiErr) {
-      if (isLMStudioNoModelError(apiErr)) {
+      if (isLMStudioNoModelError(apiErr) || isLMStudioContextOverflowError(apiErr)) {
         throw apiErr;
       }
       console.warn(`[Route Generation] AI generateFn failed:`, apiErr);
@@ -3142,7 +3231,7 @@ export const generateRoute = async (
       let retryResult: any = { success: false };
       try {
         const retryResponse = await generateFn({
-          model: activeModel,
+          model: currentActiveModel,
           contents: topologyPrompt,
           config: {
             tools: tools,
@@ -3151,7 +3240,7 @@ export const generateRoute = async (
         });
         retryResult = parseAndExtract(retryResponse.text);
       } catch (err) {
-        if (isLMStudioNoModelError(err)) {
+        if (isLMStudioNoModelError(err) || isLMStudioContextOverflowError(err)) {
           throw err;
         }
         console.warn(`[RECOVERY] LLM retry call threw:`, err);
@@ -3350,7 +3439,7 @@ export const generateRoute = async (
     const route = await runRoutePipeline(text, isUrl, generateRawRoute, effectiveIntent, onWaypointProgress);
     return route;
   } catch (error) {
-    if (isLMStudioNoModelError(error) || isSourceRetrievalError(error)) {
+    if (isLMStudioNoModelError(error) || isLMStudioContextOverflowError(error) || isSourceRetrievalError(error)) {
       throw error;
     }
     console.error("Error generating route with pipeline:", error);

@@ -11,8 +11,7 @@ import MarkerProjectionBeam from './components/MarkerProjectionBeam';
 import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import SettingsPanel from './components/SettingsPanel';
-import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint, GeoCoordinates, UserSettings, AIProvider, NewsProvider } from './types';
-import { getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, EnrichmentMetrics, cancelFeatureInfoRequests, isLMStudioNoModelError, LM_STUDIO_NO_MODEL_MESSAGE, LM_STUDIO_NO_MODEL_INSTRUCTION, isSourceRetrievalError } from './services/geminiService';
+import { getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, EnrichmentMetrics, cancelFeatureInfoRequests, isLMStudioNoModelError, LM_STUDIO_NO_MODEL_MESSAGE, LM_STUDIO_NO_MODEL_INSTRUCTION, isLMStudioContextOverflowError, LM_STUDIO_CONTEXT_OVERFLOW_MESSAGE, LM_STUDIO_CONTEXT_OVERFLOW_INSTRUCTION, isSourceRetrievalError } from './services/geminiService';
 import { getEstimatedClimate } from './services/geographic/climateEstimator';
 import { enrichLocationInfo, mergeLocationInfo, fetchAndValidateLocationNews } from './services/locationService';
 import { resolveGeographicMetadata } from './services/geographic/geographicResolver';
@@ -4027,6 +4026,12 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         if (isLMStudioNoModelError(err)) {
           setInteractionState('GLOBE_IDLE');
           setSearchError(`${LM_STUDIO_NO_MODEL_MESSAGE} ${LM_STUDIO_NO_MODEL_INSTRUCTION}`);
+          setIsDiscoveryLoading(false);
+          return;
+        }
+        if (isLMStudioContextOverflowError(err)) {
+          setInteractionState('GLOBE_IDLE');
+          setSearchError(`${LM_STUDIO_CONTEXT_OVERFLOW_MESSAGE} ${LM_STUDIO_CONTEXT_OVERFLOW_INSTRUCTION}`);
           setIsDiscoveryLoading(false);
           return;
         }

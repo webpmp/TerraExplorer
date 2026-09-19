@@ -227,6 +227,86 @@ export const HISTORICAL_KNOWLEDGE_BASE: Record<string, HistoricalEntityKnowledge
     },
     boundingBox: { minLat: 31.0, maxLat: 32.0, minLng: 30.0, maxLng: 31.0 }
   },
+  "antikythera": {
+    entity: "Antikythera",
+    entityType: "shipwreck_site",
+    expectedRegion: "Antikythera island / Aegean Sea, Greece",
+    approximateRegion: "Antikythera Island, Greece",
+    country: "Greece",
+    historicalContext: "Greek island and location of the ancient Antikythera shipwreck where the Antikythera mechanism was discovered in 1900-1901.",
+    sourceRationale: "Authoritative historical and archaeological discovery records.",
+    confidence: "high",
+    allowedCountries: ["Greece"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 35.8622,
+      lng: 23.3000,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 35.0, maxLat: 37.0, minLng: 22.5, maxLng: 24.5 }
+  },
+  "antikythera mechanism": {
+    entity: "Antikythera Wreck Site",
+    entityType: "shipwreck_site",
+    expectedRegion: "Antikythera island / Aegean Sea, Greece",
+    approximateRegion: "Off Point Glyphadia, Antikythera Island, Greece",
+    country: "Greece",
+    historicalContext: "Ancient Roman shipwreck site off Antikythera where sponge divers discovered the Antikythera mechanism in 1900-1901.",
+    sourceRationale: "Documented archaeological recovery site off Antikythera island.",
+    confidence: "high",
+    allowedCountries: ["Greece"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 35.8622,
+      lng: 23.3000,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 35.0, maxLat: 37.0, minLng: 22.5, maxLng: 24.5 }
+  },
+  "national archaeological museum": {
+    entity: "National Archaeological Museum",
+    entityType: "museum",
+    expectedRegion: "Athens, Attica, Greece",
+    approximateRegion: "Exarcheia, Athens, Greece",
+    country: "Greece",
+    historicalContext: "Major archaeological museum in Athens, Greece, housing the major fragments and gear components of the Antikythera mechanism.",
+    sourceRationale: "Authoritative museum location in central Athens.",
+    confidence: "high",
+    allowedCountries: ["Greece"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 37.9891,
+      lng: 23.7327,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 37.5, maxLat: 38.5, minLng: 23.0, maxLng: 24.5 }
+  },
+  "national archaeological museum, athens": {
+    entity: "National Archaeological Museum",
+    entityType: "museum",
+    expectedRegion: "Athens, Attica, Greece",
+    approximateRegion: "Exarcheia, Athens, Greece",
+    country: "Greece",
+    historicalContext: "Major archaeological museum in Athens, Greece, housing the major fragments and gear components of the Antikythera mechanism.",
+    sourceRationale: "Authoritative museum location in central Athens.",
+    confidence: "high",
+    allowedCountries: ["Greece"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 37.9891,
+      lng: 23.7327,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 37.5, maxLat: 38.5, minLng: 23.0, maxLng: 24.5 }
+  },
   "burkhan khaldun": {
     entity: "Burkhan Khaldun",
     entityType: "historical_waypoint",
