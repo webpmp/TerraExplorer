@@ -187,7 +187,7 @@ Terra Explorer supports AI narration for location, event, and route content.
 
 Current narration architecture:
 - Narration is handled through the TTS service layer.
-- The current AI narration model is **Orpheus**.
+- Supported AI narration providers: **Kokoro TTS** (`mlx-community/Kokoro-82M-bf16` via local HTTP bridge) and **Orpheus TTS** (via SSE streaming).
 - TTS is separate from location resolution and search intent classification.
 - Narration consumes finalized content produced by the search/content pipeline.
 - Narration must not independently resolve or modify geographic coordinates.
@@ -257,6 +257,15 @@ Important rules:
 - AI recovery may provide an alternate coordinate candidate, but the candidate must still pass validation.
 - Historical locations require particular care because modern coordinates may not represent the historical location.
 
+## Narration & Text-To-Speech (TTS)
+
+TerraExplorer supports speech synthesis providers through `NarrationService` and `INarrationProvider`:
+- **SystemVoiceProvider**: Native Web Speech API synthesis.
+- **KokoroTTSProvider** (Recommended): Ultra-fast local neural TTS via `local-services/kokoro-tts/server.py` on port 8880 (`mlx-community/Kokoro-82M-bf16` on Apple Silicon MLX). Synthesizes entire narration in a single pass in ~1.2–1.4 seconds. Default voice: `am_michael`, secondary voice: `bm_george`.
+- **OrpheusTTSProvider**: Local neural TTS via `local-services/orpheus-tts/server.py` on port 8765 using LM Studio.
+
+Preloading: When TRACE ROUTE progresses, subsequent waypoint narrations are pre-synthesized in the background into `waypointNarrationCache` and played instantly via `speakCached` with zero generation latency.
+
 ## Do Not Change Without Explicit Instruction
 
 - Historical route definitions
@@ -267,7 +276,6 @@ Important rules:
 - Canonical location/title behavior
 - Existing theme-specific behavior
 - Provider configuration behavior
-- Narration/TTS architecture
 - Existing camera/navigation behavior
 
 When implementing a change:
@@ -276,4 +284,3 @@ When implementing a change:
 - Avoid duplicate UI.
 - Do not introduce unrelated architectural changes.
 - Preserve existing behavior outside the requested change.
-::

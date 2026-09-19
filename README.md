@@ -44,27 +44,60 @@ Search for cities, landmarks, historical sites, and points of interest, explore 
 - **AI Location Insights:** Generate summaries, facts, population, climate, and other geographic information using Google Gemini or local LM Studio inference.
 - **Street Maps:** Switch to detailed CARTO vector maps based on OpenStreetMap data.
 - **Documentary Mode:** Experience cinematic camera transitions from the globe to selected locations.
-- **Location Narration:** Listen to location titles and descriptions using System Voice or local Orpheus TTS.
+- **Location Narration:** Listen to location titles and descriptions using System Voice, ultra-fast local Kokoro TTS, or local Orpheus TTS.
 - **Real-Time News:** View current news relevant to selected locations.
 - **Trace Route:** Extract locations from articles, URLs, or text and build connected journeys.
 - **Favorites & Notes:** Save locations and attach personal notes.
 - **Visual Themes:** Parchment, Modern, CRT Green, and CRT Amber.
 
-## Map Configuration
+## Kokoro TTS
 
-TerraExplorer uses CARTO vector maps based on OpenStreetMap data for its street-level map experience.
+Kokoro is an optional local neural TTS provider for TRACE ROUTE narration, powered by Apple Silicon MLX (`mlx-community/Kokoro-82M-bf16`).
 
-A CARTO API key is required:
+* **Separate Local Service:** Runs as an isolated Python service on `http://127.0.0.1:8880`.
+* **Model & Caching:** The Kokoro model weights (~82M parameters) are downloaded from Hugging Face on first run and cached locally. The model weights and Python virtual environment are **not** committed to Git.
+* **Service Availability:** The Kokoro service must be running locally before selecting or using Kokoro narration in TerraExplorer.
 
-```env
-VITE_CARTO_API_KEY=your_carto_api_key
-```
+### Setup
 
-OpenStreetMap and CARTO attribution is displayed within the application.
+1. **One-Time Environment Setup:**
+   ```bash
+   ./scripts/setup-kokoro.sh
+   ```
+   This creates an isolated virtual environment at `local-services/kokoro-tts/.venv/` (Python 3.11+) and installs the necessary dependencies without modifying TerraExplorer's global or Node environment.
+
+2. **Start the Service:**
+   ```bash
+   ./scripts/start-kokoro.sh
+   ```
+   The service listens on:
+   ```text
+   http://127.0.0.1:8880
+   ```
+   *(To override the port, set `KOKORO_PORT=8885 ./scripts/start-kokoro.sh`)*
+
+### Voice Options
+
+The following six voices are available in the Settings Panel:
+
+* **Michael (American)** — `am_michael` (Default)
+* **George (British)** — `bm_george`
+* **Bella (American)** — `af_bella`
+* **Sarah (American)** — `af_sarah`
+* **Emma (British)** — `bf_emma`
+* **Isabella (British)** — `bf_isabella`
+
+### Repository Files
+
+* [`local-services/kokoro-tts/`](local-services/kokoro-tts/): Contains the lightweight HTTP bridge server (`server.py`) and requirements (`requirements.txt`).
+* [`scripts/setup-kokoro.sh`](scripts/setup-kokoro.sh): Automated setup script to configure the Python virtual environment.
+* [`scripts/start-kokoro.sh`](scripts/start-kokoro.sh): Startup script to run the Kokoro TTS bridge server.
+
+*Note: The Python virtual environment (`.venv`), model weight caches, and generated audio files are intentionally excluded from Git.*
 
 ## Local Orpheus TTS
 
-TerraExplorer supports local neural narration through Orpheus TTS and LM Studio.
+TerraExplorer also supports local neural narration through Orpheus TTS and LM Studio.
 
 See the [Orpheus TTS setup guide](local-services/orpheus-tts/README.md) for installation, configuration, and troubleshooting.
 

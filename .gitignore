@@ -34,3 +34,8 @@ venv/
 .venv/
 __pycache__/
 *.py[cod]
+local-services/*/.venv/
+local-services/*/venv/
+local-services/kokoro-tts/*.wav
+local-services/kokoro-tts/*.safetensors
+

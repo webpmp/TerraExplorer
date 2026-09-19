@@ -304,7 +304,7 @@ export interface ResolverResult {
 export type AIProvider = 'gemini' | 'lmstudio';
 export type NewsProvider = 'gemini' | 'newsapi' | 'newsdata' | 'nyt';
 export type DocumentaryDuration = number | 'short' | 'cinematic' | 'long';
-export type NarrationProviderType = 'system' | 'orpheus';
+export type NarrationProviderType = 'system' | 'kokoro' | 'orpheus';
 
 export interface UserSettings {
   aiProvider: AIProvider;
@@ -320,6 +320,7 @@ export interface UserSettings {
   narrationEnabled?: boolean;
   narrationProvider?: NarrationProviderType;
   narrationVoice?: string;
+  kokoroVoice?: string;
   orpheusVoice?: string;
   narrationSpeed?: number;
   narrationVolume?: number;
@@ -434,6 +435,7 @@ export interface Waypoint {
     level: 'high' | 'medium' | 'low';
     reasoning: string;
   };
+  sourceEvidence?: string;
   verifiedEvidence?: {
     verified: boolean;
     evidence: string;

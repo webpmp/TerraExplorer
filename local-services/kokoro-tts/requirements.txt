@@ -1,0 +1,6 @@
+mlx-audio>=0.5.4
+soundfile>=0.14.0
+scipy>=1.17.0
+sounddevice>=0.5.0
+loguru>=0.7.3
+misaki[en]>=0.9.4

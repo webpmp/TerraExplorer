@@ -1,16 +1,21 @@
 /**
  * Narration Providers for TerraExplorer:
  * - SystemVoiceProvider: Native browser Web Speech API speech synthesis
+ * - KokoroTTSProvider: Ultra-fast local neural TTS via HTTP (http://127.0.0.1:8880/tts) + Web Audio API
  * - OrpheusTTSProvider: Progressive streaming TTS via SSE (http://127.0.0.1:8765/tts/stream) + Web Audio API
  */
 
 import { NarrationProviderType } from '../types';
+import { logTraceNarration, logProviderStart, logProviderComplete } from './waypointPipelineService';
+import { logTraceTiming } from './traceTimingService';
 
 export interface NarrationSpeakOptions {
   title: string;
   description: string;
+  waypointId?: string;
   provider?: NarrationProviderType;
   voiceURI?: string;
+  kokoroVoice?: string;
   orpheusVoice?: string;
   limit?: number;
   speed?: number;
@@ -19,6 +24,21 @@ export interface NarrationSpeakOptions {
   onEnd?: () => void;
   onError?: (error: unknown) => void;
 }
+
+export interface KokoroVoiceOption {
+  id: string;
+  name: string;
+  accent: string;
+}
+
+export const KOKORO_VOICES: KokoroVoiceOption[] = [
+  { id: 'am_michael', name: 'Michael', accent: 'American' },
+  { id: 'bm_george', name: 'George', accent: 'British' },
+  { id: 'af_bella', name: 'Bella', accent: 'American' },
+  { id: 'af_sarah', name: 'Sarah', accent: 'American' },
+  { id: 'bf_emma', name: 'Emma', accent: 'British' },
+  { id: 'bf_isabella', name: 'Isabella', accent: 'British' }
+];
 
 export interface OrpheusVoiceOption {
   id: string;
@@ -86,28 +106,86 @@ export function cleanNarrationText(text: string): string {
 }
 
 /**
+ * Deterministically removes a redundant leading occurrence of the title from the description.
+ * Case-insensitive and tolerant of normal punctuation and whitespace variations.
+ * Preserves occurrences of the title that appear later in the description.
+ */
+export function removeLeadingTitleFromDescription(title: string, description: string): string {
+  if (!title || !description) return description || '';
+
+  const cleanTitle = cleanNarrationText(title).trim();
+  const cleanDesc = cleanNarrationText(description).trim();
+  if (!cleanTitle || !cleanDesc) return cleanDesc;
+
+  // Escape special regex characters in title
+  const escapedTitle = cleanTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const strippedTitle = cleanTitle.replace(/^(the|a|an)\s+/i, '').trim();
+  const escapedStripped = strippedTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  const titlePattern = strippedTitle && strippedTitle !== cleanTitle
+    ? `(?:${escapedTitle}|${escapedStripped})`
+    : escapedTitle;
+
+  // Pattern A: Title followed by copula (is/was/are/were) and optional article (a/an/the)
+  // Example: "Teresio Olivelli park is a beloved..." -> "A beloved..."
+  // Example: "Como Cathedral is the Roman Catholic..." -> "The Roman Catholic..."
+  const copulaRegex = new RegExp(`^(?:the\\s+)?${titlePattern}\\s*(?:[.,;:—–-]+\\s*)?(?:is|was|are|were)\\s+(?:(a|an|the)\\s+)?`, 'i');
+  const copulaMatch = cleanDesc.match(copulaRegex);
+  if (copulaMatch) {
+    const article = copulaMatch[1];
+    const remainder = cleanDesc.slice(copulaMatch[0].length).trim();
+    if (remainder.length > 0) {
+      if (article) {
+        const capitalizedArticle = article.charAt(0).toUpperCase() + article.slice(1).toLowerCase();
+        return `${capitalizedArticle} ${remainder}`;
+      }
+      return remainder.charAt(0).toUpperCase() + remainder.slice(1);
+    }
+  }
+
+  // Pattern B: Title followed by punctuation (., -, :, —, ,, ;) and whitespace
+  // Example: "Teresio Olivelli park, located in..." -> "Located in..."
+  // Example: "Teresio Olivelli park. It is..." -> "It is..."
+  // Example: "Teresio Olivelli park - a popular..." -> "A popular..."
+  const punctRegex = new RegExp(`^(?:the\\s+)?${titlePattern}\\s*[.,;:—–-]+\\s*`, 'i');
+  const punctMatch = cleanDesc.match(punctRegex);
+  if (punctMatch) {
+    const remainder = cleanDesc.slice(punctMatch[0].length).trim();
+    if (remainder.length > 0) {
+      return remainder.charAt(0).toUpperCase() + remainder.slice(1);
+    }
+  }
+
+  // Pattern C: Title directly followed by a verb or phrase
+  // Example: "Teresio Olivelli park features a serene..." -> "Features a serene..."
+  const directRegex = new RegExp(`^(?:the\\s+)?${titlePattern}\\s+`, 'i');
+  const directMatch = cleanDesc.match(directRegex);
+  if (directMatch) {
+    const remainder = cleanDesc.slice(directMatch[0].length).trim();
+    if (remainder.length > 0) {
+      return remainder.charAt(0).toUpperCase() + remainder.slice(1);
+    }
+  }
+
+  return cleanDesc;
+}
+
+/**
  * Builds the formatted narration text from structured title & description.
  */
 export function buildNarrationScript(title: string, description: string): string {
-  const cleanTitle = cleanNarrationText(title);
-  const cleanDesc = cleanNarrationText(description);
+  const cleanTitle = cleanNarrationText(title).trim();
+  const cleanDesc = cleanNarrationText(description).trim();
 
   if (!cleanTitle && !cleanDesc) return '';
   if (!cleanTitle) return cleanDesc;
   if (!cleanDesc) return cleanTitle;
 
-  // Avoid duplicating title if description already begins with title or alias
-  const normTitle = cleanTitle.toLowerCase().replace(/^(the|a|an)\s+/, '');
-  const normDesc = cleanDesc.toLowerCase().replace(/^(the|a|an)\s+/, '');
-
-  if (normDesc.startsWith(normTitle) || 
-      (normTitle.length >= 4 && normDesc.substring(0, Math.min(normDesc.length, normTitle.length + 30)).includes(normTitle))) {
-    return cleanDesc;
-  }
+  const normalizedDesc = removeLeadingTitleFromDescription(cleanTitle, cleanDesc);
 
   // Ensure title ends with punctuation before appending description
   const titlePunct = /[.!?]$/.test(cleanTitle) ? cleanTitle : `${cleanTitle}.`;
-  return `${titlePunct} ${cleanDesc}`;
+  return `${titlePunct} ${normalizedDesc}`;
 }
 
 /**
@@ -145,6 +223,97 @@ export function capDescriptionForNarration(description: string, maxChars: number
   }
 
   return description.trim();
+}
+
+/**
+ * Splits enriched waypoint narration into two clean, self-contained segments:
+ * 1. Opening segment: A concise, natural spoken introduction (target ~25-40 words, 1-2 complete sentences).
+ * 2. Remainder segment: The remaining complete sentences of the description.
+ *
+ * If the description is already short (<= 35 words or 1 sentence), only 1 segment is returned.
+ */
+export function splitNarrationIntoSegments(
+  title: string,
+  description: string,
+  maxChars: number = 600
+): { opening: string; remainder: string } {
+  const cleanTitle = cleanNarrationText(title).trim();
+  const rawDesc = cleanNarrationText(description).trim();
+
+  if (!cleanTitle && !rawDesc) {
+    return { opening: '', remainder: '' };
+  }
+  if (!rawDesc) {
+    return { opening: cleanTitle, remainder: '' };
+  }
+
+  const cappedDesc = capDescriptionForNarration(rawDesc, maxChars);
+  if (cappedDesc.length < rawDesc.length) {
+    console.log(`[OrpheusTTS] Description capped for narration: originalLength=${rawDesc.length} narrationLength=${cappedDesc.length} limit=${maxChars}`);
+  }
+  const normalizedDesc = removeLeadingTitleFromDescription(cleanTitle, cappedDesc);
+
+  // Extract individual sentences with terminal punctuation
+  const sentenceMatches: string[] = [];
+  const sentenceRegex = /[^.!?]+[.!?]['"”’)}\]]*(?=\s|$)/g;
+  let match: RegExpExecArray | null;
+  let lastEnd = 0;
+
+  while ((match = sentenceRegex.exec(normalizedDesc)) !== null) {
+    const s = match[0].trim();
+    if (s) {
+      sentenceMatches.push(s);
+    }
+    lastEnd = match.index + match[0].length;
+  }
+
+  // If trailing text exists without standard terminal punctuation
+  if (lastEnd < normalizedDesc.length) {
+    const remaining = normalizedDesc.slice(lastEnd).trim();
+    if (remaining) {
+      sentenceMatches.push(remaining);
+    }
+  }
+
+  if (sentenceMatches.length <= 1) {
+    return {
+      opening: buildNarrationScript(cleanTitle, normalizedDesc),
+      remainder: ''
+    };
+  }
+
+  const titleWords = cleanTitle ? cleanTitle.split(/\s+/).filter(Boolean).length : 0;
+  const sentenceWordCounts = sentenceMatches.map((s) => s.split(/\s+/).filter(Boolean).length);
+  const totalWords = titleWords + sentenceWordCounts.reduce((acc, c) => acc + c, 0);
+
+  // If total narration is short, keep as single segment
+  if (totalWords <= 35) {
+    return {
+      opening: buildNarrationScript(cleanTitle, normalizedDesc),
+      remainder: ''
+    };
+  }
+
+  // Determine how many sentences to allocate to the opening segment (aim for 25-40 words)
+  let openingSentenceCount = 1;
+  const wordsFirstSentence = titleWords + sentenceWordCounts[0];
+
+  if (wordsFirstSentence < 22 && sentenceMatches.length > 2) {
+    const wordsTwoSentences = wordsFirstSentence + sentenceWordCounts[1];
+    if (wordsTwoSentences <= 45) {
+      openingSentenceCount = 2;
+    }
+  }
+
+  const openingSentences = sentenceMatches.slice(0, openingSentenceCount).join(' ');
+  const remainderSentences = sentenceMatches.slice(openingSentenceCount).join(' ');
+
+  const openingScript = buildNarrationScript(cleanTitle, openingSentences);
+
+  return {
+    opening: openingScript,
+    remainder: remainderSentences.trim()
+  };
 }
 
 /**
@@ -327,6 +496,9 @@ export class SystemVoiceProvider implements INarrationProvider {
   public speak(script: string, options: NarrationSpeakOptions): void {
     this.cancel();
 
+    const stableId = options.waypointId || options.title || 'system-voice';
+    const waypointName = options.title || stableId;
+
     if (!this.isSupported()) {
       console.log('[Narration] Web Speech API is not supported in this environment');
       options.onError?.(new Error('Web Speech API is not supported in this environment'));
@@ -358,11 +530,15 @@ export class SystemVoiceProvider implements INarrationProvider {
         }
       }
 
+      logTraceNarration(stableId, waypointName, 'TTS request started', `provider="system" voice="${voiceURI || 'default'}"`);
+
       utterance.onstart = () => {
         this.isSpeakingInternal = true;
         this.startKeepAlive();
         console.log(`[SearchNarration] SPEECH_ONSTART text="${script.slice(0, 60)}..."`);
         console.log('[narrationService] SPEECH_ONSTART');
+        logTraceNarration(stableId, waypointName, 'TTS generation started');
+        logTraceNarration(stableId, waypointName, 'playback started');
         options.onStart?.();
       };
 
@@ -372,6 +548,7 @@ export class SystemVoiceProvider implements INarrationProvider {
         this.currentUtterance = null;
         this.stopKeepAlive();
         console.log('[SearchNarration] SPEECH_ONEND');
+        logTraceNarration(stableId, waypointName, 'playback ended');
         options.onEnd?.();
       };
 
@@ -400,7 +577,9 @@ export class SystemVoiceProvider implements INarrationProvider {
     }
   }
 
-  public cancel(): void {
+  public cancel(reason?: string, caller?: string): void {
+    const hadUtterances = this.activeUtterances.size > 0 || this.currentUtterance !== null;
+    const wasSpeaking = this.isSpeakingInternal;
     this.stopKeepAlive();
     if (this.isSupported()) {
       try {
@@ -412,6 +591,10 @@ export class SystemVoiceProvider implements INarrationProvider {
     this.activeUtterances.clear();
     this.currentUtterance = null;
     this.isSpeakingInternal = false;
+
+    if (wasSpeaking || hadUtterances) {
+      console.log(`[NarrationCancel] provider="system" reason="${reason || 'unspecified'}" caller="${caller || 'unknown'}" activeUtterancesCleared=${hadUtterances} activeSpeechStopped=${wasSpeaking}`);
+    }
   }
 
   public isSpeaking(): boolean {
@@ -532,6 +715,101 @@ export class OrpheusTTSProvider implements INarrationProvider {
     this.nextStartTime = 0;
   }
 
+  private async synthesizeSegment(
+    text: string,
+    voice: string,
+    signal: AbortSignal,
+    onFirstChunk?: () => void
+  ): Promise<Float32Array> {
+    const fetchFn = (typeof window !== 'undefined' && typeof window.fetch === 'function') ? window.fetch : fetch;
+    const response = await fetchFn(this.bridgeUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voice }),
+      signal
+    });
+
+    if (!response.ok || !response.body) {
+      let errDetail = '';
+      try {
+        if (typeof response.json === 'function') {
+          const errJson = await response.json();
+          errDetail = errJson?.error || '';
+        }
+      } catch {}
+      throw new Error(errDetail ? `Orpheus TTS generation failed: ${errDetail}` : `Orpheus TTS generation failed (${response.status})`);
+    }
+
+    const reader = response.body.getReader();
+    this.activeReader = reader;
+    const decoder = new TextDecoder();
+    let sseBuffer = '';
+    const pcmChunks: Float32Array[] = [];
+    let totalSamples = 0;
+    let receivedAny = false;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done || signal.aborted) break;
+
+      sseBuffer += decoder.decode(value, { stream: true });
+      const events = sseBuffer.split('\n\n');
+      sseBuffer = events.pop() || '';
+
+      for (const rawEvent of events) {
+        if (!rawEvent.trim()) continue;
+        for (const line of rawEvent.split('\n')) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('data:')) {
+            const dataStr = trimmed.slice(5).trim();
+            if (dataStr === '[DONE]') continue;
+            try {
+              const eventJson = JSON.parse(dataStr);
+              if (eventJson.error) {
+                throw new Error(eventJson.error);
+              }
+              if (eventJson.raw_pcm_base64) {
+                const pcm = decodeBase64PCMToFloat32(eventJson.raw_pcm_base64);
+                if (pcm.length > 0) {
+                  if (!receivedAny) {
+                    receivedAny = true;
+                    onFirstChunk?.();
+                  }
+                  pcmChunks.push(pcm);
+                  totalSamples += pcm.length;
+                }
+              }
+            } catch (err: any) {
+              if (err instanceof Error && (err.message.startsWith('Orpheus') || err.message.includes('LM Studio') || !dataStr.startsWith('{'))) {
+                throw err;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (this.activeReader === reader) {
+      this.activeReader = null;
+    }
+
+    if (signal.aborted) {
+      return new Float32Array(0);
+    }
+
+    if (totalSamples === 0) {
+      throw new Error('Orpheus TTS generation produced no audio data');
+    }
+
+    const combined = new Float32Array(totalSamples);
+    let offset = 0;
+    for (const chunk of pcmChunks) {
+      combined.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return combined;
+  }
+
   public async speak(script: string, options: NarrationSpeakOptions): Promise<void> {
     this.cancel();
 
@@ -542,238 +820,205 @@ export class OrpheusTTSProvider implements INarrationProvider {
       return;
     }
 
+    const stableId = options?.waypointId || options?.title || 'orpheus-voice';
+    const waypointName = options?.title || stableId;
+    const voice = options?.orpheusVoice || this.defaultVoice || 'tara';
+    const limit = typeof options?.limit === 'number' && !isNaN(options.limit) && options.limit > 0 ? options.limit : 600;
+
+    const { opening, remainder } = options?.description
+      ? splitNarrationIntoSegments(options.title || '', options.description, limit)
+      : { opening: script, remainder: '' };
+
+    if (!opening || opening.trim().length === 0) return;
+
+    const openingWords = opening.split(/\s+/).filter(Boolean).length;
+    const remainderWords = remainder ? remainder.split(/\s+/).filter(Boolean).length : 0;
+    console.log(`[OrpheusTTS Lifecycle] SEGMENTS_CREATED id="${stableId}" openingWords=${openingWords} remainderWords=${remainderWords} openingLen=${opening.length} remainderLen=${remainder.length}`);
+
     const controller = new AbortController();
     this.activeAbortController = controller;
+    const { signal } = controller;
 
-    const voice = options.orpheusVoice || this.defaultVoice || 'tara';
-    const volume = typeof options.volume === 'number' && !isNaN(options.volume) ? options.volume : this.defaultVolume;
-    const speed = typeof options.speed === 'number' && !isNaN(options.speed) ? options.speed : this.defaultSpeed;
-    const limit = typeof options.limit === 'number' && !isNaN(options.limit) && options.limit > 0 ? options.limit : 600;
-
-    let textToSend = script;
-    if (options?.description) {
-      const originalDesc = cleanNarrationText(options.description);
-      const cappedDesc = capDescriptionForNarration(originalDesc, limit);
-      if (cappedDesc.length < originalDesc.length) {
-        console.log(`[OrpheusTTS] Description capped for narration: originalLength=${originalDesc.length} narrationLength=${cappedDesc.length} limit=${limit}`);
-      }
-      textToSend = buildNarrationScript(options.title || '', cappedDesc);
-    }
-
-    const requestStartTime = performance.now();
-    console.log(`[OrpheusTTS] Requesting streaming TTS generation (voice="${voice}", scriptLength=${textToSend.length})`);
+    const ttsStartTime = Date.now();
+    logProviderStart('OrpheusTTS', waypointName, stableId, `openingLength=${opening.length} remainderLength=${remainder.length}`);
+    logTraceNarration(stableId, waypointName, 'TTS request started', `provider="orpheus" voice="${voice}" openingLength=${opening.length} remainderLength=${remainder.length}`);
+    logTraceTiming('ORPHEUS_HTTP_REQUEST_STARTED', stableId, waypointName, `openingLength=${opening.length} voice="${voice}"`);
+    logTraceTiming('ORPHEUS_OPENING_REQUEST_STARTED', stableId, waypointName, `openingLength=${opening.length} voice="${voice}" words=${openingWords}`);
 
     const AudioContextClass = getAudioContextClass();
     if (!AudioContextClass) {
-      const err = new Error('Web Audio API AudioContext not available');
-      options.onError?.(err);
+      options.onError?.(new Error('AudioContext not available'));
       return;
     }
 
     const audioContext = new AudioContextClass();
     this.audioContext = audioContext;
 
+    const volume = typeof options.volume === 'number' && !isNaN(options.volume) ? options.volume : this.defaultVolume;
+    const speed = typeof options.speed === 'number' && !isNaN(options.speed) ? options.speed : this.defaultSpeed;
+
     const gainNode = audioContext.createGain();
     this.gainNode = gainNode;
     try {
       gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
-    } catch (e) {
+    } catch {
       gainNode.gain.value = volume;
     }
     gainNode.connect(audioContext.destination);
 
-    const PRE_BUFFER_TARGET_SECONDS = 3.0;
-    const bufferedChunks: { buffer: AudioBuffer; duration: number }[] = [];
-    let bufferedDuration = 0;
-    let isAudiblePlaybackStarted = false;
-    let totalReceivedAudioDuration = 0;
-    let chunkCount = 0;
-    this.streamDone = false;
-    this.nextStartTime = 0;
-
-    const scheduleChunk = (audioBuffer: AudioBuffer, duration: number) => {
-      if (!this.audioContext || !this.gainNode || controller.signal.aborted) return;
-
-      const source = this.audioContext.createBufferSource();
-      source.buffer = audioBuffer;
+    if (audioContext.state === 'suspended') {
       try {
-        source.playbackRate.setValueAtTime(speed, this.audioContext.currentTime);
-      } catch (e) {
-        source.playbackRate.value = speed;
-      }
-      source.connect(this.gainNode);
+        await audioContext.resume();
+      } catch {}
+    }
 
-      const currentTime = this.audioContext.currentTime;
-      const playAt = Math.max(currentTime + 0.02, this.nextStartTime);
-      source.start(playAt);
-      this.activeSourceNodes.add(source);
-      this.nextStartTime = playAt + (duration / speed);
-
-      source.onended = () => {
-        this.activeSourceNodes.delete(source);
-        checkStreamComplete();
-      };
-    };
-
-    const startAudiblePlayback = async () => {
-      if (isAudiblePlaybackStarted || controller.signal.aborted) return;
-      isAudiblePlaybackStarted = true;
-      this.isSpeakingInternal = true;
-
-      if (this.audioContext && this.audioContext.state === 'suspended') {
-        try {
-          await this.audioContext.resume();
-        } catch (e) {
-          // Ignore
-        }
-      }
-
-      if (controller.signal.aborted || !this.audioContext) return;
-
-      const playbackStartDelayMs = (performance.now() - requestStartTime).toFixed(0);
-      console.log(`[OrpheusTTS] Audible playback started (delay=${playbackStartDelayMs}ms, bufferedAudio=${bufferedDuration.toFixed(2)}s, chunks=${bufferedChunks.length})`);
-      options.onStart?.();
-
-      this.nextStartTime = this.audioContext.currentTime + 0.05;
-      for (const chunk of bufferedChunks) {
-        scheduleChunk(chunk.buffer, chunk.duration);
-      }
-      bufferedChunks.length = 0;
-    };
-
-    const checkStreamComplete = () => {
-      if (this.streamDone && this.activeSourceNodes.size === 0 && !controller.signal.aborted) {
-        this.isSpeakingInternal = false;
-        const totalElapsedMs = (performance.now() - requestStartTime).toFixed(0);
-        console.log(`[OrpheusTTS] Narration stream completed (totalTime=${totalElapsedMs}ms, totalChunks=${chunkCount}, audioDuration=${totalReceivedAudioDuration.toFixed(2)}s)`);
-        options.onEnd?.();
-      }
-    };
-
-    const fetchFn = (typeof window !== 'undefined' && typeof window.fetch === 'function') ? window.fetch : fetch;
+    if (signal.aborted) {
+      this.cleanupAudioNodes();
+      return;
+    }
 
     try {
-      const response = await fetchFn(this.bridgeUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          text: textToSend,
-          voice
-        }),
-        signal: controller.signal
+      logTraceNarration(stableId, waypointName, 'TTS generation started');
+      logTraceTiming('ORPHEUS_GENERATION_STARTED', stableId, waypointName);
+
+      // 1. Synthesize complete Opening Segment independently
+      const openingPcm = await this.synthesizeSegment(opening, voice, signal, () => {
+        logTraceNarration(stableId, waypointName, 'first audio data received');
+        logTraceTiming('ORPHEUS_FIRST_AUDIO', stableId, waypointName);
       });
 
-      if (!response.ok) {
-        let errorDetail = '';
-        try {
-          const errJson = await response.json();
-          errorDetail = errJson.error || errJson.message || '';
-        } catch {
-          // If response isn't JSON
-        }
-        const msg = errorDetail
-          ? `Orpheus TTS Bridge error (${response.status}): ${errorDetail}`
-          : `Orpheus TTS Bridge error (HTTP ${response.status}: ${response.statusText || 'Streaming request failed'})`;
-        throw new Error(msg);
+      if (signal.aborted) {
+        this.cleanupAudioNodes();
+        return;
       }
 
-      if (!response.body) {
-        throw new Error('ReadableStream not supported by response');
+      const openingDuration = openingPcm.length / 24000;
+      const openingElapsedMs = Date.now() - ttsStartTime;
+      logProviderComplete('OrpheusTTS', waypointName, stableId, openingElapsedMs, `openingDuration=${openingDuration.toFixed(2)}s`);
+      logTraceNarration(stableId, waypointName, 'opening audio received', `duration=${openingDuration.toFixed(2)}s`);
+      logTraceTiming('ORPHEUS_OPENING_AUDIO_COMPLETE', stableId, waypointName, `duration=${openingDuration.toFixed(2)}s elapsedMs=${openingElapsedMs}ms samples=${openingPcm.length}`);
+      logTraceTiming('ORPHEUS_AUDIO_COMPLETE', stableId, waypointName, `duration=${openingDuration.toFixed(2)}s elapsedMs=${openingElapsedMs}ms`);
+
+      // 2. Start Whole-Buffer Playback of Opening Segment immediately
+      const openingBuffer = audioContext.createBuffer(1, openingPcm.length, 24000);
+      if (typeof openingBuffer.copyToChannel === 'function') {
+        openingBuffer.copyToChannel(openingPcm, 0);
+      } else {
+        openingBuffer.getChannelData(0).set(openingPcm);
       }
 
-      const reader = response.body.getReader();
-      this.activeReader = reader;
+      const openingSourceNode = audioContext.createBufferSource();
+      openingSourceNode.buffer = openingBuffer;
+      try {
+        openingSourceNode.playbackRate.setValueAtTime(speed, audioContext.currentTime);
+      } catch {
+        openingSourceNode.playbackRate.value = speed;
+      }
+      openingSourceNode.connect(gainNode);
 
-      const decoder = new TextDecoder();
-      let sseBuffer = '';
+      this.isSpeakingInternal = true;
+      const openingPlayStartTime = audioContext.currentTime + 0.02;
+      const openingPlayDuration = openingDuration / speed;
+      const openingExpectedEndTime = openingPlayStartTime + openingPlayDuration;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done || controller.signal.aborted) {
-          break;
+      logTraceNarration(stableId, waypointName, 'playback started', `audioDuration=${openingDuration.toFixed(2)}s scheduledStart=${openingPlayStartTime.toFixed(3)}s expectedEnd=${openingExpectedEndTime.toFixed(3)}s`);
+      logTraceTiming('WP1_PLAYBACK_STARTED', stableId, waypointName, `audioDuration=${openingDuration.toFixed(2)}s`);
+      logTraceTiming('ORPHEUS_OPENING_PLAYBACK_STARTED', stableId, waypointName, `audioDuration=${openingDuration.toFixed(2)}s`);
+      options.onStart?.();
+
+      this.activeSourceNodes.add(openingSourceNode);
+      openingSourceNode.start(openingPlayStartTime);
+
+      let openingEndedWallTime: number | null = null;
+      let remainderReadyWallTime: number | null = null;
+      let isOpeningPlaying = true;
+
+      // 3. Initiate background synthesis of Remainder Segment while Opening is playing
+      let remainderPromise: Promise<Float32Array | null> | null = null;
+      const remainderRequestStartTime = Date.now();
+
+      if (remainder && remainder.trim().length > 0 && !signal.aborted) {
+        logTraceTiming('ORPHEUS_REMAINDER_REQUEST_STARTED', stableId, waypointName, `remainderLength=${remainder.length} words=${remainderWords}`);
+        remainderPromise = this.synthesizeSegment(remainder, voice, signal)
+          .then((pcm) => {
+            remainderReadyWallTime = Date.now();
+            const remDuration = pcm.length / 24000;
+            const remElapsedMs = remainderReadyWallTime - remainderRequestStartTime;
+            logTraceTiming('ORPHEUS_REMAINDER_AUDIO_COMPLETE', stableId, waypointName, `duration=${remDuration.toFixed(2)}s synthElapsedMs=${remElapsedMs}ms openingStillPlaying=${isOpeningPlaying}`);
+            console.log(`[OrpheusTTS Lifecycle] REMAINDER_SYNTHESIS_COMPLETE duration=${remDuration.toFixed(2)}s elapsedMs=${remElapsedMs}ms openingStillPlaying=${isOpeningPlaying}`);
+            return pcm;
+          })
+          .catch((err) => {
+            console.warn('[OrpheusTTS] Remainder synthesis error:', err);
+            return null;
+          });
+      }
+
+      // 4. Handle seamless continuation when Opening finishes
+      openingSourceNode.onended = async () => {
+        isOpeningPlaying = false;
+        openingEndedWallTime = Date.now();
+        this.activeSourceNodes.delete(openingSourceNode);
+        logTraceTiming('ORPHEUS_OPENING_PLAYBACK_ENDED', stableId, waypointName, `currentTime=${this.audioContext?.currentTime.toFixed(3)}s`);
+
+        if (signal.aborted) {
+          this.isSpeakingInternal = false;
+          this.cleanupAudioNodes();
+          return;
         }
 
-        sseBuffer += decoder.decode(value, { stream: true });
-        const events = sseBuffer.split('\n\n');
-        sseBuffer = events.pop() || '';
+        if (remainderPromise) {
+          if (!remainderReadyWallTime) {
+            logTraceTiming('ORPHEUS_TRANSITION_GAP_DETECTED', stableId, waypointName, `openingEndedBeforeRemainderReady=true currentTime=${this.audioContext?.currentTime.toFixed(3)}s`);
+            console.warn(`[OrpheusTTS Lifecycle] GAP_DETECTED: Opening ended before remainder was ready! Remainder still synthesizing...`);
+          }
 
-        for (const rawEvent of events) {
-          if (!rawEvent.trim()) continue;
-
-          for (const line of rawEvent.split('\n')) {
-            const trimmed = line.trim();
-            if (trimmed.startsWith('data:')) {
-              const dataStr = trimmed.slice(5).trim();
-              if (dataStr === '[DONE]') {
-                this.streamDone = true;
-                continue;
-              }
-
-              try {
-                const eventJson = JSON.parse(dataStr);
-                if (eventJson.error) {
-                  throw new Error(`Orpheus TTS generation error: ${eventJson.error}`);
-                }
-
-                if (eventJson.raw_pcm_base64) {
-                  chunkCount++;
-                  if (chunkCount === 1) {
-                    const firstChunkArrivalMs = (performance.now() - requestStartTime).toFixed(0);
-                    console.log(`[OrpheusTTS] First audio chunk received in ${firstChunkArrivalMs}ms`);
-                  }
-
-                  const pcmData = decodeBase64PCMToFloat32(eventJson.raw_pcm_base64);
-                  if (pcmData.length > 0 && this.audioContext) {
-                    const audioBuffer = this.audioContext.createBuffer(1, pcmData.length, 24000);
-                    if (typeof audioBuffer.copyToChannel === 'function') {
-                      audioBuffer.copyToChannel(pcmData, 0);
-                    } else {
-                      const channelData = audioBuffer.getChannelData(0);
-                      channelData.set(pcmData);
-                    }
-
-                    const chunkDuration = pcmData.length / 24000;
-                    totalReceivedAudioDuration += chunkDuration;
-
-                    if (!isAudiblePlaybackStarted) {
-                      bufferedChunks.push({ buffer: audioBuffer, duration: chunkDuration });
-                      bufferedDuration += chunkDuration;
-                      if (bufferedDuration >= PRE_BUFFER_TARGET_SECONDS) {
-                        await startAudiblePlayback();
-                      }
-                    } else {
-                      scheduleChunk(audioBuffer, chunkDuration);
-                    }
-                  }
-                }
-
-                if (eventJson.done) {
-                  this.streamDone = true;
-                }
-              } catch (parseErr: any) {
-                if (parseErr instanceof Error && parseErr.message.startsWith('Orpheus')) {
-                  throw parseErr;
-                }
-                // Non-fatal parse warning for malformed intermediate text
-              }
+          const remainderPcm = await remainderPromise;
+          if (remainderPcm && remainderPcm.length > 0 && !signal.aborted && this.audioContext && this.gainNode) {
+            const actualGapMs = openingEndedWallTime ? Date.now() - openingEndedWallTime : 0;
+            const remBuffer = this.audioContext.createBuffer(1, remainderPcm.length, 24000);
+            if (typeof remBuffer.copyToChannel === 'function') {
+              remBuffer.copyToChannel(remainderPcm, 0);
+            } else {
+              remBuffer.getChannelData(0).set(remainderPcm);
             }
+
+            const remSourceNode = this.audioContext.createBufferSource();
+            remSourceNode.buffer = remBuffer;
+            try {
+              remSourceNode.playbackRate.setValueAtTime(speed, this.audioContext.currentTime);
+            } catch {
+              remSourceNode.playbackRate.value = speed;
+            }
+            remSourceNode.connect(this.gainNode);
+
+            const remDuration = remainderPcm.length / 24000;
+            logTraceTiming('ORPHEUS_REMAINDER_PLAYBACK_STARTED', stableId, waypointName, `duration=${remDuration.toFixed(2)}s actualAudibleGap=${(actualGapMs / 1000).toFixed(3)}s`);
+            console.log(`[OrpheusTTS Lifecycle] REMAINDER_PLAYBACK_STARTED duration=${remDuration.toFixed(2)}s actualAudibleGap=${(actualGapMs / 1000).toFixed(3)}s`);
+
+            remSourceNode.onended = () => {
+              this.activeSourceNodes.delete(remSourceNode);
+              this.isSpeakingInternal = false;
+              this.cleanupAudioNodes();
+              logTraceTiming('NARRATION_PLAYBACK_ENDED', stableId, waypointName);
+              logTraceNarration(stableId, waypointName, 'playback ended');
+              options.onEnd?.();
+            };
+
+            this.activeSourceNodes.add(remSourceNode);
+            remSourceNode.start(this.audioContext.currentTime);
+            return;
           }
         }
-      }
 
-      this.streamDone = true;
-
-      // If stream ended before reaching 3.0s pre-buffer target (e.g. short narration phrase)
-      if (!isAudiblePlaybackStarted && bufferedChunks.length > 0 && !controller.signal.aborted) {
-        await startAudiblePlayback();
-      }
-
-      checkStreamComplete();
+        this.isSpeakingInternal = false;
+        this.cleanupAudioNodes();
+        logTraceTiming('NARRATION_PLAYBACK_ENDED', stableId, waypointName);
+        logTraceNarration(stableId, waypointName, 'playback ended');
+        options.onEnd?.();
+      };
     } catch (err: any) {
-      if (controller.signal.aborted || err?.name === 'AbortError') {
-        // Normal cancellation
+      if (signal.aborted || err?.name === 'AbortError') {
         return;
       }
 
@@ -789,17 +1034,21 @@ export class OrpheusTTSProvider implements INarrationProvider {
         friendlyError = err instanceof Error ? err : new Error(String(err));
       }
 
-      console.warn('[OrpheusTTS] Streaming generation/playback error:', friendlyError);
+      console.warn('[OrpheusTTS] Generation/playback error:', friendlyError);
       options.onError?.(friendlyError);
     } finally {
       if (this.activeAbortController === controller) {
         this.activeAbortController = null;
       }
-      this.activeReader = null;
     }
   }
 
-  public cancel(): void {
+  public cancel(reason?: string, caller?: string): void {
+    const wasAborting = !!this.activeAbortController;
+    const wasReading = !!this.activeReader;
+    const hadSources = this.activeSourceNodes.size > 0;
+    const wasSpeaking = this.isSpeakingInternal;
+
     if (this.activeAbortController) {
       try {
         this.activeAbortController.abort();
@@ -821,10 +1070,699 @@ export class OrpheusTTSProvider implements INarrationProvider {
     this.cleanupAudioNodes();
     this.isSpeakingInternal = false;
     this.streamDone = false;
-    console.log('[OrpheusTTS] Narration cancelled');
+
+    if (wasAborting || wasReading || hadSources || wasSpeaking) {
+      console.log(`[NarrationCancel] provider="orpheus" reason="${reason || 'unspecified'}" caller="${caller || 'unknown'}" activeStreamsCancelled=${wasAborting || wasReading} activePlaybackStopped=${wasSpeaking || hadSources}`);
+    }
   }
 
   public isSpeaking(): boolean {
     return this.isSpeakingInternal;
+  }
+
+  /**
+   * Generates audio for the given script silently in the background without playback.
+   * Does NOT interrupt or cancel currently active audio playback.
+   */
+  public async generateAudio(
+    script: string,
+    options?: NarrationSpeakOptions,
+    signal?: AbortSignal
+  ): Promise<{ pcmData: Float32Array; sampleRate: number; duration: number; script: string; voice: string } | null> {
+    const stableId = options?.waypointId || options?.title || 'orpheus-voice';
+    const waypointName = options?.title || stableId;
+
+    const voice = options?.orpheusVoice || this.defaultVoice || 'tara';
+    const limit = typeof options?.limit === 'number' && !isNaN(options.limit) && options.limit > 0 ? options.limit : 600;
+
+    let textToSend = script;
+    if (options?.description) {
+      const originalDesc = cleanNarrationText(options.description);
+      const cappedDesc = capDescriptionForNarration(originalDesc, limit);
+      textToSend = buildNarrationScript(options.title || '', cappedDesc);
+    }
+
+    if (!textToSend || textToSend.trim().length === 0) return null;
+
+    const ttsStartTime = Date.now();
+    logProviderStart('OrpheusTTS', waypointName, stableId, `scriptLength=${textToSend.length}`);
+    logTraceNarration(stableId, waypointName, 'TTS request started', `provider="orpheus" voice="${voice}" scriptLength=${textToSend.length}`);
+    logTraceTiming('ORPHEUS_HTTP_REQUEST_STARTED', stableId, waypointName, `scriptLength=${textToSend.length} voice="${voice}"`);
+
+    const fetchFn = (typeof window !== 'undefined' && typeof window.fetch === 'function') ? window.fetch : fetch;
+    const response = await fetchFn(this.bridgeUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: textToSend, voice }),
+      signal
+    });
+
+    if (!response.ok || !response.body) {
+      throw new Error(`Orpheus TTS generation failed (${response.status})`);
+    }
+
+    logTraceNarration(stableId, waypointName, 'TTS generation started', `status=${response.status}`);
+    logTraceTiming('ORPHEUS_GENERATION_STARTED', stableId, waypointName, `status=${response.status}`);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let sseBuffer = '';
+    const pcmChunks: Float32Array[] = [];
+    let totalSamples = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done || signal?.aborted) break;
+
+      sseBuffer += decoder.decode(value, { stream: true });
+      const events = sseBuffer.split('\n\n');
+      sseBuffer = events.pop() || '';
+
+      for (const rawEvent of events) {
+        if (!rawEvent.trim()) continue;
+        for (const line of rawEvent.split('\n')) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('data:')) {
+            const dataStr = trimmed.slice(5).trim();
+            if (dataStr === '[DONE]') continue;
+            try {
+              const eventJson = JSON.parse(dataStr);
+              if (eventJson.error) throw new Error(eventJson.error);
+              if (eventJson.raw_pcm_base64) {
+                const pcm = decodeBase64PCMToFloat32(eventJson.raw_pcm_base64);
+                if (pcm.length > 0) {
+                  if (pcmChunks.length === 0) {
+                    logTraceNarration(stableId, waypointName, 'first audio data received', `chunkSamples=${pcm.length}`);
+                    logTraceTiming('ORPHEUS_FIRST_AUDIO', stableId, waypointName, `chunkSamples=${pcm.length}`);
+                  }
+                  pcmChunks.push(pcm);
+                  totalSamples += pcm.length;
+                }
+              }
+            } catch (err: any) {
+              if (err instanceof Error && err.message.startsWith('Orpheus')) throw err;
+            }
+          }
+        }
+      }
+    }
+
+    if (totalSamples === 0) return null;
+
+    const fullPcm = new Float32Array(totalSamples);
+    let offset = 0;
+    for (const chunk of pcmChunks) {
+      fullPcm.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    const duration = totalSamples / 24000;
+    const ttsElapsedMs = Date.now() - ttsStartTime;
+    logProviderComplete('OrpheusTTS', waypointName, stableId, ttsElapsedMs, `duration=${duration.toFixed(2)}s`);
+    logTraceNarration(stableId, waypointName, 'full audio received', `totalChunks=${pcmChunks.length} duration=${duration.toFixed(2)}s`);
+    logTraceTiming('ORPHEUS_AUDIO_COMPLETE', stableId, waypointName, `duration=${duration.toFixed(2)}s totalChunks=${pcmChunks.length}`);
+    logTraceNarration(stableId, waypointName, 'audio decoded', `totalSamples=${totalSamples} sampleRate=24000`);
+
+    return {
+      pcmData: fullPcm,
+      sampleRate: 24000,
+      duration,
+      script: textToSend,
+      voice
+    };
+  }
+
+  /**
+   * Plays pre-generated PCM audio immediately with zero generation delay.
+   */
+  public async speakCached(
+    cached: { pcmData: Float32Array; sampleRate: number; duration: number },
+    options: NarrationSpeakOptions
+  ): Promise<void> {
+    this.cancel();
+
+    const stableId = options.waypointId || options.title || 'orpheus-voice';
+    const waypointName = options.title || stableId;
+
+    if (!this.isSupported()) {
+      options.onError?.(new Error('Web Audio API not supported'));
+      return;
+    }
+
+    const AudioContextClass = getAudioContextClass();
+    if (!AudioContextClass) {
+      options.onError?.(new Error('AudioContext not available'));
+      return;
+    }
+
+    const audioContext = new AudioContextClass();
+    this.audioContext = audioContext;
+
+    const volume = typeof options.volume === 'number' && !isNaN(options.volume) ? options.volume : this.defaultVolume;
+    const speed = typeof options.speed === 'number' && !isNaN(options.speed) ? options.speed : this.defaultSpeed;
+
+    const gainNode = audioContext.createGain();
+    this.gainNode = gainNode;
+    try {
+      gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+    } catch {
+      gainNode.gain.value = volume;
+    }
+    gainNode.connect(audioContext.destination);
+
+    if (audioContext.state === 'suspended') {
+      try {
+        await audioContext.resume();
+      } catch {}
+    }
+
+    const audioBuffer = audioContext.createBuffer(1, cached.pcmData.length, cached.sampleRate || 24000);
+    if (typeof audioBuffer.copyToChannel === 'function') {
+      audioBuffer.copyToChannel(cached.pcmData, 0);
+    } else {
+      audioBuffer.getChannelData(0).set(cached.pcmData);
+    }
+
+    const source = audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+    try {
+      source.playbackRate.setValueAtTime(speed, audioContext.currentTime);
+    } catch {
+      source.playbackRate.value = speed;
+    }
+    source.connect(gainNode);
+
+    this.isSpeakingInternal = true;
+    logTraceNarration(stableId, waypointName, 'playback started', `audioDuration=${cached.duration.toFixed(2)}s`);
+    logTraceTiming('WP1_PLAYBACK_STARTED', stableId, waypointName, `audioDuration=${cached.duration.toFixed(2)}s`);
+    options.onStart?.();
+
+    source.onended = () => {
+      this.activeSourceNodes.delete(source);
+      this.isSpeakingInternal = false;
+      this.cleanupAudioNodes();
+      logTraceNarration(stableId, waypointName, 'playback ended');
+      options.onEnd?.();
+    };
+
+    this.activeSourceNodes.add(source);
+    source.start(audioContext.currentTime + 0.02);
+  }
+}
+
+/**
+ * Kokoro TTS Provider connecting to the local HTTP server (http://127.0.0.1:8880/tts).
+ * Synthesizes the full narration in a single ultra-fast pass (~1.2-1.4s), decodes WAV audio,
+ * and schedules continuous playback using the Web Audio API.
+ * Supports silent preloading of future waypoints and zero-latency cached playback.
+ */
+export class KokoroTTSProvider implements INarrationProvider {
+  public readonly id: NarrationProviderType = 'kokoro';
+  private bridgeUrl = 'http://127.0.0.1:8880/tts';
+  private activeAbortController: AbortController | null = null;
+  private audioContext: AudioContext | null = null;
+  private gainNode: GainNode | null = null;
+  private activeSourceNodes: Set<AudioBufferSourceNode> = new Set();
+  private isSpeakingInternal = false;
+  private defaultVolume = 1.0;
+  private defaultSpeed = 1.0;
+  private defaultVoice = 'am_michael';
+
+  constructor(bridgeUrl = 'http://127.0.0.1:8880/tts') {
+    this.bridgeUrl = bridgeUrl;
+  }
+
+  public setVolume(volume: number): void {
+    const v = typeof volume === 'number' && !isNaN(volume) ? Math.max(0.0, Math.min(1.0, volume)) : 1.0;
+    this.defaultVolume = v;
+    if (this.gainNode && this.audioContext) {
+      try {
+        this.gainNode.gain.setValueAtTime(v, this.audioContext.currentTime);
+      } catch (e) {
+        this.gainNode.gain.value = v;
+      }
+    }
+  }
+
+  public getVolume(): number {
+    return this.defaultVolume;
+  }
+
+  public setSpeed(speed: number): void {
+    const s = typeof speed === 'number' && !isNaN(speed) ? Math.max(0.5, Math.min(2.0, speed)) : 1.0;
+    this.defaultSpeed = s;
+    if (this.audioContext) {
+      for (const source of this.activeSourceNodes) {
+        try {
+          source.playbackRate.setValueAtTime(s, this.audioContext.currentTime);
+        } catch (e) {
+          source.playbackRate.value = s;
+        }
+      }
+    }
+  }
+
+  public getSpeed(): number {
+    return this.defaultSpeed;
+  }
+
+  public setVoice(voice: string): void {
+    if (voice) {
+      this.defaultVoice = voice;
+    }
+  }
+
+  public getVoice(): string {
+    return this.defaultVoice;
+  }
+
+  public getAvailableVoices(): KokoroVoiceOption[] {
+    return KOKORO_VOICES;
+  }
+
+  public isSupported(): boolean {
+    const hasFetch = (typeof window !== 'undefined' && typeof window.fetch === 'function') || typeof fetch === 'function';
+    const hasAudioContext = !!getAudioContextClass();
+    return hasFetch && hasAudioContext;
+  }
+
+  private cleanupAudioNodes(): void {
+    for (const source of this.activeSourceNodes) {
+      try {
+        source.onended = null;
+        source.stop();
+        source.disconnect();
+      } catch (e) {
+        // Ignore
+      }
+    }
+    this.activeSourceNodes.clear();
+
+    if (this.gainNode) {
+      try {
+        this.gainNode.disconnect();
+      } catch (e) {
+        // Ignore
+      }
+      this.gainNode = null;
+    }
+
+    if (this.audioContext) {
+      try {
+        if (this.audioContext.state !== 'closed') {
+          this.audioContext.close();
+        }
+      } catch (e) {
+        // Ignore
+      }
+      this.audioContext = null;
+    }
+  }
+
+  /**
+   * Fetches raw WAV audio array buffer from Kokoro service and converts to AudioBuffer / Float32Array PCM.
+   */
+  private async synthesize(
+    text: string,
+    voice: string,
+    speed: number,
+    signal: AbortSignal
+  ): Promise<{ pcmData: Float32Array; sampleRate: number; duration: number }> {
+    const fetchFn = (typeof window !== 'undefined' && typeof window.fetch === 'function') ? window.fetch : fetch;
+    const response = await fetchFn(this.bridgeUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voice, speed }),
+      signal
+    });
+
+    if (!response.ok) {
+      let errDetail = '';
+      try {
+        if (typeof response.json === 'function') {
+          const errJson = await response.json();
+          errDetail = errJson?.error || '';
+        }
+      } catch {}
+      throw new Error(errDetail ? `Kokoro TTS generation failed: ${errDetail}` : `Kokoro TTS generation failed (${response.status})`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    if (signal.aborted) {
+      return { pcmData: new Float32Array(0), sampleRate: 24000, duration: 0 };
+    }
+
+    if (!arrayBuffer || arrayBuffer.byteLength <= 44) {
+      throw new Error('Kokoro TTS generation produced no audio data');
+    }
+
+    // Decode WAV array buffer
+    const AudioContextClass = getAudioContextClass();
+    let pcmData: Float32Array;
+    let sampleRate = 24000;
+    let duration = 0;
+
+    if (AudioContextClass) {
+      const tempCtx = new AudioContextClass();
+      try {
+        // decodeAudioData handles WAV container decoding cleanly
+        const decodedBuffer = await tempCtx.decodeAudioData(arrayBuffer.slice(0));
+        sampleRate = decodedBuffer.sampleRate;
+        duration = decodedBuffer.duration;
+        pcmData = decodedBuffer.getChannelData(0);
+      } catch (decodeErr) {
+        // Fallback to manual 16-bit PCM slice if decodeAudioData fails in non-standard test env
+        const pcmBytes = new Uint8Array(arrayBuffer, 44);
+        const int16 = new Int16Array(pcmBytes.buffer, pcmBytes.byteOffset, Math.floor(pcmBytes.byteLength / 2));
+        pcmData = new Float32Array(int16.length);
+        for (let i = 0; i < int16.length; i++) {
+          pcmData[i] = int16[i] / 32768.0;
+        }
+        duration = pcmData.length / sampleRate;
+      } finally {
+        if (tempCtx.state !== 'closed') {
+          try {
+            tempCtx.close();
+          } catch {}
+        }
+      }
+    } else {
+      const pcmBytes = new Uint8Array(arrayBuffer, 44);
+      const int16 = new Int16Array(pcmBytes.buffer, pcmBytes.byteOffset, Math.floor(pcmBytes.byteLength / 2));
+      pcmData = new Float32Array(int16.length);
+      for (let i = 0; i < int16.length; i++) {
+        pcmData[i] = int16[i] / 32768.0;
+      }
+      duration = pcmData.length / sampleRate;
+    }
+
+    return { pcmData, sampleRate, duration };
+  }
+
+  public async speak(script: string, options: NarrationSpeakOptions): Promise<void> {
+    this.cancel();
+
+    if (!this.isSupported()) {
+      const err = new Error('Web Audio API is not supported in this environment');
+      console.warn('[KokoroTTS]', err);
+      options.onError?.(err);
+      return;
+    }
+
+    const stableId = options?.waypointId || options?.title || 'kokoro-voice';
+    const waypointName = options?.title || stableId;
+    const voice = options?.kokoroVoice || this.defaultVoice || 'am_michael';
+    const limit = typeof options?.limit === 'number' && !isNaN(options.limit) && options.limit > 0 ? options.limit : 600;
+
+    let textToSend = script;
+    if (options?.description) {
+      const originalDesc = cleanNarrationText(options.description);
+      const cappedDesc = capDescriptionForNarration(originalDesc, limit);
+      textToSend = buildNarrationScript(options.title || '', cappedDesc);
+    }
+
+    if (!textToSend || textToSend.trim().length === 0) return;
+
+    const controller = new AbortController();
+    this.activeAbortController = controller;
+    const { signal } = controller;
+
+    const ttsStartTime = Date.now();
+    logProviderStart('KokoroTTS', waypointName, stableId, `scriptLength=${textToSend.length} voice="${voice}"`);
+    logTraceNarration(stableId, waypointName, 'TTS request started', `provider="kokoro" voice="${voice}" scriptLength=${textToSend.length}`);
+    logTraceTiming('KOKORO_HTTP_REQUEST_STARTED', stableId, waypointName, `scriptLength=${textToSend.length} voice="${voice}"`);
+
+    const AudioContextClass = getAudioContextClass();
+    if (!AudioContextClass) {
+      options.onError?.(new Error('AudioContext not available'));
+      return;
+    }
+
+    const audioContext = new AudioContextClass();
+    this.audioContext = audioContext;
+
+    const volume = typeof options.volume === 'number' && !isNaN(options.volume) ? options.volume : this.defaultVolume;
+    const speed = typeof options.speed === 'number' && !isNaN(options.speed) ? options.speed : this.defaultSpeed;
+
+    const gainNode = audioContext.createGain();
+    this.gainNode = gainNode;
+    try {
+      gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+    } catch {
+      gainNode.gain.value = volume;
+    }
+    gainNode.connect(audioContext.destination);
+
+    if (audioContext.state === 'suspended') {
+      try {
+        await audioContext.resume();
+      } catch {}
+    }
+
+    if (signal.aborted) {
+      this.cleanupAudioNodes();
+      return;
+    }
+
+    try {
+      logTraceNarration(stableId, waypointName, 'TTS generation started');
+      logTraceTiming('KOKORO_GENERATION_STARTED', stableId, waypointName);
+
+      const { pcmData, sampleRate, duration } = await this.synthesize(textToSend, voice, speed, signal);
+
+      if (signal.aborted) {
+        this.cleanupAudioNodes();
+        return;
+      }
+
+      const ttsElapsedMs = Date.now() - ttsStartTime;
+      logProviderComplete('KokoroTTS', waypointName, stableId, ttsElapsedMs, `duration=${duration.toFixed(2)}s`);
+      logTraceNarration(stableId, waypointName, 'full audio received', `duration=${duration.toFixed(2)}s elapsedMs=${ttsElapsedMs}ms`);
+      logTraceTiming('KOKORO_AUDIO_COMPLETE', stableId, waypointName, `duration=${duration.toFixed(2)}s elapsedMs=${ttsElapsedMs}ms`);
+
+      const audioBuffer = audioContext.createBuffer(1, pcmData.length, sampleRate || 24000);
+      if (typeof audioBuffer.copyToChannel === 'function') {
+        audioBuffer.copyToChannel(pcmData, 0);
+      } else {
+        audioBuffer.getChannelData(0).set(pcmData);
+      }
+
+      const sourceNode = audioContext.createBufferSource();
+      sourceNode.buffer = audioBuffer;
+      try {
+        sourceNode.playbackRate.setValueAtTime(speed, audioContext.currentTime);
+      } catch {
+        sourceNode.playbackRate.value = speed;
+      }
+      sourceNode.connect(gainNode);
+
+      this.isSpeakingInternal = true;
+      const scheduledStart = audioContext.currentTime + 0.02;
+      const expectedEnd = scheduledStart + (duration / speed);
+
+      logTraceNarration(stableId, waypointName, 'playback started', `audioDuration=${duration.toFixed(2)}s scheduledStart=${scheduledStart.toFixed(3)}s expectedEnd=${expectedEnd.toFixed(3)}s`);
+      logTraceTiming('WP1_PLAYBACK_STARTED', stableId, waypointName, `audioDuration=${duration.toFixed(2)}s`);
+      logTraceTiming('KOKORO_PLAYBACK_STARTED', stableId, waypointName, `audioDuration=${duration.toFixed(2)}s`);
+      options.onStart?.();
+
+      sourceNode.onended = () => {
+        this.activeSourceNodes.delete(sourceNode);
+        this.isSpeakingInternal = false;
+        this.cleanupAudioNodes();
+        logTraceTiming('KOKORO_PLAYBACK_ENDED', stableId, waypointName);
+        logTraceTiming('NARRATION_PLAYBACK_ENDED', stableId, waypointName);
+        logTraceNarration(stableId, waypointName, 'playback ended');
+        options.onEnd?.();
+      };
+
+      this.activeSourceNodes.add(sourceNode);
+      sourceNode.start(scheduledStart);
+
+    } catch (err: any) {
+      if (signal.aborted || err?.name === 'AbortError') {
+        return;
+      }
+
+      this.isSpeakingInternal = false;
+      this.cleanupAudioNodes();
+
+      let friendlyError: Error;
+      if (err instanceof Error && err.message.startsWith('Kokoro')) {
+        friendlyError = err;
+      } else if (err?.message?.includes('Failed to fetch') || err?.name === 'TypeError') {
+        friendlyError = new Error('Kokoro TTS Service unavailable. Ensure local service is running on port 8880.');
+      } else {
+        friendlyError = err instanceof Error ? err : new Error(String(err));
+      }
+
+      console.warn('[KokoroTTS] Generation/playback error:', friendlyError);
+      options.onError?.(friendlyError);
+    } finally {
+      if (this.activeAbortController === controller) {
+        this.activeAbortController = null;
+      }
+    }
+  }
+
+  public cancel(reason?: string, caller?: string): void {
+    const wasAborting = !!this.activeAbortController;
+    const hadSources = this.activeSourceNodes.size > 0;
+    const wasSpeaking = this.isSpeakingInternal;
+
+    if (this.activeAbortController) {
+      try {
+        this.activeAbortController.abort();
+      } catch (e) {
+        // Ignore
+      }
+      this.activeAbortController = null;
+    }
+
+    this.cleanupAudioNodes();
+    this.isSpeakingInternal = false;
+
+    if (wasAborting || hadSources || wasSpeaking) {
+      console.log(`[NarrationCancel] provider="kokoro" reason="${reason || 'unspecified'}" caller="${caller || 'unknown'}" activeStreamsCancelled=${wasAborting} activePlaybackStopped=${wasSpeaking || hadSources}`);
+    }
+  }
+
+  public isSpeaking(): boolean {
+    return this.isSpeakingInternal;
+  }
+
+  /**
+   * Generates audio for the given script silently in the background without playback.
+   * Does NOT interrupt or cancel currently active audio playback.
+   */
+  public async generateAudio(
+    script: string,
+    options?: NarrationSpeakOptions,
+    signal?: AbortSignal
+  ): Promise<{ pcmData: Float32Array; sampleRate: number; duration: number; script: string; voice: string } | null> {
+    const stableId = options?.waypointId || options?.title || 'kokoro-voice';
+    const waypointName = options?.title || stableId;
+
+    const voice = options?.kokoroVoice || this.defaultVoice || 'am_michael';
+    const limit = typeof options?.limit === 'number' && !isNaN(options.limit) && options.limit > 0 ? options.limit : 600;
+    const speed = typeof options?.speed === 'number' && !isNaN(options.speed) ? options.speed : this.defaultSpeed;
+
+    let textToSend = script;
+    if (options?.description) {
+      const originalDesc = cleanNarrationText(options.description);
+      const cappedDesc = capDescriptionForNarration(originalDesc, limit);
+      textToSend = buildNarrationScript(options.title || '', cappedDesc);
+    }
+
+    if (!textToSend || textToSend.trim().length === 0) return null;
+
+    const ttsStartTime = Date.now();
+    logProviderStart('KokoroTTS', waypointName, stableId, `scriptLength=${textToSend.length} (preload)`);
+    logTraceNarration(stableId, waypointName, 'TTS request started', `provider="kokoro" voice="${voice}" scriptLength=${textToSend.length} (preload)`);
+    logTraceTiming('KOKORO_HTTP_REQUEST_STARTED', stableId, waypointName, `scriptLength=${textToSend.length} voice="${voice}" preload=true`);
+
+    const abortCtrl = new AbortController();
+    const activeSignal = signal || abortCtrl.signal;
+
+    try {
+      const { pcmData, sampleRate, duration } = await this.synthesize(textToSend, voice, speed, activeSignal);
+      if (activeSignal.aborted || pcmData.length === 0) return null;
+
+      const ttsElapsedMs = Date.now() - ttsStartTime;
+      logProviderComplete('KokoroTTS', waypointName, stableId, ttsElapsedMs, `duration=${duration.toFixed(2)}s (preload)`);
+      logTraceNarration(stableId, waypointName, 'full audio received', `duration=${duration.toFixed(2)}s (preload)`);
+      logTraceTiming('KOKORO_AUDIO_COMPLETE', stableId, waypointName, `duration=${duration.toFixed(2)}s (preload)`);
+
+      return {
+        pcmData,
+        sampleRate,
+        duration,
+        script: textToSend,
+        voice
+      };
+    } catch (err) {
+      if (activeSignal.aborted) return null;
+      console.warn('[KokoroTTS] Preload generation error:', err);
+      return null;
+    }
+  }
+
+  /**
+   * Plays pre-generated PCM audio immediately with zero generation delay.
+   */
+  public async speakCached(
+    cached: { pcmData: Float32Array; sampleRate: number; duration: number },
+    options: NarrationSpeakOptions
+  ): Promise<void> {
+    this.cancel();
+
+    const stableId = options.waypointId || options.title || 'kokoro-voice';
+    const waypointName = options.title || stableId;
+
+    if (!this.isSupported()) {
+      options.onError?.(new Error('Web Audio API not supported'));
+      return;
+    }
+
+    const AudioContextClass = getAudioContextClass();
+    if (!AudioContextClass) {
+      options.onError?.(new Error('AudioContext not available'));
+      return;
+    }
+
+    const audioContext = new AudioContextClass();
+    this.audioContext = audioContext;
+
+    const volume = typeof options.volume === 'number' && !isNaN(options.volume) ? options.volume : this.defaultVolume;
+    const speed = typeof options.speed === 'number' && !isNaN(options.speed) ? options.speed : this.defaultSpeed;
+
+    const gainNode = audioContext.createGain();
+    this.gainNode = gainNode;
+    try {
+      gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+    } catch {
+      gainNode.gain.value = volume;
+    }
+    gainNode.connect(audioContext.destination);
+
+    if (audioContext.state === 'suspended') {
+      try {
+        await audioContext.resume();
+      } catch {}
+    }
+
+    const audioBuffer = audioContext.createBuffer(1, cached.pcmData.length, cached.sampleRate || 24000);
+    if (typeof audioBuffer.copyToChannel === 'function') {
+      audioBuffer.copyToChannel(cached.pcmData, 0);
+    } else {
+      audioBuffer.getChannelData(0).set(cached.pcmData);
+    }
+
+    const source = audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+    try {
+      source.playbackRate.setValueAtTime(speed, audioContext.currentTime);
+    } catch {
+      source.playbackRate.value = speed;
+    }
+    source.connect(gainNode);
+
+    this.isSpeakingInternal = true;
+    logTraceNarration(stableId, waypointName, 'playback started', `audioDuration=${cached.duration.toFixed(2)}s`);
+    logTraceTiming('WP1_PLAYBACK_STARTED', stableId, waypointName, `audioDuration=${cached.duration.toFixed(2)}s`);
+    logTraceTiming('KOKORO_PLAYBACK_STARTED', stableId, waypointName, `audioDuration=${cached.duration.toFixed(2)}s`);
+    options.onStart?.();
+
+    source.onended = () => {
+      this.activeSourceNodes.delete(source);
+      this.isSpeakingInternal = false;
+      this.cleanupAudioNodes();
+      logTraceTiming('KOKORO_PLAYBACK_ENDED', stableId, waypointName);
+      logTraceTiming('NARRATION_PLAYBACK_ENDED', stableId, waypointName);
+      logTraceNarration(stableId, waypointName, 'playback ended');
+      options.onEnd?.();
+    };
+
+    this.activeSourceNodes.add(source);
+    source.start(audioContext.currentTime + 0.02);
   }
 }

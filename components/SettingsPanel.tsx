@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Settings as SettingsIcon, X, Server, Newspaper, Film, Volume2, KeyRound, ExternalLink, Map as MapIcon, Palette, Sliders, Sparkles } from 'lucide-react';
-import { SkinType, UserSettings, AIProvider, NewsProvider } from '../types';
-import { narrationService, ORPHEUS_VOICES } from '../services/narrationService';
+import { SkinType, UserSettings, AIProvider, NewsProvider, NarrationProviderType } from '../types';
+import { narrationService, KOKORO_VOICES, ORPHEUS_VOICES } from '../services/narrationService';
 
 interface SettingsPanelProps {
   settings: UserSettings;
@@ -414,12 +414,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
     setVoiceTestMessage('Generating test sample...');
     const testTitle = "TerraExplorer";
     const testDesc = "Voice volume and narration preview at current settings.";
-    console.log(`[OrpheusTTS] TEST VOICE START provider="${settings.narrationProvider || 'system'}" voice="${settings.orpheusVoice || 'tara'}" speed=${settings.narrationSpeed ?? 0.9} volume=${Math.round((settings.narrationVolume ?? 1.0) * 100)} scriptLength=${testTitle.length + testDesc.length}`);
+    const activeProvider = settings.narrationProvider || 'system';
+    console.log(`[Narration] TEST VOICE START provider="${activeProvider}" voice="${activeProvider === 'kokoro' ? (settings.kokoroVoice || 'am_michael') : activeProvider === 'orpheus' ? (settings.orpheusVoice || 'tara') : (settings.narrationVoice || 'default')}" speed=${settings.narrationSpeed ?? 0.9} volume=${Math.round((settings.narrationVolume ?? 1.0) * 100)} scriptLength=${testTitle.length + testDesc.length}`);
     narrationService.speakStructured({
       title: testTitle,
       description: testDesc,
-      provider: settings.narrationProvider || 'system',
+      provider: activeProvider,
       voiceURI: settings.narrationVoice,
+      kokoroVoice: settings.kokoroVoice || 'am_michael',
       orpheusVoice: settings.orpheusVoice || 'tara',
       limit: settings.narrationLimit || 600,
       speed: settings.narrationSpeed,
@@ -434,7 +436,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
       },
       onError: (err: any) => {
         setIsVoiceTesting(false);
-        const errorMsg = err?.message || (settings.narrationProvider === 'orpheus' ? 'Orpheus TTS bridge error' : 'Voice test failed');
+        const defaultMsg = activeProvider === 'kokoro' 
+          ? 'Kokoro TTS service error' 
+          : activeProvider === 'orpheus' 
+          ? 'Orpheus TTS bridge error' 
+          : 'Voice test failed';
+        const errorMsg = err?.message || defaultMsg;
         setVoiceTestMessage(errorMsg);
       }
     });
@@ -474,11 +481,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
     'parchment': {
       container: "text-[#3e2723] font-sans",
       header: "",
-      headerTitle: "text-[#5c3a21] font-bold uppercase tracking-wider brand-font",
-      closeBtn: "hover:bg-[#d2b48c]/50 hover:text-[#5c3a21] text-[#8b5a2b] rounded p-1 transition-colors",
+      headerTitle: "text-[#3e2723] font-bold uppercase tracking-wider brand-font",
+      closeBtn: "hover:bg-[#d2b48c]/50 hover:text-[#3e2723] text-[#3e2723] rounded p-1 transition-colors",
       tabBar: "bg-transparent",
       tabActive: "text-[#3e2723] font-bold",
-      tabInactive: "text-[#8b5a2b]/70 hover:text-[#5c3a21]",
+      tabInactive: "text-[#3e2723]/70 hover:text-[#3e2723]",
       divider: "border-transparent"
     }
   };
@@ -502,7 +509,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
 
   const sectionTitleClasses = `
     text-sm font-bold uppercase tracking-wider flex items-center gap-2 mb-4
-    ${isParchment ? 'text-[#8b5a2b]' : ''}
+    ${isParchment ? 'text-[#3e2723]' : ''}
     ${skin === 'modern' ? 'text-white/60' : ''}
     ${isRetro ? 'text-green-300 border-b border-green-400 pb-1' : ''}
     ${skin === 'retro-amber' ? 'text-[#ffb000] border-[#ffb000]' : ''}
@@ -510,13 +517,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
 
   const labelClasses = `
     block text-sm font-medium mb-1
-    ${isParchment ? 'text-[#3e2723]/80' : ''}
+    ${isParchment ? 'text-[#3e2723]' : ''}
     ${skin === 'modern' ? 'text-white/80' : ''}
   `;
 
   const inputClasses = `
     w-full px-3 py-2 rounded-lg text-sm transition-colors
-    ${isParchment ? 'bg-[#e6d5b8] border-[#8b5a2b]/30 text-[#3e2723] focus:border-[#8b5a2b] focus:ring-1 focus:ring-[#8b5a2b]' : ''}
+    ${isParchment ? 'bg-[#e6d5b8] border border-[#8b5a2b]/30 text-[#3e2723] focus:border-[#8b5a2b] focus:ring-1 focus:ring-[#8b5a2b]' : ''}
     ${skin === 'modern' ? 'bg-white/10 border-white/20 text-white focus:bg-white/20 focus:border-white/40' : ''}
     ${isRetro ? 'bg-transparent border-2 border-green-400 text-green-300 rounded-none focus:outline-none' : ''}
     ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000]' : ''}
@@ -618,7 +625,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
           <div className="space-y-6">
             <div>
               <div className={`flex items-center justify-between mb-1 ${isRetro ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-[#ffb000]' : ''}`}>
-                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#8b5a2b]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${isRetro ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
+                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#3e2723]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${isRetro ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
                   <Film size={16} />
                   <span>DOC MODE</span>
                 </div>
@@ -655,7 +662,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                   />
                 </button>
               </div>
-              <p className={`text-xs opacity-70 mt-2 mb-4 ${isRetro ? 'uppercase' : ''}`}>
+              <p className={`text-xs mt-2 mb-4 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
                 Automatically guides the camera through a cinematic descent from the globe to the selected location.
               </p>
             </div>
@@ -668,7 +675,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
               <div>
                 <div className="flex justify-between items-center mb-1">
                   <label className={labelClasses}>Camera Transition Duration</label>
-                  <span className="text-xs opacity-70">
+                  <span className={`text-xs ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'}`}>
                     {(typeof settings.documentaryDuration === 'number' ? settings.documentaryDuration : 5.5).toFixed(1)}s
                   </span>
                 </div>
@@ -741,7 +748,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                           {isDetectingModels ? 'Detecting...' : 'Detect'}
                         </button>
                       </div>
-                      <p className={`text-xs mt-1 opacity-70 ${isRetro ? 'uppercase' : ''}`}>
+                      <p className={`text-xs mt-1 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
                         Must include /v1 for OpenAI compatibility.
                       </p>
                     </div>
@@ -766,8 +773,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                         type="button"
                         onClick={handleTestModelConnection}
                         disabled={modelTestStatus === 'testing' || !settings.lmStudioUrl}
-                        className={`w-full py-2 px-4 rounded-lg text-sm border font-medium transition-colors disabled:opacity-50
-                          ${isParchment ? 'border-0 bg-[#e8d5b5] hover:bg-[#d2b48c] text-[#5c3a21] hover:text-[#3e2723] font-bold uppercase tracking-wider' : ''}
+                        className={`w-full py-2 px-3 rounded-lg text-sm border whitespace-nowrap font-medium transition-colors disabled:opacity-50
+                          ${isParchment ? 'border-[#8b5a2b]/30 hover:bg-[#e6d5b8] text-[#3e2723]' : ''}
                           ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20 text-white' : ''}
                           ${isRetro ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300' : ''}
                           ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
@@ -823,8 +830,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                     type="button"
                     onClick={handleTestMapConnection}
                     disabled={mapTestStatus === 'testing'}
-                    className={`w-full py-2 px-4 rounded-lg text-sm border font-medium transition-colors disabled:opacity-50
-                      ${isParchment ? 'border-0 bg-[#e8d5b5] hover:bg-[#d2b48c] text-[#5c3a21] hover:text-[#3e2723] font-bold uppercase tracking-wider' : ''}
+                    className={`w-full py-2 px-3 rounded-lg text-sm border whitespace-nowrap font-medium transition-colors disabled:opacity-50
+                      ${isParchment ? 'border-[#8b5a2b]/30 hover:bg-[#e6d5b8] text-[#3e2723]' : ''}
                       ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20 text-white' : ''}
                       ${isRetro ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300' : ''}
                       ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
@@ -862,22 +869,22 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                         href="https://carto.com/developers/basemap-styles/"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className={`inline-flex items-center gap-1 hover:underline ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-400' : isRetro ? 'text-current' : 'text-cyan-400'}`}
+                        className={`inline-flex items-center gap-1 hover:underline ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-400' : isRetro ? 'text-current' : 'text-cyan-400'}`}
                       >
                         <span>carto.com</span>
                         <ExternalLink size={11} />
                       </a>
                     </div>
-                    <p className={`mt-0.5 opacity-70 ${isRetro ? 'uppercase' : ''}`}>
+                    <p className={`mt-0.5 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
                       A CARTO API key is required to load authenticated basemap tiles.
                     </p>
                   </div>
 
                   <div>
-                    <h4 className={`text-xs font-bold uppercase tracking-wider mb-1 ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300') : 'text-white/80'}`}>
+                    <h4 className={`text-xs font-bold uppercase tracking-wider mb-1 ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300') : 'text-white/80'}`}>
                       API KEY SETUP
                     </h4>
-                    <p className={`text-xs opacity-70 mb-2 ${isRetro ? 'uppercase' : ''}`}>
+                    <p className={`text-xs mb-2 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
                       Add your key to the project&apos;s .env.local file:
                     </p>
                     <div className={`p-3 rounded-lg text-[11px] font-mono leading-relaxed overflow-x-auto select-all ${
@@ -900,12 +907,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
             {/* Section 3: NEWS PROVIDER */}
             <div className="space-y-4">
               <div className={`flex items-center justify-between mb-1 ${isRetro ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-[#ffb000]' : ''}`}>
-                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#8b5a2b]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${isRetro ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
+                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#3e2723]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${isRetro ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
                   <Newspaper size={16} />
                   <span>NEWS PROVIDER</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`text-xs font-semibold uppercase tracking-wider ${isParchment ? 'text-[#8b5a2b]' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300') : 'text-white/80'}`}>
+                  <span className={`text-xs font-semibold uppercase tracking-wider ${isParchment ? 'text-[#3e2723]' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300') : 'text-white/80'}`}>
                     SHOW NEWS
                   </span>
                   <button
@@ -964,8 +971,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                       type="button"
                       onClick={handleTestNewsConnection}
                       disabled={newsTestStatus === 'testing'}
-                      className={`w-full py-2 px-4 rounded-lg text-sm border font-medium transition-colors disabled:opacity-50
-                        ${isParchment ? 'border-0 bg-[#e8d5b5] hover:bg-[#d2b48c] text-[#5c3a21] hover:text-[#3e2723] font-bold uppercase tracking-wider' : ''}
+                      className={`w-full py-2 px-3 rounded-lg text-sm border whitespace-nowrap font-medium transition-colors disabled:opacity-50
+                        ${isParchment ? 'border-[#8b5a2b]/30 hover:bg-[#e6d5b8] text-[#3e2723]' : ''}
                         ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20 text-white' : ''}
                         ${isRetro ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300' : ''}
                         ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
@@ -1003,7 +1010,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                 </div>
 
                 <div>
-                  <h4 className={`text-xs font-bold uppercase tracking-wider mb-2.5 ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300') : 'text-white/80'}`}>
+                  <h4 className={`text-xs font-bold uppercase tracking-wider mb-2.5 ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300') : 'text-white/80'}`}>
                     News API Sources
                   </h4>
                   <div className="space-y-3 text-xs">
@@ -1014,13 +1021,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                           href="https://developer.nytimes.com/get-started"
                           target="_blank"
                           rel="noopener noreferrer"
-                          className={`inline-flex items-center gap-1 hover:underline ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-400' : isRetro ? 'text-current' : 'text-cyan-400'}`}
+                          className={`inline-flex items-center gap-1 hover:underline ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-400' : isRetro ? 'text-current' : 'text-cyan-400'}`}
                         >
                           <span>developer.nytimes.com</span>
                           <ExternalLink size={11} />
                         </a>
                       </div>
-                      <p className={`mt-0.5 opacity-70 ${isRetro ? 'uppercase' : ''}`}>
+                      <p className={`mt-0.5 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
                         Obtain an API key from the New York Times Developer Portal.
                       </p>
                     </div>
@@ -1032,13 +1039,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                           href="https://newsapi.org/"
                           target="_blank"
                           rel="noopener noreferrer"
-                          className={`inline-flex items-center gap-1 hover:underline ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-400' : isRetro ? 'text-current' : 'text-cyan-400'}`}
+                          className={`inline-flex items-center gap-1 hover:underline ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-400' : isRetro ? 'text-current' : 'text-cyan-400'}`}
                         >
                           <span>newsapi.org</span>
                           <ExternalLink size={11} />
                         </a>
                       </div>
-                      <p className={`mt-0.5 opacity-70 ${isRetro ? 'uppercase' : ''}`}>
+                      <p className={`mt-0.5 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
                         Obtain an API key from News API.
                       </p>
                     </div>
@@ -1050,13 +1057,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                           href="https://newsdata.io/"
                           target="_blank"
                           rel="noopener noreferrer"
-                          className={`inline-flex items-center gap-1 hover:underline ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-400' : isRetro ? 'text-current' : 'text-cyan-400'}`}
+                          className={`inline-flex items-center gap-1 hover:underline ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-400' : isRetro ? 'text-current' : 'text-cyan-400'}`}
                         >
                           <span>newsdata.io</span>
                           <ExternalLink size={11} />
                         </a>
                       </div>
-                      <p className={`mt-0.5 opacity-70 ${isRetro ? 'uppercase' : ''}`}>
+                      <p className={`mt-0.5 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
                         Obtain an API key from NewsData.io.
                       </p>
                     </div>
@@ -1064,10 +1071,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                 </div>
 
                 <div>
-                  <h4 className={`text-xs font-bold uppercase tracking-wider mb-1 ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300') : 'text-white/80'}`}>
+                  <h4 className={`text-xs font-bold uppercase tracking-wider mb-1 ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300') : 'text-white/80'}`}>
                     API KEYS
                   </h4>
-                  <p className={`text-xs opacity-70 mb-2 ${isRetro ? 'uppercase' : ''}`}>
+                  <p className={`text-xs mb-2 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
                     Add your keys to the project&apos;s .env.local file:
                   </p>
                   <div className={`p-3 rounded-lg text-[11px] font-mono leading-relaxed overflow-x-auto select-all ${
@@ -1097,7 +1104,7 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                 <Palette size={16} />
                 <span>Theme & Appearance</span>
               </div>
-              <p className={`text-xs opacity-70 mb-4 ${isRetro ? 'uppercase' : ''}`}>
+              <p className={`text-xs mb-4 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
                 Select visual skin and cartographic presentation theme.
               </p>
 
@@ -1132,12 +1139,12 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                     >
                       <div className="space-y-0.5">
                         <div className="font-semibold text-sm">{t.name}</div>
-                        <div className="text-xs opacity-70">{t.desc}</div>
+                        <div className={`text-xs ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'}`}>{t.desc}</div>
                       </div>
                       {isSelected && (
                         <span className={`text-xs font-bold px-2 py-0.5 rounded uppercase tracking-wider shrink-0 ${
                           isParchment 
-                            ? 'bg-[#8b5a2b]/20 text-[#5c3a21]' 
+                            ? 'bg-[#8b5a2b]/20 text-[#3e2723]' 
                             : isRetro 
                             ? (skin === 'retro-amber' ? 'border border-[#ffb000]' : 'border border-green-400') 
                             : 'bg-cyan-500/20 text-cyan-300'
@@ -1209,7 +1216,7 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
           <div className="space-y-6">
             <div>
               <div className={`flex items-center justify-between mb-1 ${isRetro ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-[#ffb000]' : ''}`}>
-                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#8b5a2b]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${isRetro ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
+                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#3e2723]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${isRetro ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
                   <Volume2 size={16} />
                   <span>Narration</span>
                 </div>
@@ -1246,7 +1253,7 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                   />
                 </button>
               </div>
-              <p className={`text-xs opacity-70 mt-2 mb-4 ${isRetro ? 'uppercase' : ''}`}>
+              <p className={`text-xs mt-2 mb-4 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
                 Narrates the selected location's title and description using speech synthesis.
               </p>
             </div>
@@ -1270,11 +1277,28 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                   className={inputClasses}
                 >
                   <option value="system">SYSTEM VOICE</option>
+                  <option value="kokoro">KOKORO TTS (LOCAL)</option>
                   <option value="orpheus">ORPHEUS TTS (LOCAL)</option>
                 </select>
               </div>
 
-              {(settings.narrationProvider === 'orpheus') ? (
+              {(settings.narrationProvider === 'kokoro') ? (
+                <div>
+                  <label className={labelClasses}>Voice</label>
+                  <select
+                    value={settings.kokoroVoice || 'am_michael'}
+                    onChange={(e) => onUpdateSettings({ ...settings, kokoroVoice: e.target.value })}
+                    disabled={!settings.narrationEnabled}
+                    className={inputClasses}
+                  >
+                    {KOKORO_VOICES.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name} ({v.accent})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (settings.narrationProvider === 'orpheus') ? (
                 <div>
                   <label className={labelClasses}>Voice</label>
                   <select
@@ -1311,8 +1335,8 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
 
               <div>
                 <div className="flex justify-between text-xs mb-1">
-                  <label className={labelClasses}>Speed</label>
-                  <span className={`font-mono ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? 'text-current' : 'text-cyan-300'}`}>
+                  <label className={labelClasses}>Pace</label>
+                  <span className={`font-mono ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? 'text-current' : 'text-cyan-300'}`}>
                     {(settings.narrationSpeed || 1.0).toFixed(1)}x
                   </span>
                 </div>
@@ -1337,7 +1361,7 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
               <div>
                 <div className="flex justify-between text-xs mb-1">
                   <label className={labelClasses}>Volume</label>
-                  <span className={`font-mono ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? 'text-current' : 'text-cyan-300'}`}>
+                  <span className={`font-mono ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? 'text-current' : 'text-cyan-300'}`}>
                     {Math.round((settings.narrationVolume || 0.8) * 100)}%
                   </span>
                 </div>
@@ -1362,7 +1386,7 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
               <div>
                 <div className="flex justify-between text-xs mb-1">
                   <label className={labelClasses}>Narration Character Limit</label>
-                  <span className={`font-mono ${isParchment ? 'text-[#8b5a2b]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? 'text-current' : 'text-cyan-300'}`}>
+                  <span className={`font-mono ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? 'text-current' : 'text-cyan-300'}`}>
                     {settings.narrationLimit ?? 600} chars
                   </span>
                 </div>
@@ -1406,8 +1430,8 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                   type="button"
                   onClick={handleTestVoice}
                   disabled={!settings.narrationEnabled}
-                  className={`px-4 py-2 rounded-lg text-sm border font-medium transition-colors
-                    ${isParchment ? 'border-0 bg-[#e8d5b5] hover:bg-[#d2b48c] text-[#5c3a21] hover:text-[#3e2723] font-bold uppercase tracking-wider' : ''}
+                  className={`px-3 py-2 rounded-lg text-sm border whitespace-nowrap font-medium transition-colors
+                    ${isParchment ? 'border-[#8b5a2b]/30 hover:bg-[#e6d5b8] text-[#3e2723]' : ''}
                     ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20' : ''}
                     ${isRetro ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300 disabled:opacity-50' : ''}
                     ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
@@ -1416,7 +1440,7 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                   {isVoiceTesting ? 'Stop Sample' : 'Test Voice'}
                 </button>
                 {voiceTestMessage && (
-                  <span className={`text-xs ${isParchment ? 'text-[#8b5a2b]' : isRetro ? 'text-current' : 'text-cyan-400'}`}>
+                  <span className={`text-xs ${isParchment ? 'text-[#3e2723]' : isRetro ? 'text-current' : 'text-cyan-400'}`}>
                     {voiceTestMessage}
                   </span>
                 )}

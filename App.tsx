@@ -12,10 +12,17 @@ import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import SettingsPanel from './components/SettingsPanel';
 import { LocationInfo, SkinType, MapMarker, FavoriteLocation, LocationType, Waypoint, GeoCoordinates, UserSettings, AIProvider, NewsProvider } from './types';
-import { getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, EnrichmentMetrics, cancelFeatureInfoRequests, isLMStudioNoModelError, LM_STUDIO_NO_MODEL_MESSAGE, LM_STUDIO_NO_MODEL_INSTRUCTION } from './services/geminiService';
+import { getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, EnrichmentMetrics, cancelFeatureInfoRequests, isLMStudioNoModelError, LM_STUDIO_NO_MODEL_MESSAGE, LM_STUDIO_NO_MODEL_INSTRUCTION, isSourceRetrievalError } from './services/geminiService';
 import { getEstimatedClimate } from './services/geographic/climateEstimator';
 import { enrichLocationInfo, mergeLocationInfo, fetchAndValidateLocationNews } from './services/locationService';
 import { resolveGeographicMetadata } from './services/geographic/geographicResolver';
+import { waypointEnrichmentCache, waypointNarrationCache, inFlightNarrationPromises, CachedNarrationAudio } from './services/cacheService';
+import { waypointPipelineRegistry, logTraceNarration, logRouteScheduling } from './services/waypointPipelineService';
+import { logTraceTiming, initTraceTiming, recordWP1SubstantiveReady } from './services/traceTimingService';
+import { getWaypointStableId, findNextRouteWaypoint } from './utils/routeSequenceUtils';
+import { resolveCanonicalNarrative } from './utils/narrativeResolver';
+import { evaluateDescriptionReadiness } from './utils/descriptionReadiness';
+import { cleanNarrationText } from './services/narrationProviders';
 import { logWaypointSnapshot } from './utils/pipelineDebug';
 import { fetchLiveNews } from './services/newsService';
 import { runSearchPipeline } from './services/pipeline';
@@ -132,14 +139,16 @@ const AuthoritativeCameraEnforcer: React.FC<{
 
     // Single Source of Truth for Authoritative Distance
     let authoritativeDistance = 4.5;
-    if (cameraState.activeRoute) {
-       authoritativeDistance = cameraState.routeSuggestedDistance;
-    } else if (skin === 'parchment') {
+    if (skin === 'parchment') {
        const aspect = window.innerWidth / window.innerHeight;
        const baseDistance = getParchmentBaseDistance(aspect);
-       authoritativeDistance = Math.min(baseDistance, cameraState.themeSuggestedDistance);
+       authoritativeDistance = (cameraState.activeRoute && isSidebarOpen)
+         ? cameraState.routeSuggestedDistance
+         : Math.min(baseDistance, cameraState.themeSuggestedDistance);
     } else {
-       authoritativeDistance = cameraState.themeSuggestedDistance;
+       authoritativeDistance = (cameraState.activeRoute && isSidebarOpen)
+         ? cameraState.routeSuggestedDistance
+         : cameraState.themeSuggestedDistance;
     }
 
     // Protect against NaN
@@ -1084,6 +1093,7 @@ const App: React.FC = () => {
   const activeSearchRequestIdRef = useRef<number>(0);
   const activeSearchAbortControllerRef = useRef<AbortController | null>(null);
   const activeSelectionIdRef = useRef<string | null>(null);
+  const routePriorityWaypointRef = useRef<string | null>(null);
   const processingMarkerRef = useRef<string | null>(null);
   const isManualControlActiveRef = useRef<boolean>(false);
 
@@ -1124,7 +1134,8 @@ const App: React.FC = () => {
         parsed.showNews = parsed.showNews !== undefined ? !!parsed.showNews : true;
         parsed.retroGreenProjection = parsed.retroGreenProjection !== undefined ? !!parsed.retroGreenProjection : true;
         parsed.retroAmberProjection = parsed.retroAmberProjection !== undefined ? !!parsed.retroAmberProjection : true;
-        parsed.narrationProvider = parsed.narrationProvider === 'orpheus' ? 'orpheus' : 'system';
+        parsed.narrationProvider = (parsed.narrationProvider === 'kokoro' || parsed.narrationProvider === 'orpheus') ? parsed.narrationProvider : 'system';
+        parsed.kokoroVoice = parsed.kokoroVoice || 'am_michael';
         parsed.orpheusVoice = parsed.orpheusVoice || 'tara';
         if (typeof parsed.narrationLimit === 'number' && !isNaN(parsed.narrationLimit) && parsed.narrationLimit >= 100 && parsed.narrationLimit <= 1000) {
           parsed.narrationLimit = Math.round(parsed.narrationLimit);
@@ -1156,6 +1167,7 @@ const App: React.FC = () => {
       narrationEnabled: false,
       narrationProvider: 'system',
       narrationVoice: '',
+      kokoroVoice: 'am_michael',
       orpheusVoice: 'tara',
       narrationSpeed: 0.9,
       narrationVolume: 1.0,
@@ -1167,6 +1179,9 @@ const App: React.FC = () => {
 
   // Route State
   const [routeWaypoints, setRouteWaypoints] = useState<Waypoint[]>([]);
+  const routeWaypointsRef = useRef<Waypoint[]>([]);
+  routeWaypointsRef.current = routeWaypoints;
+  const inFlightPrefetchesRef = useRef<Set<string>>(new Set());
   const [currentWaypointIndex, setCurrentWaypointIndex] = useState<number>(-1);
   const [isTraceModalOpen, setIsTraceModalOpen] = useState(false);
 
@@ -1174,6 +1189,8 @@ const App: React.FC = () => {
   const [selectedMarkerCoordinates, setSelectedMarkerCoordinates] = useState<{ lat: number; lng: number } | null>(null);
   const [isDiscoveryLoading, setIsDiscoveryLoading] = useState(false); // Controls input search / discovery scan spinner
   const [isInfoPanelLoading, setIsInfoPanelLoading] = useState(false); // Controls InfoPanel enrichment skeleton
+  const isInfoPanelLoadingRef = useRef(false);
+  isInfoPanelLoadingRef.current = isInfoPanelLoading;
   const [isNewsFetching, setIsNewsFetching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isInteracting, setIsInteracting] = useState(false); // Interaction with Earth mesh
@@ -1186,7 +1203,11 @@ const App: React.FC = () => {
   const [isZoomLocked, setIsZoomLocked] = useState(false);
   const [lockedZoomDistance, setLockedZoomDistance] = useState<number | null>(null);
   const [isDocumentaryActive, setIsDocumentaryActive] = useState(false);
-  const activeNarrationRef = useRef<{ id: string; spoken: boolean } | null>(null);
+  const activeNarrationRef = useRef<{
+    selectionId: string;
+    narrativeKey?: string;
+    spoken: boolean;
+  } | null>(null);
 
 
   const currentCameraDistanceRef = useRef(4.5);
@@ -1196,7 +1217,7 @@ const App: React.FC = () => {
       mode: 'route' as 'route' | 'theme',
       theme: 'modern' as SkinType,
       activeRoute: null as string | null,
-      routeSuggestedDistance: 2.0,
+      routeSuggestedDistance: 4.5,
       themeSuggestedDistance: 4.5,
       targetRotation: null as { lat: number; lng: number } | null
   });
@@ -1337,6 +1358,11 @@ const App: React.FC = () => {
 
     if (startDist >= finalTargetDist - 0.05) {
       isCameraAnimatingRef.current = false;
+      if (cameraStateRef.current) {
+        cameraStateRef.current.themeSuggestedDistance = finalTargetDist;
+        cameraStateRef.current.routeSuggestedDistance = finalTargetDist;
+      }
+      currentCameraDistanceRef.current = finalTargetDist;
       console.log('[Camera] GLOBE_LEVEL_REACHED');
       return;
     }
@@ -1712,6 +1738,28 @@ const App: React.FC = () => {
   const userSettingsRef = useRef<UserSettings>(userSettings);
   userSettingsRef.current = userSettings;
 
+  const prefetchRouteWaypointEnrichmentRef = useRef<((wp: Waypoint) => Promise<void>) | null>(null);
+  const internalRouteWaypointsRef = useRef<Waypoint[]>([]);
+
+  const releaseRoutePriority = useCallback((completedWpId?: string) => {
+    if (routePriorityWaypointRef.current && (!completedWpId || routePriorityWaypointRef.current === completedWpId)) {
+      console.log('[TRACE ROUTE] WP1 PRIORITY COMPLETE');
+      console.log('[TRACE ROUTE] REMAINING WAYPOINT PROCESSING RELEASED');
+      logRouteScheduling('WP1 PRIORITY COMPLETE');
+      logRouteScheduling('REMAINING WAYPOINT PROCESSING RELEASED');
+      routePriorityWaypointRef.current = null;
+      setScanningStatusText(null);
+      const activeRoute = internalRouteWaypointsRef.current.length > 0 ? internalRouteWaypointsRef.current : routeWaypointsRef.current;
+      if (activeRoute && activeRoute.length > 1) {
+        const nextWp = activeRoute[1];
+        if (nextWp && prefetchRouteWaypointEnrichmentRef.current) {
+          logRouteScheduling('WP2 sequential processing started', `id="${nextWp.id}" name="${nextWp.name}"`);
+          void prefetchRouteWaypointEnrichmentRef.current(nextWp);
+        }
+      }
+    }
+  }, []);
+
   const maybeTriggerNarration = useCallback((info: LocationInfo | null) => {
     const currentSettings = userSettingsRef.current;
     const rawId = info ? ((info as any).id || info.osmId || info.name) : 'null';
@@ -1722,24 +1770,35 @@ const App: React.FC = () => {
       return;
     }
 
+    const title = getNarrationTitle(info);
+    const desc = getNarrationDescription(info);
+    const id = (info as any).id || info.osmId || info.name;
+    const stableId = activeSelectionIdRef.current || id;
+    const narrativeKey = `${title.toLowerCase().trim()}::${desc.trim()}`;
+
     if (!currentSettings.narrationEnabled) {
       console.log('[SearchNarration] REJECTED: narration disabled');
+      if (stableId && routePriorityWaypointRef.current === stableId) {
+        releaseRoutePriority(stableId);
+      }
       return;
     }
     console.log('[SearchNarration] NARRATION_ENABLED');
 
-    const title = getNarrationTitle(info);
-    const desc = getNarrationDescription(info);
+    console.log(`[NarrationGuard] EVALUATE selectionId="${stableId}" payloadId="${id}" activeNarration=${JSON.stringify(activeNarrationRef.current)}`);
 
-    console.log(`[SearchNarration] DESCRIPTION_RESOLVED name="${title}" descriptionType="${typeof desc}" descriptionLength=${desc.length}`);
+    console.log(`[SearchNarration] DESCRIPTION_RESOLVED name="${title}" id="${id}" descriptionType="${typeof desc}" descriptionLength=${desc.length}`);
 
-    // Strict check: must have title and a valid descriptive body (at least 3 characters)
-    if (!title || !desc || desc.length < 3) {
-      console.log(`[SearchNarration] REJECTED: no narration text (title="${title}", descLength=${desc.length})`);
+    // Strict check: must have title and a substantive documentary description
+    const descReadiness = evaluateDescriptionReadiness(desc, title);
+    if (!title || !desc || !descReadiness.isReady) {
+      console.log(`[SearchNarration] REJECTED: description not substantive (title="${title}", descLength=${desc.length}, reason="${descReadiness.reason}")`);
+      if (stableId && routePriorityWaypointRef.current === stableId && info.sectionState?.description !== 'loading') {
+        releaseRoutePriority(stableId);
+      }
       return;
     }
 
-    const id = (info as any).id || info.osmId || info.name;
     // Reject stale narration payloads if user has moved to another selection
     const isMatchingSelection = !activeSelectionIdRef.current ||
       id === activeSelectionIdRef.current ||
@@ -1747,48 +1806,238 @@ const App: React.FC = () => {
       info.name === activeSelectionIdRef.current;
 
     if (!isMatchingSelection) {
-      console.log(`[SearchNarration] REJECTED: stale selection (payloadId=${id}, activeSelectionId=${activeSelectionIdRef.current})`);
+      console.log(`[SearchNarration] NARRATION_GUARD REJECTED: stale selection (payloadId=${id}, activeSelectionId=${activeSelectionIdRef.current})`);
       return;
     }
     console.log(`[SearchNarration] SELECTION_MATCH id="${id}" (activeSelectionId="${activeSelectionIdRef.current}")`);
 
-    if (activeNarrationRef.current && activeNarrationRef.current.id === id && activeNarrationRef.current.spoken) {
-      console.log(`[SearchNarration] REJECTED: duplicate narration (id=${id})`);
+    if (
+      activeNarrationRef.current &&
+      (activeNarrationRef.current.selectionId === stableId ||
+        activeNarrationRef.current.selectionId === id ||
+        (Boolean(activeNarrationRef.current.narrativeKey) && activeNarrationRef.current.narrativeKey === narrativeKey))
+    ) {
+      console.log(`[NarrationGuard] DUPLICATE_BLOCKED selectionId="${stableId}" narrativeKey="${narrativeKey.slice(0, 50)}..."`);
       return;
     }
 
+    console.log(`[NarrationGuard] ACCEPT selectionId="${stableId}"`);
+    console.log(`[SearchNarration] NARRATION_GUARD PASSED id="${id}"`);
     console.log(`[SearchNarration] ACCEPTED id="${id}"`);
+    logTraceNarration(stableId, title, 'narration eligibility reached');
 
     activeNarrationRef.current = {
-      id,
+      selectionId: stableId,
+      narrativeKey,
       spoken: true
     };
 
     console.log(`[SearchNarration] SPEAK_REQUEST name="${title}" descriptionType="${typeof desc}" descriptionLength=${desc.length}`);
     console.log(`[SearchNarration] SPEAK_CALLED id="${id}" title="${title}" descLength=${desc.length}`);
-    console.log(`[OrpheusTTS] NARRATION START provider="${currentSettings.narrationProvider || 'system'}" voice="${currentSettings.orpheusVoice || 'tara'}" speed=${currentSettings.narrationSpeed ?? 0.9} volume=${Math.round((currentSettings.narrationVolume ?? 1.0) * 100)} scriptLength=${title.length + desc.length}`);
+
+    waypointPipelineRegistry.recordTimestamp(stableId, 'narrationStarted', Date.now());
+    waypointPipelineRegistry.setStage(stableId, 'narrationGenerating');
+    logTraceTiming('WP1_NARRATION_REQUESTED', stableId, title, `descLength=${desc.length}`);
+
+    if (stableId && routePriorityWaypointRef.current === stableId) {
+      setScanningStatusText("PREPARING NARRATION");
+    }
+
+    const isFirstRouteWaypoint = Boolean(
+      routeWaypointsRef.current &&
+      routeWaypointsRef.current[0] &&
+      (getWaypointStableId(routeWaypointsRef.current[0]) === stableId || routeWaypointsRef.current[0].name === title)
+    );
+
+    // 1. Check if we have pre-generated narration audio in waypointNarrationCache
+    const cachedNarration = waypointNarrationCache.get(stableId);
+    const activeProvider = currentSettings.narrationProvider || 'system';
+    if (cachedNarration && cachedNarration.narrativeKey === narrativeKey && (activeProvider === 'kokoro' || activeProvider === 'orpheus')) {
+      console.log(`[Narration Cache] HIT id="${stableId}"`);
+      console.log(`[Narration Cache] PLAY_CACHED id="${stableId}"`);
+      logTraceNarration(stableId, title, 'cached narration selected', `duration=${cachedNarration.duration.toFixed(2)}s`);
+      waypointPipelineRegistry.recordTimestamp(stableId, 'narrationAudioReady', Date.now());
+      waypointPipelineRegistry.setStage(stableId, 'narrationReady');
+
+      if (isFirstRouteWaypoint) {
+        console.log(`[TRACE ROUTE][Waypoint 1] narration audio ready`);
+      }
+
+      narrationService.speakCached(cachedNarration, {
+        waypointId: stableId,
+        title,
+        description: desc,
+        provider: activeProvider,
+        kokoroVoice: currentSettings.kokoroVoice || 'am_michael',
+        orpheusVoice: currentSettings.orpheusVoice || 'tara',
+        limit: currentSettings.narrationLimit || 600,
+        speed: currentSettings.narrationSpeed,
+        volume: currentSettings.narrationVolume,
+        onStart: () => {
+          waypointPipelineRegistry.recordTimestamp(stableId, 'narrationPlaybackStarted', Date.now());
+          waypointPipelineRegistry.setStage(stableId, 'playing');
+          if (isFirstRouteWaypoint) {
+            console.log(`[TRACE ROUTE][Waypoint 1] playback started`);
+          }
+          releaseRoutePriority(stableId);
+        },
+        onEnd: () => {
+          waypointPipelineRegistry.recordTimestamp(stableId, 'narrationPlaybackEnded', Date.now());
+          waypointPipelineRegistry.setStage(stableId, 'complete');
+          waypointPipelineRegistry.logWaypointMilestones(stableId, title);
+        },
+        onError: (err: any) => {
+          console.warn('[Narration] speakCached error:', err);
+          waypointPipelineRegistry.setStage(stableId, 'error');
+          releaseRoutePriority(stableId);
+          const defaultMsg = activeProvider === 'kokoro' ? 'Kokoro TTS Service unavailable' : 'Orpheus TTS Bridge unavailable';
+          const msg = err?.message || defaultMsg;
+          setSearchError(msg);
+        }
+      });
+      return;
+    }
+
+    // 2. Check if narration prefetch for this waypoint is currently in flight
+    const inFlightPromise = inFlightNarrationPromises.get(stableId);
+    if (inFlightPromise && (activeProvider === 'kokoro' || activeProvider === 'orpheus')) {
+      console.log(`[Narration Cache] IN_PROGRESS id="${stableId}"`);
+      (async () => {
+        const audioResult = await inFlightPromise;
+        if (activeSelectionIdRef.current === stableId && audioResult && audioResult.narrativeKey === narrativeKey) {
+          console.log(`[Narration Cache] HIT id="${stableId}"`);
+          console.log(`[Narration Cache] PLAY_CACHED id="${stableId}"`);
+          logTraceNarration(stableId, title, 'cached narration selected', `inFlight=true duration=${audioResult.duration.toFixed(2)}s`);
+          waypointPipelineRegistry.recordTimestamp(stableId, 'narrationAudioReady', Date.now());
+          waypointPipelineRegistry.setStage(stableId, 'narrationReady');
+
+          if (isFirstRouteWaypoint) {
+            console.log(`[TRACE ROUTE][Waypoint 1] narration audio ready`);
+          }
+
+          narrationService.speakCached(audioResult, {
+            waypointId: stableId,
+            title,
+            description: desc,
+            provider: activeProvider,
+            kokoroVoice: currentSettings.kokoroVoice || 'am_michael',
+            orpheusVoice: currentSettings.orpheusVoice || 'tara',
+            limit: currentSettings.narrationLimit || 600,
+            speed: currentSettings.narrationSpeed,
+            volume: currentSettings.narrationVolume,
+            onStart: () => {
+              waypointPipelineRegistry.recordTimestamp(stableId, 'narrationPlaybackStarted', Date.now());
+              waypointPipelineRegistry.setStage(stableId, 'playing');
+              if (isFirstRouteWaypoint) {
+                console.log(`[TRACE ROUTE][Waypoint 1] playback started`);
+              }
+              releaseRoutePriority(stableId);
+            },
+            onEnd: () => {
+              waypointPipelineRegistry.recordTimestamp(stableId, 'narrationPlaybackEnded', Date.now());
+              waypointPipelineRegistry.setStage(stableId, 'complete');
+              waypointPipelineRegistry.logWaypointMilestones(stableId, title);
+            },
+            onError: (err: any) => {
+              console.warn('[Narration] speakCached in-flight error:', err);
+              waypointPipelineRegistry.setStage(stableId, 'error');
+              releaseRoutePriority(stableId);
+              const defaultMsg = activeProvider === 'kokoro' ? 'Kokoro TTS Service unavailable' : 'Orpheus TTS Bridge unavailable';
+              const msg = err?.message || defaultMsg;
+              setSearchError(msg);
+            }
+          });
+        } else if (activeSelectionIdRef.current === stableId) {
+          console.log(`[Narration Cache] MISS id="${stableId}"`);
+          logTraceNarration(stableId, title, 'narration generation started');
+          console.log(`[Narration] NARRATION_START provider="${activeProvider}" voice="${activeProvider === 'kokoro' ? (currentSettings.kokoroVoice || 'am_michael') : activeProvider === 'orpheus' ? (currentSettings.orpheusVoice || 'tara') : (currentSettings.narrationVoice || 'default')}" speed=${currentSettings.narrationSpeed ?? 0.9} volume=${Math.round((currentSettings.narrationVolume ?? 1.0) * 100)} scriptLength=${title.length + desc.length}`);
+          narrationService.speakStructured({
+            waypointId: stableId,
+            title,
+            description: desc,
+            provider: activeProvider,
+            voiceURI: currentSettings.narrationVoice,
+            kokoroVoice: currentSettings.kokoroVoice || 'am_michael',
+            orpheusVoice: currentSettings.orpheusVoice || 'tara',
+            limit: currentSettings.narrationLimit || 600,
+            speed: currentSettings.narrationSpeed,
+            volume: currentSettings.narrationVolume,
+            onStart: () => {
+              waypointPipelineRegistry.recordTimestamp(stableId, 'narrationAudioReady', Date.now());
+              waypointPipelineRegistry.recordTimestamp(stableId, 'narrationPlaybackStarted', Date.now());
+              waypointPipelineRegistry.setStage(stableId, 'playing');
+              if (isFirstRouteWaypoint) {
+                console.log(`[TRACE ROUTE][Waypoint 1] narration audio ready`);
+                console.log(`[TRACE ROUTE][Waypoint 1] playback started`);
+              }
+              releaseRoutePriority(stableId);
+            },
+            onEnd: () => {
+              waypointPipelineRegistry.recordTimestamp(stableId, 'narrationPlaybackEnded', Date.now());
+              waypointPipelineRegistry.setStage(stableId, 'complete');
+              waypointPipelineRegistry.logWaypointMilestones(stableId, title);
+            },
+            onError: (err: any) => {
+              console.warn('[Narration] speakStructured fallback error:', err);
+              waypointPipelineRegistry.setStage(stableId, 'error');
+              releaseRoutePriority(stableId);
+              const defaultMsg = activeProvider === 'kokoro' ? 'Kokoro TTS Service unavailable' : 'Orpheus TTS Bridge unavailable';
+              const msg = err?.message || defaultMsg;
+              setSearchError(msg);
+            }
+          });
+        }
+      })();
+      return;
+    }
+
+    // 3. Fallback: standard TTS generation
+    console.log(`[Narration Cache] MISS id="${stableId}"`);
+    logTraceNarration(stableId, title, 'narration generation started');
+    console.log(`[Narration] NARRATION_START provider="${activeProvider}" voice="${activeProvider === 'kokoro' ? (currentSettings.kokoroVoice || 'am_michael') : activeProvider === 'orpheus' ? (currentSettings.orpheusVoice || 'tara') : (currentSettings.narrationVoice || 'default')}" speed=${currentSettings.narrationSpeed ?? 0.9} volume=${Math.round((currentSettings.narrationVolume ?? 1.0) * 100)} scriptLength=${title.length + desc.length}`);
 
     narrationService.speakStructured({
+      waypointId: stableId,
       title,
       description: desc,
-      provider: currentSettings.narrationProvider || 'system',
+      provider: activeProvider,
       voiceURI: currentSettings.narrationVoice,
+      kokoroVoice: currentSettings.kokoroVoice || 'am_michael',
       orpheusVoice: currentSettings.orpheusVoice || 'tara',
       limit: currentSettings.narrationLimit || 600,
       speed: currentSettings.narrationSpeed,
       volume: currentSettings.narrationVolume,
+      onStart: () => {
+        waypointPipelineRegistry.recordTimestamp(stableId, 'narrationAudioReady', Date.now());
+        waypointPipelineRegistry.recordTimestamp(stableId, 'narrationPlaybackStarted', Date.now());
+        waypointPipelineRegistry.setStage(stableId, 'playing');
+        if (isFirstRouteWaypoint) {
+          console.log(`[TRACE ROUTE][Waypoint 1] narration audio ready`);
+          console.log(`[TRACE ROUTE][Waypoint 1] playback started`);
+        }
+        releaseRoutePriority(stableId);
+      },
+      onEnd: () => {
+        waypointPipelineRegistry.recordTimestamp(stableId, 'narrationPlaybackEnded', Date.now());
+        waypointPipelineRegistry.setStage(stableId, 'complete');
+        waypointPipelineRegistry.logWaypointMilestones(stableId, title);
+      },
       onError: (err: any) => {
         console.warn('[Narration] speakStructured error:', err);
-        if (currentSettings.narrationProvider === 'orpheus') {
-          const msg = err?.message || 'Orpheus TTS Bridge unavailable';
+        waypointPipelineRegistry.setStage(stableId, 'error');
+        releaseRoutePriority(stableId);
+        if (activeProvider === 'kokoro' || activeProvider === 'orpheus') {
+          const defaultMsg = activeProvider === 'kokoro' ? 'Kokoro TTS Service unavailable' : 'Orpheus TTS Bridge unavailable';
+          const msg = err?.message || defaultMsg;
           setSearchError(msg);
         }
       }
     });
-  }, []);
+  }, [releaseRoutePriority]);
 
   useEffect(() => {
     narrationService.setProvider(userSettings.narrationProvider || 'system');
+    if (userSettings.kokoroVoice) narrationService.setKokoroVoice(userSettings.kokoroVoice);
     if (userSettings.orpheusVoice) narrationService.setOrpheusVoice(userSettings.orpheusVoice);
     if (typeof userSettings.narrationVolume === 'number') narrationService.setVolume(userSettings.narrationVolume);
     if (typeof userSettings.narrationSpeed === 'number') narrationService.setSpeed(userSettings.narrationSpeed);
@@ -1831,6 +2080,9 @@ const App: React.FC = () => {
 
     if (newSettings.narrationProvider && newSettings.narrationProvider !== prevNarrationProvider) {
       narrationService.setProvider(newSettings.narrationProvider);
+    }
+    if (newSettings.kokoroVoice) {
+      narrationService.setKokoroVoice(newSettings.kokoroVoice);
     }
     if (newSettings.orpheusVoice) {
       narrationService.setOrpheusVoice(newSettings.orpheusVoice);
@@ -1876,6 +2128,7 @@ const App: React.FC = () => {
   }, [updateCameraDistance]);
 
   const handleDocumentarySetCameraPosition = useCallback((lat: number, lng: number, dist: number) => {
+    previousGeoCenterRef.current = { lat, lng };
     if (cameraControlsRef.current && earthRef.current) {
       earthRef.current.updateMatrixWorld(true);
       const v = latLngToVector3(lat, lng, dist);
@@ -1910,7 +2163,6 @@ const App: React.FC = () => {
 
     setIsDocumentaryActive(true);
     setActiveOSMCoordinates(null);
-    activeNarrationRef.current = null;
 
     const callbacks = {
       getCameraDistance: () => {
@@ -1942,7 +2194,7 @@ const App: React.FC = () => {
         setIsDocumentaryActive(false);
         setActiveOSMCoordinates({ lat: dest.lat, lng: dest.lng });
         setInteractionState('PIN_SELECTED');
-        if (locationInfoRef.current) {
+        if (locationInfoRef.current && !isInfoPanelLoadingRef.current) {
           maybeTriggerNarration(locationInfoRef.current);
         }
       },
@@ -1973,30 +2225,478 @@ const App: React.FC = () => {
     }
   }, [handleDocumentarySetDistance, handleDocumentarySetCameraPosition, maybeTriggerNarration, skin, worldDimensions]);
 
+  const findNextWaypoint = useCallback((currentWp: Waypoint): Waypoint | null => {
+    return findNextRouteWaypoint(currentWp, routeWaypointsRef.current);
+  }, []);
+
+  const prefetchRouteWaypointEnrichment = useCallback(async (wp: Waypoint) => {
+    if (!wp) return;
+    const stableId = getWaypointStableId(wp);
+    if (routePriorityWaypointRef.current && routePriorityWaypointRef.current !== stableId) {
+      console.log(`[Waypoint Prefetch] BLOCKED by WP1 priority id="${stableId}" name="${wp.name}"`);
+      return;
+    }
+    if (waypointEnrichmentCache.has(stableId)) {
+      console.log(`[Waypoint Prefetch] ALREADY_CACHED id="${stableId}" name="${wp.name}"`);
+      return;
+    }
+    if (inFlightPrefetchesRef.current.has(stableId)) {
+      console.log(`[Waypoint Prefetch] IN_PROGRESS id="${stableId}" name="${wp.name}"`);
+      return;
+    }
+
+    inFlightPrefetchesRef.current.add(stableId);
+    console.log(`[Waypoint Prefetch] START id="${stableId}" name="${wp.name}"`);
+    logTraceNarration(stableId, wp.name, 'WP2 prefetch started');
+    waypointPipelineRegistry.recordTimestamp(stableId, 'enrichmentStarted', Date.now());
+    waypointPipelineRegistry.setStage(stableId, 'enriching');
+
+    // Early Narration Preload: If wp.description is substantive from Stage 1 streaming, preload TTS audio immediately!
+    const hasDirectDescription = Boolean(wp.description && evaluateDescriptionReadiness(wp.description, wp.name).isReady);
+    if (hasDirectDescription) {
+      const cleanTitle = getNarrationTitle(wp);
+      const cleanDesc = getNarrationDescription({ ...wp, description: wp.description });
+      if (cleanTitle && cleanDesc && evaluateDescriptionReadiness(cleanDesc, cleanTitle).isReady) {
+        const narrativeKey = `${cleanTitle.toLowerCase().trim()}::${cleanDesc.trim()}`;
+        if (!waypointNarrationCache.has(stableId) && !inFlightNarrationPromises.has(stableId)) {
+          const currentProvider = userSettingsRef.current.narrationProvider || 'system';
+          if (currentProvider === 'kokoro' || currentProvider === 'orpheus') {
+            console.log(`[Narration Prefetch] EARLY_START id="${stableId}" name="${wp.name}"`);
+            logTraceNarration(stableId, wp.name, 'WP2 narration source ready', `scriptLength=${cleanTitle.length + cleanDesc.length}`);
+            logTraceNarration(stableId, wp.name, 'WP2 TTS generation started');
+            waypointPipelineRegistry.setStage(stableId, 'narrationGenerating');
+            const currentVoice = currentProvider === 'kokoro' 
+              ? (userSettingsRef.current.kokoroVoice || 'am_michael') 
+              : (userSettingsRef.current.orpheusVoice || 'tara');
+            const ttsPromise = (async () => {
+              try {
+                const audioResult = await narrationService.preloadNarration(cleanTitle, cleanDesc, {
+                  waypointId: stableId,
+                  title: cleanTitle,
+                  description: cleanDesc,
+                  provider: currentProvider,
+                  kokoroVoice: userSettingsRef.current.kokoroVoice || 'am_michael',
+                  orpheusVoice: userSettingsRef.current.orpheusVoice || 'tara',
+                  limit: userSettingsRef.current.narrationLimit || 600,
+                  speed: userSettingsRef.current.narrationSpeed,
+                  volume: userSettingsRef.current.narrationVolume
+                });
+
+                if (audioResult) {
+                  const entry: CachedNarrationAudio = {
+                    waypointId: stableId,
+                    narrativeKey,
+                    script: audioResult.script,
+                    voice: audioResult.voice,
+                    pcmData: audioResult.pcmData,
+                    sampleRate: audioResult.sampleRate,
+                    duration: audioResult.duration,
+                    createdAt: Date.now()
+                  };
+                  waypointNarrationCache.set(stableId, entry);
+                  waypointPipelineRegistry.recordTimestamp(stableId, 'narrationAudioReady', Date.now());
+                  waypointPipelineRegistry.recordTimestamp(stableId, 'preloadStatus', 'fully_preloaded');
+                  waypointPipelineRegistry.setStage(stableId, 'narrationReady');
+                  logTraceNarration(stableId, wp.name, 'WP2 narration ready/cached', `duration=${audioResult.duration.toFixed(2)}s`);
+                  console.log(`[Narration Prefetch] COMPLETE id="${stableId}" scriptLength=${audioResult.script.length}`);
+                  return entry;
+                }
+                return null;
+              } catch (err) {
+                console.warn(`[Narration Prefetch] FAILED id="${stableId}"`, err);
+                return null;
+              } finally {
+                inFlightNarrationPromises.delete(stableId);
+              }
+            })();
+
+            inFlightNarrationPromises.set(stableId, ttsPromise);
+          }
+        }
+      }
+    }
+
+    try {
+      const initialCandidateDesc = (wp.description || "").trim();
+      const initialCandidateReadiness = evaluateDescriptionReadiness(initialCandidateDesc, wp.name);
+      const hasDirectDescription = initialCandidateReadiness.isReady;
+      const initialDescription = hasDirectDescription ? initialCandidateDesc : "";
+
+      const anchor: MapMarker = {
+        id: wp.id,
+        name: wp.name,
+        lat: wp.lat,
+        lng: wp.lng,
+        type: wp.entityType || (wp as any).type || 'landmark',
+        populationClass: 'small'
+      };
+
+      const geoMarker = await resolveGeographicMetadata(anchor);
+      const schema = ENTITY_SCHEMAS[wp.entityType || geoMarker.type || 'city'] || ENTITY_SCHEMAS['city'];
+      const fetchGeographicMetadata = schema.capabilities.supportsPopulation || schema.capabilities.supportsClimate;
+
+      let data: any = {
+        id: stableId,
+        name: wp.name,
+        canonicalName: wp.canonicalName,
+        coordinates: { lat: wp.lat, lng: wp.lng },
+        waypoint: wp,
+        country: geoMarker.country,
+        state: geoMarker.state,
+        city: geoMarker.city,
+        population: geoMarker.population,
+        osmId: geoMarker.osmId,
+        osmType: geoMarker.osmType,
+        wikidataId: geoMarker.wikidataId,
+        wikipedia: geoMarker.wikipedia,
+        coordinateSource: geoMarker.source || (wp as any).coordinateSource || (wp as any).source || 'osm',
+        coordinateTrust: geoMarker.coordinateTrust || (wp as any).coordinateTrust || 'verified',
+        coordinateMethod: geoMarker.coordinateMethod || (wp as any).coordinateMethod,
+        coordinatePrecision: geoMarker.coordinatePrecision || (wp as any).coordinatePrecision,
+        coordinateProvenance: geoMarker.coordinateProvenance || (wp as any).coordinateProvenance,
+        description: initialDescription,
+        significance: wp.significance,
+        highlights: wp.highlights,
+        historicalPeriod: wp.historicalPeriod,
+        historicalContext: wp.context || wp.historicalContext,
+        routeTitle: wp.routeTitle || wp.routeGroupName,
+        routeGroupId: wp.routeGroupId,
+        entities: wp.entities,
+        entityType: wp.entityType || geoMarker.type || (wp as any).type || "landmark",
+        searchId: (wp as any).searchId,
+        climate: getEstimatedClimate(wp.lat, wp.lng, wp.historicalRegion || wp.modernLocation || geoMarker.state || geoMarker.region || "", geoMarker.country || "", wp.entityType || geoMarker.type),
+        contextNotes: [],
+        news: [],
+        relatedEntities: [],
+        sectionState: { description: (hasDirectDescription || !fetchGeographicMetadata) ? "complete" : "loading", news: "idle" }
+      };
+
+      if (wp.context && evaluateDescriptionReadiness(wp.context, wp.name).isReady) {
+        const routeLabel = wp.routeGroupName || wp.routeTitle || "Route Context";
+        data.routeContext = {
+          title: routeLabel,
+          text: wp.context
+        };
+      }
+
+      if (wp.id === 'wp-genghis-1') {
+        data.defaultNote = "Waypoints from https://www.worldhistory.org/image/11221/map-of-the-campaigns-of-genghis-khan/";
+      }
+
+      let finalEnrichedState: any = null;
+      if (fetchGeographicMetadata) {
+        const queryContext = wp.description || wp.context || wp.routeTitle;
+        const enrichedData = await getInfoFromFeature(geoMarker, queryContext);
+        const enrichedDescription = enrichedData?.description?.trim();
+        const enrichedReadiness = evaluateDescriptionReadiness(enrichedDescription, wp.name);
+
+        const isSubstantive = enrichedReadiness.isReady || (hasDirectDescription && initialCandidateReadiness.isReady);
+        const finalDesc = enrichedReadiness.isReady
+          ? enrichedDescription!
+          : (hasDirectDescription ? initialCandidateDesc : "");
+
+        const finalDescState = isSubstantive
+          ? "complete"
+          : (enrichedData?.status === "error" || (enrichedData as any)?.sectionState?.description === "failed" ? "error" : "loading");
+
+        if (isSubstantive) {
+          waypointPipelineRegistry.recordTimestamp(stableId, 'topDescriptionReady', Date.now());
+          waypointPipelineRegistry.setStage(stableId, 'topDescriptionReady');
+        }
+
+        if (enrichedData) {
+          let nextState = mergeLocationInfo(data, {
+            description: finalDesc,
+            notable: enrichedData.notable,
+            contextNotes: enrichedData.contextNotes,
+            relatedEntities: enrichedData.relatedEntities,
+            imageSearchTerm: enrichedData.imageSearchTerm,
+            sectionState: { description: finalDescState, news: "idle" }
+          });
+          const mode = enrichedData.metadataMode || 'modern_place';
+          if (mode === 'historical_site') {
+            delete nextState.population;
+          } else if (mode === 'natural_feature') {
+            delete nextState.population;
+          }
+          finalEnrichedState = nextState;
+        } else {
+          finalEnrichedState = {
+            ...data,
+            description: finalDesc,
+            sectionState: { ...data.sectionState, description: finalDescState, news: "idle" }
+          };
+        }
+      } else {
+        const isSubstantive = initialCandidateReadiness.isReady;
+        const finalDesc = isSubstantive ? initialCandidateDesc : "";
+        const finalDescState = isSubstantive ? "complete" : "loading";
+        if (isSubstantive) {
+          waypointPipelineRegistry.recordTimestamp(stableId, 'topDescriptionReady', Date.now());
+          waypointPipelineRegistry.setStage(stableId, 'topDescriptionReady');
+        }
+        finalEnrichedState = {
+          ...data,
+          description: finalDesc,
+          sectionState: { ...data.sectionState, description: finalDescState, news: "idle" }
+        };
+      }
+
+      if (finalEnrichedState) {
+        waypointPipelineRegistry.recordTimestamp(stableId, 'fullEnrichmentReady', Date.now());
+        waypointPipelineRegistry.setStage(stableId, 'enrichmentReady');
+        waypointEnrichmentCache.set(stableId, finalEnrichedState);
+        console.log(`[Waypoint Prefetch] COMPLETE id="${stableId}" name="${wp.name}" descLength=${finalEnrichedState.description?.length || 0}`);
+
+        // Preload narration audio if not already started/preloaded
+        const cleanTitle = getNarrationTitle(finalEnrichedState);
+        const cleanDesc = getNarrationDescription(finalEnrichedState);
+
+        if (cleanTitle && cleanDesc && cleanDesc.length >= 3) {
+          const narrativeKey = `${cleanTitle.toLowerCase().trim()}::${cleanDesc.trim()}`;
+          const cachedNarration = waypointNarrationCache.get(stableId);
+
+          if (cachedNarration && cachedNarration.narrativeKey === narrativeKey) {
+            console.log(`[Narration Prefetch] CACHE_HIT id="${stableId}"`);
+            waypointPipelineRegistry.recordTimestamp(stableId, 'preloadStatus', 'fully_preloaded');
+          } else if (inFlightNarrationPromises.has(stableId)) {
+            console.log(`[Narration Prefetch] IN_PROGRESS id="${stableId}"`);
+            waypointPipelineRegistry.recordTimestamp(stableId, 'preloadStatus', 'partially_preloaded');
+          } else {
+            console.log(`[Narration Prefetch] START id="${stableId}"`);
+            waypointPipelineRegistry.setStage(stableId, 'narrationGenerating');
+            const currentProvider = userSettingsRef.current.narrationProvider || 'system';
+            const currentVoice = currentProvider === 'kokoro'
+              ? (userSettingsRef.current.kokoroVoice || 'am_michael')
+              : (userSettingsRef.current.orpheusVoice || 'tara');
+
+            if (currentProvider === 'kokoro' || currentProvider === 'orpheus') {
+              const ttsPromise = (async () => {
+                try {
+                  const audioResult = await narrationService.preloadNarration(cleanTitle, cleanDesc, {
+                    waypointId: stableId,
+                    title: cleanTitle,
+                    description: cleanDesc,
+                    provider: currentProvider,
+                    kokoroVoice: userSettingsRef.current.kokoroVoice || 'am_michael',
+                    orpheusVoice: currentSettings.orpheusVoice || 'tara',
+                    limit: userSettingsRef.current.narrationLimit || 600,
+                    speed: userSettingsRef.current.narrationSpeed,
+                    volume: userSettingsRef.current.narrationVolume
+                  });
+
+                  if (audioResult) {
+                    const entry: CachedNarrationAudio = {
+                      waypointId: stableId,
+                      narrativeKey,
+                      script: audioResult.script,
+                      voice: audioResult.voice,
+                      pcmData: audioResult.pcmData,
+                      sampleRate: audioResult.sampleRate,
+                      duration: audioResult.duration,
+                      createdAt: Date.now()
+                    };
+                    waypointNarrationCache.set(stableId, entry);
+                    waypointPipelineRegistry.recordTimestamp(stableId, 'narrationAudioReady', Date.now());
+                    waypointPipelineRegistry.recordTimestamp(stableId, 'preloadStatus', 'fully_preloaded');
+                    waypointPipelineRegistry.setStage(stableId, 'narrationReady');
+                    console.log(`[Narration Prefetch] COMPLETE id="${stableId}" scriptLength=${audioResult.script.length}`);
+                    return entry;
+                  }
+                  return null;
+                } catch (err) {
+                  console.warn(`[Narration Prefetch] FAILED id="${stableId}"`, err);
+                  return null;
+                } finally {
+                  inFlightNarrationPromises.delete(stableId);
+                }
+              })();
+
+              inFlightNarrationPromises.set(stableId, ttsPromise);
+            }
+          }
+        }
+
+        // Rolling prefetch: queue next waypoint in sequence
+        const nextNextWp = findNextWaypoint(wp);
+        if (nextNextWp) {
+          const nextNextStableId = getWaypointStableId(nextNextWp);
+          if (!waypointEnrichmentCache.has(nextNextStableId) && !inFlightPrefetchesRef.current.has(nextNextStableId)) {
+            void prefetchRouteWaypointEnrichment(nextNextWp);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[Waypoint Prefetch] ERROR id="${stableId}" name="${wp.name}"`, err);
+    } finally {
+      inFlightPrefetchesRef.current.delete(stableId);
+    }
+  }, [findNextWaypoint]);
+  prefetchRouteWaypointEnrichmentRef.current = prefetchRouteWaypointEnrichment;
+
   const loadWaypointData = useCallback(async (wp: Waypoint, fromWp?: Waypoint) => {
-     const stableId = wp.id || `${wp.name}-${wp.lat}-${wp.lng}`;
+     const stableId = getWaypointStableId(wp);
      console.log(`[SearchNarration] ROUTE_WAYPOINT_CLICKED id="${stableId}" name="${wp.name}"`);
      activeSelectionIdRef.current = stableId;
      console.log(`[SearchNarration] ACTIVE_SELECTION_SET id="${stableId}"`);
      const enrichmentRequestId = ++activeMarkerRequestRef.current;
 
+     waypointPipelineRegistry.setWaypointActivated(stableId, wp.name, Date.now());
+     waypointPipelineRegistry.setStage(stableId, 'pending');
+
+     documentaryController.cancel('waypoint_selected');
+     narrationService.cancel();
+     activeNarrationRef.current = null;
+
      console.log(`[InfoPanel] OPEN`);
      console.log(`[InfoPanel] selection = ${stableId}`);
-     console.log(`[InfoPanel] enrichment started`);
+     console.log(`[Waypoint Lifecycle] WAYPOINT_SELECTED id="${stableId}" name="${wp.name}"`);
+
+     // Check prefetch cache first
+     const cachedEnrichment = waypointEnrichmentCache.get(stableId);
+     if (cachedEnrichment) {
+       console.log(`[Waypoint Prefetch] CACHE_HIT id="${stableId}" name="${wp.name}" descLength=${cachedEnrichment.description?.length || 0}`);
+       console.log(`[SearchNarration] LOCATION_INFO_SET id="${stableId}" name="${wp.name}"`);
+       
+       const hasCachedAudio = waypointNarrationCache.has(stableId);
+       const preloadStatus = hasCachedAudio ? 'fully_preloaded' : (inFlightNarrationPromises.has(stableId) ? 'partially_preloaded' : 'partially_preloaded');
+       waypointPipelineRegistry.recordTimestamp(stableId, 'topDescriptionReady', Date.now());
+       waypointPipelineRegistry.recordTimestamp(stableId, 'fullEnrichmentReady', Date.now());
+       waypointPipelineRegistry.recordTimestamp(stableId, 'preloadStatus', preloadStatus);
+       waypointPipelineRegistry.setStage(stableId, 'enrichmentReady');
+       logTraceNarration(stableId, wp.name, 'topDescriptionReady', `cacheHit=true descLength=${cachedEnrichment.description?.length || 0}`);
+
+       setInteractionState('PIN_SELECTED');
+       setLocationInfo(cachedEnrichment);
+       setSelectedMarkerId(stableId);
+       setSelectedMarkerCoordinates({ lat: wp.lat, lng: wp.lng });
+       setIsFocused(true);
+       setIsInfoPanelLoading(false);
+       setIsNewsFetching(false);
+
+       if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
+         osmTileService.prefetchViewportTiles(
+           wp.lat,
+           wp.lng,
+           14,
+           skin,
+           worldDimensions.width > 0 ? worldDimensions.width : (typeof window !== 'undefined' ? window.innerWidth : 1920),
+           worldDimensions.height > 0 ? worldDimensions.height : (typeof window !== 'undefined' ? window.innerHeight : 1080)
+         );
+       }
+
+       const currentDist = currentCameraDistanceRef.current || (cameraControlsRef.current?.object?.position?.length()) || 4.5;
+       const bounds = osmViewportBoundsRef.current;
+       const isVisibleInOSMViewport = (typeof wp.lat === 'number' && typeof wp.lng === 'number') && (
+         bounds
+           ? isMarkerInOSMViewport(wp.lat, wp.lng, bounds)
+           : ((isOSMActive || currentDist <= 1.45) && isDestinationComfortablyVisible(
+               previousGeoCenterRef.current,
+               currentDist,
+               { lat: wp.lat, lng: wp.lng },
+               {
+                 viewportWidth: worldDimensions.width > 0 ? worldDimensions.width : (typeof window !== 'undefined' ? window.innerWidth : 1920),
+                 viewportHeight: worldDimensions.height > 0 ? worldDimensions.height : (typeof window !== 'undefined' ? window.innerHeight : 1080)
+               }
+             ))
+       );
+
+       if (userSettings.documentaryMode) {
+         if (isOSMActive || currentDist <= 1.45) {
+           if (isVisibleInOSMViewport) {
+             documentaryController.cancel('waypoint_visible_in_viewport');
+             setIsDocumentaryActive(false);
+             if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
+               navigateWaypointCamera(wp, fromWp);
+             }
+           } else {
+             const originWp = fromWp || {
+               id: 'current-camera-pos',
+               name: 'Current Viewport',
+               lat: previousGeoCenterRef.current.lat,
+               lng: previousGeoCenterRef.current.lng,
+               description: ''
+             };
+             startDocumentaryFlow(
+               {
+                 id: stableId,
+                 name: wp.name,
+                 lat: wp.lat,
+                 lng: wp.lng,
+                 description: cachedEnrichment.description || wp.description
+               },
+               originWp
+             );
+           }
+         } else {
+           startDocumentaryFlow(
+             {
+               id: stableId,
+               name: wp.name,
+               lat: wp.lat,
+               lng: wp.lng,
+               description: cachedEnrichment.description || wp.description
+             },
+             fromWp ? {
+               id: fromWp.id,
+               name: fromWp.name,
+               lat: fromWp.lat,
+               lng: fromWp.lng,
+               description: fromWp.description
+             } : undefined
+           );
+         }
+       } else {
+         setIsDocumentaryActive(false);
+         if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
+           navigateWaypointCamera(wp, fromWp);
+         }
+       }
+
+       console.log(`[Waypoint Lifecycle] ENRICHED_RECORD_RESOLVED id="${stableId}" name="${wp.name}" descLength=${cachedEnrichment.description?.length || 0} source="cache"`);
+       console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_COMPLETE');
+       if (activeSelectionIdRef.current === stableId) {
+         maybeTriggerNarration(cachedEnrichment);
+       }
+
+       const nextWp = findNextWaypoint(wp);
+       if (nextWp && !routePriorityWaypointRef.current) {
+         void prefetchRouteWaypointEnrichment(nextWp);
+       }
+       return;
+     }
+
+     console.log(`[Waypoint Prefetch] CACHE_MISS id="${stableId}" name="${wp.name}"`);
+     console.log(`[Waypoint Lifecycle] ENRICHMENT_STARTED id="${stableId}" name="${wp.name}"`);
+     console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_STARTED');
+
+     waypointPipelineRegistry.recordTimestamp(stableId, 'enrichmentStarted', Date.now());
+     waypointPipelineRegistry.recordTimestamp(stableId, 'preloadStatus', 'cold');
+     waypointPipelineRegistry.setStage(stableId, 'enriching');
+     logTraceNarration(stableId, wp.name, 'enrichment started');
 
      setInteractionState('PIN_SELECTED');
-     setIsInfoPanelLoading(true);
+     setIsInfoPanelLoading(false);
      setIsNewsFetching(false);
-     console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_STARTED');
+
+     const initialSchema = ENTITY_SCHEMAS[wp.entityType || (wp as any).type || 'city'] || ENTITY_SCHEMAS['city'];
+     const initialNeedsEnrichment = initialSchema.capabilities.supportsPopulation || initialSchema.capabilities.supportsClimate;
+
+     const initialCandidateDesc = (wp.description || "").trim();
+     const initialCandidateReadiness = evaluateDescriptionReadiness(initialCandidateDesc, wp.name);
+     const hasDirectDescription = initialCandidateReadiness.isReady;
+     const initialDescription = hasDirectDescription ? initialCandidateDesc : "";
+     const initialDescState = (hasDirectDescription || !initialNeedsEnrichment) ? "complete" : "loading";
 
      const routeLabel = wp.routeGroupName || wp.routeTitle || "Route Context";
      const initialWaypointPayload: any = {
          id: stableId,
          name: wp.name,
+         canonicalName: wp.canonicalName,
          coordinates: { lat: wp.lat, lng: wp.lng },
          waypoint: wp,
-         description: wp.description || "",
-         routeContext: wp.context ? {
+         description: initialDescription,
+         routeContext: (wp.context && evaluateDescriptionReadiness(wp.context, wp.name).isReady) ? {
              title: routeLabel,
              text: wp.context
          } : undefined,
@@ -2004,19 +2704,122 @@ const App: React.FC = () => {
          highlights: wp.highlights,
          historicalPeriod: wp.historicalPeriod,
          entities: wp.entities,
-         entityType: wp.entityType || (wp as any).type || "historical_waypoint",
+         entityType: wp.entityType || (wp as any).type || "landmark",
          climate: getEstimatedClimate(wp.lat, wp.lng, wp.historicalRegion || wp.modernLocation || "", "", wp.entityType || (wp as any).type),
          contextNotes: [],
          news: [],
          relatedEntities: [],
-         sectionState: { description: wp.description ? "complete" : "loading", news: "idle" }
+         sectionState: { description: initialDescState, news: "idle" }
      };
 
-     console.log(`[SearchNarration] LOCATION_INFO_SET id="${stableId}" name="${wp.name}"`);
-     setLocationInfo(initialWaypointPayload);
-     setSelectedMarkerId(stableId);
-     setSelectedMarkerCoordinates({ lat: wp.lat, lng: wp.lng });
-     setIsFocused(true);
+     const isRoutePriorityTarget = Boolean(routePriorityWaypointRef.current && routePriorityWaypointRef.current === stableId);
+     const shouldDeferDisplay = isRoutePriorityTarget;
+
+     const presentWaypoint = (payload: any) => {
+       console.log(`[SearchNarration] LOCATION_INFO_SET id="${stableId}" name="${wp.name}"`);
+       logTraceTiming('WP1_INFOPANEL_COMMITTED', stableId, wp.name, `descLength=${(payload.description || wp.description || '').length}`);
+       setAutoRotate(false);
+       setInteractionState('PIN_SELECTED');
+       setLocationInfo(payload);
+       setSelectedMarkerId(stableId);
+       setSelectedMarkerCoordinates({ lat: wp.lat, lng: wp.lng });
+       setIsFocused(true);
+
+       const currentDist = currentCameraDistanceRef.current || (cameraControlsRef.current?.object?.position?.length()) || 4.5;
+       const bounds = osmViewportBoundsRef.current;
+       const isVisibleInOSMViewport = (typeof wp.lat === 'number' && typeof wp.lng === 'number') && (
+         bounds
+           ? isMarkerInOSMViewport(wp.lat, wp.lng, bounds)
+           : ((isOSMActive || currentDist <= 1.45) && isDestinationComfortablyVisible(
+               previousGeoCenterRef.current,
+               currentDist,
+               { lat: wp.lat, lng: wp.lng },
+               {
+                 viewportWidth: worldDimensions.width > 0 ? worldDimensions.width : (typeof window !== 'undefined' ? window.innerWidth : 1920),
+                 viewportHeight: worldDimensions.height > 0 ? worldDimensions.height : (typeof window !== 'undefined' ? window.innerHeight : 1080)
+               }
+             ))
+       );
+
+       if (userSettings.documentaryMode) {
+         if (isOSMActive || currentDist <= 1.45) {
+           if (isVisibleInOSMViewport) {
+             documentaryController.cancel('waypoint_visible_in_viewport');
+             setIsDocumentaryActive(false);
+             if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
+               navigateWaypointCamera(wp, fromWp);
+             }
+           } else {
+             const originWp = fromWp || {
+               id: 'current-camera-pos',
+               name: 'Current Viewport',
+               lat: previousGeoCenterRef.current.lat,
+               lng: previousGeoCenterRef.current.lng,
+               description: ''
+             };
+             startDocumentaryFlow(
+               {
+                 id: stableId,
+                 name: wp.name,
+                 lat: wp.lat,
+                 lng: wp.lng,
+                 description: payload.description || wp.description
+               },
+               originWp
+             );
+           }
+         } else {
+           startDocumentaryFlow(
+             {
+               id: stableId,
+               name: wp.name,
+               lat: wp.lat,
+               lng: wp.lng,
+               description: payload.description || wp.description
+             },
+             fromWp ? {
+               id: fromWp.id,
+               name: fromWp.name,
+               lat: fromWp.lat,
+               lng: fromWp.lng,
+               description: fromWp.description
+             } : undefined
+           );
+         }
+       } else {
+         setIsDocumentaryActive(false);
+         if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
+           navigateWaypointCamera(wp, fromWp);
+         }
+       }
+     };
+
+     if (!shouldDeferDisplay) {
+       presentWaypoint(initialWaypointPayload);
+     }
+
+     const isFirstRouteWaypoint = !fromWp || (routeWaypointsRef.current && routeWaypointsRef.current[0] && getWaypointStableId(routeWaypointsRef.current[0]) === stableId);
+
+     // Fast-Track Immediate Description & Early Narration: If substantive description is already provided, trigger narration immediately!
+     if (hasDirectDescription) {
+       waypointPipelineRegistry.recordTimestamp(stableId, 'topDescriptionReady', Date.now());
+       waypointPipelineRegistry.setStage(stableId, 'topDescriptionReady');
+       logTraceNarration(stableId, wp.name, 'topDescriptionReady', `directArticleSource=true length=${initialDescription.length}`);
+
+       if (isFirstRouteWaypoint) {
+         console.log(`[TRACE ROUTE][Waypoint 1] top description ready: length=${initialDescription.length}`);
+         console.log(`[TRACE ROUTE][Waypoint 1] narration source ready: "${wp.name}"`);
+         console.log(`[TRACE ROUTE][Waypoint 1] narration generation started`);
+       }
+
+       maybeTriggerNarration(initialWaypointPayload);
+
+       // Start Waypoint 2 prefetch early so it overlaps with Waypoint 1!
+       const nextWp = findNextWaypoint(wp);
+       if (nextWp && !routePriorityWaypointRef.current) {
+         void prefetchRouteWaypointEnrichment(nextWp);
+       }
+     }
 
      // Trigger destination OSM tile prefetching in the background before camera arrives
      if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
@@ -2030,82 +2833,6 @@ const App: React.FC = () => {
        );
      }
 
-     const currentDist = currentCameraDistanceRef.current || (cameraControlsRef.current?.object?.position?.length()) || 4.5;
-     const isDocActive = isDocumentaryActive || documentaryController.isActive();
-
-     // Viewport-aware visibility check using actual OSM geographic bounds
-     const bounds = osmViewportBoundsRef.current;
-     const isVisibleInOSMViewport = (typeof wp.lat === 'number' && typeof wp.lng === 'number') && (
-       bounds
-         ? isMarkerInOSMViewport(wp.lat, wp.lng, bounds)
-         : ((isOSMActive || currentDist <= 1.45) && isDestinationComfortablyVisible(
-             previousGeoCenterRef.current,
-             currentDist,
-             { lat: wp.lat, lng: wp.lng },
-             {
-               viewportWidth: worldDimensions.width > 0 ? worldDimensions.width : (typeof window !== 'undefined' ? window.innerWidth : 1920),
-               viewportHeight: worldDimensions.height > 0 ? worldDimensions.height : (typeof window !== 'undefined' ? window.innerHeight : 1080)
-             }
-           ))
-     );
-
-     if (userSettings.documentaryMode) {
-       if (isOSMActive || currentDist <= 1.45) {
-         if (isVisibleInOSMViewport) {
-           documentaryController.cancel('waypoint_visible_in_viewport');
-           setIsDocumentaryActive(false);
-           if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
-             navigateWaypointCamera(wp, fromWp);
-           }
-         } else {
-           const originWp = fromWp || {
-             id: 'current-camera-pos',
-             name: 'Current Viewport',
-             lat: previousGeoCenterRef.current.lat,
-             lng: previousGeoCenterRef.current.lng,
-             description: ''
-           };
-           startDocumentaryFlow(
-             {
-               id: stableId,
-               name: wp.name,
-               lat: wp.lat,
-               lng: wp.lng,
-               description: wp.description
-             },
-             originWp
-           );
-         }
-       } else {
-         startDocumentaryFlow(
-           {
-             id: stableId,
-             name: wp.name,
-             lat: wp.lat,
-             lng: wp.lng,
-             description: wp.description
-           },
-           fromWp ? {
-             id: fromWp.id,
-             name: fromWp.name,
-             lat: fromWp.lat,
-             lng: fromWp.lng,
-             description: fromWp.description
-           } : undefined
-         );
-       }
-     } else {
-       setIsDocumentaryActive(false);
-       if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
-         navigateWaypointCamera(wp, fromWp);
-       }
-     }
-
-     const initialDesc = wp.description || wp.significance || "";
-     if (initialDesc && initialDesc.trim().length >= 3) {
-        maybeTriggerNarration(initialWaypointPayload);
-     }
-
      console.log(`ENTITY_RESOLUTION_STARTED [req: ${enrichmentRequestId}] for ${wp.name}`);
 
      const anchor: MapMarker = {
@@ -2113,7 +2840,7 @@ const App: React.FC = () => {
          name: wp.name,
          lat: wp.lat,
          lng: wp.lng,
-         type: wp.entityType || (wp as any).type || 'historical_waypoint',
+         type: wp.entityType || (wp as any).type || 'landmark',
          populationClass: 'small'
      };
 
@@ -2122,11 +2849,16 @@ const App: React.FC = () => {
 
      console.log(`ENTITY_RESOLUTION_COMPLETE [req: ${enrichmentRequestId}] for ${wp.name}`);
 
+     const schema = ENTITY_SCHEMAS[wp.entityType || geoMarker.type || 'city'] || ENTITY_SCHEMAS['city'];
+     const fetchGeographicMetadata = schema.capabilities.supportsPopulation || schema.capabilities.supportsClimate;
+
      let data: any = {
-         id: geoMarker.id || stableId,
+         id: stableId,
          name: wp.name, // Protected
          canonicalName: wp.canonicalName,
          coordinates: { lat: wp.lat, lng: wp.lng }, // Protected
+         coordinateSource: geoMarker.source || (wp as any).coordinateSource || (wp as any).source || 'osm',
+         coordinateTrust: geoMarker.coordinateTrust || (wp as any).coordinateTrust || 'verified',
          waypoint: wp, // Protected
          country: geoMarker.country,
          state: geoMarker.state,
@@ -2136,7 +2868,7 @@ const App: React.FC = () => {
          osmType: geoMarker.osmType,
          wikidataId: geoMarker.wikidataId,
          wikipedia: geoMarker.wikipedia,
-         description: wp.description,
+         description: initialDescription,
          significance: wp.significance,
          highlights: wp.highlights,
          historicalPeriod: wp.historicalPeriod,
@@ -2144,19 +2876,15 @@ const App: React.FC = () => {
          routeTitle: wp.routeTitle || wp.routeGroupName,
          routeGroupId: wp.routeGroupId,
          entities: wp.entities,
-         entityType: wp.entityType || geoMarker.type || "historical_waypoint",
+         entityType: wp.entityType || geoMarker.type || (wp as any).type || "landmark",
          searchId: (wp as any).searchId,
          climate: getEstimatedClimate(wp.lat, wp.lng, wp.historicalRegion || wp.modernLocation || geoMarker.state || geoMarker.region || "", geoMarker.country || "", wp.entityType || geoMarker.type),
          contextNotes: [],
          news: [],
          relatedEntities: [],
-         sectionState: { description: wp.description ? "complete" : "loading", news: "idle" }
+         sectionState: { description: initialDescState, news: "idle" }
      };
 
-     setLocationInfo((prev: any) => {
-         if (!prev || enrichmentRequestId !== activeMarkerRequestRef.current) return prev;
-         return mergeLocationInfo(prev, data);
-     }); // Inject the route context so it's always available as historical context
      if (wp.context) {
          const routeLabel = wp.routeGroupName || wp.routeTitle || "Route Context";
          data.routeContext = {
@@ -2169,69 +2897,165 @@ const App: React.FC = () => {
          data.defaultNote = "Waypoints from https://www.worldhistory.org/image/11221/map-of-the-campaigns-of-genghis-khan/";
      }
 
-     setLocationInfo(data);
-     if (data.description && data.description.trim().length >= 3) {
-        maybeTriggerNarration(data);
+     if (isFirstRouteWaypoint && !hasDirectDescription) {
+       console.log(`[TRACE ROUTE][Waypoint 1] enrichment started: id="${stableId}" name="${wp.name}"`);
      }
-     // InfoPanel mounting state ready
-     setIsInfoPanelLoading(true);
-
-     const schema = ENTITY_SCHEMAS[data.entityType || 'city'] || ENTITY_SCHEMAS['city'];
-     const fetchGeographicMetadata = schema.capabilities.supportsPopulation || schema.capabilities.supportsClimate;
-     const overwriteNarrative = schema.enrichment.overwriteNarrative;
 
      if (fetchGeographicMetadata) {
-         // Stage 3: Description & Notable
+         // Stage 3: Description & Notable Enrichment in background
          (async () => {
+             let finalEnrichedState: any = null;
              try {
                  const queryContext = wp.description || wp.context || wp.routeTitle;
                  const enrichedData = await getInfoFromFeature(geoMarker, queryContext);
                  if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
 
-                 if (enrichedData) {
-                     setLocationInfo((prev: any) => {
-                         if (!prev || prev.waypoint?.id !== wp.id) return prev;
-                         const desc = overwriteNarrative
-                              ? (enrichedData.description || wp.description || wp.significance || "")
-                              : (wp.description || enrichedData.description || wp.significance || "");
-                         let nextState = mergeLocationInfo(prev, {
-                             description: desc,
-                             notable: enrichedData.notable,
-                             contextNotes: enrichedData.contextNotes,
-                             relatedEntities: enrichedData.relatedEntities,
-                             imageSearchTerm: enrichedData.imageSearchTerm,
-                             sectionState: { ...prev.sectionState, description: "complete" }
-                         });
-                         const mode = enrichedData.metadataMode || 'modern_place';
-                         if (mode === 'historical_site') {
-                             delete nextState.population;
-                             delete nextState.climate;
-                         } else if (mode === 'natural_feature') {
-                             delete nextState.population;
-                         }
-                         maybeTriggerNarration(nextState);
-                         return nextState;
-                     });
-                 } else {
-                     setLocationInfo((prev: any) => {
-                         if (!prev || prev.waypoint?.id !== wp.id) return prev;
-                         return { ...prev, sectionState: { ...prev.sectionState, description: "error" } };
-                     });
-                 }
+                  const enrichedDescription = enrichedData?.description?.trim();
+                  const enrichedReadiness = evaluateDescriptionReadiness(enrichedDescription, wp.name);
+
+                  const isSubstantive = enrichedReadiness.isReady || (hasDirectDescription && initialCandidateReadiness.isReady);
+                  const finalDesc = enrichedReadiness.isReady
+                    ? enrichedDescription!
+                    : (hasDirectDescription ? initialCandidateDesc : "");
+
+                  const finalDescState = isSubstantive
+                    ? "complete"
+                    : (enrichedData?.status === "error" || (enrichedData as any)?.sectionState?.description === "failed" ? "error" : "loading");
+
+                  if (isSubstantive) {
+                    recordWP1SubstantiveReady();
+                    waypointPipelineRegistry.recordTimestamp(stableId, 'topDescriptionReady', Date.now());
+                    waypointPipelineRegistry.setStage(stableId, 'topDescriptionReady');
+                    logTraceNarration(stableId, wp.name, 'topDescriptionReady', `llmEnriched=true length=${finalDesc.length}`);
+                    logTraceTiming('WP1_SUBSTANTIVE_READY', stableId, wp.name, `descLength=${finalDesc.length}`);
+
+                    if (isFirstRouteWaypoint) {
+                      console.log(`[TRACE ROUTE][Waypoint 1] top description ready: length=${finalDesc.length}`);
+                      console.log(`[TRACE ROUTE][Waypoint 1] narration source ready: "${wp.name}"`);
+                      console.log(`[TRACE ROUTE][Waypoint 1] narration generation started`);
+                    }
+                  }
+
+                  if (enrichedData) {
+                      let nextState = mergeLocationInfo(data, {
+                          description: finalDesc,
+                          notable: enrichedData.notable || [],
+                          contextNotes: enrichedData.contextNotes || [],
+                          relatedEntities: enrichedData.relatedEntities || [],
+                          imageSearchTerm: enrichedData.imageSearchTerm,
+                          sectionState: { description: finalDescState, news: "idle" }
+                      });
+                      const mode = enrichedData.metadataMode || 'modern_place';
+                      if (mode === 'historical_site') {
+                          delete nextState.population;
+                      } else if (mode === 'natural_feature') {
+                          delete nextState.population;
+                      }
+                      finalEnrichedState = nextState;
+                      if (shouldDeferDisplay) {
+                          setScanningStatusText("PREPARING NARRATION");
+                          presentWaypoint(nextState);
+                      } else {
+                          setLocationInfo(nextState);
+                      }
+
+                      // Trigger narration only when substantive description is ready
+                      if (activeSelectionIdRef.current === stableId && isSubstantive) {
+                          maybeTriggerNarration(nextState);
+                      }
+                  } else {
+                      finalEnrichedState = {
+                          ...data,
+                          description: finalDesc,
+                          sectionState: { ...data.sectionState, description: finalDescState, news: "idle" }
+                      };
+                      if (shouldDeferDisplay) {
+                          setScanningStatusText("PREPARING NARRATION");
+                          presentWaypoint(finalEnrichedState);
+                      } else {
+                          setLocationInfo(finalEnrichedState);
+                      }
+
+                      if (activeSelectionIdRef.current === stableId && isSubstantive) {
+                          maybeTriggerNarration(finalEnrichedState);
+                      }
+                  }
              } catch (err) {
                  if (enrichmentRequestId === activeMarkerRequestRef.current) {
-                     setLocationInfo((prev: any) => prev ? { ...prev, sectionState: { ...prev.sectionState, description: "error" } } : prev);
+                     const fallbackDesc = wp.description || wp.significance || "";
+                     finalEnrichedState = {
+                         ...data,
+                         description: fallbackDesc,
+                         sectionState: { ...data.sectionState, description: "error" }
+                     };
+                     if (shouldDeferDisplay) {
+                         presentWaypoint(finalEnrichedState);
+                     } else {
+                         setLocationInfo(finalEnrichedState);
+                     }
                  }
              } finally {
                  if (enrichmentRequestId === activeMarkerRequestRef.current) {
-                     setIsInfoPanelLoading(false);
+                     waypointPipelineRegistry.recordTimestamp(stableId, 'fullEnrichmentReady', Date.now());
+                     waypointPipelineRegistry.setStage(stableId, 'enrichmentReady');
+                     const resolvedDesc = finalEnrichedState?.description || wp.description || "";
+                     const source = (finalEnrichedState?.description && finalEnrichedState.description !== wp.description) ? 'enriched' : 'original_fallback';
+                     console.log(`[Waypoint Lifecycle] ENRICHED_RECORD_RESOLVED id="${stableId}" name="${wp.name}" descLength=${resolvedDesc.length} source="${source}"`);
                      console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_COMPLETE');
+                     logTraceNarration(stableId, wp.name, 'enrichment ready', `source="${source}" descLength=${resolvedDesc.length}`);
+
+                     if (isFirstRouteWaypoint) {
+                       console.log(`[TRACE ROUTE][Waypoint 1] full enrichment ready`);
+                     }
+
+                     if (finalEnrichedState) {
+                         waypointEnrichmentCache.set(stableId, finalEnrichedState);
+                     }
+
+                     if (activeSelectionIdRef.current === stableId && finalEnrichedState) {
+                         maybeTriggerNarration(finalEnrichedState);
+                     }
+
+                     const nextWp = findNextWaypoint(wp);
+                     if (nextWp && !routePriorityWaypointRef.current) {
+                         void prefetchRouteWaypointEnrichment(nextWp);
+                     }
                  }
              }
          })();
      } else {
-         setIsInfoPanelLoading(false);
+         const finalDesc = initialCandidateDesc || wp.significance || "";
+         const finalDescReadiness = evaluateDescriptionReadiness(finalDesc, wp.name);
+         if (!hasDirectDescription && finalDescReadiness.isReady) {
+           waypointPipelineRegistry.recordTimestamp(stableId, 'topDescriptionReady', Date.now());
+           logTraceNarration(stableId, wp.name, 'topDescriptionReady', `fallback=true length=${finalDesc.length}`);
+         }
+         waypointPipelineRegistry.recordTimestamp(stableId, 'fullEnrichmentReady', Date.now());
+         waypointPipelineRegistry.setStage(stableId, 'enrichmentReady');
+         const originalDesc = finalDesc;
+         console.log(`[Waypoint Lifecycle] ENRICHED_RECORD_RESOLVED id="${stableId}" name="${wp.name}" descLength=${originalDesc.length} source="original"`);
          console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_COMPLETE');
+         logTraceNarration(stableId, wp.name, 'enrichment ready', `source="original" descLength=${originalDesc.length}`);
+
+         if (isFirstRouteWaypoint && !hasDirectDescription) {
+           console.log(`[TRACE ROUTE][Waypoint 1] top description ready: length=${originalDesc.length}`);
+           console.log(`[TRACE ROUTE][Waypoint 1] narration source ready: "${wp.name}"`);
+           console.log(`[TRACE ROUTE][Waypoint 1] full enrichment ready`);
+         }
+
+         const finalState = { ...data, description: finalDesc, sectionState: { ...data.sectionState, description: finalDesc ? "complete" : "loading" } };
+         waypointEnrichmentCache.set(stableId, finalState);
+         if (enrichmentRequestId === activeMarkerRequestRef.current && activeSelectionIdRef.current === stableId) {
+             setLocationInfo(finalState);
+             if (isFirstRouteWaypoint && !hasDirectDescription && finalDescReadiness.isReady) {
+               console.log(`[TRACE ROUTE][Waypoint 1] narration generation started`);
+             }
+             maybeTriggerNarration(finalState);
+         }
+         const nextWp = findNextWaypoint(wp);
+         if (nextWp && !routePriorityWaypointRef.current) {
+             void prefetchRouteWaypointEnrichment(nextWp);
+         }
      }
   }, [
     isZoomLocked,
@@ -2243,7 +3067,10 @@ const App: React.FC = () => {
     isOSMActive,
     smoothPanOSMCamera,
     smoothWaypointTransitionOSMCamera,
-    worldDimensions
+    worldDimensions,
+    findNextWaypoint,
+    prefetchRouteWaypointEnrichment,
+    navigateWaypointCamera
   ]);
 
   const selectEntity = useCallback(async (marker: MapMarker | FavoriteLocation | Waypoint) => {
@@ -2259,6 +3086,10 @@ const App: React.FC = () => {
 
     try {
         const enrichmentRequestId = ++activeMarkerRequestRef.current;
+
+        documentaryController.cancel('entity_selected');
+        narrationService.cancel();
+        activeNarrationRef.current = null;
 
         console.log(`[InfoPanel] OPEN`);
         console.log(`[InfoPanel] selection = ${stableId}`);
@@ -2284,26 +3115,29 @@ const App: React.FC = () => {
             return;
         }
 
-        const isRoutePoint = 'context' in marker || 'routeTitle' in marker;
+        const isRoutePoint = 'context' in marker || 'routeTitle' in marker || 'routeGroupId' in marker || (routeWaypoints && routeWaypoints.some(w => w.id === marker.id || (w.lat === marker.lat && w.lng === marker.lng)));
         if (isRoutePoint) {
             const wp = marker as Waypoint;
             const currentWp = (currentWaypointIndex >= 0 && currentWaypointIndex < routeWaypoints.length)
                 ? routeWaypoints[currentWaypointIndex]
                 : undefined;
-            const idx = routeWaypoints.findIndex(w => w.id === wp.id);
+            const idx = routeWaypoints.findIndex(w => w.id === wp.id || (w.lat === wp.lat && w.lng === wp.lng));
             if (idx !== -1) {
                 setCurrentWaypointIndex(idx);
             }
             loadWaypointData(wp, currentWp);
             return;
         } else {
-            if (!activeRouteId) {
+            if (!activeRouteId && (!routeWaypoints || routeWaypoints.length === 0)) {
                 setRouteWaypoints([]);
                 setCurrentWaypointIndex(-1);
             } else {
                 setCurrentWaypointIndex(-1);
             }
         }
+
+        const schema = ENTITY_SCHEMAS[('type' in marker && marker.type ? marker.type : "generic")] || ENTITY_SCHEMAS['city'];
+        const fetchGeographicMetadata = schema.capabilities.supportsPopulation || schema.capabilities.supportsClimate;
 
         // 1. Immediately create and display the basic payload so the user sees the title/basic identity without delay
         const initialPayload: any = {
@@ -2316,13 +3150,13 @@ const App: React.FC = () => {
             state: ('state' in marker ? (marker as any).state : undefined),
             city: ('city' in marker ? (marker as any).city : undefined),
             population: ('population' in marker ? (marker as any).population : undefined),
-            description: ('description' in marker && marker.description ? marker.description : ""),
+            description: fetchGeographicMetadata ? "" : (('description' in marker && marker.description) ? marker.description : ""),
             climate: getEstimatedClimate(marker.lat, marker.lng, ('state' in marker ? (marker as any).state : "") || ('region' in marker ? (marker as any).region : ""), ('country' in marker ? (marker as any).country : "") || "", ('type' in marker ? marker.type : undefined)),
             contextNotes: [],
             news: [],
             notable: [],
             relatedEntities: [],
-            sectionState: { description: ('description' in marker && marker.description) ? "complete" : "loading", news: "loading" }
+            sectionState: { description: fetchGeographicMetadata ? "loading" : "complete", news: "loading" }
         };
 
         setLocationInfo(initialPayload);
@@ -2348,31 +3182,25 @@ const App: React.FC = () => {
 
         if (userSettings.documentaryMode) {
           switch (decision.transitionDecision) {
-            case 'NO_CAMERA_MOVEMENT':
+            case 'WAYPOINT_VISIBLE_NOOP':
+              documentaryController.cancel('waypoint_visible_noop');
               setIsDocumentaryActive(false);
               break;
-            case 'PAN_CURRENT_OSM':
+            case 'WAYPOINT_CLOSE_SMOOTH_PAN':
+              documentaryController.cancel('waypoint_close_smooth_pan');
               setIsDocumentaryActive(false);
-              if (typeof marker.lat === 'number' && typeof marker.lng === 'number') {
-                updateAuthoritativeCamera(marker.lat, marker.lng, currentDist);
+              if (isOSMActive) {
+                smoothPanOSMCamera(marker.lat, marker.lng);
+              } else {
+                reconcileCameraState();
               }
               break;
-            case 'PRESERVE_CURRENT_OSM_ZOOM':
-              setIsDocumentaryActive(false);
-              if (typeof marker.lat === 'number' && typeof marker.lng === 'number') {
-                smoothPanOSMCamera(marker.lat, marker.lng, currentDist);
-              }
-              break;
-            case 'REDIRECT_CURRENT_TRANSITION':
-            case 'TRANSITION_TO_OSM':
-            case 'ZOOM_CURRENT_OSM':
-              startDocumentaryFlow({
-                id: stableId,
-                name: marker.name,
-                lat: marker.lat,
-                lng: marker.lng,
-                description: initialPayload.description
-              });
+            case 'WAYPOINT_TRANSITION_REQUIRED':
+            case 'DOCUMENTARY_FULL_REQUIRED':
+              startDocumentaryFlow(
+                { id: stableId, name: marker.name, lat: marker.lat, lng: marker.lng },
+                undefined
+              );
               break;
           }
         } else {
@@ -2380,10 +3208,6 @@ const App: React.FC = () => {
           if (typeof marker.lat === 'number' && typeof marker.lng === 'number') {
             navigateWaypointCamera({ id: stableId, name: marker.name, lat: marker.lat, lng: marker.lng });
           }
-        }
-
-        if (initialPayload.description) {
-            maybeTriggerNarration(initialPayload);
         }
 
         // 2. Resolve geographic metadata asynchronously
@@ -2417,6 +3241,8 @@ const App: React.FC = () => {
             osmType: geoMarker.osmType,
             wikidataId: geoMarker.wikidataId,
             wikipedia: geoMarker.wikipedia,
+            coordinateSource: geoMarker.source || (wp as any).coordinateSource || (wp as any).source || 'osm',
+            coordinateTrust: geoMarker.coordinateTrust || (wp as any).coordinateTrust || 'verified',
             description: "",
             climate: getEstimatedClimate(geoMarker.lat, geoMarker.lng, geoMarker.state || geoMarker.region || "", geoMarker.country || "", geoMarker.type),
             contextNotes: [],
@@ -2433,6 +3259,7 @@ const App: React.FC = () => {
 
         // Stage 3: Description & Notable
         (async () => {
+            let finalState: any = null;
             try {
                 const data = await getInfoFromFeature(geoMarker);
                 if (enrichmentRequestId !== activeMarkerRequestRef.current) return;
@@ -2440,30 +3267,40 @@ const App: React.FC = () => {
                 if (data) {
                     console.log(`[InfoPanel] enrichment updated`);
                     console.log(`[Enrichment] ${geoMarker.name} complete`);
-                    setLocationInfo((prev: any) => {
-                        if (!prev || enrichmentRequestId !== activeMarkerRequestRef.current) return prev;
-                        const nextState = mergeLocationInfo(prev, {
-                            description: data.description || prev.description,
-                            notable: data.notable || prev.notable,
-                            contextNotes: data.contextNotes || prev.contextNotes,
-                            relatedEntities: data.relatedEntities || prev.relatedEntities,
-                            imageSearchTerm: data.imageSearchTerm || prev.imageSearchTerm,
-                            sectionState: { ...prev.sectionState, description: "complete" }
-                        });
-                        maybeTriggerNarration(nextState);
-                        return nextState;
+                    const nextState = mergeLocationInfo(basePayload, {
+                        description: data.description || initialPayload.description || "",
+                        notable: data.notable || [],
+                        contextNotes: data.contextNotes || [],
+                        relatedEntities: data.relatedEntities || [],
+                        imageSearchTerm: data.imageSearchTerm,
+                        sectionState: { description: "complete" }
                     });
+                    finalState = nextState;
+                    setLocationInfo(nextState);
                 } else {
-                    setLocationInfo((prev: any) => (prev && enrichmentRequestId === activeMarkerRequestRef.current) ? { ...prev, sectionState: { ...prev.sectionState, description: "error" } } : prev);
+                    finalState = {
+                        ...basePayload,
+                        description: initialPayload.description || "",
+                        sectionState: { ...basePayload.sectionState, description: "complete" }
+                    };
+                    setLocationInfo(finalState);
                 }
             } catch (err) {
                 if (enrichmentRequestId === activeMarkerRequestRef.current) {
-                    setLocationInfo((prev: any) => prev ? { ...prev, sectionState: { ...prev.sectionState, description: "error" } } : prev);
+                    finalState = {
+                        ...basePayload,
+                        description: initialPayload.description || "",
+                        sectionState: { ...basePayload.sectionState, description: "error" }
+                    };
+                    setLocationInfo(finalState);
                 }
             } finally {
                 if (enrichmentRequestId === activeMarkerRequestRef.current) {
                     setIsInfoPanelLoading(false);
                     console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_COMPLETE');
+                    if (activeSelectionIdRef.current === stableId && finalState) {
+                        maybeTriggerNarration(finalState);
+                    }
                 }
             }
         })();
@@ -2882,6 +3719,7 @@ const App: React.FC = () => {
           setCurrentWaypointIndex(0);
           setIsDiscoveryLoading(false);
           console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
+          console.log('[TRACE ROUTE][Waypoint 1] route generated');
           loadWaypointData(waypointsWithSearch[0]);
         } else if (pipelineResult.error === 'LM_STUDIO_NO_MODEL') {
           setInteractionState('GLOBE_IDLE');
@@ -3077,12 +3915,22 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       activeSelectionIdRef.current = null;
 
       // Smoothly zoom out to globe level if currently zoomed in, while preserving natural globe rotation
+      const baseGlobeDist = getBaseGlobeDistance();
+      currentCameraDistanceRef.current = baseGlobeDist;
+      if (cameraStateRef.current) {
+        cameraStateRef.current.themeSuggestedDistance = baseGlobeDist;
+        cameraStateRef.current.routeSuggestedDistance = baseGlobeDist;
+        cameraStateRef.current.targetRotation = null;
+      }
+      targetCameraPosRef.current = null;
       setAutoRotate(true);
-      smoothReturnToGlobe();
+      smoothReturnToGlobe(baseGlobeDist);
 
       setInteractionState('GLOBE_SEARCHING');
       setIsDiscoveryLoading(true);
-      setScanningStatusText("TRACING ROUTE");
+      routePriorityWaypointRef.current = null;
+      internalRouteWaypointsRef.current = [];
+      setScanningStatusText("FINDING WAYPOINTS");
       console.log('[Scan Lifecycle] DISCOVERY_STARTED');
       setSearchError(null);
       setLocationInfo(null);
@@ -3090,44 +3938,101 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       setScanningArea(null);
       setIsFocused(true);
 
-      // Clear current active route when generating new one
-      setActiveRouteId(null);
-
+      initTraceTiming(String(currentSearchId));
       const searchId = searchImageRegistry.createSearchSession(text);
+      const routeSessionId = `trace-route-${currentSearchId}`;
+      setActiveRouteId(routeSessionId);
+      let initialWaypointPresented = false;
+      const progressiveWaypointsMap = new Map<string, Waypoint>();
+
       try {
-        const route = await generateRoute(text, undefined, abortController.signal);
+        console.log(`[TRACE ROUTE] route start: query="${text.slice(0, 60)}" (req=${currentSearchId})`);
+        const route = await generateRoute(text, {
+          signal: abortController.signal,
+          onWaypointProgress: (wp: Waypoint, allDiscoveredSoFar: Waypoint[], index: number, total: number) => {
+            if (currentSearchId !== activeSearchRequestIdRef.current || abortController.signal.aborted) return;
+            const wpWithSearch = { ...wp, searchId };
+            progressiveWaypointsMap.set(wp.id, wpWithSearch);
+            const currentList = Array.from(progressiveWaypointsMap.values());
+            internalRouteWaypointsRef.current = currentList;
+            setRouteWaypoints(currentList);
+
+            console.log(`[TRACE ROUTE] marker progress ${currentList.length}/${total}: "${wp.name}"`);
+
+            if (!initialWaypointPresented) {
+              const countFound = total > 0 ? total : currentList.length;
+              setScanningStatusText(`${countFound} WAYPOINTS FOUND`);
+            }
+
+            // Fast-track: as soon as Waypoint 1 is geographically validated and created, activate enrichment pipeline!
+            if (!initialWaypointPresented && currentList.length === 1) {
+              initialWaypointPresented = true;
+              const wpStableId = getWaypointStableId(wpWithSearch);
+              routePriorityWaypointRef.current = wpStableId;
+              logRouteScheduling("WP1 exclusive priority acquired", `id="${wpWithSearch.id}" name="${wpWithSearch.name}"`);
+              setScanningStatusText("PREPARING WAYPOINT 1");
+              setCurrentWaypointIndex(0);
+              setIsDiscoveryLoading(false);
+              console.log('[Scan Lifecycle] DISCOVERY_PROGRESSIVE_READY');
+              console.log(`[TRACE ROUTE][Waypoint 1] enrichment initiated: "${wp.name}"`);
+              loadWaypointData(wpWithSearch);
+            }
+          }
+        });
+
         if (currentSearchId !== activeSearchRequestIdRef.current || abortController.signal.aborted) return;
-        setScanningStatusText(null);
 
         if (route.waypoints && route.waypoints.length > 0) {
-            console.log('[Camera] DESTINATION_COMMITTED ownership transferred');
-            setAutoRotate(false);
-            setInteractionState('PIN_SELECTED');
+            console.log(`[TRACE ROUTE] final route ready: ${route.title} (${route.waypoints.length} waypoints)`);
             const waypointsWithSearch = route.waypoints.map(w => ({ ...w, searchId }));
-            setRouteWaypoints(waypointsWithSearch);
+            internalRouteWaypointsRef.current = waypointsWithSearch;
 
-            console.log(`Route Generated: ${route.title}`);
+            setRouteWaypoints(waypointsWithSearch);
+            if (!routePriorityWaypointRef.current) {
+              setAutoRotate(false);
+              setInteractionState('PIN_SELECTED');
+            }
+
             if (route.routeConfidence) {
                 console.log(`Confidence: ${route.routeConfidence.level} - ${route.routeConfidence.reasoning}`);
             }
 
-            setCurrentWaypointIndex(0);
             setIsDiscoveryLoading(false);
             console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
-            loadWaypointData(waypointsWithSearch[0]);
-        } else {
+            if (!initialWaypointPresented) {
+              initialWaypointPresented = true;
+              const firstWp = waypointsWithSearch[0];
+              const wpStableId = getWaypointStableId(firstWp);
+              routePriorityWaypointRef.current = wpStableId;
+              logRouteScheduling("WP1 exclusive priority acquired", `id="${firstWp.id}" name="${firstWp.name}"`);
+              setScanningStatusText("PREPARING WAYPOINT 1");
+              console.log('[Camera] DESTINATION_COMMITTED ownership transferred');
+              setCurrentWaypointIndex(0);
+              console.log('[TRACE ROUTE][Waypoint 1] route generated');
+              loadWaypointData(firstWp);
+            }
+        } else if (!initialWaypointPresented) {
             console.log('[Camera] SEARCH_NO_RESULT rotation preserved');
             setInteractionState('GLOBE_IDLE');
             setSearchError("No identifiable locations found in the text.");
             setIsDiscoveryLoading(false);
+            setScanningStatusText(null);
+            routePriorityWaypointRef.current = null;
             console.log('[Scan Lifecycle] DISCOVERY_FAILED');
         }
       } catch (err: any) {
         if (currentSearchId !== activeSearchRequestIdRef.current || abortController.signal.aborted || err?.name === 'AbortError') return;
+        routePriorityWaypointRef.current = null;
         setScanningStatusText(null);
         if (isLMStudioNoModelError(err)) {
           setInteractionState('GLOBE_IDLE');
           setSearchError(`${LM_STUDIO_NO_MODEL_MESSAGE} ${LM_STUDIO_NO_MODEL_INSTRUCTION}`);
+          setIsDiscoveryLoading(false);
+          return;
+        }
+        if (isSourceRetrievalError(err)) {
+          setInteractionState('GLOBE_IDLE');
+          setSearchError(err?.message || "Source content could not be retrieved from this URL for local AI processing. Please paste the article text directly into TRACE ROUTE or switch to Gemini for URL search grounding.");
           setIsDiscoveryLoading(false);
           return;
         }
@@ -3682,7 +4587,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           favorites={earthFavorites}
           showFavorites={true}
           selectedMarkerId={selectedMarkerId}
-          selectedMarkerCoordinates={userSettings.documentaryMode && isDocumentaryActive ? activeOSMCoordinates : selectedMarkerCoordinates}
+          selectedMarkerCoordinates={userSettings.documentaryMode && isDocumentaryActive ? (activeOSMCoordinates || selectedMarkerCoordinates) : selectedMarkerCoordinates}
           routeWaypoints={routeWaypoints}
           currentWaypointIndex={currentWaypointIndex}
           scanningArea={scanningArea}
@@ -3749,14 +4654,12 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
            skin={skin}
            cameraControlsRef={cameraControlsRef}
            targetCameraPosRef={targetCameraPosRef}
-           isSidebarOpen={!!locationInfo || routeWaypoints.length > 0 || isFavoritesPanelOpen}
+           isSidebarOpen={!!locationInfo || isFavoritesPanelOpen}
            cameraStateRef={cameraStateRef}
            parchmentZoom={parchmentZoom}
            isDocumentaryActive={isDocumentaryActive}
            isCameraAnimatingRef={isCameraAnimatingRef}
         />
-
-
 
             <RotationManager
               isDragging={isDragging}
@@ -3767,7 +4670,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
                  if (zoomedOut) setIsFocused(false);
               }}
               onOSMChange={setIsOSMActive}
-              disabled={routeWaypoints.length > 0 || !!locationInfo || markers.length > 0}
+              disabled={(!isDiscoveryLoading && !routePriorityWaypointRef.current && !!locationInfo) || markers.length > 0}
             />
           </Suspense>
         </Canvas>
@@ -3976,6 +4879,18 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         }}
         isScanningArea={isScanningArea}
         scanningStatusText={scanningStatusText}
+        activeWaypointTitle={(() => {
+          if (routeWaypoints.length > 0 && currentWaypointIndex >= 0) {
+            const currentWp = routeWaypoints[currentWaypointIndex];
+            if (locationInfo && (locationInfo.id === getWaypointStableId(currentWp) || locationInfo.name === currentWp.name)) {
+              const isSubstantive = evaluateDescriptionReadiness(locationInfo.description, locationInfo.name).isReady;
+              if (isSubstantive) {
+                return currentWp.name;
+              }
+            }
+          }
+          return null;
+        })()}
         onCancelScan={handleCancelScan}
         onCycleSkin={handleCycleSkin}
         onToggleSettings={() => setIsSettingsOpen(!isSettingsOpen)}
