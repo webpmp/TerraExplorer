@@ -2528,6 +2528,99 @@ export function classifyHistoricalImageCategory(
   return 'MODERN_LOCATION';
 }
 
+export function isGeographicPlaceEntity(
+  entity: {
+    name?: string;
+    canonicalName?: string;
+    entityType?: string;
+    type?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    category?: string;
+    waypoint?: any;
+  },
+  shape?: ImageSubjectShape
+): boolean {
+  if (!entity) return false;
+
+  const entityName = (entity.name || entity.canonicalName || '').trim();
+  const eType = (entity.entityType || entity.type || entity.category || entity.waypoint?.entityType || entity.waypoint?.type || '').toString().toLowerCase().trim();
+
+  // 1. Explicit discrete landmark / structure / vessel exclusions
+  // These entities MUST remain discrete and require entity-specific validation
+  const discreteLandmarkKeywords = [
+    'museum', 'monument', 'statue', 'sculpture', 'building', 'tower', 'castle',
+    'fort', 'fortress', 'palace', 'temple', 'cathedral', 'basilica', 'church',
+    'chapel', 'shrine', 'mosque', 'synagogue', 'acropolis', 'parthenon', 'colosseum',
+    'pyramid', 'sphinx', 'stonehenge', 'ruin', 'ruins', 'archaeological_site',
+    'historic_site', 'heritage_site', 'wreck', 'shipwreck', 'vessel', 'bridge',
+    'memorial', 'stadium', 'arena', 'observatory', 'mausoleum', 'tomb', 'arch'
+  ];
+
+  const hasDiscreteType = discreteLandmarkKeywords.some(kw => eType === kw || eType.includes(kw));
+  if (hasDiscreteType) {
+    return false;
+  }
+
+  // Name check for prominent discrete entities or discrete descriptors
+  const discreteNameRegex = /\b(?:museum|monument|statue|tower|castle|fort|palace|temple|cathedral|basilica|acropolis|parthenon|colosseum|pyramid|sphinx|stonehenge|shipwreck|wreck\s+site|eiffel\s+tower|statue\s+of\s+liberty)\b/i;
+  if (discreteNameRegex.test(entityName)) {
+    return false;
+  }
+
+  // 2. Recognized Geographic Place Types
+  const recognizedPlaceTypes = new Set([
+    'city',
+    'town',
+    'village',
+    'settlement',
+    'island',
+    'country',
+    'state',
+    'province',
+    'region',
+    'administrative',
+    'administrative_region',
+    'place',
+    'geographic_place',
+    'locality',
+    'municipality',
+    'county',
+    'district',
+    'commune',
+    'department',
+    'prefecture',
+    'territory',
+    'canton'
+  ]);
+
+  if (recognizedPlaceTypes.has(eType) || Array.from(recognizedPlaceTypes).some(t => eType === t || eType.includes(t))) {
+    return true;
+  }
+
+  // 3. Recognized Shapes
+  if (shape === 'BROAD_LOCATION' || (shape as string) === 'GEOGRAPHIC_PLACE') {
+    return true;
+  }
+
+  // 4. City/Country/State Structural Hierarchy
+  if (entity.city === entityName || entity.country === entityName || entity.state === entityName) {
+    return true;
+  }
+
+  // 5. Geographic Locality Pattern (e.g. "Antikythera, Greece", "Boston, Massachusetts", "Symi, Greece", "Vatican City")
+  // Matches "Name, Country/State" or "Name City / Island" without discrete landmark terms
+  const isPlaceNamePattern = /^[A-Za-z\u00C0-\u024F\s.'-]+,\s*[A-Za-z\u00C0-\u024F\s.'-]+$/i.test(entityName) ||
+    /\b(?:city|island|isle|town|village|municipality|republic|kingdom|state|province)\b/i.test(entityName);
+
+  if (isPlaceNamePattern && !discreteNameRegex.test(entityName)) {
+    return true;
+  }
+
+  return false;
+}
+
 export function validateImageCandidate(
   candidate: ImageCandidate,
   entity: {
@@ -3158,6 +3251,15 @@ decision=${decision}`);
       }
 
       case 'STRICT_ENTITY': {
+        const isGeoPlace = isGeographicPlaceEntity(entity, shape);
+        const isPhotographicMedia =
+          photographicSuitability === 'HIGH' ||
+          candidateMediaType === 'PHOTOGRAPH' ||
+          candidateMediaType === 'LOCATION_VIEW' ||
+          candidateMediaType === 'PANORAMA_PHOTOGRAPH' ||
+          candidateMediaType === 'HISTORICAL_PHOTOGRAPH';
+        const isGeoConstraintApplied = coordinateStatus === 'VERIFIED' || coordinateStatus === 'PROVISIONAL';
+
         if (hasStrongEntityMatch) {
           decision = 'ACCEPT';
           tier = 1;
@@ -3175,6 +3277,22 @@ decision=${decision}`);
             tier = 2;
             reason = 'STRONG_SEMANTIC_ENTITY_MATCH';
           }
+        } else if (
+          isGeoPlace &&
+          isPhotographicMedia &&
+          geoEvidence === 'MATCHING' &&
+          coordinateStatus === 'VERIFIED' &&
+          !isTrustedGeoConflict &&
+          !isGeoConflicting &&
+          isGeoConstraintApplied &&
+          !isDifferentEntity &&
+          !isFlag &&
+          !isIncompatibleForExplicitIntent &&
+          !isNonPhotographicForPhysicalLocation
+        ) {
+          decision = 'ACCEPT';
+          tier = 2;
+          reason = 'VERIFIED_GEOGRAPHIC_PLACE_MATCH';
         } else if (entityMatchLevel === 'PARTIAL') {
           if (geoEvidence === 'MATCHING') {
             if (coordinateStatus === 'VERIFIED') {
