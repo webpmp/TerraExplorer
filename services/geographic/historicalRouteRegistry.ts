@@ -357,8 +357,10 @@ export const HISTORICAL_ROUTE_REGISTRY: Record<string, HistoricalEventRouteModel
 /**
  * Returns the authoritative event model if the event title/query matches a known registry entry.
  */
-export function getAuthoritativeEventModel(eventTitle: string): HistoricalEventRouteModel | null {
+export function getAuthoritativeEventModel(eventTitle?: string): HistoricalEventRouteModel | null {
+  if (!eventTitle || typeof eventTitle !== 'string') return null;
   const normTitle = eventTitle.trim();
+  if (!normTitle) return null;
   for (const model of Object.values(HISTORICAL_ROUTE_REGISTRY)) {
     if (model.eventPattern.test(normTitle) || normTitle.toLowerCase().includes(model.eventTitle.toLowerCase())) {
       return model;

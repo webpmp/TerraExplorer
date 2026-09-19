@@ -109,7 +109,7 @@ describe('LM Studio Missing Model Error Handling & Gemini Fallback', () => {
     expect(isLMStudioNoModelError(undefined)).toBe(false);
   });
 
-  it('3. When Gemini IS configured, automatically falls back to Gemini and logs fallback steps', async () => {
+  it('3. When LM Studio is selected in Settings, does NOT silently fall back to Gemini even if Gemini API key exists', async () => {
     process.env.GEMINI_API_KEY = 'test-gemini-key';
     expect(isGeminiConfigured()).toBe(true);
 
@@ -122,30 +122,59 @@ describe('LM Studio Missing Model Error Handling & Gemini Fallback', () => {
       text: async () => rawLMStudioError
     } as unknown as Response);
 
-    const mockGeminiResponse = {
-      text: JSON.stringify({
-        name: 'Cherokee Trail of Tears',
-        waypoints: [
-          { name: 'New Echota', lat: 34.54, lng: -84.91 }
-        ]
-      })
-    };
-
-    const generateContentSpy = vi.spyOn(ai.models, 'generateContent').mockResolvedValue(mockGeminiResponse as any);
+    const generateContentSpy = vi.spyOn(ai.models, 'generateContent');
     const logSpy = vi.spyOn(console, 'log');
     const warnSpy = vi.spyOn(console, 'warn');
 
-    const result = await generateContentWithRetry({ contents: 'Trace Cherokee Trail of Tears' });
+    await expect(
+      generateContentWithRetry({ contents: 'Trace Cherokee Trail of Tears' })
+    ).rejects.toThrow(LMStudioNoModelError);
 
-    expect(generateContentSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy).toHaveBeenCalledWith('[AI Provider] LM Studio has no loaded model');
+    expect(generateContentSpy).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledWith('[AI Provider] LM Studio generation started');
-    expect(logSpy).toHaveBeenCalledWith('[AI Provider] Attempting Gemini fallback');
-    expect(logSpy).toHaveBeenCalledWith('[AI Provider] Gemini fallback successful');
-    expect(result.text).toContain('Cherokee Trail of Tears');
+    expect(warnSpy).toHaveBeenCalledWith('[AI Provider] LM Studio has no loaded model');
+    expect(warnSpy).toHaveBeenCalledWith('[AI Provider] No fallback provider available');
   });
 
-  it('4. generateRoute re-throws LMStudioNoModelError when no fallback is configured, preventing empty route swallowing', async () => {
+  it('3b. TRACE ROUTE respects LM Studio settings and passes configured model to LM Studio endpoint', async () => {
+    const mockSuccessResponse = {
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              title: 'Shackleton Expedition',
+              route: [
+                { id: 'wp-1', name: 'South Georgia', lat: -54.4296, lng: -36.5879, sequence: 1 }
+              ]
+            })
+          }
+        }
+      ]
+    };
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockSuccessResponse
+    } as unknown as Response);
+
+    const generateContentSpy = vi.spyOn(ai.models, 'generateContent');
+    const logSpy = vi.spyOn(console, 'log');
+
+    const result = await generateRoute('Custom Antarctic Journey');
+
+    expect(generateContentSpy).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[Route Generation] Using configured AI provider: LM Studio (model: local-model)'));
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://localhost:1234/v1/chat/completions',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+    );
+  });
+
+  it('4. generateRoute re-throws LMStudioNoModelError when LM Studio has no model loaded, preventing empty route swallowing', async () => {
     const rawLMStudioError = "No models loaded. Please load a model in the developer page or use the 'lms load' command.";
 
     global.fetch = vi.fn().mockResolvedValue({

@@ -161,7 +161,7 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(html).toContain('ORPHEUS TTS (LOCAL)');
     expect(html).toContain('Voice');
     expect(html).toContain('System Default Voice');
-    expect(html).toContain('Speed');
+    expect(html).toContain('Pace');
     expect(html).toContain('0.9x');
     expect(html).toContain('Volume');
     expect(html).toContain('75%');
@@ -727,7 +727,7 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
       expect(testConnectionOccurrences).toHaveLength(3);
 
       // Verify full width and identical button styling class patterns
-      const fullWidthButtons = html.match(/w-full py-2 px-4 rounded-lg text-sm border font-medium/g);
+      const fullWidthButtons = html.match(/w-full py-2 px-3 rounded-lg text-sm border/g);
       expect(fullWidthButtons).toHaveLength(3);
     });
 

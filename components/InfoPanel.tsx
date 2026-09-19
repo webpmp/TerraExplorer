@@ -5,6 +5,7 @@ import { LocationInfo, SkinType, isValidCoordinates, LocationType } from '../typ
 import { formatUserFacingCategory, formatClimateName } from '../utils/categoryFormatting';
 import { fetchAndValidateImages } from '../services/imageService';
 import { fetchAndValidateLocationNews } from '../services/locationService';
+import { logTraceTiming } from '../services/traceTimingService';
 import { isLMStudioNoModelError, LM_STUDIO_NO_MODEL_MESSAGE, LM_STUDIO_NO_MODEL_INSTRUCTION } from '../services/geminiService';
 import {
   X, Users, Info, Crown, Map, Pin, ExternalLink, Loader2,
@@ -20,8 +21,10 @@ import {
   ContextCategory,
   CONTEXT_CATEGORY_HEADINGS
 } from '../utils/contextClassification';
+import { resolveCanonicalNarrative } from '../utils/narrativeResolver';
+import { evaluateDescriptionReadiness } from '../utils/descriptionReadiness';
 import { generateDefaultRouteName, normalizeSemanticEntityTitle, isCoordinateTitle } from '../services/queryNormalizer';
-export { classifyContext, isPureGeographicLabel, sanitizeContextMarkdown };
+export { classifyContext, isPureGeographicLabel, sanitizeContextMarkdown, resolveCanonicalNarrative, evaluateDescriptionReadiness };
 
 
 export const MedievalEmeraldBronzePinIcon: React.FC<{ width?: number; height?: number; className?: string }> = ({ width = 54, height = 38, className = '' }) => (
@@ -1430,140 +1433,10 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
     const wp = rawInfo.waypoint || {};
 
-    // 1. Name
-    const name = wp.name || rawInfo.name || "Unknown Location";
-
-    // 2. Description fallback
-    // Priority: wp.description > rawInfo.description > wp.significance
-    const extractText = (val: any): string => {
-       if (!val) return "";
-       if (typeof val === "string") return normalizeDisplayText(val);
-       if (typeof val === "object") {
-           let text = "";
-           const h = val.heading || val.heading1 || val.title;
-           const t = val.text || val.text1 || val.description || val.summary || val.value || val.body;
-
-           if (h) {
-               text += `${normalizeDisplayText(h)}\n\n`;
-           }
-           if (t) {
-               text += normalizeDisplayText(t);
-           } else {
-               // Fallback: concatenate string values, explicitly excluding other metadata sections
-               const excludedKeys = ['notable', 'notableFacts', 'notable_facts', 'climate', 'population', 'news', 'contextNotes', 'entities', 'historicalPeriod'];
-               const vals = Object.entries(val)
-                 .filter(([k, v]) => typeof v === 'string' && !excludedKeys.includes(k) && !k.toLowerCase().includes('notable'))
-                 .map(([k, v]) => normalizeDisplayText(v));
-               if (vals.length > 0 && !h) {
-                   text += vals.join('\n\n');
-               }
-           }
-           return text.trim();
-       }
-       return normalizeDisplayText(String(val));
-    };
-
-    const geographicDesc = extractText(rawInfo.description) || null;
-    const historicalDesc = extractText(wp.description) || null;
-    const routeContextText = (rawInfo.routeContext?.text ? extractText(rawInfo.routeContext.text) : null) ||
-      (wp.routeContext?.text ? extractText(wp.routeContext.text) : null) ||
-      (wp.routeContextText ? extractText(wp.routeContextText) : null);
-
-    let combinedDescParts: string[] = [];
-
-    // Determine the primary narrative description:
-    let rawDesc = "";
-    if (historicalDesc && historicalDesc !== routeContextText) {
-      rawDesc = historicalDesc;
-    } else if (geographicDesc && geographicDesc !== routeContextText) {
-      rawDesc = geographicDesc;
-    } else if (historicalDesc) {
-      rawDesc = historicalDesc;
-    } else if (geographicDesc) {
-      rawDesc = geographicDesc;
-    }
-
-    if (rawDesc && !isPlaceholderString(rawDesc)) {
-      let cleanDesc = rawDesc;
-      if (/^#+\s+description/i.test(cleanDesc.trim())) {
-        cleanDesc = cleanDesc.replace(/^#+\s+description/i, '').trim();
-      }
-      if (cleanDesc && !isPlaceholderString(cleanDesc)) {
-        combinedDescParts.push(cleanDesc);
-      }
-    }
-
-    // Add significance if unique
-    if (wp.significance && !isPlaceholderString(wp.significance) && wp.significance !== rawDesc && wp.significance !== routeContextText) {
-      if (isSingleLocation) {
-        if (!combinedDescParts.some(p => p.includes(wp.significance))) {
-          combinedDescParts.push(wp.significance);
-        }
-      } else {
-        combinedDescParts.push(`## Significance\n\n${wp.significance}`);
-      }
-    }
-
-    // Consolidated contextual narrative sections (Historical, Film & Media, Cultural, Scientific/Geographic)
-    // Only render categories when substantive, non-geographic information is present.
-    const contextCandidates: string[] = [];
-    if ((rawInfo as any).historicalBackground && !isPlaceholderString((rawInfo as any).historicalBackground)) {
-      contextCandidates.push((rawInfo as any).historicalBackground);
-    }
-    if ((rawInfo as any).historicalContext && !isPlaceholderString((rawInfo as any).historicalContext)) {
-      contextCandidates.push((rawInfo as any).historicalContext);
-    }
-    if ((rawInfo as any).filmContext && !isPlaceholderString((rawInfo as any).filmContext)) {
-      contextCandidates.push((rawInfo as any).filmContext);
-    }
-    if ((rawInfo as any).mediaContext && !isPlaceholderString((rawInfo as any).mediaContext)) {
-      contextCandidates.push((rawInfo as any).mediaContext);
-    }
-    if ((rawInfo as any).culturalContext && !isPlaceholderString((rawInfo as any).culturalContext)) {
-      contextCandidates.push((rawInfo as any).culturalContext);
-    }
-    if ((rawInfo as any).scientificContext && !isPlaceholderString((rawInfo as any).scientificContext)) {
-      contextCandidates.push((rawInfo as any).scientificContext);
-    }
-
-    // Group candidates by semantic category
-    const categorizedContext: Partial<Record<ContextCategory, string[]>> = {};
-
-    for (const rawSnippet of contextCandidates) {
-      const snippet = normalizeDisplayText(String(rawSnippet)).trim();
-      if (!snippet || isPlaceholderString(snippet) || isPureGeographicLabel(snippet)) {
-        continue;
-      }
-      if (combinedDescParts.some(p => p.includes(snippet))) {
-        continue;
-      }
-      if (routeContextText && (snippet === routeContextText || routeContextText.includes(snippet) || snippet.includes(routeContextText))) {
-        continue;
-      }
-
-      const res = classifyContext(snippet);
-      if (res.category && res.isMeaningful) {
-        if (!categorizedContext[res.category]) {
-          categorizedContext[res.category] = [];
-        }
-        if (!categorizedContext[res.category]!.includes(snippet)) {
-          categorizedContext[res.category]!.push(snippet);
-        }
-      }
-    }
-
-    // Append only active, categorized context sections with semantic headings
-    for (const [category, snippets] of Object.entries(categorizedContext) as [ContextCategory, string[]][]) {
-      if (snippets && snippets.length > 0) {
-        const heading = CONTEXT_CATEGORY_HEADINGS[category];
-        const mergedText = snippets.join(' ');
-        if (mergedText && !combinedDescParts.some(p => p.includes(mergedText)) && (!routeContextText || (!routeContextText.includes(mergedText) && !mergedText.includes(routeContextText)))) {
-          combinedDescParts.push(`## ${heading}\n\n${mergedText}`);
-        }
-      }
-    }
-
-    let desc = combinedDescParts.join('\n\n');
+    // 1 & 2: Canonical narrative & title resolution
+    const canonicalResult = resolveCanonicalNarrative(rawInfo, { isSingleLocation });
+    const name = canonicalResult.title || wp.name || rawInfo.name || "Unknown Location";
+    const desc = canonicalResult.narrativeText;
 
     // 3. Context Notes
     const contextNotes: any[] = [];
@@ -1886,6 +1759,13 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   }, []);
 
   useEffect(() => {
+    if (info?.name) {
+      const stableId = (info as any)?.waypoint?.id || (info as any)?.id || info.name;
+      logTraceTiming('WP1_INFOPANEL_VISIBLE', stableId, info.name, `descLength=${(info.description || '').length}`);
+    }
+  }, [info?.name, (info as any)?.id]);
+
+  useEffect(() => {
     updateScrollFade();
   }, [info, newsState, activeTab, isError, isLoading, updateScrollFade]);
 
@@ -1911,14 +1791,31 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     return getScrollFadeMaskStyle(scrollFade.top, scrollFade.bottom);
   }, [scrollFade.top, scrollFade.bottom]);
 
-  useEffect(() => {
-    setImages([]);
-    setCurrentImageIndex(0);
-    setWikiImage(null);
-    setActiveTab('overview');
-    setShowFavoriteDialog(false);
+  const lastLocationNameRef = useRef<string | null>(null);
 
+  useEffect(() => {
     const locName = info?.name || "";
+    const isNewLocation = lastLocationNameRef.current !== locName;
+    lastLocationNameRef.current = locName;
+
+    if (isNewLocation) {
+      if (Array.isArray(info?.images) && info.images.length > 0) {
+        const mapped = info.images.map((img: any) => typeof img === 'string' ? { url: img } : img);
+        setImages(mapped);
+        setWikiImage(mapped[0]?.url || null);
+      } else if (info?.primaryImage) {
+        const pUrl = typeof info.primaryImage === 'string' ? info.primaryImage : info.primaryImage.url;
+        setImages([{ url: pUrl, caption: info.imageCaption, attribution: info.imageAttribution }]);
+        setWikiImage(pUrl);
+      } else {
+        setImages([]);
+        setWikiImage(null);
+      }
+      setCurrentImageIndex(0);
+      setActiveTab('overview');
+      setShowFavoriteDialog(false);
+    }
+
     if (locationNewsRef.current !== locName) {
       locationNewsRef.current = locName;
       if (rawInfo?.news && Array.isArray(rawInfo.news) && rawInfo.news.length > 0) {
@@ -2131,26 +2028,41 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   };
 
   const activeImageFetchIdRef = useRef<number>(0);
+  const lastFetchedWaypointKeyRef = useRef<string>('');
 
   useEffect(() => {
     if (!info?.name) {
       setImages([]);
       setWikiImage(null);
+      lastFetchedWaypointKeyRef.current = '';
       return;
     }
+
+    const currentWaypointId = (info as any)?.waypoint?.id || (info as any)?.id || info.name;
+    const currentSearchId = (info as any)?.searchId || (rawInfo as any)?.searchId || '';
+    const waypointKey = `${info.name}::${currentWaypointId}::${currentSearchId}`;
+
+    // If this waypoint was already fetched and has results, do not re-issue redundant network queries
+    if (lastFetchedWaypointKeyRef.current === waypointKey && images.length > 0) {
+      return;
+    }
+    lastFetchedWaypointKeyRef.current = waypointKey;
 
     const currentFetchId = ++activeImageFetchIdRef.current;
     const fetchImages = async () => {
       try {
         const searchContext = {
-          searchId: (info as any)?.searchId || (rawInfo as any)?.searchId,
-          waypointId: (info as any)?.waypoint?.id || (info as any)?.id || info.name,
+          searchId: currentSearchId || undefined,
+          waypointId: currentWaypointId,
           relatedWaypoints: (info as any)?.relatedWaypoints
         };
         const foundImages = await fetchAndValidateImages(info, searchContext);
         if (currentFetchId !== activeImageFetchIdRef.current) return;
         setImages(foundImages);
         setWikiImage(foundImages[0]?.url || null);
+        if ((info as any)?.waypoint?.sequence === 1 || (rawInfo as any)?.waypoint?.sequence === 1) {
+          console.log(`[TRACE ROUTE][Waypoint 1] images ready: count=${foundImages.length}`);
+        }
       } catch (e) {
         if (currentFetchId !== activeImageFetchIdRef.current) return;
         console.error("Failed to fetch image", e);
@@ -2159,7 +2071,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       }
     };
     fetchImages();
-  }, [info?.name, (info as any)?.canonicalName, info?.city, info?.country, info?.coordinates?.lat, info?.coordinates?.lng, info?.imageSearchTerm, info?.primaryImage, info?.images, info?.image, info?.imageCaption, (info as any)?.imageAttribution, (info as any)?.routeTitle, (info as any)?.historicalPeriod, (info as any)?.significance, (info as any)?.entityType, (info as any)?.searchId, (rawInfo as any)?.searchId]);
+  }, [info?.name, (info as any)?.canonicalName, (info as any)?.waypoint?.id, (info as any)?.id, (info as any)?.searchId, (rawInfo as any)?.searchId, info?.coordinates?.lat, info?.coordinates?.lng]);
 
   const themes = {
     'modern': {
@@ -2372,15 +2284,18 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       render: () => {
         const routeText = info.routeContext?.text?.trim() || "";
         const descText = info.description?.trim() || "";
-        const hasRoute = !!info.routeContext && routeText.length > 0;
+        const routeReadiness = evaluateDescriptionReadiness(routeText, info.name);
+        const descReadiness = evaluateDescriptionReadiness(descText, info.name);
+        const isDescLoading = isLoading || (rawInfo as any)?.sectionState?.description === 'loading';
+        const hasRoute = !isDescLoading && routeReadiness.isReady && !!info.routeContext && routeText.length > 0;
         const isDuplicateHeader = Boolean(
           info.routeContext?.title &&
           (displayTitle.trim().toLowerCase() === info.routeContext.title.trim().toLowerCase() ||
            (displaySubtitle && displaySubtitle.trim().toLowerCase() === info.routeContext.title.trim().toLowerCase()))
         );
         const renderRouteContext = !isDuplicateHeader && hasRoute;
-        const hasDesc = descText.length > 0 && !isPlaceholderString(descText) && (!renderRouteContext || descText !== routeText);
-        if (!hasDesc && !renderRouteContext) return null;
+        const hasDesc = !isDescLoading && descText.length > 0 && descReadiness.isReady && !isPlaceholderString(descText) && (!renderRouteContext || descText !== routeText);
+        if (!hasDesc && !renderRouteContext && !isDescLoading) return null;
 
         return (
           <div className="space-y-4">
@@ -2405,7 +2320,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                 </p>
               </div>
             )}
-            {hasDesc && (
+            {hasDesc ? (
               <div className="relative group/desc">
                 <div className="absolute top-0 -right-2 opacity-0 group-hover/desc:opacity-100 transition-opacity z-10">
                   <CopyButton text={fullCopyText} skin={skin} />
@@ -2480,10 +2395,14 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
                       const isHeuristicHeading = hasSubsequentContent && cleanedText.split(' ').length <= 8 && cleanedText.length < 60 && !cleanedText.match(/[.!?:;]$/) && !cleanedText.match(/^[a-z]/) && lines[i+1] && !lines[i+1].match(/^[-*]\s/);
 
-                      if (isMarkdownHeading || isHeuristicHeading) {
+                      if (isMarkdownHeading && hasSubsequentContent) {
                         blocks.push(
-                          <h3 key={`h-${i}`}
-                            className={`mt-3 mb-1.5 ${semanticTitleStyle}`}>
+                          <h3
+                            key={`h-${i}`}
+                            className={`font-semibold uppercase tracking-wider ${
+                              isRetro ? 'text-green-300 font-retro' : isParchment ? 'text-[#3e2723] font-serif' : 'text-cyan-300'
+                            } text-xs mt-3 mb-1`}
+                          >
                             {cleanedText}
                           </h3>
                         );
@@ -2506,7 +2425,15 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                   })()}
                 </div>
               </div>
-            )}
+            ) : isDescLoading ? (
+              <div className="space-y-3 animate-pulse pt-2">
+                <div className="space-y-2">
+                  <div className={`h-3.5 ${isRetro ? 'bg-green-500/20' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded w-3/4`}></div>
+                  <div className={`h-3.5 ${isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
+                  <div className={`h-3.5 w-[90%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
+                </div>
+              </div>
+            ) : null}
           </div>
         );
       }
@@ -2872,7 +2799,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                             isLMStudioNoModelError(rawInfo) ||
                             isLMStudioNoModelError(errorMessage);
 
-  const showContentSkeleton = isLoading && (!info?.description) && !isLMStudioNoModel && !isError;
+  const isEnrichmentLoading = isLoading || (rawInfo as any)?.sectionState?.description === 'loading';
+  const isSubstantiveReady = Boolean(info?.description && evaluateDescriptionReadiness(info.description, info?.name).isReady);
+  const showContentSkeleton = (isLoading || (isEnrichmentLoading && !isSubstantiveReady)) && !isLMStudioNoModel && !isError;
   const contextItems = info?.contextNotes;
 
   if (!rawInfo && !isLoading && !isError) {
@@ -3106,13 +3035,12 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                   )}
                </div>
             ) : showContentSkeleton ? (
-               <div className="p-6 space-y-8 animate-pulse">
-                  {/* skeleton content */}
+               <div className="p-6 space-y-6 animate-pulse">
                   <div className="space-y-3">
-                    <div className={`h-4 ${isRetro ? 'bg-green-500/20' : 'bg-white/10'} rounded w-3/4`}></div>
-                    <div className={`h-4 ${isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
-                    <div className={`h-4 w-[90%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
-                 </div>
+                    <div className={`h-3.5 ${isRetro ? 'bg-green-500/20' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded w-3/4`}></div>
+                    <div className={`h-3.5 ${isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
+                    <div className={`h-3.5 w-[90%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
+                  </div>
                </div>
             ) : info ? (
                 <div className="p-5 pb-6 space-y-5 animate-in fade-in duration-300">

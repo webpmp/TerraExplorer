@@ -52,3 +52,22 @@ export const newsCache = new TTLCache<any>(15 * 60 * 1000);
 export const imageCache = new TTLCache<any>(60 * 60 * 1000);
 // 1 hour for nearby places
 export const nearbyCache = new TTLCache<any>(60 * 60 * 1000);
+// 1 hour for route waypoint finalized enrichment
+export const waypointEnrichmentCache = new TTLCache<any>(60 * 60 * 1000);
+
+export interface CachedNarrationAudio {
+  waypointId: string;
+  narrativeKey: string;
+  script: string;
+  voice: string;
+  pcmData: Float32Array;
+  sampleRate: number;
+  duration: number;
+  createdAt: number;
+}
+
+// 1 hour for route waypoint preloaded narration audio
+export const waypointNarrationCache = new TTLCache<CachedNarrationAudio>(60 * 60 * 1000);
+
+// In-flight narration prefetch promises map
+export const inFlightNarrationPromises = new Map<string, Promise<CachedNarrationAudio | null>>();

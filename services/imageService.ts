@@ -3,6 +3,7 @@ import { cleanMetadataString, formatImageAttribution, GalleryImage } from '../co
 import { searchImageRegistry, canonicalizeImageUrl } from './imageDeduplicationService';
 import { getHistoricalEntityKnowledge } from './geographic/historicalCoordinateValidator';
 import { stripDiacritics, areEntitiesMatchingWithDiacritics, getUnicodeNormalizedForms } from './geographic/geographicNormalization';
+import { logTraceNarration } from './waypointPipelineService';
 
 export interface ImageCandidate {
   url: string;
@@ -1098,7 +1099,7 @@ export function getEntityDistanceToleranceKm(entityType?: string): number {
     type.includes('ruin') ||
     type.includes('square')
   ) {
-    return 15; // Tight radius for physical landmarks/buildings
+    return 15; // Strict 15km radius for specific physical landmarks
   }
   if (
     type.includes('mountain') ||
@@ -1113,10 +1114,10 @@ export function getEntityDistanceToleranceKm(entityType?: string): number {
     type.includes('waypoint') ||
     type.includes('historical')
   ) {
-    return 85; // Feature-appropriate radius for natural features and historical waypoints
+    return 25; // 25km radius for natural features and historical waypoints
   }
   if (type.includes('city') || type.includes('town') || type.includes('village') || type.includes('settlement')) {
-    return 50; // Broad radius for cities/towns
+    return 35; // 35km radius for cities/towns
   }
   if (type.includes('state') || type.includes('province') || type.includes('region') || type.includes('county')) {
     return 250; // Regional radius
@@ -1124,7 +1125,7 @@ export function getEntityDistanceToleranceKm(entityType?: string): number {
   if (type.includes('country') || type.includes('nation')) {
     return 1500; // Country-level radius
   }
-  return 50;
+  return 15;
 }
 
 export function isGenericFlagOrEmblem(
@@ -2121,6 +2122,7 @@ export interface HistoricalImageContext {
   description?: string;
   significance?: string;
   notableFacts: string[];
+  aliases?: string[];
 }
 
 export function isHistoricalWaypointEntity(entity: {
@@ -2139,6 +2141,7 @@ export function isHistoricalWaypointEntity(entity: {
   significance?: string;
 }): boolean {
   if (entity.intent === 'MULTI_LOCATION_DISCOVERY') return false;
+  if (entity.metadataMode === 'modern_place') return false;
 
   const title = (entity.routeTitle || entity.waypoint?.routeTitle || '').toLowerCase();
   const context = (entity.historicalContext || entity.waypoint?.context || '').toLowerCase();
@@ -2160,6 +2163,17 @@ export function isHistoricalWaypointEntity(entity: {
     return false;
   }
 
+  // If this is a modern travel guide, recommendation itinerary, or highlights route
+  if (
+    combined.includes('36 hours') ||
+    combined.includes('travel guide') ||
+    combined.includes('places to visit') ||
+    combined.includes('itinerary') ||
+    combined.includes('highlights')
+  ) {
+    return false;
+  }
+
   const eType = (entity.entityType || entity.type || '').toString().toLowerCase();
 
   const isExplicitHistoricalWaypointType =
@@ -2168,23 +2182,17 @@ export function isHistoricalWaypointEntity(entity: {
 
   const hasExplicitHistoricalRouteContext =
     Boolean(entity.routeGroupId) ||
-    Boolean(entity.routeTitle) ||
     Boolean(entity.historicalRouteId) ||
-    Boolean(entity.routeEvidenceMode) ||
-    Boolean(entity.waypoint?.routeTitle) ||
-    Boolean(entity.waypoint?.routeGroupId);
+    Boolean(entity.historicalPeriod) ||
+    (Boolean(entity.routeTitle) && !combined.includes('guide') && !combined.includes('hours') && !combined.includes('highlights'));
 
   const hasWaypointContext =
-    Boolean(entity.waypoint) ||
+    Boolean(entity.historicalPeriod) ||
     Boolean(entity.historicalContext) ||
-    Boolean((entity as any).context) ||
-    Boolean((entity as any).routeContext) ||
-    Boolean(entity.significance) ||
-    Boolean((entity as any).waypointType === 'route_waypoint') ||
     eType.includes('battlefield') ||
     eType.includes('historic');
 
-  if (isExplicitHistoricalWaypointType) {
+  if (isExplicitHistoricalWaypointType && (hasExplicitHistoricalRouteContext || hasWaypointContext)) {
     return true;
   }
 
@@ -2245,6 +2253,15 @@ export function extractHistoricalImageContext(info: any): HistoricalImageContext
   const region = (info?.state || info?.region || wp?.historicalRegion || wp?.modernLocation || '').trim();
   const country = (info?.country || wp?.country || '').trim();
 
+  const derivedAliases = deriveEntityAliases(rawWaypointName, info?.canonicalName || wp?.canonicalName, info?.aliases || wp?.aliases);
+  const aliases = Array.from(new Set([
+    ...derivedAliases.exactAliases,
+    ...derivedAliases.canonicalAliases,
+    ...derivedAliases.alternateAliases,
+    ...(info?.aliases || []),
+    ...(wp?.aliases || [])
+  ]));
+
   // Extract people / entities
   const rawEntities = [
     ...(Array.isArray(info?.entities) ? info.entities : []),
@@ -2253,8 +2270,6 @@ export function extractHistoricalImageContext(info: any): HistoricalImageContext
   ].filter(Boolean);
 
   const people = Array.from(new Set(rawEntities.map(e => String(e).trim()).filter(Boolean)));
-
-  // Extract activities and keywords from description & significance
   const fullNarrative = `${info?.description || ''} ${wp?.description || ''} ${event}`.toLowerCase();
   const activityKeywords = [
     'preparation', 'preparations', 'departure', 'departed', 'keelboat', 'pirogue', 'boatmen',
@@ -2488,10 +2503,13 @@ export function classifyHistoricalImageCategory(
     return 'HISTORICAL_ILLUSTRATION';
   }
 
-  // 7. Historical Place / Depiction of Historic Settlement
+  // 7. Historical Place / Depiction of Historic Settlement / Architectural Landmark
   const locLower = (context.cleanLocationName || '').toLowerCase();
+  const allAliases = [locLower, ...(context.aliases || []).map(a => a.toLowerCase())].filter(Boolean);
+  const matchesEntityLocation = allAliases.some(alias => alias.length >= 3 && (text.includes(alias) || title.includes(alias)));
+
   if (
-    (locLower && text.includes(locLower)) ||
+    matchesEntityLocation ||
     /\b(historic|1804|19th century|18th century|settlement|fort clatsop|camp dubois|missouri river)\b/i.test(text)
   ) {
     return 'HISTORICAL_PLACE';
@@ -2865,8 +2883,8 @@ Reason=${reason}`);
 
     let score = typeScore + entityScore + narrativeScore + geoScore + periodScore;
 
-    // Strong negative preference / penalty against modern location photography on historical waypoints
-    if (isModern) {
+    // Strong negative preference / penalty against modern civic/streetscape photography on antique expeditions
+    if (isModern && category === 'MODERN_LOCATION' && entityMatch !== 'EXACT_TITLE') {
       score -= 40;
       score = Math.min(score, 30);
     }
@@ -3725,6 +3743,10 @@ async function _fetchAndValidateImagesInternal(
     console.log(`[IMAGE GROUP]\nsearchId="${effectiveSearchId}"\nwaypointId="${effectiveWaypointId}"\nrelatedWaypointCount=${relatedWaypointCount}`);
   }
 
+  const isRouteWaypoint = Boolean(effectiveSearchId || info.waypoint || (info as any).routeGroupId || (info as any).routeTitle);
+  const maxPhotos = isRouteWaypoint ? 2 : 4;
+  const stableId = (info as any).id || (info as any).osmId || info.name;
+
   const imageIntent = (info as any).imageIntent || resolveImageIntent(info);
   const allRawCandidates: ImageCandidate[] = [];
   const seenRawUrls = new Set<string>();
@@ -3781,6 +3803,13 @@ async function _fetchAndValidateImagesInternal(
     }, intentToUse);
 
     if (validation.decision === 'ACCEPT') {
+      if (isRouteWaypoint) {
+        const mt = validation.mediaType || classifyCandidateMedia(candidate).mediaType;
+        if (['MAP', 'FLAG', 'SEAL', 'COAT_OF_ARMS', 'LOGO', 'ORGANIZATION_GRAPHIC', 'DIAGRAM', 'ARCHITECTURAL_DRAWING', 'ICON', 'OTHER_NON_PHOTOGRAPH'].includes(mt)) {
+          return false;
+        }
+      }
+
       seenUrls.add(cleanUrl);
       const category = isHistorical && histContext
         ? classifyHistoricalImageCategory(candidate, histContext)
@@ -3794,6 +3823,12 @@ async function _fetchAndValidateImagesInternal(
       });
 
       searchMetrics.accepted++;
+      if (searchMetrics.accepted === 1) {
+        logTraceNarration(stableId, info.name, 'first accepted image', `url="${cleanUrl}"`);
+      } else if (searchMetrics.accepted === 2) {
+        logTraceNarration(stableId, info.name, 'second accepted image', `url="${cleanUrl}"`);
+      }
+
       if (validation.tier === 1) {
         searchMetrics.exactEntityMatches++;
       } else if (validation.tier === 2) {
@@ -3892,12 +3927,18 @@ async function _fetchAndValidateImagesInternal(
   }
 
   // 2. Fetch images from Wikipedia using entity-specific progressive queries
-  const queries = buildEntityImageQueries({
+  let queries = buildEntityImageQueries({
     ...info,
     rawQuery: (info as any).rawQuery,
     query: (info as any).query,
     imageIntent
   });
+
+  // For route waypoints, keep queries tightly focused (max 4 queries) to prevent API rate limiting
+  if (isRouteWaypoint && queries.length > 4) {
+    queries = queries.slice(0, 4);
+  }
+
   const resolvedHistKnowledge = getHistoricalEntityKnowledge(info.canonicalName || info.name);
   let effectiveHistContext = (info as any).historicalContext || resolvedHistKnowledge?.historicalContext || '';
   const rawEntityName = (info.canonicalName || info.name || '').toLowerCase();
@@ -3917,6 +3958,9 @@ async function _fetchAndValidateImagesInternal(
     }
   }
 
+  logTraceNarration(stableId, info.name, 'image search started', `queries=${queries.length} maxPhotos=${maxPhotos}`);
+  logTraceNarration(stableId, info.name, 'image validation started');
+
   for (let i = 0; i < queries.length; i++) {
     const query = queries[i];
     searchMetrics.queriesAttempted++;
@@ -3931,12 +3975,37 @@ async function _fetchAndValidateImagesInternal(
     try {
       const endpoint = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrlimit=8&prop=pageimages|description|coordinates&format=json&pithumbsize=800&origin=*`;
       const res = await fetch(endpoint);
-      const data = await res.json();
-      const pages = data.query?.pages;
+      if (!res.ok) {
+        if (res.status === 429) {
+          console.warn(`[IMAGE SEARCH] Wikipedia API rate limited (429 Too Many Requests) for query "${query}". Gracefully skipping.`);
+        } else {
+          console.warn(`[IMAGE SEARCH] Query "${query}" failed with HTTP status ${res.status}`);
+        }
+        continue;
+      }
+
+      const contentType = res.headers?.get('content-type') || '';
+      if (!contentType.includes('json')) {
+        console.warn(`[IMAGE SEARCH] Query "${query}" returned non-JSON content-type: ${contentType}. Gracefully skipping.`);
+        continue;
+      }
+
+      let data: any;
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        console.warn(`[IMAGE SEARCH] Failed to parse JSON for query "${query}":`, jsonErr);
+        continue;
+      }
+
+      const pages = data?.query?.pages;
 
       if (pages) {
         const sortedPageIds = Object.keys(pages).sort((a, b) => ((pages[a] as any).index || 0) - ((pages[b] as any).index || 0));
         for (const pageId of sortedPageIds) {
+          if (validatedCandidates.length >= maxPhotos) {
+            break;
+          }
           const page = pages[pageId];
           if (pageId !== '-1' && page?.thumbnail?.source) {
             const candidateCoords = page.coordinates && page.coordinates.length > 0
@@ -3951,6 +4020,10 @@ async function _fetchAndValidateImagesInternal(
               attribution: 'Wikimedia Commons',
               coordinates: candidateCoords
             });
+
+            if (validatedCandidates.length >= maxPhotos) {
+              break;
+            }
           }
         }
       }
@@ -3958,9 +4031,8 @@ async function _fetchAndValidateImagesInternal(
       console.warn(`[IMAGE SEARCH] Failed query "${query}":`, e);
     }
 
-    // Stop searching early if we have sufficient high-scoring validated images (at least 4 Tier 1/2 candidates)
-    const highQualityCount = validatedCandidates.filter(c => c.tier === 1 || c.tier === 2).length;
-    if (highQualityCount >= 4 || validatedCandidates.length >= 8) {
+    // Stop searching early if we have reached the max photo target
+    if (validatedCandidates.length >= maxPhotos) {
       break;
     }
   }
@@ -4067,7 +4139,7 @@ accepted=${searchMetrics.accepted}`);
     // If historical candidates are available, select diverse historical categories
     const candidatesToUse = rankedHistorical.length > 0
       ? rankedHistorical
-      : rankedModern.slice(0, 2);
+      : rankedModern.slice(0, maxPhotos);
 
     const usedCategories = new Set<string>();
     const selectedList: Array<{ candidate: ImageCandidate; score: number; category?: HistoricalImageCategory }> = [];
@@ -4079,16 +4151,16 @@ accepted=${searchMetrics.accepted}`);
         usedCategories.add(catKey);
         selectedList.push(item);
       }
-      if (selectedList.length >= 4) break;
+      if (selectedList.length >= maxPhotos) break;
     }
 
-    // Second pass: fill remaining slots up to 4 if more high-scoring historical candidates exist
-    if (selectedList.length < 4) {
+    // Second pass: fill remaining slots up to maxPhotos if more high-scoring historical candidates exist
+    if (selectedList.length < maxPhotos) {
       for (const item of candidatesToUse) {
         if (!selectedList.includes(item)) {
           selectedList.push(item);
         }
-        if (selectedList.length >= 4) break;
+        if (selectedList.length >= maxPhotos) break;
       }
     }
 
@@ -4135,7 +4207,7 @@ accepted=${searchMetrics.accepted}`);
       ...rankedTier4
     ];
 
-    for (const { candidate } of prioritizedCandidates.slice(0, 4)) {
+    for (const { candidate } of prioritizedCandidates.slice(0, maxPhotos)) {
       foundImages.push({
         url: candidate.url,
         caption: cleanMetadataString(candidate.caption || candidate.description || candidate.title || (foundImages.length === 0 ? info.imageCaption : undefined)),
@@ -4153,6 +4225,8 @@ accepted=${searchMetrics.accepted}`);
     });
     console.log(`[IMAGE SELECTED]\nsearchId="${effectiveSearchId}"\nwaypointId="${effectiveWaypointId}"\nimageId="${canonicalizeImageUrl(primaryUrl)}"\nuniqueWithinSearch=${isUnique}`);
   }
+
+  logTraceNarration(stableId, info.name, 'image processing complete', `found=${foundImages.length}`);
 
   return foundImages;
 }

@@ -399,7 +399,11 @@ describe('Controls Trace Route Modal Outside Click Behavior', () => {
       expect(html).toContain('Generate Route</button>');
 
       // Verify X close button is present
-      expect(html).toContain('absolute top-0 right-0 p-1 hover:opacity-70');
+      if (skin === 'parchment') {
+        expect(html).toContain('hover:bg-[#d2b48c]/50');
+      } else {
+        expect(html).toContain('absolute top-0 right-0 p-1 hover:opacity-70');
+      }
     });
   });
 });

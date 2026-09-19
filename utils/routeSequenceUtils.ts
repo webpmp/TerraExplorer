@@ -736,5 +736,22 @@ export function validateHistoricalRouteData(route: Route): {
   return { isValid, issues };
 }
 
+/**
+ * Resolves the deterministic stable identity for a route waypoint or marker.
+ */
+export function getWaypointStableId(wp: { id?: string; name: string; lat: number; lng: number }): string {
+  return wp.id || `${wp.name}-${wp.lat}-${wp.lng}`;
+}
 
-
+/**
+ * Finds the immediate next waypoint in a route list given the current waypoint.
+ * Returns null if the current waypoint is the last waypoint or cannot be found.
+ */
+export function findNextRouteWaypoint(currentWp: Waypoint, waypoints: Waypoint[]): Waypoint | null {
+  if (!waypoints || waypoints.length <= 1) return null;
+  const currentIdx = waypoints.findIndex(w => w.id === currentWp.id || (w.lat === currentWp.lat && w.lng === currentWp.lng));
+  if (currentIdx >= 0 && currentIdx < waypoints.length - 1) {
+    return waypoints[currentIdx + 1];
+  }
+  return null;
+}

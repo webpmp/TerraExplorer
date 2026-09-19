@@ -15,7 +15,7 @@ import { LocationInfo, QueryIntent, Waypoint, Route, UserSettings, LocationType,
 import { runRoutePipeline } from './routePipeline';
 import { PIPELINE_DEBUG, logWaypointSnapshot, logFieldDiff, logEnrichmentJsonPipeline } from '../utils/pipelineDebug';
 import { EnrichmentResult, CanonicalGeographicEntity } from '../domain';
-import { parseAndExtract } from '../utils/jsonParser';
+import { parseAndExtract, IncrementalCandidateParser } from '../utils/jsonParser';
 import { enrichLocationInfo, mergeRichestFields } from './locationService';
 import { isGenericPlaceholderDescription, isEnglishText } from './entityValidation';
 import { isPlaceholderString } from '../components/InfoPanel';
@@ -25,6 +25,7 @@ import { validateHistoricalCoordinate, getHistoricalEntityKnowledge, toCanonical
 import { determineHistoricalEventScope, logHistoricalEventScope } from './geographic/historicalEventScope';
 import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation, validateEntityCoordinates, logAiCoordinateTrust, logEntityCoordinateValidation, CoordinateTrustLevel } from './geographic/entityIdentityValidator';
 import { buildCanonicalEventTopology, getAuthoritativeEventModel } from './geographic/historicalRouteRegistry';
+import { fetchSourceContent, formatSourceBlock, cleanPastedArticleText } from './sourceContentService';
 
 export const EnrichmentMetrics = {
     retry: 0,
@@ -88,7 +89,7 @@ export const callGeminiWithRetry = async (params: any, retries = 3, signal?: Abo
   console.log("=== GEMINI API REQUEST START ===");
   console.log("Request URL:", requestUrl);
   console.log("Request Payload:", JSON.stringify(params, null, 2));
-  
+
   if (signal?.aborted || params.signal?.aborted) {
     const abortErr = new DOMException('Aborted', 'AbortError');
     throw abortErr;
@@ -116,12 +117,12 @@ export const callGeminiWithRetry = async (params: any, retries = 3, signal?: Abo
     console.error("Error Status/Code:", error?.status || error?.code);
     console.error("Full Thrown Exception:", error);
     console.error("=================================");
-    
+
     // Check for common rate limit error signatures from Google GenAI SDK or raw response
-    const isQuotaError = 
-      error?.status === 429 || 
-      error?.code === 429 || 
-      error?.message?.includes('429') || 
+    const isQuotaError =
+      error?.status === 429 ||
+      error?.code === 429 ||
+      error?.message?.includes('429') ||
       error?.message?.includes('Quota') ||
       error?.message?.includes('RESOURCE_EXHAUSTED') ||
       error?.statusText?.includes('RESOURCE_EXHAUSTED') ||
@@ -130,12 +131,12 @@ export const callGeminiWithRetry = async (params: any, retries = 3, signal?: Abo
 
     if (isQuotaError && retries > 0) {
       // Increase backoff time: 4s, 8s, 12s to give quota time to reset
-      const delayMs = 4000 * (4 - retries); 
+      const delayMs = 4000 * (4 - retries);
       console.warn(`Quota exceeded (429). Retrying in ${delayMs}ms...`);
       await new Promise(resolve => setTimeout(resolve, delayMs));
       return callGeminiWithRetry(params, retries - 1, signal);
     }
-    
+
     throw error;
   }
 };
@@ -148,23 +149,18 @@ export const generateContentWithRetry = async (params: any, retries = 3, signal?
   }
 
   const settings = getUserSettings();
-  
-  if (settings.aiProvider === 'lmstudio' && !params.config?.tools?.some((t: any) => t.googleSearch)) {
+
+  if (settings.aiProvider === 'lmstudio') {
     console.log('[AI Provider] LM Studio generation started');
     try {
-      return await generateLocalLMStudioContent(params, settings.lmStudioUrl, settings.lmStudioModel, activeSignal);
+      const model = settings.lmStudioModel || params.model || "local-model";
+      return await generateLocalLMStudioContent(params, settings.lmStudioUrl, model, activeSignal);
     } catch (err: any) {
       if (err?.name === 'AbortError' || activeSignal?.aborted) {
         throw err?.name === 'AbortError' ? err : new DOMException('Aborted', 'AbortError');
       }
       if (isLMStudioNoModelError(err)) {
         console.warn('[AI Provider] LM Studio has no loaded model');
-        if (isGeminiConfigured()) {
-          console.log('[AI Provider] Attempting Gemini fallback');
-          const response = await callGeminiWithRetry(params, retries, activeSignal);
-          console.log('[AI Provider] Gemini fallback successful');
-          return response;
-        }
         console.warn('[AI Provider] No fallback provider available');
       }
       throw err;
@@ -239,7 +235,7 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
     } else if (schemaInstruction) {
       messages.push({ role: 'system', content: schemaInstruction.trim() });
     }
-    
+
     if (params.contents) {
       if (typeof params.contents === 'string') {
         messages.push({ role: 'user', content: params.contents });
@@ -259,20 +255,26 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
     const payload: any = {
       model: model,
       messages,
-      temperature: params.config?.temperature ?? params.generationConfig?.temperature ?? 0.7
+      temperature: params.config?.temperature ?? params.generationConfig?.temperature ?? 0.7,
+      max_tokens: params.config?.maxOutputTokens ?? params.generationConfig?.maxOutputTokens ?? 4096
     };
+
+    let normalizedBaseUrl = (baseUrl || 'http://localhost:1234/v1').trim().replace(/\/+$/, '');
+    if (!normalizedBaseUrl.endsWith('/v1')) {
+      normalizedBaseUrl += '/v1';
+    }
 
     const systemMessage = messages.find(m => m.role === 'system');
     const userMessage = messages.find(m => m.role === 'user');
     console.log("[LM STUDIO REQUEST]");
-    console.log(`endpoint: ${baseUrl}/chat/completions`);
+    console.log(`endpoint: ${normalizedBaseUrl}/chat/completions`);
     console.log(`model: ${model}`);
     console.log(`message count: ${messages.length}`);
     console.log(`system prompt length: ${systemMessage?.content?.length || 0}`);
     console.log(`user prompt length: ${userMessage?.content?.length || 0}`);
     console.log(`temperature: ${payload.temperature}`);
 
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const response = await fetch(`${normalizedBaseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -290,7 +292,7 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
     }
 
     const data = await response.json();
-    
+
     // Translate back to Gemini format
     return {
       text: data.choices?.[0]?.message?.content || ""
@@ -300,6 +302,208 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
     console.error("Local LM Studio Request Failed", error);
     throw error;
   }
+};
+
+/**
+ * Streams content from LM Studio /v1/chat/completions with SSE parsing.
+ * Dispatches text delta chunks to onChunk callback in real-time.
+ */
+export const streamLocalLMStudioContent = async (
+  params: any,
+  baseUrl: string,
+  model: string = "local-model",
+  onChunk: (chunk: string) => void,
+  signal?: AbortSignal
+): Promise<{ text: string }> => {
+  if (signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
+
+  const messages = [];
+  const isJson = params.config?.responseMimeType === "application/json";
+  let schemaInstruction = '';
+  if (isJson) {
+    schemaInstruction = '\n\nYou must respond with a valid JSON object. Ensure all requested fields are present.';
+  }
+
+  if (params.systemInstruction) {
+    const sysContent = params.systemInstruction.parts?.[0]?.text || params.systemInstruction;
+    messages.push({ role: 'system', content: sysContent + schemaInstruction });
+  } else if (schemaInstruction) {
+    messages.push({ role: 'system', content: schemaInstruction.trim() });
+  }
+
+  if (params.contents) {
+    if (typeof params.contents === 'string') {
+      messages.push({ role: 'user', content: params.contents });
+    } else if (Array.isArray(params.contents)) {
+      for (const item of params.contents) {
+        if (typeof item === 'string') {
+          messages.push({ role: 'user', content: item });
+        } else {
+          let role = item.role === 'model' ? 'assistant' : 'user';
+          const text = item.parts?.[0]?.text || item.text || '';
+          messages.push({ role, content: text });
+        }
+      }
+    }
+  }
+
+  const payload: any = {
+    model: model,
+    messages,
+    stream: true,
+    temperature: params.config?.temperature ?? params.generationConfig?.temperature ?? 0.7,
+    max_tokens: params.config?.maxOutputTokens ?? params.generationConfig?.maxOutputTokens ?? 4096
+  };
+
+  let normalizedBaseUrl = (baseUrl || 'http://localhost:1234/v1').trim().replace(/\/+$/, '');
+  if (!normalizedBaseUrl.endsWith('/v1')) {
+    normalizedBaseUrl += '/v1';
+  }
+
+  const systemMessage = messages.find(m => m.role === 'system');
+  const userMessage = messages.find(m => m.role === 'user');
+  console.log("[LM STUDIO STREAM REQUEST]");
+  console.log(`endpoint: ${normalizedBaseUrl}/chat/completions (stream=true)`);
+  console.log(`model: ${model}`);
+  console.log(`message count: ${messages.length}`);
+  console.log(`system prompt length: ${systemMessage?.content?.length || 0}`);
+  console.log(`user prompt length: ${userMessage?.content?.length || 0}`);
+
+  const response = await fetch(`${normalizedBaseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload),
+    signal
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    if (errorBody.toLowerCase().includes("no models loaded") || errorBody.includes("No models loaded")) {
+      throw new LMStudioNoModelError();
+    }
+    throw new Error(`LM Studio streaming request failed\nStatus: ${response.status}\nBody: ${errorBody}`);
+  }
+
+  if (!response.body) {
+    throw new Error('Response body is null, cannot stream');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let accumulatedText = '';
+  let lineBuffer = '';
+
+  try {
+    while (true) {
+      if (signal?.aborted) {
+        await reader.cancel();
+        throw new DOMException('Aborted', 'AbortError');
+      }
+
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      lineBuffer += chunk;
+
+      const lines = lineBuffer.split('\n');
+      lineBuffer = lines.pop() || ''; // Keep unterminated last line in buffer
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith(':')) continue; // SSE comment or empty line
+
+        if (trimmed.startsWith('data:')) {
+          const dataStr = trimmed.substring(5).trim();
+          if (dataStr === '[DONE]') {
+            break;
+          }
+          try {
+            const parsed = JSON.parse(dataStr);
+            const deltaContent = parsed.choices?.[0]?.delta?.content;
+            if (typeof deltaContent === 'string' && deltaContent.length > 0) {
+              accumulatedText += deltaContent;
+              onChunk(deltaContent);
+            }
+          } catch {
+            // Ignore malformed individual SSE framing chunks
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return { text: accumulatedText };
+};
+
+/**
+ * Streams content with fallback: tries streaming first, falling back to non-streaming if needed.
+ */
+export const streamContentWithRetry = async (
+  params: any,
+  onChunk: (chunk: string) => void,
+  retries = 3,
+  signal?: AbortSignal
+): Promise<any> => {
+  const activeSignal = signal || params.signal;
+  if (activeSignal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
+
+  const settings = getUserSettings();
+  if (settings.aiProvider === 'lmstudio') {
+    try {
+      const model = settings.lmStudioModel || params.model || "local-model";
+      return await streamLocalLMStudioContent(params, settings.lmStudioUrl, model, onChunk, activeSignal);
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || activeSignal?.aborted || isLMStudioNoModelError(err)) {
+        throw err;
+      }
+      console.warn('[AI Provider] LM Studio streaming failed, falling back to non-streaming:', err);
+      const fallbackResult = await generateLocalLMStudioContent(params, settings.lmStudioUrl, settings.lmStudioModel, activeSignal);
+      if (fallbackResult.text) {
+        onChunk(fallbackResult.text);
+      }
+      return fallbackResult;
+    }
+  }
+
+  // Gemini streaming fallback
+  try {
+    if (ai.models && typeof (ai.models as any).generateContentStream === 'function') {
+      const stream = await (ai.models as any).generateContentStream(params);
+      let accumulated = '';
+      for await (const chunk of stream) {
+        if (activeSignal?.aborted) {
+          throw new DOMException('Aborted', 'AbortError');
+        }
+        const text = chunk.text || (typeof chunk.text === 'function' ? chunk.text() : '');
+        if (text) {
+          accumulated += text;
+          onChunk(text);
+        }
+      }
+      return { text: accumulated };
+    }
+  } catch (geminiErr: any) {
+    if (geminiErr?.name === 'AbortError' || activeSignal?.aborted) {
+      throw geminiErr;
+    }
+    console.warn('[AI Provider] Gemini streaming failed, falling back to non-streaming:', geminiErr);
+  }
+
+  const directRes = await callGeminiWithRetry(params, retries, activeSignal);
+  const text = directRes.text || '';
+  if (text) {
+    onChunk(text);
+  }
+  return directRes;
 };
 
 const populationInfoSchema = {
@@ -342,7 +546,7 @@ const mainInfoSchemaConfig = {
         "Do NOT describe the entity as unidentified or speculate about its location when the canonical identity is established. " +
         "Write as a knowledgeable author describing a real, known place."
     },
-    climate: { 
+    climate: {
       type: Type.OBJECT,
       properties: {
         name: { type: Type.STRING },
@@ -373,7 +577,7 @@ const mainInfoSchemaConfig = {
 // Helper to normalize coordinates (handle AI returning [lat, lng] instead of {lat, lng})
 export const normalizeCoordinates = (coordsData: any): { lat: number, lng: number, source?: CoordinateSource, confidence?: "high" | "medium" | "low" } | undefined => {
   if (!coordsData) return undefined;
-  
+
   // Format D: { coordinates: [...] }
   if (coordsData.coordinates !== undefined) {
     const res = normalizeCoordinates(coordsData.coordinates);
@@ -396,7 +600,7 @@ export const normalizeCoordinates = (coordsData: any): { lat: number, lng: numbe
       lat = coordsData[0];
       lng = coordsData[1];
     }
-  } 
+  }
   // Format A: { lat, lng }
   else if (typeof coordsData.lat === 'number' && typeof coordsData.lng === 'number') {
     lat = coordsData.lat;
@@ -407,7 +611,7 @@ export const normalizeCoordinates = (coordsData: any): { lat: number, lng: numbe
     lat = coordsData.latitude;
     lng = coordsData.longitude;
   }
-  
+
   if (lat === undefined || lng === undefined) {
       return undefined;
   }
@@ -476,8 +680,8 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
     const rawAliasResolved = resolveAlias(query.toLowerCase().trim()).canonical;
 
     // Step 2: Deterministic geographic resolution before AI provider call
-    let deterministicRes = DETERMINISTIC_LOCATION_DB[lookupKey] || 
-                           DETERMINISTIC_LOCATION_DB[aliasResolved] || 
+    let deterministicRes = DETERMINISTIC_LOCATION_DB[lookupKey] ||
+                           DETERMINISTIC_LOCATION_DB[aliasResolved] ||
                            DETERMINISTIC_LOCATION_DB[query.toLowerCase().trim()] ||
                            DETERMINISTIC_LOCATION_DB[rawAliasResolved];
     let aiUsed = false;
@@ -556,7 +760,7 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
 
             if (identityCheck.matches) {
               console.log(`COORDINATE_VERIFICATION_SUCCESS\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}\ncoordinates: ${geoEntity.coordinates.lat}, ${geoEntity.coordinates.lng}`);
-              
+
               resolvedData = {
                 name: candidateShortName,
                 locationString: geoEntity.name,
@@ -664,7 +868,7 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
         CRITICAL INSTRUCTION: Return ONLY a valid JSON object. Do not output markdown code blocks (\`\`\`json), explanations, or any other text. Output strict raw JSON.
       `;
 
-      
+
       const isHistoricalDiscovery = ['DISCOVERY_LOCATION', 'DISCOVERY_OBJECT_LOCATION', 'historical_site', 'shipwreck', 'archaeological site', 'excavation site'].includes(intent || '');
       let historicalCoords: GeoCoordinates | null = null;
       let historicalLocationStr = '';
@@ -691,7 +895,7 @@ Return only JSON:
   "location": "string",
   "confidence": "string"
 }`;
-          
+
           try {
               const histRes = await generateContentWithRetry({
                   model: modelName,
@@ -720,7 +924,7 @@ Return only JSON:
           config: {
             responseMimeType: "application/json",
             responseSchema: mainInfoSchemaConfig,
-            maxOutputTokens: 4000, 
+            maxOutputTokens: 4000,
           }
         }, 3, signal);
       };
@@ -796,12 +1000,12 @@ Return only JSON:
           data.canonicalName = data.name;
         }
       }
-      
+
       if (data.coordinates) {
          data.coordinates = normalizeCoordinates(data.coordinates) || data.coordinates;
          const lat = data.coordinates.lat;
          const lng = data.coordinates.lng;
-         
+
          if (lat === 999 && lng === 999) {
             console.log("[DEBUG] Failure reason code: LOCATION_NOT_FOUND");
             return { error: "NOT_FOUND" };
@@ -824,9 +1028,9 @@ Return only JSON:
          data.coordinates.coordinateTrust = "provisional";
 
          // Historical Coordinate Geographic Consistency Guard
-         const isHistoricalQuery = 
-           isHistoricalDiscovery || 
-           intent === 'DISCOVERY_OBJECT_LOCATION' || 
+         const isHistoricalQuery =
+           isHistoricalDiscovery ||
+           intent === 'DISCOVERY_OBJECT_LOCATION' ||
            intent === 'HISTORICAL_EVENT' ||
            data.entityType === 'shipwreck' ||
            data.entityType === 'shipwreck_site' ||
@@ -851,7 +1055,7 @@ Return only JSON:
 
            if (!histValidation.valid) {
              console.warn(`[HISTORICAL COORDINATE REJECTED] ${targetSearchTerm} coordinates rejected (${histValidation.reason}). Expected region: ${histValidation.expectedRegion}`);
-             
+
              // Check if we have a deterministic/trustworthy approximate historical location
              const histKnowledge = getHistoricalEntityKnowledge(targetSearchTerm);
              if (histKnowledge?.approximateCoordinates) {
@@ -889,7 +1093,7 @@ Return only JSON:
     if (!resolvedData.funFacts) resolvedData.funFacts = [];
     if (!resolvedData.notable) resolvedData.notable = [];
     if (!resolvedData.type) resolvedData.type = LocationType.POI;
-    
+
     const finalLocationInfo = await enrichLocationInfo(resolvedData);
 
     console.log(`=== LOCATION RESOLUTION TRACE ===
@@ -912,7 +1116,7 @@ Final Coordinates: ${JSON.stringify(finalLocationInfo.coordinates)}
     console.log("[DEBUG] Raw lookup query:", query);
     console.log("[DEBUG] Failure reason code: EXCEPTION_THROWN", error?.message || error);
     if (error?.stack) console.log(error.stack);
-    
+
     // Check if we have deterministic historical entity knowledge before failing
     const isHistorical = intent === 'DISCOVERY_OBJECT_LOCATION' || intent === 'HISTORICAL_EVENT';
     if (isHistorical) {
@@ -961,16 +1165,16 @@ Final Coordinates: ${JSON.stringify(finalLocationInfo.coordinates)}
 export const validateEnrichmentPayload = (data: any, entityName: string, coordinates: any) => {
     let lat = coordinates?.lat ?? coordinates?.latitude ?? (Array.isArray(coordinates) ? coordinates[0] : undefined);
     let lng = coordinates?.lng ?? coordinates?.longitude ?? (Array.isArray(coordinates) ? coordinates[1] : undefined);
-    
+
     const climateNameLower = (data.climate as any)?.name?.toLowerCase() || "";
-    const isBadClimate = !data.climate || typeof data.climate === 'string' || 
-                         climateNameLower === "unknown" || 
-                         climateNameLower === "unavailable" || 
-                         climateNameLower === "n/a" || 
-                         climateNameLower === "not available" || 
-                         climateNameLower === "none" || 
+    const isBadClimate = !data.climate || typeof data.climate === 'string' ||
+                         climateNameLower === "unknown" ||
+                         climateNameLower === "unavailable" ||
+                         climateNameLower === "n/a" ||
+                         climateNameLower === "not available" ||
+                         climateNameLower === "none" ||
                          climateNameLower === "";
-    
+
     console.log(`[CLIMATE VALIDATION] before validation: ${JSON.stringify(data.climate)}`);
     if (isBadClimate) {
         if (lat !== undefined && lng !== undefined && !isNaN(Number(lat)) && !isNaN(Number(lng))) {
@@ -991,7 +1195,7 @@ export const validateEnrichmentPayload = (data: any, entityName: string, coordin
     console.log(`[CLIMATE VALIDATION] after validation: ${JSON.stringify(data.climate)}`);
     if (data.news !== undefined && data.news !== null) {
         if (Array.isArray(data.news)) {
-            const validNews = data.news.filter((n: any) => 
+            const validNews = data.news.filter((n: any) =>
                 n && typeof n.title === 'string' && (n.summary || n.source || n.url)
             );
             data.news = validNews as any;
@@ -1003,7 +1207,7 @@ export const validateEnrichmentPayload = (data: any, entityName: string, coordin
     console.log(`description: PASS`);
     console.log(`climate: PASS`);
     console.log(`newsSource: ${(data.news && data.news.length > 0) ? 'ACCEPTED' : 'EMPTY'}`);
-    
+
     return data;
 };
 
@@ -1030,7 +1234,7 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
   if (data.news !== undefined && data.news !== null) {
       data.news = (Array.isArray(data.news) ? data.news : undefined) as any;
   }
-  
+
   if (Array.isArray(data.notable)) {
       data.notable = data.notable.map((item: any) => {
           if (typeof item === 'string') {
@@ -1092,19 +1296,19 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
     // 1. Remove coordinates patterns like 44.315949, 142.306349
     let cleanDesc = data.description.replace(/-?\d{1,3}\.\d+,\s*-?\d{1,3}\.\d+/g, '');
     cleanDesc = cleanDesc.replace(/\(-?\d{1,3}\.\d+,\s*-?\d{1,3}\.\d+\)/g, '');
-    
+
     // 2. Remove coordinate phrases
     cleanDesc = cleanDesc.replace(/coordinates:\s*/gi, '');
     cleanDesc = cleanDesc.replace(/latitude:\s*/gi, '');
     cleanDesc = cleanDesc.replace(/longitude:\s*/gi, '');
     cleanDesc = cleanDesc.replace(/lat:\s*/gi, '');
     cleanDesc = cleanDesc.replace(/lng:\s*/gi, '');
-    
+
     // 3. Remove raw markdown formatting that leaks
     cleanDesc = cleanDesc.replace(/#{1,3}\s/g, ''); // Remove #, ##, ###
     cleanDesc = cleanDesc.replace(/\*\*(.*?)\*\*/g, '$1'); // Remove bold **
     cleanDesc = cleanDesc.replace(/__(.*?)__/g, '$1'); // Remove bold __
-    
+
     data.description = cleanDesc.trim();
   }
 
@@ -1115,20 +1319,20 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
   const name = (data.name || '').toString().toLowerCase().trim();
 
   // Explicit allowed entity types for population: city, country, state
-  const isPopulationAllowed = 
+  const isPopulationAllowed =
     rawEntityType === 'city' ||
     rawEntityType === 'country' ||
     rawEntityType === 'state';
 
   // Explicit allowed entity types for climate: city, country, state, natural_feature, mountain, ocean
-  const isClimateAllowed = 
+  const isClimateAllowed =
     isPopulationAllowed ||
     rawEntityType === 'ocean' ||
     rawEntityType === 'natural_feature' ||
     rawEntityType === 'mountain';
 
   // Explicit hidden entity types: historical_event_site, shipwreck_site, archaeological_site, discovery_site, artifact, museum, battlefield, festival_site
-  const isHiddenEntityType = 
+  const isHiddenEntityType =
     rawEntityType.includes('historical') ||
     rawEntityType.includes('event') ||
     rawEntityType.includes('shipwreck') ||
@@ -1146,7 +1350,7 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
     name.includes('museum');
 
   // Check if a POI represents a natural/geographic feature fallback (e.g. Mount Fuji)
-  const isGeographicFeatureName = 
+  const isGeographicFeatureName =
     name.includes('mount') ||
     name.includes('mountain') ||
     name.includes('canyon') ||
@@ -1169,7 +1373,7 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
           year,
           censusYear,
           label,
-          current: pObj.current || { 
+          current: pObj.current || {
             value: pObj.value,
             formattedValue: pObj.value.toLocaleString(),
             year,
@@ -1205,7 +1409,7 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
   if (data.climate !== undefined) {
     if (typeof data.climate === 'string') {
       const rawClimate = (data.climate as string).trim();
-      
+
       // Detect fallback strings to prevent bad normalization
       if (!rawClimate || rawClimate.toLowerCase().includes('unavailable') || rawClimate.toLowerCase() === 'unknown') {
           data.climate = {
@@ -1217,7 +1421,7 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
           let name = "Unknown climate";
           let koppenCode = "";
           let description = "";
-      
+
       const koppenMap: Record<string, string> = {
         'Af': 'Tropical rainforest',
         'Am': 'Tropical monsoon',
@@ -1254,7 +1458,7 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
 
       // Remove prefixes
       let raw = rawClimate.replace(/^(K[öo]ppen climate classification|K[öo]ppen classification|K[öo]ppen|Climate classification|Climate)s?[:\-]?\s*/i, '');
-      
+
       // Attempt to extract Koppen code
       const codeMatch = raw.match(/\b([A-Z][a-z]{1,2})\b/);
       if (codeMatch && koppenMap[codeMatch[1]]) {
@@ -1273,7 +1477,7 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
               // Split by comma or "characterized by"
               const parts = raw.split(/,\s*characterized by\s*|,\s*with\s*|,\s*(?=[a-z])|\.\s*/i);
               name = parts[0].trim();
-              
+
               if (parts.length > 1) {
                   description = parts.slice(1).join(', ').trim();
                   // Remove trailing commas in description, capitalize first letter
@@ -1282,13 +1486,13 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
                      description = description.charAt(0).toUpperCase() + description.slice(1);
                   }
               }
-              
+
               if (koppenCode && name === koppenCode) {
                   name = koppenMap[koppenCode];
               }
           }
       }
-      
+
       // Add "climate" if missing
       if (!name.toLowerCase().includes('climate')) {
           name = name + " climate";
@@ -1367,7 +1571,7 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
 
     console.log(`[CLIMATE VALIDATION] after sanitize: ${JSON.stringify(data.climate)}`);
   }
-  
+
   // Normalize notable to array as requested by user
   if (data.notable) {
     if (Array.isArray(data.notable)) {
@@ -1382,11 +1586,11 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
   } else {
     data.notable = [] as any;
   }
-  
+
   if (!Array.isArray(data.notable)) {
       data.notable = [];
   }
-  
+
   return data;
 };
 const infoCache = new Map<string, Promise<LocationInfo | null>>();
@@ -1398,6 +1602,7 @@ const logInfoPanelTrace = (event: string, marker: any, elapsedMs?: number, state
 };
 
 import { descriptionCache } from './cacheService';
+import { logProviderStart, logProviderComplete } from './waypointPipelineService';
 
 export const getInfoFromFeature = async (marker: MapMarker, queryContext?: string, signal?: AbortSignal): Promise<LocationInfo | null> => {
   if (signal?.aborted) return null;
@@ -1423,9 +1628,9 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
     const osmType = marker.osmType ? `OSM Type: ${marker.osmType}` : null;
     const wikidataId = marker.wikidataId ? `Wikidata ID: ${marker.wikidataId}` : null;
     const wikipedia = marker.wikipedia ? `Wikipedia: ${marker.wikipedia}` : null;
-    
+
     const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
-    
+
     const discoveryBrief = {
       entity: marker.name,
       type: marker.type || "place",
@@ -1433,7 +1638,7 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
     };
     console.log("[DISCOVERY BRIEF SENT TO LLM]", JSON.stringify(discoveryBrief, null, 2));
     const discoveryPrompt = getDiscoveryPrompt(discoveryBrief.type, discoveryBrief.entity, discoveryBrief.signals, queryContext);
-    
+
     const mainPrompt = `
       AUTHORITATIVE CANONICAL GEOGRAPHIC IDENTITY:
       Canonical entity: ${marker.name}
@@ -1450,18 +1655,24 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
       ${wikipedia ? wikipedia : ''}
       ${marker.population?.value ? `Population: ${marker.population.value}` : ''}
       ${queryContext ? `USER RESEARCH QUERY / CONTEXT: "${queryContext}"` : ''}
-      
+
       CRITICAL INSTRUCTIONS:
       You are enriching the EXACT verified geographic entity specified above.
       You must describe THIS ${marker.name} in ${country} (${region}) and must NOT substitute another entity with the same or similar name.
       The coordinates, country, region, city, and identity are authoritative.
       ${queryContext ? 'The narrative, significance, and notable facts MUST directly address and answer the user query/context, keeping the queried event as the primary semantic anchor.' : ''}
-      
+
       Return a JSON object conforming to the schema with substantive, educational information (do NOT output generic placeholder text like "Information on ${marker.name}.").
       CRITICAL INSTRUCTION: You MUST keep semantic boundaries strict. Do not duplicate information across fields.
       Return ONLY a valid JSON object. Do not output markdown code blocks (\`\`\`json), explanations, or any other text. Output strict raw JSON.
     `;
     console.log(`[ENRICHMENT ATTEMPT 1] id: ${cacheKey}`);
+    const userSettings = getUserSettings();
+    const isLMStudio = userSettings.aiProvider === 'lmstudio';
+    const llmProviderLabel = isLMStudio ? 'LM Studio' : 'Gemini';
+    if (isLMStudio) {
+      logProviderStart('LM Studio', marker.name, marker.id || cacheKey);
+    }
     const mainRequest = generateContentWithRetry({
       model: modelName,
       systemInstruction: discoveryPrompt,
@@ -1475,9 +1686,12 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
     }, 3, signal);
 
     let mainResponse = await mainRequest;
-    
+    if (isLMStudio) {
+      logProviderComplete('LM Studio', marker.name, marker.id || cacheKey, Date.now() - startTime);
+    }
+
     let parsed = parseAndExtract(mainResponse.text);
-    
+
     logEnrichmentJsonPipeline(mainResponse.text, parsed, false);
     let data: any = parsed.success ? parsed.value : null;
 
@@ -1491,7 +1705,7 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
 
     if (data) {
         const beforeKeys = Object.keys(data);
-        
+
         // Grounding & placeholder validation
         if (data.description) {
             const entityNameStr = discoveryBrief.entity.toLowerCase();
@@ -1499,7 +1713,7 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
             const descLower = data.description.toLowerCase();
             const isGrounded = descLower.includes(entityNameStr) || entityNameParts.some(p => descLower.includes(p));
             const isPlaceholder = isGenericPlaceholderDescription(data.description, discoveryBrief.entity);
-            
+
             if (!isGrounded || isPlaceholder) {
                 console.warn(`[Enrichment] REJECTED_DESCRIPTION: isGrounded=${isGrounded}, isPlaceholder=${isPlaceholder} for "${discoveryBrief.entity}"`);
                 data = null;
@@ -1542,18 +1756,18 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
                mainResponse = await retryRequest;
                parsed = parseAndExtract(mainResponse.text);
                logEnrichmentJsonPipeline(mainResponse.text, parsed, true);
-               
+
                if (parsed.success) {
                    let retryData = parsed.value;
                    if (Array.isArray(retryData)) retryData = retryData.length > 0 ? retryData[0] : null;
-                   
+
                    if (retryData) {
                        const postRetryScore = evaluateDiscoveryScore(retryData).score;
                        console.log(`[Enrichment] Retry Score: ${postRetryScore}/4 vs Initial Score: ${score}/4`);
-                       
+
                        // Field-by-field richest merge, ensuring initial rich description is never destroyed
                        data = mergeRichestFields(initialValidData, retryData);
-                       
+
                        if (postRetryScore >= 4) {
                            EnrichmentMetrics.retry_success++;
                            EnrichmentMetrics.accepted++;
@@ -1573,7 +1787,7 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
                EnrichmentMetrics.accepted++;
             }
         }
-        
+
         if (data) {
             data.imageSearchTerm = getDeterministicImageSearchTerm(data.name, data.type, data.metadataMode, marker.discoverySignals || []);
         }
@@ -1598,31 +1812,31 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
         if (data.overview && !data.description) {
             data.description = data.overview;
         }
-        
+
         // Final Quality Validation: only replace if genuinely empty or an explicit generic placeholder
         if (!data.description || isGenericPlaceholderDescription(data.description, name)) {
             console.warn(`[Enrichment] Placeholder description detected for ${name}.`);
             data.description = "Documentary enrichment unavailable.";
         }
     }
-    
+
     // Ensure the name returned is the one requested
     data.name = name;
-    
+
     if (data.coordinates) {
         data.coordinates = normalizeCoordinates(data.coordinates);
     }
-    
+
     if (!data.coordinates || typeof data.coordinates.lat !== 'number' || isNaN(data.coordinates.lat)) {
         data.coordinates = { lat, lng };
     }
 
     if (!data.status) data.status = "success";
-    
+
     console.log(`[ENRICHMENT FINAL APPLY] id: ${cacheKey}, name: ${data.name}`);
     const finalData = data as LocationInfo;
     logInfoPanelTrace("INFO_REQUEST_COMPLETE", name, Date.now() - startTime);
-    
+
     console.log("[ENRICHMENT FINAL PAYLOAD]");
     console.log(`{
   descriptionLength: ${finalData.description?.length || 0},
@@ -1650,7 +1864,7 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
         sectionState: { description: "failed" },
         errorMessage: isNoModel
             ? LM_STUDIO_NO_MODEL_MESSAGE
-            : (error.message?.includes('429') || error.message?.includes('Quota') 
+            : (error.message?.includes('429') || error.message?.includes('Quota')
                 ? "API Quota Exceeded. Please try again later."
                 : "Could not retrieve information at this time."),
         errorInstruction: isNoModel
@@ -1659,7 +1873,7 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
     } as unknown as LocationInfo);
   }
   })();
-  
+
   descriptionCache.set(cacheKey, promise);
   return promise;
 };
@@ -1711,7 +1925,7 @@ export function evaluateDiscoveryScore(data: any): { score: number, reasons: str
             break;
         }
     }
-    
+
     // Substantial description boost (+1)
     if (score < 4 && !penaltyApplied && descLower.length > 80) {
         score += 1;
@@ -1725,27 +1939,27 @@ export function getDeterministicImageSearchTerm(name: string, type: string, meta
     const typeLower = (type || "").toLowerCase();
     const mode = (metadataMode || "").toLowerCase();
     const signals = discoverySignals.map(s => s.toLowerCase());
-    
+
     // Landmark optimization
     if (signals.includes("tourism") || signals.includes("historic") || typeLower.includes("monument") || typeLower.includes("museum") || typeLower.includes("landmark")) {
         return `${name} landmark`;
     }
-    
+
     // Landscape optimization
     if (signals.includes("natural") || typeLower.includes("mountain") || typeLower.includes("river") || typeLower.includes("lake") || mode === "natural_feature") {
         return `${name} landscape`;
     }
-    
+
     // Historical optimization
     if (typeLower.includes("ruin") || typeLower.includes("castle") || mode === "historical_site") {
         return `${name} historical`;
     }
-    
+
     // Urban optimization
     if (typeLower.includes("city") || typeLower.includes("capital") || mode === "modern_place") {
         return `${name} skyline`;
     }
-    
+
     return name;
 }
 
@@ -1794,15 +2008,15 @@ const nearbyPlacesSchemaConfig = {
 export function getRegionalGuidance(lat: number, lng: number): string {
   const isFlorida = lat >= 24 && lat <= 31 && lng >= -87 && lng <= -80;
   const isHawaii = lat >= 18 && lat <= 23 && lng >= -161 && lng <= -154;
-  
+
   if (isFlorida) {
     return "You MUST prioritize major populated cities and destinations (such as Miami, Orlando, Tampa, Jacksonville, Key West) rather than generic terrain features or state parks.";
   }
-  
+
   if (isHawaii) {
     return "You MUST prioritize well-known cities or landmarks (for example: Honolulu, Waikiki, Maui towns, or Pearl Harbor).";
   }
-  
+
   return "";
 }
 interface ReverseGeocodeCacheEntry {
@@ -1866,7 +2080,7 @@ Provide a JSON array of significant local places, natural features, landmarks, o
         });
         const text = result.text || "[]";
         const parsed = JSON.parse(text);
-        
+
         return parsed.map((item: any, index: number) => ({
             id: `gemini-fallback-${index}`,
             name: item.name,
@@ -1907,7 +2121,7 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
     let providerFailures = 0;
     let candidatesReceived = 0;
     let rejectedByDistance = 0;
-    
+
     // 1. Resolve Context for the clicked coordinate
     const geoContext: Partial<ReverseGeocodeContext> = await reverseGeocode(lat, lng).catch(() => ({})) || {};
     if (signal?.aborted) {
@@ -1992,7 +2206,7 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
                 const existingNormalized = existing.name.toLowerCase().replace(/[^a-z0-9]/g, '');
                 const existingId = existing.identifiers?.osmId || existing.identifiers?.wikidataId || existing.id;
                 const dist = Math.sqrt(Math.pow(candidate.coordinates.lat - existing.coordinates.lat, 2) + Math.pow(candidate.coordinates.lng - existing.coordinates.lng, 2)) * 111;
-                
+
                 // Match by stable identity, exact normalized name (within 50km or for geographic features/national parks), or spatial proximity (< 0.5 km)
                 const idMatch = Boolean(candidateId && existingId && candidateId === existingId);
                 const nameMatch = normalizedName.length > 2 && normalizedName === existingNormalized && (dist < 50 || candidate.entityClass === 'geographic_feature' || existing.entityClass === 'geographic_feature');
@@ -2021,7 +2235,7 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
             if (!merged) {
                 candidate.pipelineStatus = "merged";
                 candidate.entityClass = classifyEntity(candidate);
-                
+
                 // Exclude administrative regions from discovery markers
                 if (geoContext.country && candidate.name.toLowerCase() === geoContext.country.toLowerCase()) {
                     candidate.entityClass = 'administrative_region';
@@ -2044,7 +2258,7 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
                     candidate.normalizedEntityType = 'administrative_region';
                     candidate.eligibleForDefaultDiscovery = false;
                 }
-                
+
                 result.push(candidate);
             }
         }
@@ -2056,8 +2270,8 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
     // Inject Anchor Provider Candidate (only if valid specific feature, not an administrative container)
     if (geoContext.feature) {
         const anchorName = geoContext.feature;
-        const isCountyOrAdmin = anchorName.toLowerCase().includes('county') || 
-                               anchorName.toLowerCase().includes('district') || 
+        const isCountyOrAdmin = anchorName.toLowerCase().includes('county') ||
+                               anchorName.toLowerCase().includes('district') ||
                                (geoContext.county && anchorName.toLowerCase() === geoContext.county.toLowerCase()) ||
                                (geoContext.state && anchorName.toLowerCase() === geoContext.state.toLowerCase());
         if (anchorName && !isCountyOrAdmin && !isLowSignificancePoi(anchorName)) {
@@ -2292,7 +2506,7 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
     const adminRegionsCount = balancedCandidates.filter(c => c.rankingClass === 'ADMINISTRATIVE_REGION' || c.entityClass === 'administrative_region' || c.type === 'administrative').length;
 
     console.log(`[Candidate Normalization & Classification Diagnostics]\n` +
-      (balancedCandidates.length > 0 ? balancedCandidates.map(c => 
+      (balancedCandidates.length > 0 ? balancedCandidates.map(c =>
         `Candidate: ${c.name}\n` +
         `  Provider type: ${c.originalProviderType || c.type}\n` +
         `  Normalized type: ${c.normalizedEntityType || c.type}\n` +
@@ -2300,7 +2514,7 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
         (c.displayName && c.displayName !== c.name ? `  Display name: ${c.displayName}\n` : '') +
         `  Reason: ${c.classificationReason || c.classificationEvidence || (c.rankingClass === 'POPULATED_PLACE' ? 'Verified populated place' : (c.rankingClass === 'REJECTED' ? 'Non-geographic event/topic' : 'Geographic feature / administrative area'))}`
       ).join('\n') : '  None'));
-    
+
     // Apply standard scoring threshold gate (strictly enforces eligibleForDefaultDiscovery)
     const gatedCandidates = applyQualityGate(balancedCandidates);
 
@@ -2346,10 +2560,10 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
         return {
             places: [],
             status: "NO_RESULTS",
-            diagnostics: { 
+            diagnostics: {
                 discoveryMode: 'REGIONAL_DISCOVERY',
-                providersAttempted, 
-                providerFailures, 
+                providersAttempted,
+                providerFailures,
                 resultCount: 0,
                 candidatesReceived,
                 rejectedByDistance,
@@ -2379,20 +2593,43 @@ export const getNearbyPlaces = async (lat: number, lng: number, initialRadius: n
   }
 };
 
+export const SOURCE_RETRIEVAL_ERROR_MESSAGE = "Source content could not be retrieved from this URL for local AI processing. Please paste the article text directly into TRACE ROUTE or switch to Gemini for URL search grounding.";
+
+export const isSourceRetrievalError = (err: any): boolean => {
+  return Boolean(err && (err.message === SOURCE_RETRIEVAL_ERROR_MESSAGE || String(err?.message || err).includes("Source content could not be retrieved")));
+};
+
+export interface GenerateRouteOptions {
+  intent?: string;
+  generateFn?: (params: any) => Promise<any>;
+  signal?: AbortSignal;
+  onWaypointProgress?: (waypoint: Waypoint, allDiscoveredSoFar: Waypoint[], index: number, total: number) => void;
+}
+
 export const generateRoute = async (
   text: string,
-  intent?: string,
+  intentOrOptions?: string | GenerateRouteOptions,
   generateFnOrSignal?: ((params: any) => Promise<any>) | AbortSignal,
   signalParam?: AbortSignal
 ): Promise<Route> => {
   const isUrl = text.startsWith('http');
+  const userSettings = getUserSettings();
+  const isLMStudio = userSettings.aiProvider === 'lmstudio';
   const queryMeta = routeIntentAndExtractEntity(text);
-  const effectiveIntent = intent || queryMeta.intent;
-  const isFilmingQuery = queryMeta.discoveryTarget === 'filming locations' ||
-    /\b(filmed|filming|shot|shooting|production locations?|locations? used|places used|places where)\b/i.test(text);
 
+  let effectiveIntent = queryMeta.intent;
+  let onWaypointProgress: ((waypoint: Waypoint, allDiscoveredSoFar: Waypoint[], index: number, total: number) => void) | undefined;
   let generateFn: (params: any) => Promise<any> = generateContentWithRetry;
   let activeSignal: AbortSignal | undefined = signalParam;
+
+  if (typeof intentOrOptions === 'object' && intentOrOptions !== null) {
+    if (intentOrOptions.intent) effectiveIntent = intentOrOptions.intent;
+    if (intentOrOptions.generateFn) generateFn = intentOrOptions.generateFn;
+    if (intentOrOptions.signal) activeSignal = intentOrOptions.signal;
+    if (intentOrOptions.onWaypointProgress) onWaypointProgress = intentOrOptions.onWaypointProgress;
+  } else if (typeof intentOrOptions === 'string') {
+    effectiveIntent = intentOrOptions;
+  }
 
   if (typeof generateFnOrSignal === 'function') {
     generateFn = generateFnOrSignal;
@@ -2400,14 +2637,51 @@ export const generateRoute = async (
     activeSignal = generateFnOrSignal as AbortSignal;
   }
 
+  const isFilmingQuery = queryMeta.discoveryTarget === 'filming locations' ||
+    /\b(filmed|filming|shot|shooting|production locations?|locations? used|places used|places where)\b/i.test(text);
+
   if (activeSignal?.aborted) {
     return { waypoints: [] };
   }
-  
-  const generateRawRoute = async (t: string, url: boolean): Promise<{ waypoints: any[], title?: string, routeConfidence?: any, routeType?: string, isSequential?: boolean, routeEvidenceMode?: any, routeGroups?: any[] }> => {
+
+  // Pre-acquisition: If input is a URL and AI provider is LM Studio, acquire readable source content
+  let acquiredSourceContext: string | undefined = undefined;
+  let acquiredSourceText: string | undefined = undefined;
+
+  console.log(`[TRACE ROUTE Pipeline] Input length=${text.length}, preview="${text.slice(0, 100).replace(/\n/g, ' ')}"`);
+
+  if (isUrl && isLMStudio) {
+    const sourceResult = await fetchSourceContent(text, activeSignal);
+    if (!sourceResult.success || !sourceResult.content) {
+      throw new Error(SOURCE_RETRIEVAL_ERROR_MESSAGE);
+    }
+    acquiredSourceText = sourceResult.content;
+    acquiredSourceContext = formatSourceBlock({
+      url: text,
+      title: sourceResult.title,
+      content: sourceResult.content
+    });
+  } else if (!isUrl && text.trim().length > 200) {
+    // Pasted article content: clean site chrome, headers, navigation, cookie boilerplate
+    const cleaned = cleanPastedArticleText(text);
+    acquiredSourceText = cleaned.content;
+    acquiredSourceContext = formatSourceBlock({
+      title: cleaned.title || undefined,
+      content: cleaned.content
+    });
+    console.log(`[TRACE ROUTE Pipeline] Cleaned pasted article length=${acquiredSourceText.length}, title="${cleaned.title || 'Untitled'}", preview="${acquiredSourceText.slice(0, 100).replace(/\n/g, ' ')}"`);
+  }
+
+  const generateRawRoute = async (t: string, url: boolean, rawOptions?: { onCandidateProgress?: (rawCand: any, count: number) => void }): Promise<{ waypoints: any[], title?: string, routeConfidence?: any, routeType?: string, isSequential?: boolean, routeEvidenceMode?: any, routeGroups?: any[], metadata?: any }> => {
     if (activeSignal?.aborted) {
       return { waypoints: [] };
     }
+
+    const userSettings = getUserSettings();
+    const isLMStudio = userSettings.aiProvider === 'lmstudio';
+    const activeModel = isLMStudio ? (userSettings.lmStudioModel || 'local-model') : modelName;
+    console.log(`[Route Generation] Using configured AI provider: ${isLMStudio ? 'LM Studio' : 'Gemini'} (model: ${activeModel})`);
+
     // Check if query corresponds to a registered authoritative historical event
     const registeredEventModel = getAuthoritativeEventModel(t);
     const isMockOrCustomGenerate = generateFn !== generateContentWithRetry;
@@ -2418,7 +2692,7 @@ export const generateRoute = async (
         // Build an enrichment-only prompt for AI: ask ONLY for narrative fields, never topology/coordinates
         const enrichmentPrompt = `
           Task: Provide historical narrative enrichment for documented locations of: "${registeredEventModel.eventTitle}".
-          
+
           Documented Historical Anchors:
           ${canonicalTopology.route.map(a => `- ${a.name} (${a.routeGroupName})`).join('\n')}
 
@@ -2450,7 +2724,7 @@ export const generateRoute = async (
 
         try {
           const enrichmentResponse = await generateFn({
-            model: modelName,
+            model: activeModel,
             contents: enrichmentPrompt,
             config: { maxOutputTokens: 4096 }
           });
@@ -2480,6 +2754,9 @@ export const generateRoute = async (
             }
           }
         } catch (enrichErr) {
+          if (isLMStudioNoModelError(enrichErr)) {
+            throw enrichErr;
+          }
           console.warn(`[Authoritative Event Bypass] AI enrichment failed, using canonical topology fallback:`, enrichErr);
         }
 
@@ -2487,43 +2764,119 @@ export const generateRoute = async (
       }
     }
 
-    const prompt = `
-      Task: Trace a geographical route or extract locations from the text.
-      ${url ? `URL: "${t}". Trace locations mentioned in the page content.` : `Text: "${t}"`}
+    const isSourceDoc = Boolean(acquiredSourceText);
+    const sourceContextBlock = acquiredSourceContext
+      ? acquiredSourceContext
+      : (url ? `URL: "${t}". Extract ONLY locations explicitly mentioned or clearly supported in the source page content.` : `Source Text: "${t}"`);
+
+    const docExtractionPrompt = `
+      Task: Extract physical geographic entities explicitly mentioned in the provided source text.
+      ${sourceContextBlock}
+
+      MANDATORY PHYSICAL ENTITY EXTRACTION RULES:
+      1. PRIMARY OBJECTIVE: Identify and extract actual physical geographic places (e.g. cities, towns, villages, specific historic villas, named museums, churches, landmarks, parks, lakes, mountains, ports) that are EXPLICITLY mentioned in the text.
+      2. NEVER EXTRACT ACTIVITIES, EDITORIAL HEADINGS, OR RECOMMENDATION TITLES:
+         - Article headings, time markers, and activity titles (e.g. "Get On Board", "Savor the View", "Master the Art of Breakfast", "Pick Up Local Provisions", "Stroll Storied Sites", "Dine Somewhere Different", "Get Lost in Gardens", "Wander a Quieter Coastal Town", "Village Hop", "Dine Dockside", "36 Hours", "10:30 AM") are NOT geographic locations and MUST NEVER become waypoint names.
+      3. DO NOT WRAP REAL PLACES IN ACTIVITY HEADINGS:
+         - If the text has a section titled "Get On Board" which describes visiting "Villa Melzi", the extracted entity name MUST be "Villa Melzi", NOT "Get On Board (Villa Melzi)" or "Get On Board".
+         - If the text recommends dining at "Una Finestra sul Lago" under a heading "Savor the View", the extracted entity name MUST be "Una Finestra sul Lago", NOT "Savor the View (Una Finestra sul Lago)".
+         - The activity/section heading may only be mentioned inside the description or context, NEVER in the "name", "canonicalName", or "id".
+      4. DO NOT ASSUME A TRAVEL ARTICLE IS A DOCUMENTED ROUTE:
+         - Travel guides, recommendation articles, and suggested itineraries are NOT documented historical routes.
+         - Do NOT classify recommendation articles as "DOCUMENTED_ROUTE". Set "routeEvidenceMode": "REGIONAL_EVENT" and "isSequential": false unless the text explicitly documents an actual single continuous journey taken by specific travelers in an established geographic sequence.
+         - Do NOT manufacture fake route titles like "Lake Como Tourist Route". Use a descriptive title based on the document topic or region (e.g. "Lake Como Highlights" or the article title).
+      5. SOURCE EVIDENCE MUST DIRECTLY SUPPORT THE SPECIFIC PHYSICAL ENTITY:
+         - For every candidate, "sourceEvidence" MUST be the exact verbatim excerpt/sentence from the text that explicitly names and describes THAT specific physical location.
+         - General statements about the broader region (e.g. "Nothing beats a boat ride on Lake Como") are NOT valid evidence for specific sub-entities like "Villa Melzi".
+      6. STRICT GROUNDING:
+         - Extract ONLY locations explicitly mentioned in the text. NEVER add neighboring towns or places from memory.
+         - PREFER FEWER SUPPORTED WAYPOINTS OVER SPECULATIVE WAYPOINTS.
+      7. NON-AUTHORITATIVE COORDINATES:
+         - Coordinates ("lat", "lng") are OPTIONAL and non-authoritative. TerraExplorer validates all physical entity locations.
+         - Your primary job is identifying the exact, authentic physical place names from the source.
+         - Do NOT guess or reuse identical coordinates across different entities.
+
+      Instructions:
+      1. Provide a title reflecting the document topic or region.
+      2. For each real physical location found in the text:
+         - "name": Clean display name of the physical location (e.g. "Villa Melzi", "Bellagio", "Varenna"). NEVER an activity or section title.
+         - "canonicalName": Standard name of the location.
+         - "lat" / "lng": Real-world decimal coordinates if known, or 0.0000.
+         - "sourceEvidence": Direct verbatim quote from the source text mentioning this location.
+         - "description": Exactly 1 concise sentence summarizing what the source says about this location.
+         - "isSequential": false (unless the text describes an actual continuous expedition travel journal).
+
+      JSON Response Format:
+      {
+        "title": "Document Topic or Article Title",
+        "routeConfidence": {
+          "level": "high" | "medium" | "low",
+          "reasoning": "Extraction confidence based on source text"
+        },
+        "routeType": "single_location" | "regional_event" | "multi_location_campaign" | "point",
+        "routeEvidenceMode": "REGIONAL_EVENT" | "DOCUMENTED_ROUTE" | "LLM_INFERRED_ROUTE",
+        "isSequential": boolean,
+        "route": [
+          {
+            "id": "unique-kebab-case-id",
+            "name": "Physical Place Name",
+            "canonicalName": "Physical Place Name",
+            "lat": 0.0000,
+            "lng": 0.0000,
+            "sourceEvidence": "Verbatim quote mentioning this place",
+            "description": "1 concise sentence from source",
+            "waypointType": "route_waypoint" | "historical_site"
+          }
+        ]
+      }
+      Output a strict compact JSON Object. Keep descriptions to 1 concise sentence.
+    `;
+
+    const historicalPrompt = `
+      Task: Trace a geographical route or extract locations from the provided query.
+      Query: "${t}"
+
+      MANDATORY SOURCE GROUNDING & EVIDENCE RULES:
+      1. The query is the AUTHORITATIVE basis for the requested route or locations.
+      2. Extract locations directly supported by historical evidence rather than inventing waypoints.
+      3. NEVER invent or hallucinate locations.
+      4. NEVER add geographically nearby locations simply because you know they exist nearby.
+      5. NEVER add historically related locations unless historically documented for this specific event.
+      6. NEVER infer missing intermediate waypoints to "fill gaps" in a route.
+      7. NEVER connect unrelated locations merely because doing so creates a plausible route.
+      8. NEVER create a circular route (connecting the last waypoint back to the first) unless the source explicitly describes a circular loop.
+      9. NEVER convert an unordered collection of locations into a sequential route unless historical evidence establishes that sequence.
+      10. If the query supports only one valid location, return exactly ONE valid location ("routeType": "single_location").
+      11. PREFER FEWER SUPPORTED WAYPOINTS OVER MORE SPECULATIVE WAYPOINTS.
 
       HISTORICAL STRUCTURE CLASSIFICATION & RULES:
       Before generating waypoints, classify the historical event structure into "routeEvidenceMode":
       1. "DOCUMENTED_ROUTE": A continuous, single documented journey or route (e.g. Lewis & Clark expedition, Magellan's circumnavigation, a specific trade trail). Waypoints are visited in a continuous chronological sequence.
-      2. "MULTI_ROUTE_EVENT": An event comprising multiple independent documented routes, detachments, corridors, or contingents (e.g. "Trail of Tears", which had the Northern Route, Benge Route, Bell Route, and Water Route). 
-      3. "REGIONAL_EVENT": A war, campaign theater, or regional historical occurrence spanning multiple locations without a single connecting path (e.g. American Civil War major battlefields, Seven Years' War). Locations are associated with the event without implying participants traveled directly between them in a single sequence. "isSequential" is false.
+      2. "MULTI_ROUTE_EVENT": An event comprising multiple independent documented routes, detachments, corridors, or contingents.
+      3. "REGIONAL_EVENT": A war, campaign theater, or regional historical occurrence spanning multiple locations without a single connecting path. Locations are associated with the event without implying participants traveled directly between them in a single sequence. "isSequential" is false.
       4. "LLM_INFERRED_ROUTE": Plausible traversals of distributed networks (e.g. Silk Road trade branches). Mark clearly as inferred.
 
-      CRITICAL CONSTRAINTS & HISTORICAL ACCURACY:
-      - Every waypoint generated for a MULTI_ROUTE_EVENT MUST have a documented historical relationship to BOTH the event and the specific routeGroupId.
+      CRITICAL CONSTRAINTS & ACCURACY:
+      - Waypoints must represent actual physical or geographic entities (e.g. cities, towns, villages, landmarks, historic fortifications, ports).
       - NEVER derive a geographic waypoint from the name of a route, detachment, person, or group (e.g. "Bell Route" must NEVER generate "Bell, Tennessee"; "Benge Route" must NEVER generate "Benge, Texas").
       - NEVER generate generic geographic regions, states, or broad territories as historical waypoints (e.g. "Oklahoma", "Indian Territory", "Tennessee", "Georgia", "Arkansas" are strictly forbidden as waypoint names). Every waypoint must be a specific, documented historical site, fort, landing, ferry crossing, encampment, or town.
-      - For the Trail of Tears, ground your detachments in their documented historical anchors:
-        * "northern-route" (Northern Route): New Echota, GA (Cherokee capital/treaty site), Fort Cass, TN (Charleston staging depot), Fort Gibson, OK (receiving garrison), Tahlequah, OK (Cherokee capital).
-        * "benge-route" (Benge Route): Fort Payne, AL (departure fort), Gunter's Landing, AL (Tennessee River crossing), Tahlequah, OK (arrival destination).
-        * "bell-route" (Bell Route): Fort Cass, TN (departure depot), Memphis, TN (Mississippi River crossing), Fort Gibson, OK (receiving garrison).
-        * "water-route" (Water Route): Ross's Landing, TN (Chattanooga embarkation depot), Fort Coffee, OK (Arkansas River debarkation landing), Fort Gibson, OK (receiving garrison).
       - Return every historically documented, materially relevant waypoint needed to represent the route (origin, intermediate milestones/encampments/crossings, and destination).
       - If multiple independent route groups (detachments, corridors) are documented, every declared routeGroup MUST be populated with its own documented waypoints. Do NOT output empty route group shells.
       - NEVER invent route relationships. Two valid locations do not automatically form a route segment without documented connection.
       - NEVER infer connecting lines from geographic proximity alone.
-      - NEVER conflate distinct historical entities (e.g., Fort Gibson in Oklahoma is NOT Fort Cass in Tennessee; Fort Cass in Tennessee is NOT Fort Gibson in Oklahoma; Fort Jackson in Alabama is NOT Fort Franklin; Fort Coffee in Oklahoma is NOT Oklahoma City).
-      - NEVER fabricate aliases. If uncertain whether two names refer to the same historical entity, do NOT treat them as aliases.
-      - Never confuse model confidence with verified historical evidence.
+      - NEVER conflate distinct historical entities.
+      - NEVER fabricate aliases. If uncertain whether two names refer to the same entity, do NOT treat them as aliases.
+      - Never confuse model confidence with verified evidence.
 
       Instructions:
       1. Identify a name for this route/expedition or event (e.g. "Trail of Tears", "Lewis and Clark Expedition").
       2. Classify every location by its relationship to the query using 'role': "primary", "related", "administrative", or "historical_context".
       3. For multi-route events, organize waypoints into "routeGroups".
-         - For a waypoint belonging to ONE route group, provide scalar strings: "routeGroupId": "northern-route", "routeGroupName": "Northern Route", "sequence": 1.
+         - For a waypoint belonging to ONE route group, provide scalar strings: "routeGroupId": "group-1", "routeGroupName": "Group Name", "sequence": 1.
          - For a waypoint genuinely belonging to MULTIPLE route groups (shared anchor across detachments), provide:
            "memberships": [
-             { "routeGroupId": "northern-route", "routeGroupName": "Northern Route", "sequence": 3 },
-             { "routeGroupId": "bell-route", "routeGroupName": "Bell Route", "sequence": 3 }
+             { "routeGroupId": "group-1", "routeGroupName": "Group 1", "sequence": 3 },
+             { "routeGroupId": "group-2", "routeGroupName": "Group 2", "sequence": 3 }
            ]
          - NEVER use parallel arrays like "routeGroupId": ["a", "b"] or "routeGroupName": ["A", "B"].
          - Do not infer shared route membership merely because a location is historically associated with the overall event. Assign a waypoint to multiple route groups only when historical evidence supports that membership. The canonical route registry is authoritative and may override generated membership.
@@ -2533,39 +2886,37 @@ export const generateRoute = async (
           - "canonicalName": Strict historical name.
           - "lat" / "lng": High precision real-world decimal coordinates.
           - "sequence": Integer starting at 1 within its route group.
-          - "routeGroupId": ID of the detachment/route group (e.g. "northern-route", "benge-route", "bell-route", "water-route"). Must be a string.
-          - "routeGroupName": Display name of the route group (e.g. "Northern Route", "Benge Route", "Bell Route", "Water Route"). Must be a string.
+          - "routeGroupId": ID of the detachment/route group. Must be a string.
+          - "routeGroupName": Display name of the route group. Must be a string.
+          - "sourceEvidence": Direct quote or specific factual reference establishing that this location was mentioned/visited.
           - 3 DISTINCT SEMANTIC NARRATIVE LAYERS (MANDATORY NON-REDUNDANCY):
-            * "routeContext": Exactly 1 concise sentence answering "What specific role did this location play on this particular route?" (e.g. "Cherokee national capital and treaty site from which overland detachments departed.").
-            * "description": 2-3 concise sentences answering "What happened here?" (e.g. "In December 1835, a minority Cherokee faction signed the Treaty of New Echota ceding all lands east of the Mississippi. Principal Chief John Ross and the National Council rejected the unauthorized treaty, but federal authorities enforced it to compel removal.").
-            * "significance": 1-2 concise sentences answering "Why did what happened here matter to the larger historical event?" (e.g. "The disputed treaty provided the legal justification used by the United States government to forcibly dispossess the Cherokee Nation.").
+            * "routeContext": Exactly 1 concise sentence answering "What specific role did this location play on this particular route?"
+            * "description": 2-3 concise sentences answering "What happened here?"
+            * "significance": 1-2 concise sentences answering "Why did what happened here matter to the larger historical event?"
             * FORBIDDEN CONTENT:
-              - FORBIDDEN: Generic boilerplate phrases ("important location in history", "key location for the Trail of Tears", "played a vital role", "site along the path").
+              - FORBIDDEN: Generic boilerplate phrases ("important location in history", "key location", "played a vital role", "site along the path").
               - FORBIDDEN: Redundant paraphrasing where routeContext, description, and significance repeat the same factual statement using slightly different words.
               - Each layer MUST answer its own distinct historical question.
           - "historicalPeriod": Time period (e.g. "1838-1839").
           - "modelConfidence": { "level": "high" | "medium" | "low", "reasoning": "..." }
 
       ${effectiveIntent === 'MULTI_LOCATION_DISCOVERY' || isFilmingQuery ? `
-      CRITICAL MULTI-LOCATION DISCOVERY & FILMING LOCATION INSTRUCTIONS:
-      - The user is asking to discover multiple real-world locations for a subject.
-      - Return 3-6 distinct, verified real-world physical locations associated with the subject.
-      - Return REAL-WORLD physical geographic locations on Earth (e.g. Dubrovnik, Castle Ward).
+      CRITICAL: You are answering a discovery/filming query. Extract ALL specific filming locations, archaeological sites, or points of interest that match the query and are supported by historical or factual evidence.
       ` : ''}
 
-      Schema:
+      JSON Response Format:
       {
-        "title": "Name of Route or Event",
+        "title": "Historical Route or Event Title",
+        "routeConfidence": {
+          "level": "high" | "medium" | "low",
+          "reasoning": "Explanation of confidence based on historical documentation"
+        },
         "routeType": "single_location" | "regional_event" | "multi_location_campaign" | "fixed_path" | "network" | "conceptual" | "point",
         "routeEvidenceMode": "DOCUMENTED_ROUTE" | "MULTI_ROUTE_EVENT" | "REGIONAL_EVENT" | "LLM_INFERRED_ROUTE",
         "isSequential": boolean,
-        "routeConfidence": {
-          "level": "high" | "medium" | "low",
-          "reasoning": "Explanation of certainty..."
-        },
         "routeGroups": [
           {
-            "id": "group-id",
+            "id": "unique-group-id",
             "name": "Route Group Name",
             "type": "documented_route" | "detachment" | "contingent" | "regional_cluster" | "inferred_route",
             "isSequential": boolean,
@@ -2585,6 +2936,7 @@ export const generateRoute = async (
             "role": "primary",
             "waypointType": "route_waypoint" | "historical_site" | "administrative_depot",
             "segmentEvidence": "DOCUMENTED_ROUTE_SEGMENT" | "HIGH_LEVEL_HISTORICAL_ASSOCIATION" | "INFERRED_CONNECTION",
+            "sourceEvidence": "Direct quote or reference from source text",
             "sequence": 1,
             "routeGroupId": "group-id",
             "routeGroupName": "Route Group Name",
@@ -2605,20 +2957,66 @@ export const generateRoute = async (
       }
       Output a strict JSON Object.
     `;
-    
-    const tools = url ? [{ googleSearch: {} }] : undefined;
+
+    const prompt = isSourceDoc ? docExtractionPrompt : historicalPrompt;
+
+    const tools = (url && !isLMStudio) ? [{ googleSearch: {} }] : undefined;
 
     let rawText = "";
+    const isDefaultGenerateFn = generateFn === generateContentWithRetry;
+    const startTime = Date.now();
+    let firstChunkTime: number | null = null;
+    let streamedCandidateCount = 0;
+
     try {
-      const response = await generateFn({
-        model: modelName,
-        contents: prompt,
-        config: {
-          tools: tools,
-          maxOutputTokens: 8192,
-        }
-      });
-      rawText = response.text || "";
+      if (isDefaultGenerateFn) {
+        console.log(`[TRACE ROUTE] Stage 1 stream started (provider=${isLMStudio ? 'LM Studio' : 'Gemini'})`);
+        const incrementalParser = new IncrementalCandidateParser();
+
+        const streamRes = await streamContentWithRetry(
+          {
+            model: activeModel,
+            contents: prompt,
+            config: {
+              tools: tools,
+              maxOutputTokens: 8192,
+            }
+          },
+          (chunk: string) => {
+            if (firstChunkTime === null) {
+              firstChunkTime = Date.now();
+              console.log(`[TRACE ROUTE] Stage 1 first content chunk in ${firstChunkTime - startTime}ms`);
+            }
+            const newlyParsed = incrementalParser.ingest(chunk);
+            if (newlyParsed.length > 0) {
+              for (const cand of newlyParsed) {
+                streamedCandidateCount++;
+                const candElapsed = Date.now() - startTime;
+                console.log(`[TRACE ROUTE] Stage 1 candidate ${streamedCandidateCount} JSON complete in ${candElapsed}ms: "${cand.name || cand.canonicalName || 'unnamed'}"`);
+                if (rawOptions && typeof rawOptions.onCandidateProgress === 'function') {
+                  rawOptions.onCandidateProgress(cand, streamedCandidateCount);
+                } else if (intentOrOptions && typeof intentOrOptions === 'object' && typeof (intentOrOptions as any).onCandidateProgress === 'function') {
+                  (intentOrOptions as any).onCandidateProgress(cand, streamedCandidateCount);
+                }
+              }
+            }
+          },
+          3,
+          activeSignal
+        );
+        rawText = streamRes.text || "";
+        console.log(`[TRACE ROUTE] Stage 1 stream completed in ${Date.now() - startTime}ms (totalStreamedChars=${rawText.length}, extractedCandidates=${streamedCandidateCount})`);
+      } else {
+        const response = await generateFn({
+          model: activeModel,
+          contents: prompt,
+          config: {
+            tools: tools,
+            maxOutputTokens: 8192,
+          }
+        });
+        rawText = response.text || "";
+      }
     } catch (apiErr) {
       if (isLMStudioNoModelError(apiErr)) {
         throw apiErr;
@@ -2631,7 +3029,7 @@ export const generateRoute = async (
       }
       throw apiErr;
     }
-    
+
     // Add size logging
     const charCount = rawText.length;
     const estimatedWaypoints = (rawText.match(/"lat"/g) || []).length;
@@ -2658,13 +3056,54 @@ export const generateRoute = async (
         `;
       }
 
-      const topologyPrompt = `
+      const recoverySourceBlock = acquiredSourceContext
+        ? acquiredSourceContext
+        : (url ? `URL: "${t}"` : `Query: "${t}"`);
+
+      const docRecoveryTopologyPrompt = `
+        Task: Extract physical geographic entities explicitly mentioned in the provided source text.
+        ${recoverySourceBlock}
+
+        MANDATORY PHYSICAL ENTITY EXTRACTION RULES:
+        - Extract ONLY physical geographic places explicitly mentioned in the text (e.g. cities, towns, villages, specific historic villas, named museums, churches, landmarks, ports).
+        - NEVER create waypoints for editorial section titles, itinerary headlines, activity recommendations, or time slots (e.g. "Master the Art of Breakfast", "Stroll Storied Sites", "Savor the View", "Pick Up Local Provisions", "Dine Somewhere Different", "Get Lost in Gardens", "Wander a Quieter Coastal Town", "Village Hop", "Dine Dockside", "Lake Como Tourist Route", "6 p.m. Get on board", "10:30 AM", "Day 1").
+        - NEVER wrap real places in activity headings like "Get On Board (Villa Melzi)". Extract the physical place name itself ("Villa Melzi").
+        - Travel articles are NOT documented routes. Set "routeEvidenceMode": "REGIONAL_EVENT" and "isSequential": false unless an actual continuous journey is documented.
+        - "sourceEvidence" MUST be the verbatim excerpt mentioning that specific physical location.
+        - NEVER invent nearby locations to fill gaps.
+        - Return ONLY a compact valid JSON Object representing the locations with NO extra prose.
+
+        Schema:
+        {
+          "title": "Document Topic Title",
+          "routeType": "single_location" | "regional_event" | "point",
+          "routeEvidenceMode": "REGIONAL_EVENT" | "DOCUMENTED_ROUTE" | "LLM_INFERRED_ROUTE",
+          "isSequential": false,
+          "route": [
+            {
+              "id": "kebab-case-id",
+              "name": "Physical Place Name",
+              "canonicalName": "Physical Place Name",
+              "lat": 0.0000,
+              "lng": 0.0000,
+              "sourceEvidence": "Verbatim excerpt from text",
+              "waypointType": "route_waypoint" | "historical_site"
+            }
+          ]
+        }
+        Output ONLY strict JSON.
+      `;
+
+      const historicalRecoveryTopologyPrompt = `
         Task: Extract the exact route topology and locations for:
-        ${url ? `URL: "${t}"` : `Query: "${t}"`}
+        ${recoverySourceBlock}
         ${authoritativeConstraints}
 
-        Return ONLY a compact valid JSON Object representing the route topology with NO extra prose or explanations.
-        Do NOT generate long narrative text or rich descriptions.
+        MANDATORY SOURCE GROUNDING & TOPOLOGY RULES:
+        - Extract ONLY physical geographic entities explicitly mentioned or supported by the source.
+        - NEVER invent nearby locations to fill gaps.
+        - Return ONLY a compact valid JSON Object representing the route topology with NO extra prose or explanations.
+        - Do NOT generate long narrative text or rich descriptions.
 
         Schema:
         {
@@ -2698,10 +3137,12 @@ export const generateRoute = async (
         Output ONLY strict JSON.
       `;
 
+      const topologyPrompt = isSourceDoc ? docRecoveryTopologyPrompt : historicalRecoveryTopologyPrompt;
+
       let retryResult: any = { success: false };
       try {
         const retryResponse = await generateFn({
-          model: modelName,
+          model: activeModel,
           contents: topologyPrompt,
           config: {
             tools: tools,
@@ -2710,6 +3151,9 @@ export const generateRoute = async (
         });
         retryResult = parseAndExtract(retryResponse.text);
       } catch (err) {
+        if (isLMStudioNoModelError(err)) {
+          throw err;
+        }
         console.warn(`[RECOVERY] LLM retry call threw:`, err);
       }
 
@@ -2734,7 +3178,7 @@ export const generateRoute = async (
         console.log(`[RAW AI JSON RESPONSE]:\n${rawText}`);
     }
     const result = parseAndExtract(rawText);
-    
+
     if (!result.success) {
         console.error(
             `[Route Generation] JSON extraction failed: ${(result as any).reason}`,
@@ -2744,14 +3188,14 @@ export const generateRoute = async (
     }
     return processParsedRouteResult(result.value, text);
   };
-  
+
     const processParsedRouteResult = (data: any, originalText: string) => {
       let items: any[] = [];
       let title: string | undefined = undefined;
       let routeConfidence: any = undefined;
       let routeEvidenceMode: any = undefined;
       let routeGroups: any[] | undefined = undefined;
-  
+
       if (data && typeof data === 'object') {
           if (data.title) title = data.title;
           if (data.routeConfidence) routeConfidence = data.routeConfidence;
@@ -2811,7 +3255,12 @@ export const generateRoute = async (
         const mapped = {
           ...item,
           routeTitle: title,
-          routeEvidenceMode: item.routeEvidenceMode || routeEvidenceMode
+          routeEvidenceMode: item.routeEvidenceMode || routeEvidenceMode,
+          metadata: {
+            sourceText: acquiredSourceText,
+            ...(data.metadata || {}),
+            ...(item.metadata || {})
+          }
         };
         if (idx === 0) logFieldDiff('generateRawRoute', item, mapped);
         if (idx === 0 && mapped.id) logWaypointSnapshot('RAW AI (After generateRawRoute map)', mapped as Waypoint);
@@ -2879,7 +3328,8 @@ export const generateRoute = async (
           routeType: canonicalTopology.routeType,
           isSequential: canonicalTopology.isSequential,
           routeEvidenceMode: canonicalTopology.routeEvidenceMode as any,
-          routeGroups: canonicalTopology.routeGroups
+          routeGroups: canonicalTopology.routeGroups,
+          metadata: { sourceText: acquiredSourceText }
         };
       }
     }
@@ -2891,15 +3341,16 @@ export const generateRoute = async (
       routeType: data.routeType,
       isSequential: data.isSequential,
       routeEvidenceMode,
-      routeGroups
+      routeGroups,
+      metadata: { sourceText: acquiredSourceText }
     };
   };
 
   try {
-    const route = await runRoutePipeline(text, isUrl, generateRawRoute, effectiveIntent);
+    const route = await runRoutePipeline(text, isUrl, generateRawRoute, effectiveIntent, onWaypointProgress);
     return route;
   } catch (error) {
-    if (isLMStudioNoModelError(error)) {
+    if (isLMStudioNoModelError(error) || isSourceRetrievalError(error)) {
       throw error;
     }
     console.error("Error generating route with pipeline:", error);
@@ -2923,7 +3374,7 @@ import { detectHistoricalRouteEvent, normalizeSemanticEntityTitle } from './quer
 
 export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
   const clean = query.trim();
-  
+
   // 0. Check for Authoritative Historical Route Registry Events (Precedence over single-location intents)
   const historicalDetection = detectHistoricalRouteEvent(clean);
   if (historicalDetection.isHistoricalRouteEvent) {
@@ -3015,9 +3466,9 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
     if (match) {
       const { subject, target } = item.getDetails(match);
       const cleanedSubject = toCanonicalTitleCase(subject.replace(/^(?:the|a|an)\s+/i, '').replace(/[?.,!]+$/, '').trim());
-      
+
       console.log(`[QUERY INTENT]\nquery="${clean.toLowerCase()}"\nintent=MULTI_LOCATION_DISCOVERY\nsubject="${cleanedSubject}"\ntarget="${target}"`);
-      
+
       return {
         intent: 'MULTI_LOCATION_DISCOVERY',
         subject: cleanedSubject,
@@ -3036,8 +3487,8 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
   ];
   for (const pattern of routePatterns) {
     if (pattern.test(clean)) {
-      return { 
-        intent: 'route' as any, 
+      return {
+        intent: 'route' as any,
         entity: clean,
         resolutionMode: 'MULTI_LOCATION_EXPLORATION',
         queryShape: 'HISTORICAL_ROUTE'
@@ -3127,12 +3578,12 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
       const entityStr = subject.replace(/[?.,!]+$/, "").trim();
       const cleanedEntity = entityStr.replace(/^the\s+/i, "");
       const finalSubject = toCanonicalTitleCase(cleanedEntity || entityStr);
-      
+
       const scopeInfo = determineHistoricalEventScope(finalSubject, clean);
       const resolutionMode = scopeInfo.singleLocation ? 'SINGLE_POINT' : 'HISTORICAL_NON_POINT';
-      
+
       console.log(`Intent:\nHISTORICAL_EVENT\nRouting decision:\n${resolutionMode}\nsubject="${finalSubject}"\nevent="${event}"\ngeographicScope="${scopeInfo.scope}"`);
-      
+
       return {
         intent: 'HISTORICAL_EVENT',
         entity: finalSubject,
@@ -3159,11 +3610,11 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
     /\bevents\s+of\b/i,
     /\bbattles\s+of\b/i,
   ];
-  
+
   for (const pattern of exploratoryPatterns) {
     if (pattern.test(clean)) {
-      return { 
-        intent: 'EXPLORATORY', 
+      return {
+        intent: 'EXPLORATORY',
         entity: clean,
         resolutionMode: 'MULTI_LOCATION_EXPLORATION',
         queryShape: 'EXPLORATORY'
@@ -3203,8 +3654,8 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
       let entityStr = match[1].replace(/[?.,!;:]+$/, "").trim();
       entityStr = entityStr.replace(/\s+(?:located|found|situated)$/i, "").trim();
       const cleanedEntity = entityStr.replace(/^(?:the|a|an)\s+/i, "").replace(/[?.,!;:]+$/, "").trim();
-      return { 
-        intent: 'NATURAL_LOCATION', 
+      return {
+        intent: 'NATURAL_LOCATION',
         entity: cleanedEntity || entityStr,
         queryShape: 'NATURAL_LANGUAGE_QUESTION'
       };
@@ -3282,20 +3733,20 @@ Output ONLY the JSON object.`;
   if (attempt > 1) {
       promptText += `\n\nReturn the documented coordinates for "${entity}". Do not return a similarly named location or different entity.`;
   }
-  
+
   try {
     const response = await generateContentWithRetry({
       model: modelName,
       contents: promptText,
       config: {
-        maxOutputTokens: 300, 
+        maxOutputTokens: 300,
       }
     }, 3, signal);
 
     const parsed = parseAndExtract(response.text);
     const data = parsed.success ? parsed.value : null;
     let valid = false;
-    
+
     const resolvedEntityName = (data && ((data as any).resolvedEntity || (data as any).name || (data as any).entity)) || entity;
     const rawEntityType = (data && ((data as any).entityType || (data as any).type)) || (isMaritime ? 'shipwreck_site' : undefined);
     const candidateEntityType = rawEntityType === 'shipwreck' ? 'shipwreck_site' : rawEntityType;
@@ -3303,7 +3754,7 @@ Output ONLY the JSON object.`;
     const locationDescription = (data && ((data as any).locationDescription || (data as any).description)) || undefined;
 
     let parsedCoords = normalizeCoordinates(data) || (data && normalizeCoordinates((data as any).coordinates));
-    
+
     if (parsedCoords) {
       valid = isValidCoordinates(parsedCoords);
       if (parsedCoords.lat === 997 || parsedCoords.lat === 998 || parsedCoords.lat === 999) {
@@ -3318,7 +3769,7 @@ Output ONLY the JSON object.`;
         console.warn(`[Coordinate Recovery] Rejected fabricated placeholder coordinates for ${entity}: ${parsedCoords.lat}, ${parsedCoords.lng}`);
         valid = false;
       }
-      
+
       const lookupKey = entity.toLowerCase().trim();
       const knownEntity = DETERMINISTIC_LOCATION_DB[lookupKey];
       if (valid && knownEntity) {
@@ -3330,9 +3781,9 @@ Output ONLY the JSON object.`;
                    Math.sin(dLon/2) * Math.sin(dLon/2);
          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
          const distance = R * c;
-         
+
          const threshold = knownEntity.type === LocationType.CITY ? 50 : 10;
-         
+
          if (distance > threshold) {
              valid = false;
          }
@@ -3355,7 +3806,7 @@ Output ONLY the JSON object.`;
 
           if (!histValidation.valid) {
               console.warn(`[RECOVERY COORDINATE REJECTED] Candidate coordinate for "${entity}" rejected (${histValidation.reason}). Stopping LLM retries.`);
-              const histKnowledge = getHistoricalEntityKnowledge(entity) || 
+              const histKnowledge = getHistoricalEntityKnowledge(entity) ||
                                     getHistoricalEntityKnowledge(resolvedEntityName) ||
                                     getHistoricalEntityKnowledge(entity.toLowerCase().trim().replace(/^the\s+/i, ''));
               if (histKnowledge?.approximateCoordinates) {
@@ -3378,7 +3829,7 @@ Output ONLY the JSON object.`;
     }
 
     const identityCheck = validateEntityIdentity(entity, resolvedEntityName, { rawQuery, intent, candidateEntityType, coordinatesValid: valid });
-    
+
     // Geographic entity coordinate validation & trust model
     let coordinateTrust: CoordinateTrustLevel = 'unverified';
     let coordinateGeographicallyConsistent = true;
@@ -3387,9 +3838,9 @@ Output ONLY the JSON object.`;
     if (valid && parsedCoords && identityCheck.matches) {
       // 1. Determine whether authoritative entity context exists (from DETERMINISTIC_LOCATION_DB or historical knowledge)
       const lookupKey = entity.toLowerCase().trim();
-      const authoritativeEntry = DETERMINISTIC_LOCATION_DB[lookupKey] || 
+      const authoritativeEntry = DETERMINISTIC_LOCATION_DB[lookupKey] ||
                                  DETERMINISTIC_LOCATION_DB[resolvedEntityName.toLowerCase().trim()];
-      
+
       const authoritativeContext = authoritativeEntry ? {
         country: authoritativeEntry.context?.country || (authoritativeEntry as any).country,
         state: authoritativeEntry.context?.state || (authoritativeEntry as any).state,
@@ -3452,8 +3903,8 @@ Output ONLY the JSON object.`;
     });
 
     if (recoveryAccepted && parsedCoords) {
-       return { 
-         ...parsedCoords, 
+       return {
+         ...parsedCoords,
          source: "ai_recovery",
          coordinateTrust,
          recoveredEntity: resolvedEntityName,
@@ -3467,7 +3918,7 @@ Output ONLY the JSON object.`;
          historicalCorroborated: (typeof histValidation !== 'undefined' && histValidation?.valid && (histValidation.reason === 'MARITIME_LOCATION_SUPPORTED' || histValidation.reason === 'MATCHES_EXPECTED_HISTORICAL_REGION' || histValidation.reason === 'AUTHORITATIVE_PROVIDER_COORDINATE'))
        };
     }
-    
+
     return null;
 
   } catch (error) {
@@ -3476,7 +3927,7 @@ Output ONLY the JSON object.`;
 };
 
 export const recoverLocationMetadata = async (
-  entityName: string, 
+  entityName: string,
   coordinates: GeoCoordinates,
   canonicalIdentity?: Partial<CanonicalGeographicEntity> & { country?: string; state?: string; city?: string; region?: string; county?: string; originalQuery?: string },
   signal?: AbortSignal
@@ -3484,7 +3935,7 @@ export const recoverLocationMetadata = async (
   if (signal?.aborted) return null;
   try {
     const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
-    
+
     const entityTitle = canonicalIdentity?.canonicalName || entityName || normalizeLocationEntity(entityName);
     const cityName = canonicalIdentity?.city;
     const adminArea = canonicalIdentity?.state || canonicalIdentity?.region || canonicalIdentity?.county || canonicalIdentity?.city || "Unknown area";
@@ -3493,8 +3944,8 @@ export const recoverLocationMetadata = async (
     const originalQuery = canonicalIdentity?.originalQuery;
 
     const expectedLocationString = [
-      cityName, 
-      adminArea && adminArea !== cityName && adminArea !== "Unknown area" ? adminArea : null, 
+      cityName,
+      adminArea && adminArea !== cityName && adminArea !== "Unknown area" ? adminArea : null,
       countryName && countryName !== "Unknown country" ? countryName : null
     ].filter(Boolean).join(', ') || `${adminArea}, ${countryName}`;
 
@@ -3553,9 +4004,9 @@ export const recoverLocationMetadata = async (
       2. Do not substitute another place with the same or similar name.
       3. The coordinates, country, administrative area, and entity type are authoritative.
       4. LANGUAGE REQUIREMENT: All text fields ("description", "climate", "contextNotes", "notable") MUST be written strictly in ENGLISH. Never return French, Spanish, German, Italian, or other non-English text.
-      
+
       Current Date: ${currentDate}
-      
+
       Require the response to be a SINGLE JSON object with exactly these top-level fields:
       {
         "name": "${entityTitle}",
@@ -3611,21 +4062,21 @@ export const recoverLocationMetadata = async (
           maxOutputTokens: 4000,
         }
       }, 3, signal);
-      
+
       const rawText = response.text;
       const parsed = parseAndExtract(rawText);
       let data = parsed.success ? (parsed.value as any) : null;
       if (Array.isArray(data) && data.length > 0) {
          data = data[0];
       }
-      
+
       if (data && typeof data === 'object' && !Array.isArray(data)) {
           const keys = Object.keys(data);
           // Unwrap container if needed
           if (keys.length === 1 && typeof data[keys[0]] === 'object' && data[keys[0]] !== null && !Array.isArray(data[keys[0]])) {
               data = data[keys[0]];
           }
-          
+
           // Never accept isolated sub-objects (e.g., climate sub-object extracted as root)
           if (data.koppenCode && !data.climate) {
               console.warn(`[RECOVERY PARSER] Rejected isolated sub-object containing koppenCode:`, data);
@@ -3644,46 +4095,46 @@ export const recoverLocationMetadata = async (
     };
 
     let attempt = await fetchAndParse(false);
-    
+
     const validateContent = (data: any) => {
         let missing: string[] = [];
         if (!data) return ['all'];
-        
+
         if (!data.description || typeof data.description !== 'string' || isGenericPlaceholderDescription(data.description, entityTitle) || !isEnglishText(data.description)) {
             missing.push('description');
         }
-        
+
         return missing;
     };
-    
+
     let missingKeys: string[] = validateContent(attempt.data);
     let retryAttempted = false;
-    
+
     if (missingKeys.length > 0) {
         retryAttempted = true;
         console.warn(`Initial metadata recovery failed validation. Missing/Empty keys: ${missingKeys.join(', ')}. Retrying with strict fallback...`);
         attempt = await fetchAndParse(true);
         missingKeys = validateContent(attempt.data);
     }
-    
+
     console.log(`=== METADATA RECOVERY PIPELINE ===`);
     console.log(`Raw Response:\n${attempt.rawText}`);
     console.log(`Extracted JSON:\n${attempt.extractedJson}`);
     console.log(`Parse Result:\n${attempt.parseResult}`);
     console.log(`Retry Attempted:\n${retryAttempted}`);
-    
+
     const data = attempt.data;
 
     // Guardrail against narrative mismatch
     if (data && data.description && canonicalIdentity?.country) {
       const canonicalCountry = canonicalIdentity.country.toLowerCase().trim();
       const descLower = (data.description || '').toLowerCase();
-      if ((canonicalCountry === 'united states' || canonicalCountry === 'usa') && 
+      if ((canonicalCountry === 'united states' || canonicalCountry === 'usa') &&
           (descLower.includes('iceland') || descLower.includes('reykjanes') || descLower.includes('grindavík')) &&
           !descLower.includes('united states') && !descLower.includes('nevada')) {
         console.warn(`[ENRICHMENT GUARDRAIL REJECTION] Narrative described Iceland for canonical US/Nevada entity. Rejecting contradictory narrative.`);
         data.description = "";
-      } else if (canonicalCountry === 'iceland' && 
+      } else if (canonicalCountry === 'iceland' &&
                  (descLower.includes('nevada') || descLower.includes('las vegas')) &&
                  !descLower.includes('iceland')) {
         console.warn(`[ENRICHMENT GUARDRAIL REJECTION] Narrative described Nevada for canonical Iceland entity. Rejecting contradictory narrative.`);
@@ -3694,10 +4145,10 @@ export const recoverLocationMetadata = async (
     const timestamp = Date.now();
     const provenance = { provider: "Gemini", timestamp, cache: false };
     const metadata: Partial<EnrichmentResult> = {};
-    
+
     const validFields: string[] = [];
     const rejectedFields: string[] = [];
-    
+
     const isBlank = (val: any) => {
         if (val === undefined || val === null) return true;
         if (typeof val === 'string' && val.trim() === '') return true;
@@ -3707,21 +4158,21 @@ export const recoverLocationMetadata = async (
     };
 
     if (data && data.description && !isBlank(data.description) && isEnglishText(typeof data.description === 'string' ? data.description : data.description.text)) {
-       metadata.description = typeof data.description === 'string' 
-           ? { text: data.description, provenance } 
+       metadata.description = typeof data.description === 'string'
+           ? { text: data.description, provenance }
            : { ...data.description, provenance };
        validFields.push('description');
     } else {
        rejectedFields.push('description');
     }
-    
+
     const rawEType = (canonicalIdentity?.entityType || '').toLowerCase();
     const isSettlement = ['city', 'town', 'village', 'municipality', 'settlement', 'country', 'state'].includes(rawEType);
 
     // AI-generated population estimates are strictly rejected to prevent hallucination;
     // population must always originate from authoritative structured data pipelines.
     rejectedFields.push('population');
-    
+
     if (data && data.climate && !isBlank(data.climate)) {
        let cName = "";
        let cDesc = "";
@@ -3771,7 +4222,7 @@ export const recoverLocationMetadata = async (
     } else {
        rejectedFields.push('climate');
     }
-    
+
     if (data.contextNotes && !isBlank(data.contextNotes)) {
        const notesArray = Array.isArray(data.contextNotes) ? data.contextNotes : [data.contextNotes];
        metadata.contextNotes = notesArray.map((note: any) => ({
@@ -3782,7 +4233,7 @@ export const recoverLocationMetadata = async (
     } else {
        rejectedFields.push('contextNotes');
     }
-    
+
     if (data.notable && !isBlank(data.notable)) {
        const notableArray = Array.isArray(data.notable) ? data.notable : [data.notable];
        metadata.notable = notableArray.map((e: any) => {
@@ -3868,15 +4319,15 @@ export const recoverLocationMetadata = async (
     } else {
        rejectedFields.push('notable');
     }
-    
+
     console.log(`[METADATA RECOVERY]\nValid fields: ${validFields.length > 0 ? validFields.join(', ') : 'None'}\nRejected fields: ${rejectedFields.length > 0 ? rejectedFields.join(', ') : 'None'}`);
-    
+
     (metadata as any)._validFields = validFields;
     (metadata as any)._rejectedFields = rejectedFields;
-    
+
     console.log(`Final Metadata Keys:\n${Object.keys(metadata).join(', ')}`);
     console.log(`================================`);
-    
+
     console.log(`=== BOUNDARY LOG 1: recoverLocationMetadata output ===`);
     console.log(`{
       description: typeof ${typeof metadata.description},

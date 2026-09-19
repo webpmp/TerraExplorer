@@ -1,4 +1,4 @@
-import { Waypoint, ProvenanceRecord, HistoricalIssue, Route, RouteGroup, RouteEvidenceMode, RouteWaypointMembership } from '../types';
+import { Waypoint, ProvenanceRecord, HistoricalIssue, Route, RouteGroup, RouteEvidenceMode, RouteWaypointMembership, isValidCoordinates } from '../types';
 import { generateContentWithRetry, modelName } from './geminiService';
 import { PIPELINE_DEBUG, logWaypointSnapshot, logFieldDiff, logHierarchy, logPipelineSummary, PipelineSummary } from '../utils/pipelineDebug';
 import { parseAndExtract } from '../utils/jsonParser';
@@ -6,9 +6,12 @@ import { validateEarthGeography } from './celestialCapabilities';
 import { isRouteSequential, groupWaypointsByRoute, logHistoricalRouteStructure, validateHistoricalRouteData } from '../utils/routeSequenceUtils';
 import { validateEntityAlias } from './geographic/entityIdentityValidator';
 import { getHistoricalEntityKnowledge, validateHistoricalCoordinate } from './geographic/historicalCoordinateValidator';
+import { resolveGeographicEntity } from './geographic/geographicResolver';
+import { calculateDistanceKm } from './geographic/geographicDistance';
 import { validateCandidateAgainstRegistry, validateDocumentedSegment, getAuthoritativeEventModel, resolveCanonicalRouteGroup, buildCanonicalEventTopology, findAuthoritativeAnchorAcrossEvent, isAnchorMatch } from './geographic/historicalRouteRegistry';
 import { validateHistoricalWaypointContent } from './historicalContentValidation';
 import { normalizeSemanticEntityTitle } from './queryNormalizer';
+import { isItineraryOrActivityPhrase, unwrapPhysicalEntityName } from './entityValidation';
 
 /**
  * Normalizes raw/malformed AI route membership structures into a clean RouteWaypointMembership[] array
@@ -121,7 +124,8 @@ export const runRoutePipeline = async (
     routeEvidenceMode?: RouteEvidenceMode;
     routeGroups?: RouteGroup[];
   }>,
-  intent?: string
+  intent?: string,
+  onWaypointProgress?: (waypoint: Waypoint, allDiscoveredSoFar: Waypoint[], index: number, total: number) => void
 ): Promise<Route> => {
   const pipelineId = Math.random().toString(16).substring(2, 8);
   console.log(`[Pipeline ${pipelineId}] === STARTING 7-STAGE HISTORICAL & ROUTE VALIDATION PIPELINE ===`);
@@ -163,8 +167,212 @@ export const runRoutePipeline = async (
     console.log(`==============================================\n`);
   };
 
+  // Progressive emission tracker across Stage 1 streaming and Stage 3 reconciliation
+  const progressivelyEmittedWaypoints = new Map<string, Waypoint>();
+
+  // Single candidate normalization helper for early streaming candidate validation
+  const normalizeSingleCandidate = (item: any, i: number, defaultTitle?: string): Waypoint => {
+    let validAlternateNames: string[] = [];
+    if (Array.isArray(item.alternateNames)) {
+      validAlternateNames = item.alternateNames
+        .filter((alt: any) => typeof alt === 'string' && alt.trim().length > 0)
+        .map((alt: string) => alt.trim())
+        .filter((alt: string) => validateEntityAlias(item.canonicalName || item.name || '', alt));
+    }
+
+    const { memberships, primaryGroupId, primaryGroupName } = normalizeRouteMemberships(item);
+    const unwrappedRawName = unwrapPhysicalEntityName(item.name);
+    const unwrappedRawCanonical = unwrapPhysicalEntityName(item.canonicalName);
+
+    const normalizedWpTitle = normalizeSemanticEntityTitle({
+      explicitTitle: unwrappedRawName,
+      canonicalName: unwrappedRawCanonical,
+      name: unwrappedRawName,
+      subject: unwrappedRawCanonical || unwrappedRawName,
+      routeTitle: item.routeTitle || defaultTitle,
+      description: item.description,
+      coordinates: { lat: typeof item.lat === 'number' ? item.lat : Number(item.lat), lng: typeof item.lng === 'number' ? item.lng : Number(item.lng) }
+    });
+
+    const finalName = normalizedWpTitle || unwrappedRawName || item.name || "Unknown Waypoint";
+    const finalCanonical = unwrappedRawCanonical || item.canonicalName || normalizedWpTitle || finalName;
+    const cleanSlug = (finalCanonical || finalName).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const deterministicId = item.id && typeof item.id === 'string' && item.id.trim() ? item.id.trim() : `wp-${i + 1}-${cleanSlug || 'location'}`;
+
+    return {
+      id: deterministicId,
+      name: finalName,
+      canonicalName: finalCanonical,
+      historicalRegion: item.historicalRegion,
+      modernLocation: item.modernLocation,
+      lat: typeof item.lat === 'number' ? item.lat : (Number(item.lat) || 0),
+      lng: typeof item.lng === 'number' ? item.lng : (Number(item.lng) || 0),
+      role: item.role,
+      parentId: item.parentId,
+      sequence: typeof item.sequence === 'number' ? item.sequence : (memberships[0]?.sequence),
+      alternateNames: validAlternateNames,
+      context: item.context || "",
+      routeTitle: item.routeTitle || defaultTitle,
+      routeContext: item.routeContext ? (typeof item.routeContext === 'object' ? item.routeContext : { title: primaryGroupName || 'Route Context', text: String(item.routeContext) }) : undefined,
+      routeContextText: typeof item.routeContext === 'string' ? item.routeContext : (item.routeContextText || item.routeContext?.text),
+      description: item.description,
+      significance: item.significance,
+      highlights: Array.isArray(item.highlights) ? item.highlights : [],
+      historicalPeriod: item.historicalPeriod,
+      entities: Array.isArray(item.entities) ? item.entities : [],
+      historicalConfidence: item.historicalConfidence,
+      modelConfidence: item.modelConfidence,
+      verifiedEvidence: item.verifiedEvidence,
+      routeGroupId: primaryGroupId,
+      routeGroupName: primaryGroupName,
+      memberships,
+      routeEvidenceMode: item.routeEvidenceMode,
+      waypointType: (['route_waypoint', 'historical_site', 'administrative_depot'].includes(item.waypointType)) ? item.waypointType : 'route_waypoint',
+      segmentEvidence: (['DOCUMENTED_ROUTE_SEGMENT', 'HIGH_LEVEL_HISTORICAL_ASSOCIATION', 'INFERRED_CONNECTION'].includes(item.segmentEvidence)) ? item.segmentEvidence : 'DOCUMENTED_ROUTE_SEGMENT',
+      segmentEvidenceReason: typeof item.segmentEvidenceReason === 'string' ? item.segmentEvidenceReason : undefined,
+      date: item.date,
+      year: item.year,
+      timestamp: item.timestamp,
+      temporalRelation: item.temporalRelation,
+      relationship: item.relationship,
+      order: item.order,
+      isSequential: item.isSequential,
+      sourceEvidence: item.sourceEvidence,
+      metadata: {
+        ...(item.metadata || {})
+      },
+      provenance: [{
+        stage: 'normalization',
+        source: 'deterministic',
+        timestamp: new Date().toISOString(),
+        summary: 'Initialized structure, normalized route memberships, and verified entity aliases'
+      }]
+    };
+  };
+
+  // Single candidate geographic validator for early streaming release
+  const validateSingleCandidate = async (w: Waypoint, sourceTxt: string): Promise<Waypoint | null> => {
+    const isItineraryActivity = isItineraryOrActivityPhrase(w.name) || isItineraryOrActivityPhrase(w.canonicalName);
+    if (isItineraryActivity) return null;
+
+    const isNameValid = Boolean(
+      w.name &&
+      w.name.toLowerCase() !== text.toLowerCase() &&
+      !/^(where was|where were|what are|filming locations|places used)\b/i.test(w.name)
+    );
+    if (!isNameValid) return null;
+
+    const histKnowledge = getHistoricalEntityKnowledge(w.canonicalName || w.name);
+    let entityIdentityValid = true;
+    let coordGeographicallyValid = true;
+
+    if (w.alternateNames && w.alternateNames.length > 0) {
+      for (const alt of w.alternateNames) {
+        if (!validateEntityAlias(w.canonicalName || w.name, alt)) {
+          entityIdentityValid = false;
+          break;
+        }
+      }
+    }
+    if (!entityIdentityValid) return null;
+
+    if (histKnowledge) {
+      const coordValidation = await validateHistoricalCoordinate(
+        w.canonicalName || w.name,
+        { lat: w.lat, lng: w.lng },
+        {
+          intent,
+          coordinateSource: 'ai',
+          expectedRegion: histKnowledge.expectedRegion,
+          entityType: histKnowledge.entityType || 'historical_site'
+        }
+      );
+      if (!coordValidation.valid) {
+        if (histKnowledge.approximateCoordinates) {
+          w.lat = histKnowledge.approximateCoordinates.lat;
+          w.lng = histKnowledge.approximateCoordinates.lng;
+        } else {
+          coordGeographicallyValid = false;
+        }
+      }
+    } else {
+      const queryName = w.canonicalName || w.name;
+      const resolved = await resolveGeographicEntity(queryName);
+      if (resolved && !('status' in resolved) && resolved.coordinates && isValidCoordinates(resolved.coordinates)) {
+        const distKm = calculateDistanceKm(w.lat, w.lng, resolved.coordinates.lat, resolved.coordinates.lng);
+        const shouldUpdate = isUrl || sourceTxt.length > 200 || distKm > 50 || (w.lat === 0 && w.lng === 0);
+        if (shouldUpdate && (distKm > 0.001 || (w.lat === 0 && w.lng === 0))) {
+          w.lat = resolved.coordinates.lat;
+          w.lng = resolved.coordinates.lng;
+        }
+      }
+    }
+
+    if (!coordGeographicallyValid) return null;
+
+    const isSentinel = (typeof w.lat === 'number' && typeof w.lng === 'number') &&
+      ((Math.abs(w.lat - 12.345) < 0.01 && Math.abs(w.lng - 67.89) < 0.01) || (w.lat === 0 && w.lng === 0));
+    const isCoordValid = typeof w.lat === 'number' && typeof w.lng === 'number' && !isNaN(w.lat) && !isNaN(w.lng) && (w.lat !== 0 || w.lng !== 0) && w.lat >= -90 && w.lat <= 90 && w.lng >= -180 && w.lng <= 180 && !isSentinel;
+    if (!isCoordValid) return null;
+
+    const celestialValidation = validateEarthGeography({
+      name: w.name,
+      canonicalName: w.canonicalName,
+      historicalRegion: w.historicalRegion,
+      modernLocation: w.modernLocation,
+      description: w.description
+    });
+    if (!celestialValidation.isValid) return null;
+
+    // Source evidence check if pasted source text provided (NOT a URL and length > 200)
+    if (!isUrl && sourceTxt && sourceTxt.length > 200 && !histKnowledge) {
+      const nameLower = (w.canonicalName || w.name || '').toLowerCase().trim();
+      const rawNameLower = (w.name || '').toLowerCase().trim();
+      const coreName = nameLower.split(',')[0].replace(/\s+(?:in|near|at)\s+.*$/i, '').trim();
+      const inSource = (nameLower.length > 2 && sourceTxt.includes(nameLower)) ||
+        (rawNameLower.length > 2 && sourceTxt.includes(rawNameLower)) ||
+        (coreName.length > 2 && sourceTxt.includes(coreName));
+      const aliasInSource = Array.isArray(w.alternateNames) && w.alternateNames.some(alt => alt.trim().length > 2 && sourceTxt.includes(alt.toLowerCase().trim()));
+      const hasSourceEvidence = Boolean(w.sourceEvidence && typeof w.sourceEvidence === 'string' && w.sourceEvidence.trim().length > 0);
+
+      if (!inSource && !aliasInSource && !hasSourceEvidence) {
+        console.log(`[Progressive Candidate Validation] REJECT "${w.name}": Source evidence not found in pasted text`);
+        return null;
+      }
+    }
+
+    console.log(`[Progressive Candidate Validation] ACCEPT "${w.name}" (${w.lat.toFixed(4)}, ${w.lng.toFixed(4)})`);
+    return w;
+  };
+
   // Stage 1: Generate
   console.log(`[Pipeline ${pipelineId}] Stage 1: Generate (Calling AI)`);
+  console.log(`[Pipeline ${pipelineId}] Stage 1 Input: length=${text.length}, isUrl=${isUrl}, preview="${text.slice(0, 100).replace(/\n/g, ' ')}"`);
+
+  // Connect streaming candidate progress handler to Stage 1
+  const onCandidateProgress = async (rawCand: any, candIndex: number) => {
+    try {
+      console.log(`[TRACE ROUTE] Stage 1 candidate ${candIndex} validation started: "${rawCand.name || 'unnamed'}"`);
+      const normalizedCand = normalizeSingleCandidate(rawCand, candIndex - 1);
+      const validatedCand = await validateSingleCandidate(normalizedCand, text.toLowerCase());
+      if (validatedCand) {
+        console.log(`[TRACE ROUTE] Stage 1 candidate ${candIndex} validated: "${validatedCand.name}" (${validatedCand.lat.toFixed(4)}, ${validatedCand.lng.toFixed(4)})`);
+        if (!progressivelyEmittedWaypoints.has(validatedCand.id)) {
+          progressivelyEmittedWaypoints.set(validatedCand.id, validatedCand);
+          const currentDiscovered = Array.from(progressivelyEmittedWaypoints.values());
+          console.log(`[TRACE ROUTE] Stage 1 candidate ${candIndex} progressive emission: "${validatedCand.name}" (${currentDiscovered.length} emitted so far)`);
+          if (onWaypointProgress) {
+            onWaypointProgress(validatedCand, currentDiscovered, currentDiscovered.length, currentDiscovered.length);
+          }
+        }
+      } else {
+        console.log(`[TRACE ROUTE] Stage 1 candidate ${candIndex} rejected during progressive validation: "${rawCand.name || 'unnamed'}"`);
+      }
+    } catch (streamValErr) {
+      console.warn(`[TRACE ROUTE] Error during progressive candidate validation:`, streamValErr);
+    }
+  };
+
   let {
     waypoints: rawItems,
     title: rawTitle,
@@ -172,13 +380,17 @@ export const runRoutePipeline = async (
     routeType: rawRouteType,
     isSequential: rawIsSequential,
     routeEvidenceMode: rawRouteEvidenceMode,
-    routeGroups: rawRouteGroups
-  } = await generateRawRoute(text, isUrl);
+    routeGroups: rawRouteGroups,
+    metadata: rawMetadata
+  } = (await generateRawRoute(text, isUrl, { onCandidateProgress })) as any;
+
+  console.log(`[Pipeline ${pipelineId}] Stage 1 Output: candidateCount=${rawItems ? rawItems.length : 0}, title="${rawTitle || 'Untitled'}", sourceMetadataLength=${rawMetadata?.sourceText ? rawMetadata.sourceText.length : 0}`);
 
   logPipelineTrace("Stage 1: Generate", rawItems);
 
   // Stage 2: Normalize
   console.log(`[Pipeline ${pipelineId}] Stage 2: Normalize (Structural initialization & alias validation)`);
+  console.log(`[Pipeline ${pipelineId}] Stage 2 Input candidateCount=${rawItems ? rawItems.length : 0}`);
   console.log(`\n===== ROUTE MEMBERSHIP NORMALIZATION =====`);
   let normalizedItems = rawItems.map((item, i): Waypoint => {
     // Strip invalid or conflated aliases
@@ -196,20 +408,29 @@ export const runRoutePipeline = async (
       console.log(`[Item ${i}: "${item.name}"] Warning: ${warning}`);
     }
 
+    // Unwrap physical place names if wrapped in activity labels like "Get On Board (Villa Melzi)"
+    const unwrappedRawName = unwrapPhysicalEntityName(item.name);
+    const unwrappedRawCanonical = unwrapPhysicalEntityName(item.canonicalName);
+
     const normalizedWpTitle = normalizeSemanticEntityTitle({
-      explicitTitle: item.name,
-      canonicalName: item.canonicalName,
-      name: item.name,
-      subject: item.canonicalName || item.name,
+      explicitTitle: unwrappedRawName,
+      canonicalName: unwrappedRawCanonical,
+      name: unwrappedRawName,
+      subject: unwrappedRawCanonical || unwrappedRawName,
       routeTitle: item.routeTitle || rawTitle,
       description: item.description,
       coordinates: { lat: typeof item.lat === 'number' ? item.lat : Number(item.lat), lng: typeof item.lng === 'number' ? item.lng : Number(item.lng) }
     });
 
+    const finalName = normalizedWpTitle || unwrappedRawName || item.name || "Unknown Waypoint";
+    const finalCanonical = unwrappedRawCanonical || item.canonicalName || normalizedWpTitle || finalName;
+    const cleanSlug = (finalCanonical || finalName).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const deterministicId = item.id && typeof item.id === 'string' && item.id.trim() ? item.id.trim() : `wp-${i + 1}-${cleanSlug || 'location'}`;
+
     const wp: Waypoint = {
-      id: item.id || `wp-${i}-${Date.now()}`,
-      name: normalizedWpTitle || item.name || "Unknown Waypoint",
-      canonicalName: item.canonicalName || normalizedWpTitle,
+      id: deterministicId,
+      name: finalName,
+      canonicalName: finalCanonical,
       historicalRegion: item.historicalRegion,
       modernLocation: item.modernLocation,
       lat: typeof item.lat === 'number' ? item.lat : (Number(item.lat) || 0),
@@ -244,7 +465,11 @@ export const runRoutePipeline = async (
       relationship: item.relationship,
       order: item.order,
       isSequential: item.isSequential,
-      metadata: item.metadata,
+      sourceEvidence: item.sourceEvidence,
+      metadata: {
+        ...(rawMetadata || {}),
+        ...(item.metadata || {})
+      },
       provenance: [{
         stage: 'normalization',
         source: 'deterministic',
@@ -257,6 +482,7 @@ export const runRoutePipeline = async (
     return wp;
   });
   console.log(`==========================================\n`);
+  console.log(`[Pipeline ${pipelineId}] Stage 2 Output: candidateCount=${normalizedItems.length}`);
 
   logPipelineTrace("Stage 2: Normalize", normalizedItems);
 
@@ -266,20 +492,55 @@ export const runRoutePipeline = async (
   let placeholderRepaired = 0;
 
   // Stage 3: Structural & Multi-Stage Historical Validation
-  console.log(`[Pipeline ${pipelineId}] Stage 3: Structural & Historical Waypoint Validation`);
+  console.log(`[Pipeline ${pipelineId}] Stage 3: Structural & Historical Waypoint Validation (candidateCount=${normalizedItems.length})`);
+
+  const sourceText = (rawMetadata?.sourceText || '').trim();
+  const sourceMode = isUrl ? 'url' : (sourceText.length > 200 ? 'pasted_article' : 'query_text');
+  console.log(`[Pipeline ${pipelineId}] Stage 3 Source Metadata: length=${sourceText.length}, mode="${sourceMode}", preview="${sourceText.slice(0, 100).replace(/\n/g, ' ')}"`);
+  let rejectedActivityCount = 0;
+  let rejectedUnsupportedCount = 0;
+
+  // Track coordinate reuse frequency among valid physical candidates (excluding discarded itinerary/editorial phrases)
+  const coordUsageCounts = new Map<string, number>();
+  for (const item of normalizedItems) {
+    const isActivity = isItineraryOrActivityPhrase(item.name) || isItineraryOrActivityPhrase(item.canonicalName);
+    const isBadName = !item.name || item.name.toLowerCase() === text.toLowerCase() || /^(where was|where were|what are|filming locations|places used)\b/i.test(item.name);
+    if (!isActivity && !isBadName && typeof item.lat === 'number' && typeof item.lng === 'number' && (item.lat !== 0 || item.lng !== 0)) {
+      const coordKey = `${item.lat.toFixed(4)},${item.lng.toFixed(4)}`;
+      coordUsageCounts.set(coordKey, (coordUsageCounts.get(coordKey) || 0) + 1);
+    }
+  }
 
   const validatedItems: Waypoint[] = [];
 
   for (const w of normalizedItems) {
-    // 1. Coordinate Validation
-    const isSentinel = (typeof w.lat === 'number' && typeof w.lng === 'number') &&
-      ((Math.abs(w.lat - 12.345) < 0.01 && Math.abs(w.lng - 67.89) < 0.01) || (w.lat === 0 && w.lng === 0));
-    const isCoordValid = typeof w.lat === 'number' && typeof w.lng === 'number' && !isNaN(w.lat) && !isNaN(w.lng) && (w.lat !== 0 || w.lng !== 0) && w.lat >= -90 && w.lat <= 90 && w.lng >= -180 && w.lng <= 180 && !isSentinel;
-    
-    // 2. Name / Entity Identity Validation
-    const isNameValid = Boolean(w.name && w.name.toLowerCase() !== text.toLowerCase() && !/^(where was|where were|what are|filming locations|places used)\b/i.test(w.name));
+    // 1. Initial Name / Entity Identity Validation & Itinerary Action Rejection
+    const isItineraryActivity = isItineraryOrActivityPhrase(w.name) ||
+      isItineraryOrActivityPhrase(w.canonicalName);
 
-    // 3. Historical Knowledge Base check & Geographic Coordinate Validation
+    if (isItineraryActivity) {
+      rejectedActivityCount++;
+      console.warn(`[Pipeline ${pipelineId}] Structural Validation failed for ${w.name}: Editorial/itinerary phrase rejected`);
+      console.log(`[Route Validation] Waypoint rejected: ${w.name} — itinerary/activity phrase`);
+      continue;
+    }
+
+    const isNameValid = Boolean(
+      w.name &&
+      w.name.toLowerCase() !== text.toLowerCase() &&
+      !/^(where was|where were|what are|filming locations|places used)\b/i.test(w.name)
+    );
+
+    if (!isNameValid) {
+      console.warn(`[Pipeline ${pipelineId}] Structural Validation failed for ${w.name}: Name matches query pattern`);
+      console.log(`[Route Validation] Waypoint rejected: ${w.name} — matches query pattern`);
+      continue;
+    }
+
+    const coordKey = (typeof w.lat === 'number' && typeof w.lng === 'number') ? `${w.lat.toFixed(4)},${w.lng.toFixed(4)}` : '';
+    const isSuspiciousDuplicate = (coordUsageCounts.get(coordKey) || 0) > 1;
+
+    // 2. Historical Knowledge Base check & Geographic Coordinate Validation
     const histKnowledge = getHistoricalEntityKnowledge(w.canonicalName || w.name);
     let entityIdentityValid = true;
     let eventAssociationValid = true;
@@ -342,6 +603,47 @@ export const runRoutePipeline = async (
       }
     }
 
+    // General Geographic Entity Resolution & Deterministic Coordinate Repair (for non-historical-knowledge entities)
+    let generalGeoResolution: any = null;
+    if (!histKnowledge) {
+      const queryName = w.canonicalName || w.name;
+      const resolved = await resolveGeographicEntity(queryName);
+      if (resolved && !('status' in resolved) && resolved.coordinates && isValidCoordinates(resolved.coordinates)) {
+        generalGeoResolution = resolved;
+        const distKm = calculateDistanceKm(w.lat, w.lng, resolved.coordinates.lat, resolved.coordinates.lng);
+        // For pasted articles / source documents, or suspicious duplicate coordinates, or large mismatch (> 50km):
+        // ALWAYS update to trusted resolved coordinates!
+        const shouldUpdateCoordinates = sourceMode === 'pasted_article' || isUrl || isSuspiciousDuplicate || distKm > 50 || (w.lat === 0 && w.lng === 0);
+        if (shouldUpdateCoordinates && (distKm > 0.001 || (w.lat === 0 && w.lng === 0))) {
+          console.log(`[Route Validation] Coordinate updated: ${w.name} (${w.lat}, ${w.lng}) → (${resolved.coordinates.lat}, ${resolved.coordinates.lng}) [${distKm.toFixed(1)}km mismatch corrected via trusted resolver]`);
+          w.lat = resolved.coordinates.lat;
+          w.lng = resolved.coordinates.lng;
+          coordGeographicallyValid = true;
+          w.provenance!.push({
+            stage: 'deterministic_repair',
+            source: 'deterministic',
+            timestamp: new Date().toISOString(),
+            summary: `Repaired coordinates to trusted geographic location for ${resolved.name} (${w.lat.toFixed(4)}, ${w.lng.toFixed(4)})`
+          });
+        }
+      } else if (isSuspiciousDuplicate) {
+        console.warn(`[Route Validation] Physical entity "${w.name}" has suspicious duplicate coordinate (${w.lat}, ${w.lng}) that could not be independently resolved. Rejecting.`);
+        coordGeographicallyValid = false;
+        conflictDetails = `Unresolvable duplicate model coordinate (${w.lat}, ${w.lng})`;
+      }
+    }
+
+    // Coordinate Validity Check post-resolution
+    const isSentinel = (typeof w.lat === 'number' && typeof w.lng === 'number') &&
+      ((Math.abs(w.lat - 12.345) < 0.01 && Math.abs(w.lng - 67.89) < 0.01) || (w.lat === 0 && w.lng === 0));
+    const isCoordValid = typeof w.lat === 'number' && typeof w.lng === 'number' && !isNaN(w.lat) && !isNaN(w.lng) && (w.lat !== 0 || w.lng !== 0) && w.lat >= -90 && w.lat <= 90 && w.lng >= -180 && w.lng <= 180 && !isSentinel;
+
+    if (!isCoordValid) {
+      console.warn(`[Pipeline ${pipelineId}] Structural Validation failed for ${w.name}: Invalid coordinates`);
+      console.log(`[Route Validation] Waypoint rejected: ${w.name} — invalid coordinates`);
+      continue;
+    }
+
     // Diagnostic Block: ===== HISTORICAL WAYPOINT VALIDATION =====
     console.log(`\n===== HISTORICAL WAYPOINT VALIDATION =====
 Requested Entity: "${w.canonicalName || w.name}"
@@ -361,20 +663,15 @@ Conflict Details: ${conflictDetails}
 Validation Decision: ${isCoordValid && isNameValid && entityIdentityValid && coordGeographicallyValid ? 'ACCEPT' : 'REJECT'}
 ==========================================\n`);
 
-    if (!isCoordValid) {
-      console.warn(`[Pipeline ${pipelineId}] Structural Validation failed for ${w.name}: Invalid coordinates`);
-      continue;
-    }
-    if (!isNameValid) {
-      console.warn(`[Pipeline ${pipelineId}] Structural Validation failed for ${w.name}: Name matches query pattern`);
-      continue;
-    }
     if (!entityIdentityValid) {
       console.warn(`[Pipeline ${pipelineId}] Historical Validation failed for ${w.name}: Entity identity mismatch or conflation`);
+      console.log(`[Route Validation] Waypoint rejected: ${w.name} — entity identity mismatch`);
       continue;
     }
     if (!coordGeographicallyValid) {
       console.warn(`[Pipeline ${pipelineId}] Historical Validation failed for ${w.name}: Coordinates geographically invalid and non-repairable`);
+      console.log(`[Route Validation] Coordinate rejected: ${w.name} — identity/coordinate mismatch`);
+      console.log(`[Route Validation] Waypoint rejected: ${w.name} — coordinates geographically invalid`);
       continue;
     }
 
@@ -483,8 +780,31 @@ Validation Decision: ${isCoordValid && isNameValid && entityIdentityValid && coo
       console.warn(`[Pipeline ${pipelineId}] REJECTING candidate "${w.name}": Shares identical coordinates (${w.lat}, ${w.lng}) with distinct entity "${duplicateCoordConflict.name}" in group "${w.routeGroupId || 'default'}"`);
     }
 
+    // Source Evidence Validation Gate (for non-authoritative/non-registered events)
+    let sourceEvidenceValid = true;
+    if (!registryValidation.isRegisteredEvent && !histKnowledge) {
+      const hasSourceEvidence = Boolean(w.sourceEvidence && typeof w.sourceEvidence === 'string' && w.sourceEvidence.trim().length > 0);
+      const isHistoricalEventIntent = intent === 'HISTORICAL_EVENT' || intent === 'MULTI_LOCATION_DISCOVERY';
+      if (!hasSourceEvidence && !isHistoricalEventIntent) {
+        sourceEvidenceValid = false;
+      }
+
+      // Deterministic validation against actual source text if provided
+      const sourceText = (w.metadata?.sourceText || (w as any).sourceText || '').toLowerCase();
+      if (sourceText && sourceText.length > 0) {
+        const nameLower = (w.canonicalName || w.name || '').toLowerCase().trim();
+        const rawNameLower = (w.name || '').toLowerCase().trim();
+        const inSource = (nameLower.length > 2 && sourceText.includes(nameLower)) || (rawNameLower.length > 2 && sourceText.includes(rawNameLower));
+        const aliasInSource = Array.isArray(w.alternateNames) && w.alternateNames.some(alt => alt.trim().length > 2 && sourceText.includes(alt.toLowerCase().trim()));
+        if (!inSource && !aliasInSource) {
+          sourceEvidenceValid = false;
+          conflictDetails = `Candidate "${w.name}" not mentioned in provided source content`;
+        }
+      }
+    }
+
     const historicalEventMatch = entityIdentityValid && coordGeographicallyValid;
-    const isAccepted = isCoordValid && isNameValid && historicalEventMatch && !isGenericRegion && !isRouteNameHallucination && routeMembershipValid && !hasDuplicateCoordConflict;
+    const isAccepted = isCoordValid && isNameValid && historicalEventMatch && !isGenericRegion && !isRouteNameHallucination && routeMembershipValid && !hasDuplicateCoordConflict && sourceEvidenceValid;
 
     // Diagnostic Log: [CANONICAL HISTORICAL ROUTE VALIDATION]
     console.log(`[CANONICAL HISTORICAL ROUTE VALIDATION Candidate]
@@ -495,10 +815,15 @@ Validation Decision: ${isCoordValid && isNameValid && entityIdentityValid && coo
   WAYPOINT ROLE: ${w.waypointType || 'route_waypoint'}
   GENERIC REGION: ${isGenericRegion ? 'FAIL' : 'PASS'}
   ROUTE-NAME HALLUCINATION: ${isRouteNameHallucination ? 'FAIL (' + hallucinationReason + ')' : 'PASS'}
+  SOURCE EVIDENCE: ${sourceEvidenceValid ? 'PASS' : 'FAIL'}
   REASON: ${w.segmentEvidenceReason || routeMembershipReason}
   ACTION: ${isAccepted ? 'ACCEPT' : 'REJECT'}`);
 
     if (!isAccepted) {
+      if (!sourceEvidenceValid) {
+        rejectedUnsupportedCount++;
+        console.log(`[Route Validation] Waypoint rejected: ${w.name} — no source evidence`);
+      }
       if (registryValidation.isRegisteredEvent || (rawTitle || text).toLowerCase().includes('trail of tears')) {
         console.warn(`[TRAIL OF TEARS CANDIDATE REJECTED]
 name: "${w.name}"
@@ -506,12 +831,32 @@ routeGroupId: "${w.routeGroupId || 'default'}"
 reason: "${!routeMembershipValid ? routeMembershipReason : (isGenericRegion ? 'Generic geographic region/state' : (isRouteNameHallucination ? hallucinationReason : (hasDuplicateCoordConflict ? 'Duplicate physical coordinates conflict' : 'Invalid entity/coordinates')))}"
 expectedGroupId: "${registryValidation.expectedGroupId || 'N/A'}"`);
       }
-      console.warn(`[Pipeline ${pipelineId}] Rejected candidate "${w.name}" in group "${w.routeGroupId}": genericRegion=${isGenericRegion}, hallucination=${isRouteNameHallucination}, routeValid=${routeMembershipValid}, dupCoord=${hasDuplicateCoordConflict}`);
+      console.warn(`[Pipeline ${pipelineId}] Rejected candidate "${w.name}" in group "${w.routeGroupId}": genericRegion=${isGenericRegion}, hallucination=${isRouteNameHallucination}, routeValid=${routeMembershipValid}, dupCoord=${hasDuplicateCoordConflict}, sourceEvidenceValid=${sourceEvidenceValid}`);
       continue;
     }
 
+    console.log(`[Route Validation] Waypoint accepted: ${w.name}`);
     validatedItems.push(w);
+    if (!progressivelyEmittedWaypoints.has(w.id)) {
+      progressivelyEmittedWaypoints.set(w.id, w);
+      if (onWaypointProgress) {
+        try {
+          onWaypointProgress(w, [...validatedItems], validatedItems.length, normalizedItems.length);
+        } catch (cbErr) {
+          console.warn(`[Pipeline ${pipelineId}] onWaypointProgress callback error:`, cbErr);
+        }
+      }
+    }
   }
+
+  console.log(`\n===== TRACE ROUTE SOURCE & VALIDATION METRICS =====
+Source Mode: ${sourceMode}
+Source Content Length: ${sourceText.length} chars
+Total Candidates: ${normalizedItems.length}
+Rejected Activity/Editorial Phrases: ${rejectedActivityCount}
+Rejected Unsupported/Hallucinated: ${rejectedUnsupportedCount}
+Accepted Waypoints: ${validatedItems.length}
+==================================================\n`);
 
   normalizedItems = validatedItems;
   logPipelineTrace("Stage 3: Historical Validation", normalizedItems);
@@ -837,13 +1182,31 @@ Action: CANNOT_NORMALIZE`);
   console.log(`==========================\n`);
 
   for (const group of routeGroups) {
-    const groupWps = group.waypoints;
+    let groupWps = group.waypoints;
+
+    // Protection against unsupported circular route closure (closing loop duplicate)
+    if (groupWps.length >= 3) {
+      const firstWp = groupWps[0];
+      const lastWp = groupWps[groupWps.length - 1];
+      const sameName = (firstWp.canonicalName || firstWp.name).toLowerCase() === (lastWp.canonicalName || lastWp.name).toLowerCase();
+      const sameCoords = Math.abs(firstWp.lat - lastWp.lat) < 0.001 && Math.abs(firstWp.lng - lastWp.lng) < 0.001;
+
+      if (sameName || sameCoords) {
+        const isRegisteredCircuit = Boolean(authoritativeEventModel);
+        if (!isRegisteredCircuit) {
+          console.log(`[Route Validation] Segment rejected: ${lastWp.name} → ${firstWp.name} — unsupported route closure`);
+          groupWps = groupWps.slice(0, groupWps.length - 1);
+          group.waypoints = groupWps;
+        }
+      }
+    }
+
     for (let i = 0; i < groupWps.length; i++) {
       const current = groupWps[i];
       const prev = repairedItems.length > 0 ? repairedItems[repairedItems.length - 1] : null;
 
       // Duplicate physical coordinates guard for distinct historical entities
-      const existingSameCoord = repairedItems.find(item => 
+      const existingSameCoord = repairedItems.find(item =>
         Math.abs(item.lat - current.lat) < 0.0001 && Math.abs(item.lng - current.lng) < 0.0001
       );
 
@@ -933,16 +1296,16 @@ Action: CANNOT_NORMALIZE`);
       const auditPrompt = `
         You are an expert historian auditor. Review the following historical route waypoints.
         You must optimize for precision over recall. Return corrections ONLY when highly confident (>0.90). If uncertain, return no issue rather than speculate.
-        
+
         Look for:
         - Glaring historical inaccuracies in names or descriptions.
         - Anachronisms.
         - Waypoints that are continents, countries, vast empires, or broad regions (e.g. "Europe", "Persian Empire"). For these, suggest a specific, traversable historical stop (city, port, oasis, fortress) that replaces the broad region in the context of the journey.
 
-        
+
         Input Data:
         ${JSON.stringify(repairedItems.map(w => ({ id: w.id, name: w.name, description: w.description, historicalPeriod: w.historicalPeriod })), null, 2)}
-        
+
         Output Schema:
         Return a STRICT JSON array of HistoricalIssue objects:
         [
@@ -958,7 +1321,7 @@ Action: CANNOT_NORMALIZE`);
             "source": "historical_llm"
           }
         ]
-        
+
         If no issues are found, return [].
       `;
       const response = await generateContentWithRetry({
@@ -966,16 +1329,16 @@ Action: CANNOT_NORMALIZE`);
         contents: auditPrompt,
         config: { maxOutputTokens: 2048 }
       });
-      
+
       const parseResult = parseAndExtract(response.text);
-      
+
       console.log(`\n===== LLM AUDIT JSON PIPELINE =====`);
       console.log(`Extraction: ${parseResult.extracted ? 'SUCCESS' : 'FAILED'}`);
       console.log(`Parse: ${parseResult.success ? 'SUCCESS' : 'FAILED'}`);
       console.log(`Repair: ${parseResult.success && parseResult.repairs && parseResult.repairs.length > 0 ? 'SUCCESS' : (parseResult.success ? 'SKIPPED' : 'FAILED')}`);
       console.log(`Fallback: ${!parseResult.success ? 'USED' : 'SKIPPED'}`);
       console.log(`===================================\n`);
-      
+
       if (parseResult.success && Array.isArray(parseResult.value)) {
          const parsed = parseResult.value;
          issues = parsed.filter((iss: any) => iss && typeof iss === 'object' && iss.waypointId && (iss.confidence === undefined || iss.confidence >= 0.90));
@@ -1000,10 +1363,10 @@ Action: CANNOT_NORMALIZE`);
   const patchedItems = repairedItems.map((wp, idx) => {
     const wpIssues = issues.filter(iss => iss.waypointId === wp.id);
     if (wpIssues.length === 0) return wp;
-    
+
     let patchedWp = { ...wp };
     let patchesApplied = 0;
-    
+
     for (const issue of wpIssues) {
       if (issue.operation === 'replace' && issue.field) {
         if (!MUTABLE_ENRICHMENT_FIELDS.has(issue.field)) {
@@ -1026,7 +1389,7 @@ Action: CANNOT_NORMALIZE`);
         }
       }
     }
-    
+
     if (patchesApplied > 0) {
       patchedWp.provenance!.push({
         stage: 'patch',
@@ -1035,13 +1398,13 @@ Action: CANNOT_NORMALIZE`);
         summary: `Applied ${patchesApplied} historical narrative patches`
       });
     }
-    
+
     if (idx === 0) logFieldDiff('Stage 6: Patch', wp, patchedWp);
     if (idx === 0) logWaypointSnapshot('Stage 6: Patch', patchedWp);
 
     return patchedWp;
   });
-  
+
   // Stage 6.5: Final Deterministic Validation Guard
   console.log(`[Pipeline ${pipelineId}] Stage 6.5: Final Deterministic Validation Guard`);
   const placeholderPatterns = [
@@ -1053,36 +1416,36 @@ Action: CANNOT_NORMALIZE`);
     /TBD/i,
     /PLACEHOLDER/i
   ];
-  
+
   const cleanItems: Waypoint[] = [];
   const itemsToProcess = [...patchedItems];
-  
+
   for (let i = 0; i < itemsToProcess.length; i++) {
     const wp = itemsToProcess[i];
     const fieldsToScan = [wp.name, wp.canonicalName, wp.modernLocation, wp.description].filter(Boolean) as string[];
     const hasPlaceholder = fieldsToScan.some(text => placeholderPatterns.some(pattern => pattern.test(text)));
-    
+
     if (hasPlaceholder) {
       console.log(`\n===== PLACEHOLDER REMOVAL =====`);
       console.log(`Removed:\n${wp.id} ${wp.name} ${wp.name.includes('NEEDS_LLM_REPLACEMENT') ? 'NEEDS_LLM_REPLACEMENT' : 'INVALID_LOCATION'}`);
-      
+
       const removedId = wp.id;
       const newParentId = wp.parentId;
       const childrenToUpdate = itemsToProcess.filter(c => c.parentId === removedId);
-      
+
       if (childrenToUpdate.length > 0) {
          childrenToUpdate.forEach(c => c.parentId = newParentId);
          console.log(`Reparented:\n${childrenToUpdate.map(c => `${c.id} -> ${newParentId || 'none'}`).join('\n')}`);
       }
       console.log(`===============================`);
-      
+
       placeholderRemoved++;
       itemsToProcess.splice(i, 1);
       i--;
       continue;
     }
   }
-  
+
   cleanItems.push(...itemsToProcess);
 
   logPipelineTrace("Stage 6.5: Clean Waypoints", cleanItems);
@@ -1142,7 +1505,7 @@ Action: CANNOT_NORMALIZE`);
       // Single continuous route: preserve existing traversal order
       cleanItems.sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
       let lastPrimaryId: string | undefined = undefined;
-      
+
       for (let i = 0; i < cleanItems.length; i++) {
         const wp = cleanItems[i];
         const oldParent = wp.parentId;
@@ -1179,7 +1542,7 @@ Action: CANNOT_NORMALIZE`);
         }
       }
     }
-    
+
     console.log(`\n===== STAGE 7 FINAL HIERARCHY =====`);
     console.log(`PRIMARY CHAIN:`);
     let primaryIndex = 1;
@@ -1196,11 +1559,11 @@ Action: CANNOT_NORMALIZE`);
   }
 
   logHierarchy(cleanItems);
-  
+
   if (cleanItems.length > 0) {
       logWaypointSnapshot('Stage 7: Sequential Hierarchy', cleanItems[0]);
   }
-  
+
   // Final Validation for Orphaned Parents
   for (const wp of cleanItems) {
      if (wp.parentId) {
@@ -1232,7 +1595,7 @@ Action: CANNOT_NORMALIZE`);
       placeholderRepaired, // Repaired placeholders are technically LLM repairs if they didn't hit this removal block
       finalRouteValid: cleanItems.length > 0 && !cleanItems.some(wp => [wp.name, wp.canonicalName, wp.modernLocation, wp.description].filter(Boolean).some(text => placeholderPatterns.some(pattern => pattern.test(text as string))))
   };
-  
+
   logPipelineSummary(summary);
 
   console.log(`[Pipeline ${pipelineId}] === PIPELINE COMPLETE ===`);

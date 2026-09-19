@@ -34,8 +34,11 @@ venv/
 .venv/
 __pycache__/
 *.py[cod]
-local-services/*/.venv/
-local-services/*/venv/
 local-services/kokoro-tts/*.wav
 local-services/kokoro-tts/*.safetensors
 
+
+# Local Python virtual environments
+
+# Local Kokoro TTS environment symlink
+local-services/kokoro-tts/.venv

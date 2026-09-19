@@ -164,7 +164,7 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
     expect(favsHtml).toContain('parchment-background');
   });
 
-  test('4. Trace Route modal removes outer 2px border, rounded-sm, and textarea border in Parchment theme', () => {
+  test('4. Trace Route modal in Parchment theme uses standardized form styling', () => {
     const parchmentHtml = renderToStaticMarkup(
       <Controls
         onZoomIn={vi.fn()}
@@ -188,10 +188,11 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
     expect(parchmentHtml).toContain('parchment-background');
     expect(parchmentHtml).toContain('shadow-[0_4px_20px_rgba(0,0,0,0.4)]');
 
-    // Textarea has border-0, bg-transparent, and no rectangular background
-    expect(parchmentHtml).toContain('border-0 rounded-none');
-    expect(parchmentHtml).not.toContain('border border-current');
-    expect(parchmentHtml).not.toContain('bg-[#e8d5b5]/30');
+    // Textarea has bg-[#e6d5b8], text-[#3e2723], border-[#8b5a2b]/30, and rounded-lg
+    expect(parchmentHtml).toContain('bg-[#e6d5b8]');
+    expect(parchmentHtml).toContain('text-[#3e2723]');
+    expect(parchmentHtml).toContain('border-[#8b5a2b]/30');
+    expect(parchmentHtml).toContain('rounded-lg');
   });
 
   test('5. Search input in Parchment theme has no conventional rounded corners or inner border shadow', () => {
@@ -608,8 +609,9 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
     );
     // EXPLORE button
     expect(parchmentControls).toContain('text-[#5c3a21] hover:text-[#3e2723] bg-transparent hover:bg-transparent rounded-none font-sans font-bold uppercase tracking-wider text-sm');
-    // GENERATE ROUTE button (no filled background)
-    expect(parchmentControls).toContain('border-0 bg-transparent hover:bg-transparent text-[#5c3a21] hover:text-[#3e2723] font-sans rounded-none shadow-none');
+    // GENERATE ROUTE button in Trace Route modal
+    expect(parchmentControls).toContain('border-[#8b5a2b]/30 hover:bg-[#e6d5b8] text-[#3e2723]');
+    expect(parchmentControls).toContain('Generate Route');
 
     // 3. SettingsPanel: TEST CONNECTION & TEST VOICE
     const parchmentProvidersSettings = renderToStaticMarkup(
@@ -621,8 +623,8 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
         initialTab="providers"
       />
     );
-    // TEST CONNECTION buttons have border-0, bg-[#e8d5b5], text-[#5c3a21]
-    const testConnButtons = parchmentProvidersSettings.match(/border-0 bg-\[#e8d5b5\] hover:bg-\[#d2b48c\] text-\[#5c3a21\] hover:text-\[#3e2723\] font-bold uppercase tracking-wider/g);
+    // TEST CONNECTION buttons have border-[#8b5a2b]/30, hover:bg-[#e6d5b8], text-[#3e2723]
+    const testConnButtons = parchmentProvidersSettings.match(/border-\[#8b5a2b\]\/30 hover:bg-\[#e6d5b8\] text-\[#3e2723\]/g);
     expect(testConnButtons?.length).toBe(3);
 
     // Audio tab: TEST VOICE button
@@ -635,7 +637,7 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
         initialTab="audio"
       />
     );
-    expect(parchmentAudioSettings).toContain('border-0 bg-[#e8d5b5] hover:bg-[#d2b48c] text-[#5c3a21] hover:text-[#3e2723] font-bold uppercase tracking-wider');
+    expect(parchmentAudioSettings).toContain('border-[#8b5a2b]/30 hover:bg-[#e6d5b8] text-[#3e2723]');
     expect(parchmentAudioSettings).toContain('Test Voice');
   });
 
@@ -666,7 +668,7 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
         skin="parchment"
       />
     );
-    expect(parchmentSettings).toContain('text-lg font-bold text-[#5c3a21] font-bold uppercase tracking-wider brand-font');
+    expect(parchmentSettings).toContain('text-lg font-bold text-[#3e2723] font-bold uppercase tracking-wider brand-font');
     expect(parchmentSettings).toContain('SETTINGS');
 
     // 3. Controls: TRACE ROUTE
@@ -687,7 +689,7 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
         onToggleZoomLock={vi.fn()}
       />
     );
-    expect(parchmentControls).toContain('font-bold uppercase text-[#5c3a21] text-lg tracking-wider brand-font');
+    expect(parchmentControls).toContain('font-bold uppercase text-[#3e2723] text-lg tracking-wider brand-font');
     expect(parchmentControls).toContain('Trace Route');
   });
 
@@ -724,6 +726,60 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
     );
     expect(retroSettings).toContain('SETTINGS');
     expect(retroSettings).toContain('lucide-settings');
+  });
+
+  test('14. Trace Route overlay styling matches Settings panel in Parchment theme', () => {
+    const parchmentControls = renderToStaticMarkup(
+      <Controls
+        onZoomIn={vi.fn()}
+        onZoomOut={vi.fn()}
+        onSearch={vi.fn()}
+        onTraceRoute={vi.fn()}
+        isSearching={false}
+        skin="parchment"
+        showFavorites={false}
+        onToggleShowFavorites={vi.fn()}
+        paused={false}
+        isTraceModalOpen={true}
+        onToggleTraceModal={vi.fn()}
+        isZoomLocked={false}
+        onToggleZoomLock={vi.fn()}
+      />
+    );
+
+    // Parchment Title & Description
+    expect(parchmentControls).toContain('text-[#3e2723] text-lg tracking-wider brand-font');
+    expect(parchmentControls).toContain('text-sm text-[#3e2723]/70');
+
+    // Parchment Textarea form control
+    expect(parchmentControls).toContain('bg-[#e6d5b8] text-[#3e2723] border border-[#8b5a2b]/30 rounded-lg placeholder-[#3e2723]/60 focus:border-[#8b5a2b] focus:ring-1 focus:ring-[#8b5a2b]');
+
+    // Parchment Generate Route button
+    expect(parchmentControls).toContain('px-3 py-2 rounded-lg border whitespace-nowrap transition-colors border-[#8b5a2b]/30 hover:bg-[#e6d5b8] text-[#3e2723]');
+
+    // Parchment Close button
+    expect(parchmentControls).toContain('hover:bg-[#d2b48c]/50 hover:text-[#3e2723] text-[#3e2723] rounded');
+
+    // Non-parchment themes remain unchanged
+    const modernControls = renderToStaticMarkup(
+      <Controls
+        onZoomIn={vi.fn()}
+        onZoomOut={vi.fn()}
+        onSearch={vi.fn()}
+        onTraceRoute={vi.fn()}
+        isSearching={false}
+        skin="modern"
+        showFavorites={false}
+        onToggleShowFavorites={vi.fn()}
+        paused={false}
+        isTraceModalOpen={true}
+        onToggleTraceModal={vi.fn()}
+        isZoomLocked={false}
+        onToggleZoomLock={vi.fn()}
+      />
+    );
+    expect(modernControls).toContain('bg-transparent border border-white/20 rounded-lg');
+    expect(modernControls).not.toContain('bg-[#e6d5b8]');
   });
 });
 

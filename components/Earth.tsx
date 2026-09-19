@@ -980,7 +980,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     const allMarkers: any[] = [];
     
     // Constants for sizing and clustering
-    const WAYPOINT_SIZE = 0.02; // Restored previous larger size for globe waypoint markers
+    const WAYPOINT_SIZE = 0.012; // Matches OSM waypoint layer baseline
     const MARKER_SIZE_LARGE = 0.012;
     const MARKER_SIZE_SMALL = 0.008;
     
@@ -1059,92 +1059,9 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
         return { ...item, position: pos };
     });
 
-    // 3. De-clustering / Nudging Logic using Connected Components
-    // Build Adjacency Graph
-    const adj: number[][] = Array.from({ length: itemsWithPos.length }, () => []);
-    
-    for (let i = 0; i < itemsWithPos.length; i++) {
-        for (let j = i + 1; j < itemsWithPos.length; j++) {
-             // Check if markers are too close
-             if (itemsWithPos[i].position.distanceTo(itemsWithPos[j].position) < CLUSTER_THRESHOLD) {
-                 adj[i].push(j);
-                 adj[j].push(i);
-             }
-        }
-    }
-
-    const visited = new Set<number>();
-    const groups: any[][] = [];
-    
-    // Find connected components
-    for (let i = 0; i < itemsWithPos.length; i++) {
-        if (visited.has(i)) continue;
-        const group = [];
-        const stack = [i];
-        visited.add(i);
-        
-        while(stack.length > 0) {
-            const curr = stack.pop()!;
-            group.push(itemsWithPos[curr]);
-            for(const neighbor of adj[curr]) {
-                if(!visited.has(neighbor)) {
-                    visited.add(neighbor);
-                    stack.push(neighbor);
-                }
-            }
-        }
-        groups.push(group);
-    }
-    
-    // Map to store final positions for the RouteLine to access
+    // Map to store finalized positions
     const finalPosMap = new Map<string, THREE.Vector3>();
-
-    // Apply displacements
-    groups.forEach(group => {
-        if (group.length > 1) {
-            // Organize: Sort by Latitude (North to South) for deterministic layout
-            group.sort((a, b) => b.lat - a.lat);
-
-            // Calculate Center of the cluster
-            const center = new THREE.Vector3();
-            group.forEach(item => center.add(item.position));
-            center.divideScalar(group.length).normalize();
-            
-            // Tangent Plane Basis
-            let up = new THREE.Vector3(0, 1, 0);
-            if (Math.abs(up.dot(center)) > 0.99) up = new THREE.Vector3(1, 0, 0);
-            const tanX = new THREE.Vector3().crossVectors(center, up).normalize();
-            const tanY = new THREE.Vector3().crossVectors(center, tanX).normalize();
-            
-            // Layout Radius: Tighter clustering
-            // 2 items: 0.014 * 2 = 0.028 distance. 
-            // Marker size ~0.024 diameter. They will roughly touch.
-            const layoutRadius = Math.max(0.014, group.length * 0.005);
-            
-            group.forEach((item, k) => {
-                // Geographic accuracy requirement: Do NOT modify original coordinates or position for scan result markers
-                if (item.type === 'marker') {
-                    return;
-                }
-
-                const angle = (k / group.length) * Math.PI * 2;
-                const offsetX = Math.cos(angle) * layoutRadius;
-                const offsetY = Math.sin(angle) * layoutRadius;
-                
-                const shift = tanX.clone().multiplyScalar(offsetX).add(tanY.clone().multiplyScalar(offsetY));
-                
-                // New position projected back onto sphere radius MARKER_ALTITUDE
-                const newPos = center.clone().add(shift).normalize().multiplyScalar(MARKER_ALTITUDE);
-                
-                item.position.copy(newPos);
-            });
-        }
-        
-        // Store finalized positions
-        group.forEach(item => finalPosMap.set(item.id, item.position));
-    });
-
-    // Telemetry logger removed to avoid React StrictMode log spam
+    itemsWithPos.forEach(item => finalPosMap.set(item.id, item.position));
 
     // 4. Final Processing & Deduplication
     const uniqueMarkers = new Map();
@@ -1299,8 +1216,8 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
         }
     }
 
-    // Dynamic screen-space repulsion for region scan markers
-    const scanMarkers = processedMarkers.filter(m => m.type === 'marker');
+    // Dynamic screen-space repulsion for globe markers (search markers, route waypoints, favorites)
+    const scanMarkers = processedMarkers;
     if (scanMarkers.length > 0 && groupRef.current) {
        const distance = state.camera.position.length();
 

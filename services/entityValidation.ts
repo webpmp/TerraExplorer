@@ -189,6 +189,107 @@ export function isEnglishText(text: string): boolean {
   return true;
 }
 
+/**
+ * Detects whether a candidate entity name is an editorial headline, itinerary step,
+ * activity recommendation, time slot, or generic tour label rather than an actual geographic place name.
+ */
+export function isItineraryOrActivityPhrase(name?: string | null): boolean {
+  if (!name || typeof name !== 'string') return false;
+  const trimmed = name.trim();
+  if (trimmed.length === 0) return false;
+  const lower = trimmed.toLowerCase();
+
+  // 1. Time slots / Schedule markers
+  // e.g. "6 p.m. Get on board", "10:30 AM", "6 PM", "Day 1", "Morning", "Afternoon"
+  if (/^\s*(?:\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)|\d{1,2}-(?:am|pm)-)\b/i.test(trimmed)) return true;
+  if (/^\s*(?:day\s+\d+|day\s+[a-z]+|morning|afternoon|evening|night|late\s+afternoon|early\s+morning|noon|midnight)\b/i.test(trimmed)) return true;
+  if (/^\s*(?:stop\s+\d+|step\s+\d+|part\s+\d+|stage\s+\d+)\b/i.test(trimmed)) return true;
+
+  // 2. Imperative action verbs / Verb phrases at the beginning of the name
+  // e.g. "Master the Art of Breakfast", "Stroll Storied Sites", "Savor the View", "Pick Up Local Provisions",
+  // "Dine Somewhere Different", "Get Lost in Gardens", "Wander a Quieter Coastal Town", "Village Hop", "Dine Dockside", "Get On Board"
+  const actionVerbPrefixRegex = /^(?:master|stroll|savor|pick\s+up|dine|get\s+lost|get\s+on\s+board|get\s+on|get|wander|hop|village\s+hop|explore|taste|shop|walk|visit|enjoy|discover|stop\s+by|head\s+to|check\s+out|take\s+a|cruise|sail|tour|eat|drink|relax|watch|listen|admire|experience|marvel|sample|find|climb|hike|swim|rent|stay|soak|bask|gaze|gawk|view|feast|unwind|sip|trek|board|embark|disembark|travel|journey|see|wake\s+up|spend|indulge|stash|grab|catch|try|browse|ride|cycle|boat|kayak|paddle|drive|return|depart|arrive|sleep|stay\s+at|book|reserve|seek\s+out|seek|look\s+for)\b/i;
+  if (actionVerbPrefixRegex.test(trimmed)) return true;
+
+  // 3. Gerund action phrases at the beginning
+  // e.g. "Walking through...", "Dining dockside", "Exploring the lake"
+  const gerundPrefixRegex = /^(?:walking|strolling|dining|exploring|cruising|tasting|visiting|shopping|wandering|mastering|savoring|getting\s+lost|getting\s+on\s+board|getting|heading|taking|touring|eating|drinking|relaxing|watching|admiring|experiencing|sampling|finding|climbing|hiking|swimming|renting|staying|soaking|gazing|feasting|unwinding|sipping|trekking|boarding|embarking|traveling|journeying|seeing|waking|spending|indulging|browsing|riding|cycling|boating|kayaking|paddling|driving|returning|departing|arriving|sleeping|booking|reserving|seeking)\b/i;
+  if (gerundPrefixRegex.test(trimmed)) return true;
+
+  // 4. Editorial phrasing, section headers, or conceptual titles
+  const editorialPhrases = [
+    'the art of',
+    'the view',
+    'storied sites',
+    'somewhere different',
+    'quieter coastal town',
+    'in gardens',
+    'dockside',
+    'local provisions',
+    'tourist route',
+    'scenic drive',
+    'walking tour',
+    'day trip',
+    'things to do',
+    'where to eat',
+    'what to do',
+    'where to stay',
+    'best of',
+    '36 hours',
+    'tourist itinerary',
+    'travel diary',
+    'travel itinerary',
+    'travel guide',
+    'itinerary step',
+    'afternoon in',
+    'morning in',
+    'evening in',
+    'night in',
+    'a day in',
+    'days in',
+    'hours in'
+  ];
+  if (editorialPhrases.some(phrase => lower.includes(phrase))) return true;
+
+  // 5. Generic route/tour placeholders (e.g. "Lake Como Tourist Route", "Lake Como Itinerary")
+  if (/^(.+)\s+(?:tourist\s+route|itinerary|travel\s+guide|highlights|excursion|guide)$/i.test(trimmed)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Unwraps an underlying physical place name if a candidate was formatted as "Activity (Physical Place)"
+ * or "Activity: Physical Place" (e.g. "Get On Board (Villa Melzi)" -> "Villa Melzi").
+ */
+export function unwrapPhysicalEntityName(name?: string | null): string {
+  if (!name || typeof name !== 'string') return '';
+  const trimmed = name.trim();
+
+  // Pattern 1: Activity (Physical Place)
+  const parenMatch = trimmed.match(/^(.+?)\s*\(([^)]+)\)$/);
+  if (parenMatch) {
+    const prefix = parenMatch[1].trim();
+    const inner = parenMatch[2].trim();
+    if (isItineraryOrActivityPhrase(prefix) && !isItineraryOrActivityPhrase(inner) && inner.length > 2) {
+      return inner;
+    }
+  }
+
+  // Pattern 2: Activity: Physical Place or Activity - Physical Place
+  const colonMatch = trimmed.match(/^(.+?)\s*[:–—]\s*(.+)$/);
+  if (colonMatch) {
+    const prefix = colonMatch[1].trim();
+    const suffix = colonMatch[2].trim();
+    if (isItineraryOrActivityPhrase(prefix) && !isItineraryOrActivityPhrase(suffix) && suffix.length > 2) {
+      return suffix;
+    }
+  }
+
+  return trimmed;
+}
+
 export const validateResolvedEntity = (entity: ResolvedEntity | null | undefined): boolean => {
   let failureReason = 'none';
   let coordinatesValid = false;

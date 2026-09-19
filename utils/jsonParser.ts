@@ -6,6 +6,8 @@
  * It never modifies JSON syntax, never invents missing content, and never throws. 
  * It either returns a successfully parsed value or a structured failure reason.
  */
+import { jsonrepair } from 'jsonrepair';
+
 export const PARSER_VERSION = 'v2';
 
 export type ParseFailureReason = 
@@ -245,13 +247,17 @@ export const repairJson = (text: string): { repaired: string, repairs: string[] 
 
 function repairTruncatedJson(input: string): string {
   let repaired = input.trim();
-  const openBraces = (repaired.match(/{/g) || []).length;
-  const closeBraces = (repaired.match(/}/g) || []).length;
-  const openBrackets = (repaired.match(/\[/g) || []).length;
-  const closeBrackets = (repaired.match(/\]/g) || []).length;
-  repaired += "]".repeat(Math.max(0, openBrackets - closeBrackets));
-  repaired += "}".repeat(Math.max(0, openBraces - closeBraces));
-  return repaired;
+  try {
+    return jsonrepair(repaired);
+  } catch {
+    const openBraces = (repaired.match(/{/g) || []).length;
+    const closeBraces = (repaired.match(/}/g) || []).length;
+    const openBrackets = (repaired.match(/\[/g) || []).length;
+    const closeBrackets = (repaired.match(/\]/g) || []).length;
+    repaired += "]".repeat(Math.max(0, openBrackets - closeBrackets));
+    repaired += "}".repeat(Math.max(0, openBraces - closeBraces));
+    return repaired;
+  }
 }
 
 export function extractAllJsonCandidates(text: string): Array<{ extracted: string, startIndex: number, endIndex: number }> {
@@ -463,15 +469,15 @@ export const parseAndExtract = (text: string): ParseResult => {
     } catch (e: any) {
         // Deterministic repair
         let textToRepair = extracted || text;
-        textToRepair = repairTruncatedJson(textToRepair);
-        const { repaired, repairs: syntaxRepairs } = repairJson(textToRepair);
+
+        // Strategy 1: Attempt jsonrepair library directly
         try {
-            let value = JSON.parse(repaired);
+            const repairedWithLib = jsonrepair(textToRepair);
+            let value = JSON.parse(repairedWithLib);
             ParserMetrics.recovered++;
             ParserMetrics.success++;
-            console.log(`[JSON Parser Trace] RAW JSON ↓ EXTRACT SUCCESS ↓ PARSE FAILED ↓ REPAIR ATTEMPTED ↓ REPAIR SUCCESS ↓ PARSE SUCCESS`);
+            console.log(`[JSON Parser Trace] RAW JSON ↓ EXTRACT SUCCESS ↓ PARSE FAILED ↓ JSONREPAIR SUCCESS ↓ PARSE SUCCESS`);
 
-            // Unwrap single key container if applicable
             if (value && typeof value === 'object' && !Array.isArray(value)) {
                 const k = Object.keys(value);
                 if (k.length === 1 && typeof value[k[0]] === 'object' && value[k[0]] !== null && !Array.isArray(value[k[0]])) {
@@ -485,19 +491,154 @@ export const parseAndExtract = (text: string): ParseResult => {
             return {
                 success: true,
                 value,
-                extracted: repaired,
-                repairs: [...extractRepairs, ...syntaxRepairs, "Repaired JSON parsing error"]
+                extracted: repairedWithLib,
+                repairs: [...extractRepairs, "Repaired via jsonrepair"]
             };
-        } catch (repairError: any) {
-            ParserMetrics.invalid_json++;
-            console.log(`[JSON Parser Trace] RAW JSON ↓ EXTRACT SUCCESS ↓ PARSE FAILED ↓ REPAIR ATTEMPTED ↓ REPAIR FAILED`);
-            console.log(`[JSON Parser Trace] RAW JSON ↓ REPAIR FAILED ↓ STRICT RETRY TRIGGERED`);
-            return {
-                success: false,
-                reason: "INVALID_JSON",
-                extracted: repaired,
-                error: repairError?.message || String(repairError)
-            };
+        } catch {
+            // Strategy 2: Custom syntax and truncation repair
+            textToRepair = repairTruncatedJson(textToRepair);
+            const { repaired, repairs: syntaxRepairs } = repairJson(textToRepair);
+            try {
+                let value = JSON.parse(repaired);
+                ParserMetrics.recovered++;
+                ParserMetrics.success++;
+                console.log(`[JSON Parser Trace] RAW JSON ↓ EXTRACT SUCCESS ↓ PARSE FAILED ↓ REPAIR ATTEMPTED ↓ REPAIR SUCCESS ↓ PARSE SUCCESS`);
+
+                // Unwrap single key container if applicable
+                if (value && typeof value === 'object' && !Array.isArray(value)) {
+                    const k = Object.keys(value);
+                    if (k.length === 1 && typeof value[k[0]] === 'object' && value[k[0]] !== null && !Array.isArray(value[k[0]])) {
+                        const innerScore = scoreMetadataObject(value[k[0]]);
+                        if (innerScore > 0) {
+                            value = value[k[0]];
+                        }
+                    }
+                }
+
+                return {
+                    success: true,
+                    value,
+                    extracted: repaired,
+                    repairs: [...extractRepairs, ...syntaxRepairs, "Repaired JSON parsing error"]
+                };
+            } catch (repairError: any) {
+                ParserMetrics.invalid_json++;
+                console.log(`[JSON Parser Trace] RAW JSON ↓ EXTRACT SUCCESS ↓ PARSE FAILED ↓ REPAIR ATTEMPTED ↓ REPAIR FAILED`);
+                console.log(`[JSON Parser Trace] RAW JSON ↓ REPAIR FAILED ↓ STRICT RETRY TRIGGERED`);
+                return {
+                    success: false,
+                    reason: "INVALID_JSON",
+                    extracted: repaired,
+                    error: repairError?.message || String(repairError)
+                };
+            }
         }
     }
 };
+
+/**
+ * Robust incremental JSON candidate parser for streaming LLM outputs.
+ * Parses raw streamed chunks (or accumulated text) and extracts complete JSON objects
+ * (e.g. waypoint candidates from `{"route": [ {...}, {...} ]}` or `[ {...}, {...} ]`)
+ * as soon as each candidate object's closing brace is encountered.
+ */
+export class IncrementalCandidateParser {
+    private accumulatedText = '';
+    private currentIndex = 0;
+    private emittedCount = 0;
+
+    /**
+     * Ingests a new text chunk from the stream and returns any newly completed candidate objects.
+     */
+    public ingest(chunk: string): any[] {
+        this.accumulatedText += chunk;
+        const newCandidates: any[] = [];
+        const text = this.accumulatedText;
+
+        while (this.currentIndex < text.length) {
+            // Find the start of the next candidate object '{'
+            const nextBrace = text.indexOf('{', this.currentIndex);
+            if (nextBrace === -1) {
+                break;
+            }
+
+            // Quick check: if this is the very first '{' of the outer root object (e.g. {"title": ..., "route": [ ... ]}),
+            // we should not treat the outer object itself as a candidate if it contains a nested "route": [ or array.
+            // Let's check if there is an enclosing array '[' before this brace or if this brace is inside an array.
+            const prefix = text.substring(0, nextBrace);
+            const hasOuterArrayOrRouteKey = prefix.includes('[') || /"route"\s*:\s*\[/i.test(prefix) || /"locations"\s*:\s*\[/i.test(prefix) || /"waypoints"\s*:\s*\[/i.test(prefix);
+
+            // If we are at index 0 and it's the root object, skip past this root opening brace to find array candidates
+            if (!hasOuterArrayOrRouteKey && this.emittedCount === 0) {
+                // Check if this root object has an opening bracket '[' downstream
+                const openBracketIndex = text.indexOf('[', nextBrace);
+                if (openBracketIndex !== -1) {
+                    this.currentIndex = openBracketIndex + 1;
+                    continue;
+                }
+            }
+
+            // Now parse balanced braces starting at nextBrace to find the complete candidate object
+            let insideString = false;
+            let escaped = false;
+            let depth = 0;
+            let candidateEnd = -1;
+
+            for (let i = nextBrace; i < text.length; i++) {
+                const char = text[i];
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+                if (char === '\\') {
+                    escaped = true;
+                    continue;
+                }
+                if (char === '"') {
+                    insideString = !insideString;
+                    continue;
+                }
+                if (!insideString) {
+                    if (char === '{') {
+                        depth++;
+                    } else if (char === '}') {
+                        depth--;
+                        if (depth === 0) {
+                            candidateEnd = i;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // If the closing brace has not arrived yet in the stream, wait for more chunks
+            if (candidateEnd === -1) {
+                break;
+            }
+
+            // We found a complete candidate substring from nextBrace to candidateEnd
+            const candidateRaw = text.substring(nextBrace, candidateEnd + 1);
+            this.currentIndex = candidateEnd + 1;
+
+            const parseRes = parseAndExtract(candidateRaw);
+            if (parseRes.success && parseRes.value && typeof parseRes.value === 'object' && !Array.isArray(parseRes.value)) {
+                // Verify that this is a meaningful candidate object (e.g. has a name, id, or canonicalName)
+                const val: any = parseRes.value;
+                if (val.name || val.canonicalName || val.id || val.title || val.description || val.lat !== undefined) {
+                    this.emittedCount++;
+                    newCandidates.push(val);
+                }
+            }
+        }
+
+        return newCandidates;
+    }
+
+    public getEmittedCount(): number {
+        return this.emittedCount;
+    }
+
+    public getAccumulatedText(): string {
+        return this.accumulatedText;
+    }
+}

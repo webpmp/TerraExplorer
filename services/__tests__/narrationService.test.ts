@@ -73,12 +73,12 @@ It was a major **whaling station** in the *Southern Ocean* <p>era</p>.`;
   it('3. buildNarrationScript combines title and description nicely', () => {
     const service = NarrationService.getInstance();
 
-    // Normal combination
+    // Normal combination with title deduplication
     const script1 = service.buildNarrationScript(
       'Grytviken',
       'Grytviken was the first whaling station established in Antarctica.'
     );
-    expect(script1).toBe('Grytviken was the first whaling station established in Antarctica.');
+    expect(script1).toBe('Grytviken. The first whaling station established in Antarctica.');
 
     // Separate title and distinct description
     const script2 = service.buildNarrationScript(

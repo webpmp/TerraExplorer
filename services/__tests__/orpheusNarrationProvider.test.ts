@@ -10,7 +10,8 @@ import {
   getNarrationDescription,
   capDescriptionForNarration,
   cleanNarrationText,
-  buildNarrationScript
+  buildNarrationScript,
+  splitNarrationIntoSegments
 } from '../narrationService';
 
 // Helpers to generate mock PCM base64 data and SSE streams
@@ -287,33 +288,29 @@ describe('Orpheus TTS Progressive Streaming & Narration Provider Suite', () => {
         voice: 'tara'
       });
 
-      // Wait for playback to begin after accumulating 3.0s of pre-buffer audio
+      // Playback begins with contiguous decoded audio
       await vi.waitFor(() => {
         expect(onStart).toHaveBeenCalledTimes(1);
       });
 
-      // Verify all 4 chunks were converted to AudioBufferSourceNodes and scheduled
+      // Verifies all chunks were merged into a single continuous AudioBufferSourceNode for 100% gap-free playback
       await vi.waitFor(() => {
-        expect(createdSourceNodes.length).toBe(4);
+        expect(createdSourceNodes.length).toBe(1);
       });
 
-      // Each source node should have been started
-      for (const node of createdSourceNodes) {
-        expect(node.start).toHaveBeenCalled();
-        expect(node.connect).toHaveBeenCalled();
-      }
+      const node = createdSourceNodes[0];
+      expect(node.start).toHaveBeenCalled();
+      expect(node.connect).toHaveBeenCalled();
 
-      // Simulate completion of all nodes
-      for (const node of createdSourceNodes) {
-        if (node.onended) node.onended();
-      }
+      // Simulate completion of playback
+      if (node.onended) node.onended();
 
       await vi.waitFor(() => {
         expect(onEnd).toHaveBeenCalledTimes(1);
       });
     });
 
-    it('starts playback immediately if stream ends before reaching 3.0s buffer (short narration phrase)', async () => {
+    it('starts playback immediately when stream completes for short narration phrase', async () => {
       // 1 chunk of 1.2s audio, then done
       const shortChunk = createFakePCMBase64(1.2, 24000);
       const mockStream = createMockSSEStream([
@@ -338,7 +335,6 @@ describe('Orpheus TTS Progressive Streaming & Narration Provider Suite', () => {
         onEnd
       });
 
-      // Playback must start even though duration (1.2s) < 3.0s because stream ended
       await vi.waitFor(() => {
         expect(onStart).toHaveBeenCalledTimes(1);
         expect(createdSourceNodes.length).toBe(1);
@@ -358,8 +354,7 @@ describe('Orpheus TTS Progressive Streaming & Narration Provider Suite', () => {
       const chunkPcm = createFakePCMBase64(1.0, 24000);
       const mockStream1 = createMockSSEStream([
         { raw_pcm_base64: chunkPcm },
-        { raw_pcm_base64: chunkPcm },
-        { raw_pcm_base64: chunkPcm }
+        { raw_pcm_base64: chunkPcm, done: true }
       ]);
       const mockStream2 = createMockSSEStream([
         { raw_pcm_base64: chunkPcm, done: true }
@@ -688,8 +683,8 @@ describe('Orpheus TTS Progressive Streaming & Narration Provider Suite', () => {
       const [url, requestInit] = fetchMock.mock.calls[0];
       const body = JSON.parse(requestInit.body);
 
-      // Script should not duplicate title if description starts with title
-      expect(body.text.startsWith('Machu Picchu is a 15th-century')).toBe(true);
+      // Script formats title and deduplicates leading description
+      expect(body.text.startsWith('Machu Picchu. A 15th-century')).toBe(true);
       expect(body.text.length).toBeLessThanOrEqual(600);
       expect(body.text.endsWith('.')).toBe(true);
       expect(body.text.includes('Hiram Bingham')).toBe(false); // Hiram Bingham was in the trailing sentences > 600 chars
@@ -950,9 +945,9 @@ describe('Orpheus TTS Progressive Streaming & Narration Provider Suite', () => {
         expect(onStart).toHaveBeenCalledTimes(1);
       });
 
-      // All 4 source nodes created
+      // Single continuous source node created for gap-free playback
       await vi.waitFor(() => {
-        expect(createdSourceNodes.length).toBe(4);
+        expect(createdSourceNodes.length).toBe(1);
       });
 
       // Trigger node ended
@@ -1096,6 +1091,111 @@ describe('Orpheus TTS Progressive Streaming & Narration Provider Suite', () => {
       const body = JSON.parse(fetchMock.mock.calls[0][1].body);
       expect(body.voice).toBe('zac');
       expect(body.voice).not.toBe('tara');
+    });
+  });
+
+  describe('11. Segmented Whole-Buffer Narration (Startup Latency Optimization)', () => {
+    it('splits long multi-sentence narration into concise opening (~25-40 words) and remainder', () => {
+      const title = 'Villa del Balbianello';
+      const desc = 'Villa del Balbianello is a historic villa on the wooded tip of the Lavedo Peninsula overlooking Lake Como in Lenno, Lombardy, Italy. ' +
+        'Built in 1787 on the site of a 13th-century Franciscan monastery by Cardinal Angelo Maria Durini, the estate features elaborate terraced gardens, loggias, and panoramic lake vistas. ' +
+        'Today, it is managed by the Fondo per l\'Ambiente Italiano (FAI) and serves as a prominent museum and cultural attraction.';
+
+      const { opening, remainder } = splitNarrationIntoSegments(title, desc);
+
+      expect(opening.startsWith('Villa del Balbianello. A historic villa')).toBe(true);
+      const openingWords = opening.split(/\s+/).filter(Boolean).length;
+      expect(openingWords).toBeGreaterThanOrEqual(18);
+      expect(openingWords).toBeLessThanOrEqual(45);
+
+      expect(remainder.startsWith('Built in 1787')).toBe(true);
+      expect(remainder.endsWith('cultural attraction.')).toBe(true);
+      expect(remainder.includes('Villa del Balbianello. A historic villa')).toBe(false);
+    });
+
+    it('keeps short single-sentence descriptions as a single segment with empty remainder', () => {
+      const title = 'Rome';
+      const desc = 'Capital and largest city of Italy.';
+
+      const { opening, remainder } = splitNarrationIntoSegments(title, desc);
+      expect(opening).toBe('Rome. Capital and largest city of Italy.');
+      expect(remainder).toBe('');
+    });
+
+    it('executes two-stage sequential synthesis and seamless whole-buffer playback without concurrent generation', async () => {
+      const chunkPcm1 = createFakePCMBase64(1.0, 24000);
+      const mockStream1 = createMockSSEStream([
+        { raw_pcm_base64: chunkPcm1, done: true }
+      ]);
+      const chunkPcm2 = createFakePCMBase64(1.5, 24000);
+      const mockStream2 = createMockSSEStream([
+        { raw_pcm_base64: chunkPcm2, done: true }
+      ]);
+
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, body: mockStream1 })
+        .mockResolvedValueOnce({ ok: true, body: mockStream2 });
+      setFetchMock(fetchMock);
+
+      narrationService.setProvider('orpheus');
+
+      const onStart = vi.fn();
+      const onEnd = vi.fn();
+
+      const longDesc = 'First complete sentence describing the landmark in clear and vivid detail for the listener across the world. ' +
+        'Second complete sentence providing extensive additional historical and cultural context for the explorer. ' +
+        'Third complete sentence describing remarkable architectural features and deep geological significance.';
+
+      narrationService.speakStructured({
+        title: 'Ancient Citadel',
+        description: longDesc,
+        onStart,
+        onEnd
+      });
+
+      // Opening request sent first
+      await vi.waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      });
+
+      const firstRequestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(firstRequestBody.text.startsWith('Ancient Citadel. First complete sentence')).toBe(true);
+
+      // Playback starts immediately after Opening whole-buffer finishes
+      await vi.waitFor(() => {
+        expect(onStart).toHaveBeenCalledTimes(1);
+        expect(createdSourceNodes.length).toBe(1);
+      });
+
+      // Background remainder synthesis started AFTER opening playback began
+      await vi.waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+      });
+
+      const secondRequestBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+      expect(secondRequestBody.text.startsWith('Third complete sentence')).toBe(true);
+
+      // Simulate opening node ended
+      if (createdSourceNodes[0].onended) {
+        createdSourceNodes[0].onended();
+      }
+
+      // Remainder source node is created and started seamlessly
+      await vi.waitFor(() => {
+        expect(createdSourceNodes.length).toBe(2);
+      });
+
+      const remNode = createdSourceNodes[1];
+      expect(remNode.start).toHaveBeenCalled();
+
+      // Simulate remainder node ended
+      if (remNode.onended) {
+        remNode.onended();
+      }
+
+      await vi.waitFor(() => {
+        expect(onEnd).toHaveBeenCalledTimes(1);
+      });
     });
   });
 });

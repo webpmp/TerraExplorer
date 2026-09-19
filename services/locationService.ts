@@ -5,6 +5,7 @@ import { logWaypointSnapshot } from '../utils/pipelineDebug';
 import { isClimateConflicting } from './geographic/climateEstimator';
 import { isPlaceholderString } from '../components/InfoPanel';
 import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
+import { evaluateDescriptionReadiness } from '../utils/descriptionReadiness';
 
 export const mergeLocationInfo = (prev: any, next: any): any => {
     if (!next || typeof next !== 'object') return prev;
@@ -79,6 +80,12 @@ export const mergeLocationInfo = (prev: any, next: any): any => {
             merged.primaryImage = next.primaryImage;
         }
     }
+
+    if (Array.isArray(prev.images) && prev.images.length > 0) {
+        if (!Array.isArray(next.images) || next.images.length === 0) {
+            merged.images = prev.images;
+        }
+    }
     
     if (prev.notable && Array.isArray(prev.notable) && next.notable && Array.isArray(next.notable)) {
         // Merge notable arrays safely, preserving images where possible
@@ -95,15 +102,22 @@ export const mergeLocationInfo = (prev: any, next: any): any => {
         merged.notable = deduplicateNotableFacts(merged.notable);
     }
 
-    // 3. String length and quality fallback for descriptions/context (like mergeRichestFields)
+    // 3. Substantive description evaluation for descriptions/context
     const TEXT_FIELDS = ["description", "overview"];
     for (const field of TEXT_FIELDS) {
-        if (typeof prev[field] === 'string') {
-            if (typeof next[field] !== 'string' || next[field].trim().length === 0 || isInvalidImage(next[field])) {
-                merged[field] = prev[field];
-            } else if (prev[field].trim().length > next[field].trim().length && !isInvalidImage(prev[field])) {
-                merged[field] = prev[field];
-            }
+        const prevText = typeof prev[field] === 'string' ? prev[field].trim() : '';
+        const nextText = typeof next[field] === 'string' ? next[field].trim() : '';
+        const prevReadiness = evaluateDescriptionReadiness(prevText, prev.name);
+        const nextReadiness = evaluateDescriptionReadiness(nextText, next.name || prev.name);
+
+        if (nextReadiness.isReady) {
+            merged[field] = nextText;
+        } else if (prevReadiness.isReady) {
+            merged[field] = prevText;
+        } else if (nextText && !isInvalidImage(nextText) && !isPlaceholderString(nextText)) {
+            merged[field] = nextText;
+        } else if (prevText && !isInvalidImage(prevText) && !isPlaceholderString(prevText)) {
+            merged[field] = prevText;
         }
     }
 

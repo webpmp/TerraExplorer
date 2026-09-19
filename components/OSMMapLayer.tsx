@@ -224,7 +224,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
           marker.name ||
           (showMarkerNumber ? `Waypoint ${marker.index + 1}` : 'Location');
 
-        const pinSize = isSelected ? 22 : 16;
+        const pinSize = isWaypoint ? 22 : (isSelected ? 22 : 16);
         const visualOffset = calculateOSMMarkerVisualOffset(osmProjection.z, {
           pinSize,
           isSelected
@@ -1810,7 +1810,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                       const isNextSelected =
                         selectedMarkerId === nextWp.id ||
                         (matchingNextMarker && selectedMarkerId === matchingNextMarker.id);
-                      const nextPinSize = isNextSelected ? 22 : 16;
+                      const nextPinSize = 22;
                       const nextMarkerRadius = nextPinSize / 2;
                       const nextVisualOffset = calculateOSMMarkerVisualOffset(osmProjection.z, {
                         pinSize: nextPinSize,
@@ -1903,7 +1903,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                 const isWaypoint = marker.isWaypoint || marker.type === 'waypoint';
                 const isMultiLocation = marker.isMultiLocation ?? false;
                 const showMarkerNumber = isWaypoint && isMultiLocation && marker.index !== undefined;
-                const pinSize = isSelected ? 22 : 16;
+                const pinSize = isWaypoint ? 22 : (isSelected ? 22 : 16);
                 const isMultiDigit = showMarkerNumber && (marker.index + 1) >= 10;
                 
                 const markerRouteGroupId = marker.routeGroupId || (marker.data as any)?.routeGroupId;
@@ -2056,12 +2056,19 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                           {showMarkerNumber && (
                             <span
                               style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: '100%',
+                                height: '100%',
+                                textAlign: 'center',
                                 fontSize: `${numberFontSize}px`,
                                 fontWeight: numberStyle.fontWeight,
                                 color: numberStyle.color,
-                                lineHeight: numberStyle.lineHeight,
+                                lineHeight: '1',
                                 textShadow: numberStyle.textShadow,
-                                pointerEvents: 'none'
+                                pointerEvents: 'none',
+                                userSelect: 'none'
                               }}
                             >
                               {marker.index + 1}

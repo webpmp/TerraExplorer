@@ -24,6 +24,7 @@ interface ControlsProps {
   onCycleSkin?: () => void;
   isScanningArea?: boolean;
   scanningStatusText?: string | null;
+  activeWaypointTitle?: string | null;
   onCancelScan?: () => void;
   onToggleSettings?: () => void;
   onOpenSettingsTab?: (tab: 'providers' | 'general' | 'appearance' | 'audio') => void;
@@ -158,6 +159,7 @@ const Controls: React.FC<ControlsProps> = ({
   onCycleSkin,
   isScanningArea = false,
   scanningStatusText = null,
+  activeWaypointTitle = null,
   onCancelScan,
   onToggleSettings,
   onOpenSettingsTab,
@@ -241,6 +243,10 @@ const Controls: React.FC<ControlsProps> = ({
            upper.startsWith("FINALIZING RESULTS") ||
            upper.startsWith("LOCATING ") ||
            upper.startsWith("TRACING ROUTE") ||
+           upper.startsWith("FINDING WAYPOINTS") ||
+           upper.includes("WAYPOINTS FOUND") ||
+           upper.startsWith("PREPARING WAYPOINT") ||
+           upper.startsWith("PREPARING NARRATION") ||
            upper === "SCAN CANCELLED" ||
            upper === "SCAN FAILED";
   };
@@ -266,12 +272,15 @@ const Controls: React.FC<ControlsProps> = ({
     if (query.trim()) {
       console.log(`[SearchNarration] SEARCH_SUBMITTED query="${query.trim()}"`);
       onSearch(query);
-    } else if (placeholder !== "Search location..." && placeholder !== "SEARCH LOCATION...") {
-      const cleanQuery = placeholder.replace(/\.\.\.$/, "");
-      if (!isScanStatusQuery(cleanQuery)) {
-        console.log(`[SearchNarration] SEARCH_SUBMITTED query="${cleanQuery}"`);
-        setQuery(cleanQuery);
-        onSearch(cleanQuery);
+    } else {
+      const effectiveCandidate = (activeWaypointTitle && !scanningStatusText) ? activeWaypointTitle : placeholder;
+      if (effectiveCandidate && effectiveCandidate !== "Search location..." && effectiveCandidate !== "SEARCH LOCATION...") {
+        const cleanQuery = effectiveCandidate.replace(/\.\.\.$/, "");
+        if (!isScanStatusQuery(cleanQuery)) {
+          console.log(`[SearchNarration] SEARCH_SUBMITTED query="${cleanQuery}"`);
+          setQuery(cleanQuery);
+          onSearch(cleanQuery);
+        }
       }
     }
   };
@@ -382,8 +391,10 @@ const Controls: React.FC<ControlsProps> = ({
     }
   };
 
-  // Format placeholder for retro skins, clear on focus
-  const displayPlaceholder = isFocused ? "" : (skin === 'modern' ? placeholder : placeholder.toUpperCase());
+  // Format placeholder for retro skins, clear on focus.
+  // When an active waypoint title is provided (during route navigation) and no active user search/focus is happening, display it.
+  const activePlaceholderText = (activeWaypointTitle && !scanningStatusText) ? activeWaypointTitle : placeholder;
+  const displayPlaceholder = isFocused ? "" : (skin === 'modern' ? activePlaceholderText : activePlaceholderText.toUpperCase());
 
   return (
     <div className="absolute bottom-6 left-0 right-0 z-20 flex flex-col items-center gap-4 pointer-events-none px-4">
@@ -479,32 +490,39 @@ const Controls: React.FC<ControlsProps> = ({
                     <div className="parchment-background" aria-hidden="true" />
                   )}
                   <div className="relative z-[1] flex flex-col gap-4">
-                    <button onClick={() => onToggleTraceModal(false)} className={`absolute top-0 right-0 p-1 hover:opacity-70`}>
+                    <button
+                      onClick={() => onToggleTraceModal(false)}
+                      className={`absolute top-0 right-0 p-1 ${
+                        skin === 'parchment'
+                          ? 'transition-colors hover:bg-[#d2b48c]/50 hover:text-[#3e2723] text-[#3e2723] rounded'
+                          : 'hover:opacity-70'
+                      }`}
+                    >
                         <X size={20} />
                     </button>
-                    <h2 className={`font-bold uppercase ${skin === 'parchment' ? 'text-[#5c3a21] text-lg tracking-wider brand-font' : 'text-xl tracking-wide'}`}>Trace Route</h2>
-                    <p className="text-sm opacity-70">Paste an article, URL, or text block. The system will identify locations and create a connected journey.</p>
+                    <h2 className={`font-bold uppercase ${skin === 'parchment' ? 'text-[#3e2723] text-lg tracking-wider brand-font' : 'text-xl tracking-wide'}`}>Trace Route</h2>
+                    <p className={`text-sm ${skin === 'parchment' ? 'text-[#3e2723]/70' : 'opacity-70'}`}>Paste an article, URL, or text block. The system will identify locations and create a connected journey.</p>
                     <form onSubmit={handleTraceSubmit} className="flex flex-col gap-4">
                         <textarea
                           value={traceText}
                           onChange={(e) => setTraceText(e.target.value)}
                           placeholder="Paste text here..."
-                          className={`w-full h-32 p-3 ${
+                          className={`w-full h-32 p-3 text-sm transition-colors outline-none resize-none ${
                             skin === 'modern'
-                              ? 'bg-transparent border border-white/20 rounded-lg'
+                              ? 'bg-transparent border border-white/20 rounded-lg focus:border-opacity-100'
                               : skin === 'parchment'
-                              ? 'bg-transparent placeholder-[#522B07] border-0 rounded-none'
-                              : 'bg-transparent border border-current rounded-none'
-                          } outline-none resize-none focus:border-opacity-100 transition-colors`}
+                              ? 'bg-[#e6d5b8] text-[#3e2723] border border-[#8b5a2b]/30 rounded-lg placeholder-[#3e2723]/60 focus:border-[#8b5a2b] focus:ring-1 focus:ring-[#8b5a2b]'
+                              : 'bg-transparent border border-current rounded-none focus:border-opacity-100'
+                          }`}
                           autoFocus
                         />
                         <button
                           type="submit"
                           disabled={!traceText.trim()}
-                          className={`py-3 font-bold uppercase tracking-wider text-sm transition-all ${
+                          className={`font-bold uppercase tracking-wider text-sm transition-all ${
                             skin === 'parchment'
-                              ? 'border-0 bg-transparent hover:bg-transparent text-[#5c3a21] hover:text-[#3e2723] font-sans rounded-none shadow-none'
-                              : theme.btn
+                              ? 'px-3 py-2 rounded-lg border whitespace-nowrap transition-colors border-[#8b5a2b]/30 hover:bg-[#e6d5b8] text-[#3e2723]'
+                              : `${theme.btn} py-3`
                           } ${!traceText.trim() ? 'opacity-50 cursor-not-allowed' : 'hover:scale-[1.02]'}`}
                         >
                             Generate Route
@@ -712,15 +730,15 @@ const Controls: React.FC<ControlsProps> = ({
 
         return (
           <div
-            className={`relative w-full max-w-[532px] pointer-events-auto flex items-center justify-between px-3.5 py-1.5 -mt-2.5 text-xs transition-all animate-in fade-in duration-200 ${skin === 'parchment' ? '[isolation:isolate]' : ''} ${theme.statusRow}`}
+            className={`relative w-full max-w-[532px] pointer-events-auto flex items-start justify-between px-3.5 py-2 -mt-2.5 text-xs transition-all animate-in fade-in duration-200 ${skin === 'parchment' ? '[isolation:isolate]' : ''} ${theme.statusRow}`}
             role="status"
             aria-live="polite"
           >
             {skin === 'parchment' && (
               <div className="parchment-background" aria-hidden="true" />
             )}
-            <div className="relative z-[1] flex items-center justify-between w-full min-w-0">
-              <span className={`truncate text-xs ${theme.statusText} flex flex-wrap items-center gap-x-1.5`}>
+            <div className="relative z-[1] flex items-start justify-between w-full min-w-0 gap-2">
+              <span className={`break-words whitespace-normal leading-relaxed text-xs ${theme.statusText} flex flex-wrap items-center gap-x-1.5`}>
                 <span>{mainMessage}</span>
                 {hasGuidance && (
                   <span className="opacity-90 inline-flex items-center">
@@ -743,7 +761,7 @@ const Controls: React.FC<ControlsProps> = ({
               <button
                 type="button"
                 onClick={onClearError}
-                className={`ml-2 shrink-0 ${theme.statusDismiss}`}
+                className={`ml-2 shrink-0 mt-0.5 ${theme.statusDismiss}`}
                 aria-label="Dismiss error"
                 title="Dismiss"
               >
