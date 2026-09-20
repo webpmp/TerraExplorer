@@ -8,6 +8,7 @@
 import { NarrationProviderType } from '../types';
 import { logTraceNarration } from './waypointPipelineService';
 import {
+  NarrationUnit,
   NarrationSpeakOptions,
   KokoroVoiceOption,
   KOKORO_VOICES,
@@ -20,6 +21,8 @@ import {
   decodeBase64PCMToFloat32,
   cleanNarrationText,
   buildNarrationScript,
+  buildFullNarrationScript,
+  buildFullNarrationUnits,
   removeLeadingTitleFromDescription,
   capDescriptionForNarration,
   splitNarrationIntoSegments
@@ -27,7 +30,7 @@ import {
 
 import { resolveCanonicalNarrative } from '../utils/narrativeResolver';
 
-export type { NarrationSpeakOptions, KokoroVoiceOption, OrpheusVoiceOption, INarrationProvider };
+export type { NarrationUnit, NarrationSpeakOptions, KokoroVoiceOption, OrpheusVoiceOption, INarrationProvider };
 export {
   KOKORO_VOICES,
   ORPHEUS_VOICES,
@@ -37,6 +40,8 @@ export {
   decodeBase64PCMToFloat32,
   cleanNarrationText,
   buildNarrationScript,
+  buildFullNarrationScript,
+  buildFullNarrationUnits,
   removeLeadingTitleFromDescription,
   capDescriptionForNarration,
   splitNarrationIntoSegments,
@@ -174,6 +179,13 @@ export class NarrationService {
   public isSupported(): boolean {
     const active = this.getActiveProvider();
     return active.isSupported();
+  }
+
+  public isTTSAvailable(): boolean {
+    if (this.currentProvider === 'kokoro' || this.currentProvider === 'orpheus') {
+      return true;
+    }
+    return typeof window !== 'undefined' && 'speechSynthesis' in window;
   }
 
   /**

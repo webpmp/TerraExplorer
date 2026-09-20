@@ -21,7 +21,8 @@ import { logTraceTiming, initTraceTiming, recordWP1SubstantiveReady } from './se
 import { getWaypointStableId, findNextRouteWaypoint } from './utils/routeSequenceUtils';
 import { resolveCanonicalNarrative } from './utils/narrativeResolver';
 import { evaluateDescriptionReadiness } from './utils/descriptionReadiness';
-import { cleanNarrationText } from './services/narrationProviders';
+import { cleanNarrationText, buildFullNarrationScript, buildFullNarrationUnits } from './services/narrationProviders';
+import { classifyFollowUpIntent, researchFollowUp } from './services/followUpService';
 import { logWaypointSnapshot } from './utils/pipelineDebug';
 import { fetchLiveNews } from './services/newsService';
 import { runSearchPipeline } from './services/pipeline';
@@ -1770,7 +1771,13 @@ const App: React.FC = () => {
     }
 
     const title = getNarrationTitle(info);
-    const desc = getNarrationDescription(info);
+    const narrationUnits = buildFullNarrationUnits(info, {
+      contentSettings: currentSettings.narrationContent,
+      showNews: currentSettings.showNews !== false,
+      maxChars: currentSettings.narrationLimit || 600
+    });
+    const assembledScript = narrationUnits.map((u) => u.text).join(' ');
+    const desc = assembledScript || getNarrationDescription(info);
     const id = (info as any).id || info.osmId || info.name;
     const stableId = activeSelectionIdRef.current || id;
     const narrativeKey = `${title.toLowerCase().trim()}::${desc.trim()}`;
@@ -1810,16 +1817,22 @@ const App: React.FC = () => {
     }
     console.log(`[SearchNarration] SELECTION_MATCH id="${id}" (activeSelectionId="${activeSelectionIdRef.current}")`);
 
-    if (
+    const contributingSections = Array.from(new Set(narrationUnits.map((u) => u.section)));
+    console.log(`[NarrationGuard] CANDIDATE sections=${contributingSections.join(',')} units=${narrationUnits.length} length=${desc.length}`);
+    console.log(`[NarrationGuard] CANDIDATE_KEY ${narrativeKey.slice(0, 80)}`);
+
+    const isDuplicate = Boolean(
       activeNarrationRef.current &&
-      (activeNarrationRef.current.selectionId === stableId ||
-        activeNarrationRef.current.selectionId === id ||
-        (Boolean(activeNarrationRef.current.narrativeKey) && activeNarrationRef.current.narrativeKey === narrativeKey))
-    ) {
+      (activeNarrationRef.current.selectionId === stableId || activeNarrationRef.current.selectionId === id) &&
+      activeNarrationRef.current.narrativeKey === narrativeKey
+    );
+
+    if (isDuplicate) {
       console.log(`[NarrationGuard] DUPLICATE_BLOCKED selectionId="${stableId}" narrativeKey="${narrativeKey.slice(0, 50)}..."`);
       return;
     }
 
+    console.log(`[NarrationGuard] ALLOW_NEW_NARRATION selectionId="${stableId}"`);
     console.log(`[NarrationGuard] ACCEPT selectionId="${stableId}"`);
     console.log(`[SearchNarration] NARRATION_GUARD PASSED id="${id}"`);
     console.log(`[SearchNarration] ACCEPTED id="${id}"`);
@@ -1866,6 +1879,7 @@ const App: React.FC = () => {
         waypointId: stableId,
         title,
         description: desc,
+        units: narrationUnits,
         provider: activeProvider,
         kokoroVoice: currentSettings.kokoroVoice || 'am_michael',
         orpheusVoice: currentSettings.orpheusVoice || 'tara',
@@ -1918,6 +1932,7 @@ const App: React.FC = () => {
             waypointId: stableId,
             title,
             description: desc,
+            units: narrationUnits,
             provider: activeProvider,
             kokoroVoice: currentSettings.kokoroVoice || 'am_michael',
             orpheusVoice: currentSettings.orpheusVoice || 'tara',
@@ -1954,6 +1969,7 @@ const App: React.FC = () => {
             waypointId: stableId,
             title,
             description: desc,
+            units: narrationUnits,
             provider: activeProvider,
             voiceURI: currentSettings.narrationVoice,
             kokoroVoice: currentSettings.kokoroVoice || 'am_michael',
@@ -1999,6 +2015,7 @@ const App: React.FC = () => {
       waypointId: stableId,
       title,
       description: desc,
+      units: narrationUnits,
       provider: activeProvider,
       voiceURI: currentSettings.narrationVoice,
       kokoroVoice: currentSettings.kokoroVoice || 'am_michael',
@@ -3616,7 +3633,78 @@ const App: React.FC = () => {
       })();
    }, [routeWaypoints, handleMarkerClick, startScan, resolveScan, failScan, setScanStatus]);
 
-  const handleSearch = async (query: string) => {
+  const handleDeleteFollowUp = useCallback((id: string) => {
+    // 1. Remove from active locationInfo
+    setLocationInfo(prev => {
+      if (!prev || !prev.followUps) return prev;
+      const updatedFollowUps = prev.followUps.filter(item => item.id !== id);
+      return {
+        ...prev,
+        followUps: updatedFollowUps
+      };
+    });
+
+    // 2. If in route, update active waypoint
+    if (routeWaypoints.length > 0 && currentWaypointIndex >= 0) {
+      const currentWp = routeWaypoints[currentWaypointIndex];
+      const stableId = getWaypointStableId(currentWp);
+      setRouteWaypoints(prev => prev.map((wp, idx) => {
+        if (idx === currentWaypointIndex) {
+          return {
+            ...wp,
+            followUps: (wp.followUps || []).filter(item => item.id !== id)
+          };
+        }
+        return wp;
+      }));
+
+      // Also update waypoint enrichment cache
+      const cached = waypointEnrichmentCache.get(stableId);
+      if (cached && cached.followUps) {
+        waypointEnrichmentCache.set(stableId, {
+          ...cached,
+          followUps: cached.followUps.filter((item: any) => item.id !== id)
+        });
+      }
+
+      // If active route is saved in favorites, update it
+      if (activeRouteId) {
+        setFavorites(prev => prev.map(fav => {
+          if (fav.id === activeRouteId && fav.waypoints) {
+            return {
+              ...fav,
+              waypoints: fav.waypoints.map((wp, idx) => {
+                if (idx === currentWaypointIndex) {
+                  return {
+                    ...wp,
+                    followUps: (wp.followUps || []).filter(item => item.id !== id)
+                  };
+                }
+                return wp;
+              })
+            };
+          }
+          return fav;
+        }));
+      }
+    } else if (locationInfo) {
+      // If single saved location in favorites, update it
+      const currentFav = getCurrentFavorite();
+      if (currentFav && currentFav.type !== 'route') {
+        setFavorites(prev => prev.map(fav => {
+          if (fav.id === currentFav.id) {
+            return {
+              ...fav,
+              followUps: (fav.followUps || []).filter(item => item.id !== id)
+            };
+          }
+          return fav;
+        }));
+      }
+    }
+  }, [routeWaypoints, currentWaypointIndex, activeRouteId, locationInfo, favorites]);
+
+  const handleSearch = async (query: string, isExplicitChip?: boolean) => {
     const cleanQuery = query.trim();
     if (!cleanQuery) return;
 
@@ -3633,6 +3721,114 @@ const App: React.FC = () => {
     ) {
       console.warn(`[handleSearch] Blocked scan status string from being searched: "${cleanQuery}"`);
       return;
+    }
+
+    // Determine active location context
+    const isRouteActive = routeWaypoints.length > 0 && currentWaypointIndex >= 0;
+    const activeLoc = locationInfo || (isRouteActive ? routeWaypoints[currentWaypointIndex] : null);
+
+    // Contextual Follow-Up Intent Classification
+    if (activeLoc) {
+      const classification = classifyFollowUpIntent(cleanQuery, activeLoc, isRouteActive, isExplicitChip);
+
+      if (classification.intent === 'FOLLOW_UP') {
+        if (activeSearchAbortControllerRef.current) {
+          activeSearchAbortControllerRef.current.abort();
+        }
+        const abortController = new AbortController();
+        activeSearchAbortControllerRef.current = abortController;
+        const currentSearchId = ++activeSearchRequestIdRef.current;
+
+        setScanningStatusText("RESEARCHING FOLLOW-UP");
+        setSearchError(null);
+
+        try {
+          const followUpItem = await researchFollowUp(cleanQuery, activeLoc, abortController.signal);
+
+          if (currentSearchId !== activeSearchRequestIdRef.current || abortController.signal.aborted) {
+            return;
+          }
+
+          // Append to locationInfo
+          setLocationInfo(prev => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              followUps: [...(prev.followUps || []), followUpItem]
+            };
+          });
+
+          // If inside route, append to route waypoint and enrichment cache
+          if (isRouteActive) {
+            const currentWp = routeWaypoints[currentWaypointIndex];
+            const stableId = getWaypointStableId(currentWp);
+            setRouteWaypoints(prev => prev.map((wp, idx) => {
+              if (idx === currentWaypointIndex) {
+                return {
+                  ...wp,
+                  followUps: [...(wp.followUps || []), followUpItem]
+                };
+              }
+              return wp;
+            }));
+
+            const cached = waypointEnrichmentCache.get(stableId);
+            if (cached) {
+              waypointEnrichmentCache.set(stableId, {
+                ...cached,
+                followUps: [...(cached.followUps || []), followUpItem]
+              });
+            }
+
+            if (activeRouteId) {
+              setFavorites(prev => prev.map(fav => {
+                if (fav.id === activeRouteId && fav.waypoints) {
+                  return {
+                    ...fav,
+                    waypoints: fav.waypoints.map((wp, idx) => {
+                      if (idx === currentWaypointIndex) {
+                        return {
+                          ...wp,
+                          followUps: [...(wp.followUps || []), followUpItem]
+                        };
+                      }
+                      return wp;
+                    })
+                  };
+                }
+                return fav;
+              }));
+            }
+          } else {
+            // Update single location favorite if saved
+            const currentFav = getCurrentFavorite();
+            if (currentFav && currentFav.type !== 'route') {
+              setFavorites(prev => prev.map(fav => {
+                if (fav.id === currentFav.id) {
+                  return {
+                    ...fav,
+                    followUps: [...(fav.followUps || []), followUpItem]
+                  };
+                }
+                return fav;
+              }));
+            }
+          }
+
+          setScanningStatusText(null);
+          return;
+        } catch (err: any) {
+          if (currentSearchId !== activeSearchRequestIdRef.current || abortController.signal.aborted) {
+            return;
+          }
+          setScanningStatusText(null);
+          setSearchError(err?.message || "Failed to research follow-up question.");
+          return;
+        }
+      } else if (classification.intent === 'ROUTE_LEVEL_QUERY') {
+        setSearchError("Route-level comparisons are not yet supported for individual waypoint follow-ups.");
+        return;
+      }
     }
 
     if (activeSearchAbortControllerRef.current) {
@@ -4831,6 +5027,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           onLoadMoreNews={handleLoadMoreNews}
           onOpenSettingsTab={handleOpenSettingsTab}
           onEditRoute={handleEditActiveRoute}
+          onDeleteFollowUp={handleDeleteFollowUp}
           routeNav={(routeWaypoints.length > 1 && currentWaypointIndex !== -1) ? (() => {
               const currentWp = routeWaypoints[currentWaypointIndex];
               const currentRoute = activeRouteId ? favorites.find(f => f.id === activeRouteId) : undefined;
@@ -4870,18 +5067,15 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         paused={shouldPauseSuggestions}
         isTraceModalOpen={isTraceModalOpen}
         onToggleTraceModal={setIsTraceModalOpen}
-        isZoomLocked={isZoomLocked}
-        onToggleZoomLock={() => {
-           setIsZoomLocked(prev => {
-              if (!prev) {
-                 setLockedZoomDistance(cameraControlsRef.current?.getDistance() || null);
-                 return true;
-              } else {
-                 setLockedZoomDistance(null);
-                 return false;
-              }
-           });
+        isNarrationEnabled={userSettings.narrationEnabled ?? true}
+        onToggleNarration={() => {
+          handleUpdateSettings({
+            ...userSettings,
+            narrationEnabled: !(userSettings.narrationEnabled ?? true)
+          });
         }}
+        isNarrationAvailable={narrationService.isTTSAvailable()}
+        showNews={userSettings.showNews !== false}
         isScanningArea={isScanningArea}
         scanningStatusText={scanningStatusText}
         activeWaypointTitle={(() => {
@@ -4893,6 +5087,30 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
                 return currentWp.name;
               }
             }
+          }
+          return null;
+        })()}
+        activeLocationContext={(() => {
+          if (locationInfo && interactionState === 'PIN_SELECTED') {
+            return {
+              name: locationInfo.name,
+              entityType: locationInfo.entityType,
+              description: locationInfo.description,
+              notable: locationInfo.notable,
+              news: locationInfo.news,
+              followUps: locationInfo.followUps
+            };
+          }
+          if (routeWaypoints.length > 0 && currentWaypointIndex >= 0 && interactionState === 'PIN_SELECTED') {
+            const currentWp = routeWaypoints[currentWaypointIndex];
+            return {
+              name: currentWp.name,
+              entityType: currentWp.entityType,
+              description: currentWp.description,
+              notable: currentWp.highlights,
+              news: (currentWp as any).news,
+              followUps: (currentWp as any).followUps
+            };
           }
           return null;
         })()}

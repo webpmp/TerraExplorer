@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { ENTITY_SCHEMAS } from '../entitySchema';
-import { LocationInfo, SkinType, isValidCoordinates, LocationType } from '../types';
+import { LocationInfo, SkinType, isValidCoordinates, LocationType, FollowUpItem } from '../types';
 import { formatUserFacingCategory, formatClimateName } from '../utils/categoryFormatting';
 import { fetchAndValidateImages } from '../services/imageService';
 import { fetchAndValidateLocationNews } from '../services/locationService';
@@ -1089,6 +1089,7 @@ interface InfoPanelProps {
   onRetry?: () => void;
   onOpenSettingsTab?: (tab: 'providers' | 'general' | 'appearance' | 'audio') => void;
   onEditRoute?: () => void;
+  onDeleteFollowUp?: (id: string) => void;
 }
 
 interface Note {
@@ -1423,7 +1424,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   errorMessage,
   onRetry,
   onOpenSettingsTab,
-  onEditRoute
+  onEditRoute,
+  onDeleteFollowUp
 }: InfoPanelProps) => {
   const isMultiLocation = Boolean(routeNav?.total && routeNav.total > 1);
   const isSingleLocation = !isMultiLocation;
@@ -1668,6 +1670,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       news,
       notable,
       relatedEntities,
+      followUps: rawInfo.followUps || wp.followUps || [],
       waypoint: rawInfo.waypoint || undefined
     };
   }, [rawInfo, isSingleLocation, isMultiLocation]);
@@ -1790,6 +1793,23 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const maskStyle = useMemo(() => {
     return getScrollFadeMaskStyle(scrollFade.top, scrollFade.bottom);
   }, [scrollFade.top, scrollFade.bottom]);
+
+  const prevFollowUpsLengthRef = useRef(0);
+  useEffect(() => {
+    const currentLength = info?.followUps?.length || 0;
+    if (currentLength > prevFollowUpsLengthRef.current) {
+      setTimeout(() => {
+        const exploreEl = document.getElementById('info-panel-explore-section');
+        if (exploreEl) {
+          exploreEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else if (scrollRef.current) {
+          scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+        }
+      }, 100);
+    }
+    prevFollowUpsLengthRef.current = currentLength;
+  }, [info?.followUps?.length]);
+
 
   const lastLocationNameRef = useRef<string | null>(null);
 
@@ -2783,13 +2803,28 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const fullCopyText = useMemo(() => {
       if (!info) return '';
       let txt = `${info.name || 'Location'}\n\n`;
+      // 1. Non-news sections
       schema.ui.sections.forEach((section: any) => {
+          if (section.id === 'liveNews' || section.id === 'news') return;
           const renderer = SECTION_RENDERERS[section.id];
           if (renderer && renderer.copyText) {
               const copyData = renderer.copyText();
               if (copyData) txt += copyData + '\n\n';
           }
       });
+      // 2. Explore / Follow-up Section
+      if (info.followUps && info.followUps.length > 0) {
+        txt += `EXPLORE\n\n`;
+        info.followUps.forEach((fu: FollowUpItem) => {
+          txt += `${fu.question}\n${fu.answer}\n\n`;
+        });
+      }
+      // 3. News Section
+      const newsRenderer = SECTION_RENDERERS.liveNews;
+      if (newsRenderer && newsRenderer.copyText) {
+        const copyData = newsRenderer.copyText();
+        if (copyData) txt += copyData + '\n\n';
+      }
       return txt.trim();
   }, [info, schema]);
 
@@ -3044,14 +3079,74 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                </div>
             ) : info ? (
                 <div className="p-5 pb-6 space-y-5 animate-in fade-in duration-300">
-                    {schema.ui.sections.map((section: any) => {
-                        const renderer = SECTION_RENDERERS[section.id];
-                        if (renderer && renderer.render) return <React.Fragment key={section.id}>{renderer.render()}</React.Fragment>;
-                        return null;
-                    })}
+                     {/* 1. Non-news sections (Overview, Notable Facts, Climate, Gallery, etc.) */}
+                     {schema.ui.sections
+                       .filter((section: any) => section.id !== 'liveNews' && section.id !== 'news')
+                       .map((section: any) => {
+                         const renderer = SECTION_RENDERERS[section.id];
+                         if (renderer && renderer.render) return <React.Fragment key={section.id}>{renderer.render()}</React.Fragment>;
+                         return null;
+                     })}
+
+                     {/* 2. EXPLORE / Follow-up Section */}
+                     {info.followUps && info.followUps.length > 0 && (
+                       <div className="space-y-4 pt-3" data-testid="explore-section" id="info-panel-explore-section">
+                         <SectionHeader
+                           title="Explore"
+                           theme={theme}
+                           isRetro={isRetro}
+                           isParchment={isParchment}
+                         />
+                         <div className="space-y-4">
+                           {info.followUps.map((fu: FollowUpItem, idx: number) => (
+                             <div key={fu.id || `fu-${idx}`} className="space-y-1.5 relative group/fu" data-testid={`follow-up-item-${fu.id}`}>
+                               <div className="flex items-start justify-between gap-2">
+                                 <h4 className={`${semanticTitleStyle} flex-1`}>
+                                   {fu.question}
+                                 </h4>
+                                 {onDeleteFollowUp && (
+                                   <button
+                                     type="button"
+                                     onClick={() => onDeleteFollowUp(fu.id)}
+                                     className={`p-1 opacity-60 hover:opacity-100 transition-opacity ${theme.actionBtn}`}
+                                     title="Delete"
+                                     aria-label="Delete follow-up"
+                                     data-testid={`delete-follow-up-${fu.id}`}
+                                   >
+                                     <Trash2 size={14} />
+                                   </button>
+                                 )}
+                               </div>
+                               <p className={bodyTextStyle}>
+                                 {fu.answer}
+                               </p>
+                               {fu.images && fu.images.length > 0 && (
+                                 <div className="pt-2">
+                                   <StackedImageCarousel
+                                     images={fu.images.map((im: any) => typeof im === 'string' ? { url: im } : im)}
+                                     locationName={info.name || 'Location'}
+                                     skin={skin}
+                                     theme={theme}
+                                   />
+                                 </div>
+                               )}
+                             </div>
+                           ))}
+                         </div>
+                       </div>
+                     )}
+
+                     {/* 3. News Section & LOAD NEWS button */}
+                     {Boolean(SECTION_RENDERERS.liveNews?.render) && (
+                       <React.Fragment key="liveNews">
+                         {SECTION_RENDERERS.liveNews.render()}
+                       </React.Fragment>
+                     )}
                 </div>
             ) : null}
           </div>
+
+
         </div>
 
         {/* My Notes Section */}

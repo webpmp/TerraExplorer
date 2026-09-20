@@ -228,10 +228,10 @@ export const HISTORICAL_KNOWLEDGE_BASE: Record<string, HistoricalEntityKnowledge
     boundingBox: { minLat: 31.0, maxLat: 32.0, minLng: 30.0, maxLng: 31.0 }
   },
   "antikythera": {
-    entity: "Antikythera",
+    entity: "Antikythera Wreck Site",
     entityType: "shipwreck_site",
     expectedRegion: "Antikythera island / Aegean Sea, Greece",
-    approximateRegion: "Antikythera Island, Greece",
+    approximateRegion: "Off Point Glyphadia, Antikythera Island, Greece",
     country: "Greece",
     historicalContext: "Greek island and location of the ancient Antikythera shipwreck where the Antikythera mechanism was discovered in 1900-1901.",
     sourceRationale: "Authoritative historical and archaeological discovery records.",
@@ -239,6 +239,70 @@ export const HISTORICAL_KNOWLEDGE_BASE: Record<string, HistoricalEntityKnowledge
     allowedCountries: ["Greece"],
     exactLocationConfirmed: true,
     exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: 35.8622,
+      lng: 23.3000,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 35.0, maxLat: 37.0, minLng: 22.5, maxLng: 24.5 }
+  },
+  "antikythera wreck": {
+    entity: "Antikythera Wreck Site",
+    entityType: "shipwreck_site",
+    expectedRegion: "Antikythera island / Aegean Sea, Greece",
+    approximateRegion: "Off Point Glyphadia, Antikythera Island, Greece",
+    country: "Greece",
+    historicalContext: "Ancient Roman shipwreck site dating to c. 70–60 BC off Point Glyphadia, Antikythera, where sponge divers discovered the Antikythera mechanism in 1900-1901.",
+    sourceRationale: "Authoritative historical and archaeological discovery records.",
+    confidence: "high",
+    allowedCountries: ["Greece"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: 35.8622,
+      lng: 23.3000,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 35.0, maxLat: 37.0, minLng: 22.5, maxLng: 24.5 }
+  },
+  "the antikythera wreck": {
+    entity: "Antikythera Wreck Site",
+    entityType: "shipwreck_site",
+    expectedRegion: "Antikythera island / Aegean Sea, Greece",
+    approximateRegion: "Off Point Glyphadia, Antikythera Island, Greece",
+    country: "Greece",
+    historicalContext: "Ancient Roman shipwreck site dating to c. 70–60 BC off Point Glyphadia, Antikythera, where sponge divers discovered the Antikythera mechanism in 1900-1901.",
+    sourceRationale: "Authoritative historical and archaeological discovery records.",
+    confidence: "high",
+    allowedCountries: ["Greece"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: 35.8622,
+      lng: 23.3000,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 35.0, maxLat: 37.0, minLng: 22.5, maxLng: 24.5 }
+  },
+  "antikythera shipwreck": {
+    entity: "Antikythera Wreck Site",
+    entityType: "shipwreck_site",
+    expectedRegion: "Antikythera island / Aegean Sea, Greece",
+    approximateRegion: "Off Point Glyphadia, Antikythera Island, Greece",
+    country: "Greece",
+    historicalContext: "Ancient Roman shipwreck site dating to c. 70–60 BC off Point Glyphadia, Antikythera, where sponge divers discovered the Antikythera mechanism in 1900-1901.",
+    sourceRationale: "Authoritative historical and archaeological discovery records.",
+    confidence: "high",
+    allowedCountries: ["Greece"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
     approximateCoordinates: {
       lat: 35.8622,
       lng: 23.3000,
@@ -259,6 +323,7 @@ export const HISTORICAL_KNOWLEDGE_BASE: Record<string, HistoricalEntityKnowledge
     allowedCountries: ["Greece"],
     exactLocationConfirmed: true,
     exactLocationKnown: true,
+    confirmedWreckLocation: true,
     approximateCoordinates: {
       lat: 35.8622,
       lng: 23.3000,
@@ -2539,6 +2604,9 @@ export function isMaritimeHistoricalEntity(entityOrContext: any): boolean {
     if (/^(?:SS|RMS|HMS|USS|MV|HMAS|USNS|CSS|IJN|SMS|RV|SV|MS)\b/i.test(name) && entityOrContext.intent === 'DISCOVERY_OBJECT_LOCATION') {
       return true;
     }
+    if (/\b(?:shipwreck|wreck|sunken|submerged|galleon|frigate|battleship|submarine|destroyer)\b/i.test(name)) {
+      return true;
+    }
   }
 
   if (entityOrContext.intent === 'DISCOVERY_OBJECT_LOCATION') {
@@ -2562,15 +2630,12 @@ export async function validateHistoricalCoordinate(
   const normEntity = (entityName || '').toLowerCase().trim().replace(/^the\s+/i, '');
   const candidateSource = context?.coordinateSource || candidateCoords?.source || 'ai';
 
-  // 1. Numeric coordinate sanity
   if (!candidateCoords || !isValidCoordinates(candidateCoords)) {
-    const res: HistoricalCoordinateValidationResult = {
+    return {
       valid: false,
       reason: 'INVALID_NUMERIC_COORDINATES',
       expectedRegion: context?.expectedRegion
     };
-    logValidation(entityName, candidateCoords, candidateSource, 'None', res);
-    return res;
   }
 
   const { lat, lng } = candidateCoords;
@@ -2922,6 +2987,21 @@ export function getHistoricalEntityKnowledge(entityName: string): HistoricalEnti
       return val;
     }
   }
+
+  // Normalized discovery/maritime suffix stripping fallback (e.g. "Antikythera Wreck" -> "antikythera")
+  const strippedSuffix = normEntity.replace(/\s+(?:shipwreck|wreck|wreck\s+site|shipwreck\s+site|site|ruins|monument|cemetery|battlefield|battle)$/i, '').trim();
+  if (strippedSuffix && strippedSuffix !== normEntity) {
+    const suffixMatch = HISTORICAL_KNOWLEDGE_BASE[strippedSuffix] || HISTORICAL_KNOWLEDGE_BASE[stripDiacritics(strippedSuffix)];
+    if (suffixMatch) return suffixMatch;
+  }
+
+  // Normalized discovery/maritime prefix stripping fallback (e.g. "Wreck of the Antikythera" -> "antikythera")
+  const strippedPrefix = normEntity.replace(/^(?:wreck\s+of(?:\s+the)?|shipwreck\s+of(?:\s+the)?|ruins\s+of(?:\s+the)?|battle\s+of(?:\s+the)?|site\s+of(?:\s+the)?)\s+/i, '').trim();
+  if (strippedPrefix && strippedPrefix !== normEntity) {
+    const prefixMatch = HISTORICAL_KNOWLEDGE_BASE[strippedPrefix] || HISTORICAL_KNOWLEDGE_BASE[stripDiacritics(strippedPrefix)];
+    if (prefixMatch) return prefixMatch;
+  }
+
   return undefined;
 }
 

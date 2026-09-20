@@ -164,7 +164,7 @@ describe('Controls Modern Theme OSM Button Hover Contrast', () => {
       'aria-label="Toggle Favorites"',
       'aria-label="Zoom Out"',
       'aria-label="Zoom In"',
-      'aria-label="Zoom enabled"',
+      'aria-label="Narration On"',
       'aria-label="Switch Theme"',
       'aria-label="Settings"',
     ];
@@ -405,6 +405,68 @@ describe('Controls Trace Route Modal Outside Click Behavior', () => {
         expect(html).toContain('absolute top-0 right-0 p-1 hover:opacity-70');
       }
     });
+  });
+});
+
+describe('Controls Contextual Question Chips & Follow-Up Lifecycle', () => {
+  const baseProps = {
+    onZoomIn: vi.fn(),
+    onZoomOut: vi.fn(),
+    onSearch: vi.fn(),
+    onTraceRoute: vi.fn(),
+    isSearching: false,
+    skin: 'modern' as SkinType,
+    showFavorites: false,
+    onToggleShowFavorites: vi.fn(),
+    paused: false,
+    isTraceModalOpen: false,
+    onToggleTraceModal: vi.fn(),
+    isNarrationEnabled: true,
+    onToggleNarration: vi.fn(),
+    isNarrationAvailable: true
+  };
+
+  const sampleLocation = {
+    name: 'Bodie, California',
+    entityType: 'ghost town',
+    description: 'Bodie is a historic gold mining ghost town.',
+    notable: [{ title: 'Standard Mill', description: 'Stamping mill' }],
+    news: [{ title: 'Preservation Underway', url: 'https://news.org/bodie' }]
+  };
+
+  test('renders contextual chips and READ news chips for active location context', () => {
+    const html = renderToStaticMarkup(
+      <Controls {...baseProps} activeLocationContext={sampleLocation} showNews={true} />
+    );
+
+    expect(html).toContain('data-testid="contextual-chips-container"');
+    expect(html).toContain('READ: Preservation Underway');
+    expect(html).toContain('Ask about Bodie, California...');
+  });
+
+  test('chips remain visible when scanningStatusText is RESEARCHING FOLLOW-UP', () => {
+    const html = renderToStaticMarkup(
+      <Controls
+        {...baseProps}
+        activeLocationContext={sampleLocation}
+        scanningStatusText="RESEARCHING FOLLOW-UP"
+      />
+    );
+
+    expect(html).toContain('data-testid="contextual-chips-container"');
+  });
+
+  test('renders Narration On/Off toolbar toggle synced with isNarrationEnabled', () => {
+    const htmlOn = renderToStaticMarkup(
+      <Controls {...baseProps} isNarrationEnabled={true} />
+    );
+    expect(htmlOn).toContain('data-testid="narration-toolbar-toggle"');
+    expect(htmlOn).toContain('aria-label="Narration On"');
+
+    const htmlOff = renderToStaticMarkup(
+      <Controls {...baseProps} isNarrationEnabled={false} />
+    );
+    expect(htmlOff).toContain('aria-label="Narration Off"');
   });
 });
 

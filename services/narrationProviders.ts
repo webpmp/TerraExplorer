@@ -9,9 +9,15 @@ import { NarrationProviderType } from '../types';
 import { logTraceNarration, logProviderStart, logProviderComplete } from './waypointPipelineService';
 import { logTraceTiming } from './traceTimingService';
 
+export interface NarrationUnit {
+  section: 'SUMMARY' | 'NOTABLE' | 'CLIMATE' | 'EXPLORE' | 'NEWS';
+  text: string;
+}
+
 export interface NarrationSpeakOptions {
   title: string;
   description: string;
+  units?: NarrationUnit[];
   waypointId?: string;
   provider?: NarrationProviderType;
   voiceURI?: string;
@@ -97,7 +103,7 @@ export function cleanNarrationText(text: string): string {
     // Strip coordinate patterns e.g. 50°22'N 4°08'W or 50.3755, -4.1427
     .replace(/\b-?\d{1,3}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}\b/g, '')
     // Strip common raw metadata prefixes e.g. "Overview:", "Climate:", "Population:", "Coordinates:"
-    .replace(/^(overview|climate|population|coordinates|significance|highlights)\s*[:\-]\s*/gi, '')
+    .replace(/^(overview|climate|population|coordinates|significance|highlights|notable facts|notable fact|explore|recent news|news)\s*[:\-]\s*/gi, '')
     // Collapse multiple whitespace
     .replace(/\s+/g, ' ')
     .trim();
@@ -123,8 +129,8 @@ export function removeLeadingTitleFromDescription(title: string, description: st
   const escapedStripped = strippedTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   const titlePattern = strippedTitle && strippedTitle !== cleanTitle
-    ? `(?:${escapedTitle}|${escapedStripped})`
-    : escapedTitle;
+    ? `(?:(?:hms|rms|ss|uss)\\s+)?(?:${escapedTitle}|${escapedStripped})`
+    : `(?:(?:hms|rms|ss|uss)\\s+)?${escapedTitle}`;
 
   // Pattern A: Title followed by copula (is/was/are/were) and optional article (a/an/the)
   // Example: "Teresio Olivelli park is a beloved..." -> "A beloved..."
@@ -226,6 +232,37 @@ export function capDescriptionForNarration(description: string, maxChars: number
 }
 
 /**
+/**
+ * Splits a content unit string into sentence-bounded chunks if it exceeds maxChars.
+ */
+export function chunkContentUnit(text: string, maxChars: number = 600): string[] {
+  if (!text || typeof text !== 'string') return [];
+  const limit = typeof maxChars === 'number' && !isNaN(maxChars) && maxChars > 0 ? maxChars : 600;
+  const clean = cleanNarrationText(text).trim();
+  if (!clean) return [];
+  if (clean.length <= limit) return [clean];
+
+  const chunks: string[] = [];
+  let remaining = clean;
+
+  while (remaining.length > 0) {
+    if (remaining.length <= limit) {
+      chunks.push(remaining);
+      break;
+    }
+    const chunk = capDescriptionForNarration(remaining, limit);
+    if (!chunk || chunk.length === 0) {
+      chunks.push(remaining);
+      break;
+    }
+    chunks.push(chunk);
+    remaining = remaining.slice(chunk.length).trim();
+  }
+
+  return chunks;
+}
+
+/**
  * Splits enriched waypoint narration into two clean, self-contained segments:
  * 1. Opening segment: A concise, natural spoken introduction (target ~25-40 words, 1-2 complete sentences).
  * 2. Remainder segment: The remaining complete sentences of the description.
@@ -249,8 +286,10 @@ export function splitNarrationIntoSegments(
 
   const cappedDesc = capDescriptionForNarration(rawDesc, maxChars);
   if (cappedDesc.length < rawDesc.length) {
-    console.log(`[OrpheusTTS] Description capped for narration: originalLength=${rawDesc.length} narrationLength=${cappedDesc.length} limit=${maxChars}`);
+    console.log(`[OrpheusTTS] Description capped for narration: originalLength=${rawDesc.length} narrationLength=${cappedDesc.length}`);
+    console.log(`[KokoroTTS] Description capped for narration: originalLength=${rawDesc.length} narrationLength=${cappedDesc.length}`);
   }
+
   const normalizedDesc = removeLeadingTitleFromDescription(cleanTitle, cappedDesc);
 
   // Extract individual sentences with terminal punctuation
@@ -314,6 +353,160 @@ export function splitNarrationIntoSegments(
     opening: openingScript,
     remainder: remainderSentences.trim()
   };
+}
+
+export interface FullNarrationScriptOptions {
+  contentSettings?: {
+    summary?: boolean;
+    notable?: boolean;
+    climate?: boolean;
+    explore?: boolean;
+    news?: boolean;
+  };
+  showNews?: boolean;
+  maxChars?: number;
+}
+
+/**
+ * Assembles individual narration units in InfoPanel order:
+ * 1. Summary
+ * 2. Notable Facts (each item independently chunked/capped if needed)
+ * 3. Climate (independently chunked/capped if needed)
+ * 4. Explore (each follow-up answer independently chunked/capped if needed)
+ * 5. News (each news item independently chunked/capped if needed)
+ */
+export function buildFullNarrationUnits(
+  info: any,
+  options?: FullNarrationScriptOptions
+): NarrationUnit[] {
+  if (!info) return [];
+
+  const content = options?.contentSettings || {
+    summary: true,
+    notable: true,
+    climate: true,
+    explore: true,
+    news: true
+  };
+  const isNewsEnabled = options?.showNews !== false;
+  const unitLimit = typeof options?.maxChars === 'number' && !isNaN(options.maxChars) && options.maxChars > 0 ? options.maxChars : 600;
+
+  const units: NarrationUnit[] = [];
+
+  // 1. Summary
+  if (content.summary !== false) {
+    const rawDesc = info.description || info.context || '';
+    const cleanDesc = cleanNarrationText(rawDesc).trim();
+    if (cleanDesc && cleanDesc.length > 3) {
+      const chunks = chunkContentUnit(cleanDesc, unitLimit);
+      for (const chunk of chunks) {
+        units.push({ section: 'SUMMARY', text: chunk });
+      }
+    }
+  }
+
+  // 2. Notable Facts (read descriptive content, do NOT narrate "Notable facts:" or subsection titles)
+  if (content.notable !== false && Array.isArray(info.notable) && info.notable.length > 0) {
+    for (const item of info.notable) {
+      let itemText = '';
+      if (typeof item === 'string' && item.trim()) {
+        itemText = cleanNarrationText(item).trim();
+      } else if (item && typeof item === 'object') {
+        const desc = (item.description || item.summary || item.text || item.fact || item.content || '').trim();
+        const title = (item.title || item.name || '').trim();
+        if (desc) {
+          itemText = cleanNarrationText(desc).trim();
+        } else if (title) {
+          itemText = cleanNarrationText(title).trim();
+        }
+      }
+      if (itemText) {
+        const chunks = chunkContentUnit(itemText, unitLimit);
+        for (const chunk of chunks) {
+          units.push({ section: 'NOTABLE', text: chunk });
+        }
+      }
+    }
+  }
+
+  // 3. Climate (read descriptive content, do NOT narrate "Climate:" or classification heading if description is present)
+  if (content.climate !== false && info.climate) {
+    let cleanClim = '';
+    if (typeof info.climate === 'string') {
+      cleanClim = cleanNarrationText(info.climate).trim();
+    } else if (typeof info.climate === 'object') {
+      const climDesc = (info.climate.description || info.climate.summary || info.climate.text || '').trim();
+      const climName = (info.climate.name || info.climate.title || '').trim();
+      if (climDesc) {
+        cleanClim = cleanNarrationText(climDesc).trim();
+      } else if (climName) {
+        cleanClim = cleanNarrationText(climName).trim();
+      }
+    }
+    if (cleanClim && cleanClim.length > 3) {
+      const chunks = chunkContentUnit(cleanClim, unitLimit);
+      for (const chunk of chunks) {
+        units.push({ section: 'CLIMATE', text: chunk });
+      }
+    }
+  }
+
+  // 4. Explore (read answer content only, do NOT narrate "EXPLORE:" or question labels)
+  if (content.explore !== false && Array.isArray(info.followUps) && info.followUps.length > 0) {
+    for (const fu of info.followUps) {
+      if (fu && fu.answer) {
+        const a = cleanNarrationText(fu.answer).trim();
+        if (a) {
+          const chunks = chunkContentUnit(a, unitLimit);
+          for (const chunk of chunks) {
+            units.push({ section: 'EXPLORE', text: chunk });
+          }
+        }
+      }
+    }
+  }
+
+  // 5. News (read headlines/descriptions, do NOT narrate "Recent news:" or "NEWS:")
+  if (isNewsEnabled && content.news !== false && Array.isArray(info.news) && info.news.length > 0) {
+    for (const n of info.news) {
+      const headline = cleanNarrationText(n.headline || n.title || n.summary || n.description || '').trim();
+      if (headline) {
+        const chunks = chunkContentUnit(headline, unitLimit);
+        for (const chunk of chunks) {
+          units.push({ section: 'NEWS', text: chunk });
+        }
+      }
+    }
+  }
+
+  return units;
+}
+
+/**
+ * Assembles a comprehensive, multi-section narration script in InfoPanel order:
+ * 1. Summary
+ * 2. Notable Facts (content only, no section labels or item headings)
+ * 3. Climate (descriptive content only, no section label or classification heading)
+ * 4. Explore (Follow-up answers only, no question headings)
+ * 5. News (Headlines/descriptions only, no section label)
+ * Only enabled sections with actual content are included.
+ * Applies character limit per content unit, preserving full combined multi-section narration.
+ */
+export function buildFullNarrationScript(
+  info: any,
+  options?: FullNarrationScriptOptions
+): string {
+  const units = buildFullNarrationUnits(info, options);
+  if (units.length === 0) return '';
+
+  const contributingSections = Array.from(new Set(units.map((u) => u.section)));
+  const combinedScript = units.map((u) => u.text).join(' ');
+
+  console.log(
+    `[NarrationScript] ASSEMBLED sections=${contributingSections.join(',')} units=${units.length} totalLength=${combinedScript.length}`
+  );
+
+  return combinedScript;
 }
 
 /**
@@ -505,76 +698,112 @@ export class SystemVoiceProvider implements INarrationProvider {
       return;
     }
 
-    try {
-      if (window.speechSynthesis.paused) {
-        window.speechSynthesis.resume();
-      }
+    const units: NarrationUnit[] = options.units && options.units.length > 0
+      ? options.units
+      : [{ section: 'SUMMARY', text: script }];
 
-      const utterance = new SpeechSynthesisUtterance(script);
-      console.log(`[SearchNarration] UTTERANCE_CREATED textLength=${script.length}`);
-      this.currentUtterance = utterance;
-      this.activeUtterances.add(utterance);
+    const sections = Array.from(new Set(units.map((u) => u.section))).join(',');
+    console.log(`[NarrationPlayback] START sections=${sections} units=${units.length}`);
 
-      const speed = typeof options.speed === 'number' && !isNaN(options.speed) ? options.speed : this.defaultSpeed;
-      utterance.rate = Math.max(0.5, Math.min(2.0, speed));
+    let currentIndex = 0;
 
-      const volume = typeof options.volume === 'number' && !isNaN(options.volume) ? options.volume : this.defaultVolume;
-      utterance.volume = Math.max(0.0, Math.min(1.0, volume));
-
-      const voiceURI = options.voiceURI || this.defaultVoiceURI;
-      if (voiceURI) {
-        const voices = this.getVoices();
-        const matched = voices.find((v) => v.voiceURI === voiceURI || v.name === voiceURI);
-        if (matched) {
-          utterance.voice = matched;
-        }
-      }
-
-      logTraceNarration(stableId, waypointName, 'TTS request started', `provider="system" voice="${voiceURI || 'default'}"`);
-
-      utterance.onstart = () => {
-        this.isSpeakingInternal = true;
-        this.startKeepAlive();
-        console.log(`[SearchNarration] SPEECH_ONSTART text="${script.slice(0, 60)}..."`);
-        console.log('[narrationService] SPEECH_ONSTART');
-        logTraceNarration(stableId, waypointName, 'TTS generation started');
-        logTraceNarration(stableId, waypointName, 'playback started');
-        options.onStart?.();
-      };
-
-      utterance.onend = () => {
-        this.activeUtterances.delete(utterance);
+    const playNext = () => {
+      if (currentIndex >= units.length) {
+        console.log('[NarrationPlayback] COMPLETE');
+        this.activeUtterances.clear();
         this.isSpeakingInternal = false;
         this.currentUtterance = null;
         this.stopKeepAlive();
         console.log('[SearchNarration] SPEECH_ONEND');
         logTraceNarration(stableId, waypointName, 'playback ended');
         options.onEnd?.();
-      };
+        return;
+      }
 
-      utterance.onerror = (event: SpeechSynthesisErrorEvent) => {
-        this.activeUtterances.delete(utterance);
+      const unit = units[currentIndex];
+      const chunkText = currentIndex === 0 && options.title
+        ? buildNarrationScript(options.title, unit.text)
+        : unit.text;
+
+      console.log(`[NarrationPlayback] CHUNK_START index=${currentIndex} total=${units.length} section=${unit.section}`);
+
+      try {
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+
+        const utterance = new SpeechSynthesisUtterance(chunkText);
+        console.log(`[SearchNarration] UTTERANCE_CREATED textLength=${chunkText.length}`);
+        this.currentUtterance = utterance;
+        this.activeUtterances.add(utterance);
+
+        const speed = typeof options.speed === 'number' && !isNaN(options.speed) ? options.speed : this.defaultSpeed;
+        utterance.rate = Math.max(0.5, Math.min(2.0, speed));
+
+        const volume = typeof options.volume === 'number' && !isNaN(options.volume) ? options.volume : this.defaultVolume;
+        utterance.volume = Math.max(0.0, Math.min(1.0, volume));
+
+        const voiceURI = options.voiceURI || this.defaultVoiceURI;
+        if (voiceURI) {
+          const voices = this.getVoices();
+          const matched = voices.find((v) => v.voiceURI === voiceURI || v.name === voiceURI);
+          if (matched) {
+            utterance.voice = matched;
+          }
+        }
+
+        if (currentIndex === 0) {
+          logTraceNarration(stableId, waypointName, 'TTS request started', `provider="system" voice="${voiceURI || 'default'}"`);
+        }
+
+        utterance.onstart = () => {
+          if (currentIndex === 0) {
+            this.isSpeakingInternal = true;
+            this.startKeepAlive();
+            console.log(`[SearchNarration] SPEECH_ONSTART text="${chunkText.slice(0, 60)}..."`);
+            console.log('[narrationService] SPEECH_ONSTART');
+            logTraceNarration(stableId, waypointName, 'TTS generation started');
+            logTraceNarration(stableId, waypointName, 'playback started');
+            options.onStart?.();
+          }
+        };
+
+        utterance.onend = () => {
+          this.activeUtterances.delete(utterance);
+          console.log(`[NarrationPlayback] CHUNK_END index=${currentIndex} total=${units.length}`);
+          currentIndex++;
+          if (currentIndex < units.length) {
+            console.log(`[NarrationPlayback] ADVANCE nextIndex=${currentIndex}`);
+          }
+          playNext();
+        };
+
+        utterance.onerror = (event: SpeechSynthesisErrorEvent) => {
+          this.activeUtterances.delete(utterance);
+          this.isSpeakingInternal = false;
+          this.currentUtterance = null;
+          this.stopKeepAlive();
+          if (event.error !== 'canceled' && event.error !== 'interrupted') {
+            console.warn(`[SearchNarration] SPEECH_ONERROR error="${event.error}"`);
+            options.onError?.(event);
+          }
+        };
+
+        console.log(`[SearchNarration] SYNTHESIS_SPEAK_CALLED speaking=${window.speechSynthesis.speaking} pending=${window.speechSynthesis.pending} paused=${window.speechSynthesis.paused}`);
+        window.speechSynthesis.speak(utterance);
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+      } catch (err: unknown) {
         this.isSpeakingInternal = false;
         this.currentUtterance = null;
         this.stopKeepAlive();
-        if (event.error !== 'canceled' && event.error !== 'interrupted') {
-          console.warn(`[SearchNarration] SPEECH_ONERROR error="${event.error}"`);
-          options.onError?.(event);
-        }
-      };
-
-      console.log(`[SearchNarration] SYNTHESIS_SPEAK_CALLED speaking=${window.speechSynthesis.speaking} pending=${window.speechSynthesis.pending} paused=${window.speechSynthesis.paused}`);
-      window.speechSynthesis.speak(utterance);
-      if (window.speechSynthesis.paused) {
-        window.speechSynthesis.resume();
+        console.warn('[Narration] Failed to execute speak:', err);
+        options.onError?.(err);
       }
-    } catch (err: unknown) {
-      this.isSpeakingInternal = false;
-      this.currentUtterance = null;
-      this.stopKeepAlive();
-      console.warn('[Narration] Failed to execute speak:', err);
-      options.onError?.(err);
-    }
+    };
+
+    playNext();
   }
 
   public cancel(reason?: string, caller?: string): void {
@@ -831,6 +1060,11 @@ export class OrpheusTTSProvider implements INarrationProvider {
 
     if (!opening || opening.trim().length === 0) return;
 
+    const units = options?.units && options.units.length > 0 ? options.units : [{ section: 'SUMMARY', text: script }];
+    const sections = Array.from(new Set(units.map((u) => u.section))).join(',');
+    console.log(`[NarrationPlayback] START sections=${sections} units=${units.length}`);
+    console.log(`[NarrationPlayback] CHUNK_START index=0 total=${units.length} section=${units[0]?.section || 'SUMMARY'}`);
+
     const openingWords = opening.split(/\s+/).filter(Boolean).length;
     const remainderWords = remainder ? remainder.split(/\s+/).filter(Boolean).length : 0;
     console.log(`[OrpheusTTS Lifecycle] SEGMENTS_CREATED id="${stableId}" openingWords=${openingWords} remainderWords=${remainderWords} openingLen=${opening.length} remainderLen=${remainder.length}`);
@@ -960,6 +1194,7 @@ export class OrpheusTTSProvider implements INarrationProvider {
         openingEndedWallTime = Date.now();
         this.activeSourceNodes.delete(openingSourceNode);
         logTraceTiming('ORPHEUS_OPENING_PLAYBACK_ENDED', stableId, waypointName, `currentTime=${this.audioContext?.currentTime.toFixed(3)}s`);
+        console.log(`[NarrationPlayback] CHUNK_END index=0 total=${units.length}`);
 
         if (signal.aborted) {
           this.isSpeakingInternal = false;
@@ -972,6 +1207,9 @@ export class OrpheusTTSProvider implements INarrationProvider {
             logTraceTiming('ORPHEUS_TRANSITION_GAP_DETECTED', stableId, waypointName, `openingEndedBeforeRemainderReady=true currentTime=${this.audioContext?.currentTime.toFixed(3)}s`);
             console.warn(`[OrpheusTTS Lifecycle] GAP_DETECTED: Opening ended before remainder was ready! Remainder still synthesizing...`);
           }
+
+          console.log(`[NarrationPlayback] ADVANCE nextIndex=1`);
+          console.log(`[NarrationPlayback] CHUNK_START index=1 total=${units.length} section=${units[1]?.section || 'NOTABLE'}`);
 
           const remainderPcm = await remainderPromise;
           if (remainderPcm && remainderPcm.length > 0 && !signal.aborted && this.audioContext && this.gainNode) {
@@ -1000,6 +1238,8 @@ export class OrpheusTTSProvider implements INarrationProvider {
               this.activeSourceNodes.delete(remSourceNode);
               this.isSpeakingInternal = false;
               this.cleanupAudioNodes();
+              console.log(`[NarrationPlayback] CHUNK_END index=1 total=${units.length}`);
+              console.log('[NarrationPlayback] COMPLETE');
               logTraceTiming('NARRATION_PLAYBACK_ENDED', stableId, waypointName);
               logTraceNarration(stableId, waypointName, 'playback ended');
               options.onEnd?.();
@@ -1013,6 +1253,7 @@ export class OrpheusTTSProvider implements INarrationProvider {
 
         this.isSpeakingInternal = false;
         this.cleanupAudioNodes();
+        console.log('[NarrationPlayback] COMPLETE');
         logTraceTiming('NARRATION_PLAYBACK_ENDED', stableId, waypointName);
         logTraceNarration(stableId, waypointName, 'playback ended');
         options.onEnd?.();
@@ -1093,13 +1334,10 @@ export class OrpheusTTSProvider implements INarrationProvider {
     const waypointName = options?.title || stableId;
 
     const voice = options?.orpheusVoice || this.defaultVoice || 'tara';
-    const limit = typeof options?.limit === 'number' && !isNaN(options.limit) && options.limit > 0 ? options.limit : 600;
 
     let textToSend = script;
-    if (options?.description) {
-      const originalDesc = cleanNarrationText(options.description);
-      const cappedDesc = capDescriptionForNarration(originalDesc, limit);
-      textToSend = buildNarrationScript(options.title || '', cappedDesc);
+    if (!textToSend && options?.description) {
+      textToSend = buildNarrationScript(options.title || '', options.description);
     }
 
     if (!textToSend || textToSend.trim().length === 0) return null;
@@ -1472,16 +1710,18 @@ export class KokoroTTSProvider implements INarrationProvider {
     const stableId = options?.waypointId || options?.title || 'kokoro-voice';
     const waypointName = options?.title || stableId;
     const voice = options?.kokoroVoice || this.defaultVoice || 'am_michael';
-    const limit = typeof options?.limit === 'number' && !isNaN(options.limit) && options.limit > 0 ? options.limit : 600;
 
     let textToSend = script;
-    if (options?.description) {
-      const originalDesc = cleanNarrationText(options.description);
-      const cappedDesc = capDescriptionForNarration(originalDesc, limit);
-      textToSend = buildNarrationScript(options.title || '', cappedDesc);
+    if (!textToSend && options?.description) {
+      textToSend = buildNarrationScript(options.title || '', options.description);
     }
 
     if (!textToSend || textToSend.trim().length === 0) return;
+
+    const units = options?.units && options.units.length > 0 ? options.units : [{ section: 'SUMMARY', text: textToSend }];
+    const sections = Array.from(new Set(units.map((u) => u.section))).join(',');
+    console.log(`[NarrationPlayback] START sections=${sections} units=${units.length}`);
+    console.log(`[NarrationPlayback] CHUNK_START index=0 total=${units.length} section=${units[0]?.section || 'SUMMARY'}`);
 
     const controller = new AbortController();
     this.activeAbortController = controller;
@@ -1569,6 +1809,8 @@ export class KokoroTTSProvider implements INarrationProvider {
         this.activeSourceNodes.delete(sourceNode);
         this.isSpeakingInternal = false;
         this.cleanupAudioNodes();
+        console.log(`[NarrationPlayback] CHUNK_END index=0 total=${units.length}`);
+        console.log('[NarrationPlayback] COMPLETE');
         logTraceTiming('KOKORO_PLAYBACK_ENDED', stableId, waypointName);
         logTraceTiming('NARRATION_PLAYBACK_ENDED', stableId, waypointName);
         logTraceNarration(stableId, waypointName, 'playback ended');
@@ -1643,14 +1885,11 @@ export class KokoroTTSProvider implements INarrationProvider {
     const waypointName = options?.title || stableId;
 
     const voice = options?.kokoroVoice || this.defaultVoice || 'am_michael';
-    const limit = typeof options?.limit === 'number' && !isNaN(options.limit) && options.limit > 0 ? options.limit : 600;
     const speed = typeof options?.speed === 'number' && !isNaN(options.speed) ? options.speed : this.defaultSpeed;
 
     let textToSend = script;
-    if (options?.description) {
-      const originalDesc = cleanNarrationText(options.description);
-      const cappedDesc = capDescriptionForNarration(originalDesc, limit);
-      textToSend = buildNarrationScript(options.title || '', cappedDesc);
+    if (!textToSend && options?.description) {
+      textToSend = buildNarrationScript(options.title || '', options.description);
     }
 
     if (!textToSend || textToSend.trim().length === 0) return null;

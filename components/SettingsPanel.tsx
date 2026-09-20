@@ -1384,6 +1384,54 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
               </div>
 
               <div>
+                <label className={`${labelClasses} mb-2`}>Narration Content</label>
+                <div className="space-y-2">
+                  {[
+                    { id: 'summary' as const, label: 'Summary' },
+                    { id: 'notable' as const, label: 'Notable Facts' },
+                    { id: 'climate' as const, label: 'Climate' },
+                    { id: 'explore' as const, label: 'Explore (Follow-Ups)' },
+                    ...(settings.showNews !== false ? [{ id: 'news' as const, label: 'News' }] : [])
+                  ].map(({ id, label }) => {
+                    const isChecked = settings.narrationContent ? (settings.narrationContent as any)[id] !== false : true;
+                    return (
+                      <label key={id} className={`flex items-center gap-2 cursor-pointer text-xs select-none ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-white/80' : isRetro ? 'text-current' : 'text-white/80'}`}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          disabled={!settings.narrationEnabled}
+                          onChange={(e) => {
+                            const prevContent = settings.narrationContent || {
+                              summary: true,
+                              notable: true,
+                              climate: true,
+                              explore: true,
+                              news: true
+                            };
+                            onUpdateSettings({
+                              ...settings,
+                              narrationContent: {
+                                ...prevContent,
+                                [id]: e.target.checked
+                              }
+                            });
+                          }}
+                          className={`rounded ${
+                            skin === 'modern' ? 'accent-cyan-400' :
+                            skin === 'retro-green' ? 'accent-green-400' :
+                            skin === 'retro-amber' ? 'accent-[#ffb000]' :
+                            'accent-[#8b5a2b]'
+                          }`}
+                          data-testid={`narration-content-${id}`}
+                        />
+                        <span>{label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
                 <div className="flex justify-between text-xs mb-1">
                   <label className={labelClasses}>Narration Character Limit</label>
                   <span className={`font-mono ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? 'text-current' : 'text-cyan-300'}`}>

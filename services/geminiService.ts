@@ -304,6 +304,10 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
       max_tokens: params.config?.maxOutputTokens ?? params.generationConfig?.maxOutputTokens ?? 4096
     };
 
+    if (isJson) {
+      payload.response_format = { type: "json_object" };
+    }
+
     let normalizedBaseUrl = (baseUrl || 'http://localhost:1234/v1').trim().replace(/\/+$/, '');
     if (!normalizedBaseUrl.endsWith('/v1')) {
       normalizedBaseUrl += '/v1';
@@ -318,8 +322,11 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
     console.log(`system prompt length: ${systemMessage?.content?.length || 0}`);
     console.log(`user prompt length: ${userMessage?.content?.length || 0}`);
     console.log(`temperature: ${payload.temperature}`);
+    if (payload.response_format) {
+      console.log(`response_format: ${JSON.stringify(payload.response_format)}`);
+    }
 
-    const response = await fetch(`${normalizedBaseUrl}/chat/completions`, {
+    let response = await fetch(`${normalizedBaseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -327,6 +334,22 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
       body: JSON.stringify(payload),
       signal
     });
+
+    if (!response.ok && payload.response_format) {
+      const errorText = await response.clone().text();
+      if (errorText.toLowerCase().includes('response_format') || errorText.toLowerCase().includes('json_object') || response.status === 400) {
+        console.warn('[LM Studio] Server rejected response_format, retrying without response_format constraint...');
+        delete payload.response_format;
+        response = await fetch(`${normalizedBaseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload),
+          signal
+        });
+      }
+    }
 
     if (!response.ok) {
       const errorBody = await response.text();
@@ -341,10 +364,14 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
     }
 
     const data = await response.json();
+    const rawContent = data.choices?.[0]?.message?.content ?? "";
+
+    // Requirement 1 & 3: Inspect and log raw decoded HTTP response before any extraction, cleanup, or parser logic
+    console.log(`[LM STUDIO RAW HTTP RESPONSE] status: ${response.status}, content length: ${rawContent.length}, raw text: ${JSON.stringify(rawContent)}`);
 
     // Translate back to Gemini format
     return {
-      text: data.choices?.[0]?.message?.content || ""
+      text: rawContent
     };
 
   } catch (error) {
@@ -405,6 +432,10 @@ export const streamLocalLMStudioContent = async (
     temperature: params.config?.temperature ?? params.generationConfig?.temperature ?? 0.7,
     max_tokens: params.config?.maxOutputTokens ?? params.generationConfig?.maxOutputTokens ?? 4096
   };
+
+  if (isJson) {
+    payload.response_format = { type: "json_object" };
+  }
 
   let normalizedBaseUrl = (baseUrl || 'http://localhost:1234/v1').trim().replace(/\/+$/, '');
   if (!normalizedBaseUrl.endsWith('/v1')) {
@@ -3797,6 +3828,44 @@ export const recoverCoordinatesFromAi = async (rawQuery: string, intent: string,
     rawQuery
   });
 
+  // Step 1: Check authoritative knowledge base first before LLM generation
+  const lookupKey = entity.toLowerCase().trim();
+  const histKnowledge = getHistoricalEntityKnowledge(entity) ||
+                        getHistoricalEntityKnowledge(lookupKey) ||
+                        getHistoricalEntityKnowledge(rawQuery);
+  if (histKnowledge?.approximateCoordinates) {
+    const coordSource = (histKnowledge.approximateCoordinates.source || 'deterministic') as CoordinateSource;
+    console.log(`[Coordinate Recovery Strategy]
+entity: "${entity}"
+intent: "${intent}"
+entityType: "${histKnowledge.entityType}"
+isMaritime: ${isMaritime}
+expectedEnvironment: ${isMaritime ? 'water' : 'land'}
+expectedRegion: "${histKnowledge.expectedRegion}"
+strategy: "AUTHORITATIVE_KNOWLEDGE_BASE"
+candidateCoordinate: "${histKnowledge.approximateCoordinates.lat}, ${histKnowledge.approximateCoordinates.lng}"
+candidateSource: "${coordSource}"
+validationResult: "ACCEPT"`);
+    return {
+      lat: histKnowledge.approximateCoordinates.lat,
+      lng: histKnowledge.approximateCoordinates.lng,
+      source: coordSource,
+      confidence: histKnowledge.confidence || (coordSource === 'deterministic' ? 'high' : 'low'),
+      recoveredEntity: histKnowledge.entity,
+      canonicalName: histKnowledge.entity,
+      entityType: histKnowledge.entityType === 'shipwreck' ? 'shipwreck_site' : histKnowledge.entityType,
+      coordinateTrust: coordSource === 'deterministic' ? 'verified' : 'provisional',
+      identityStatus: 'verified'
+    } as any;
+  }
+
+  console.log(`[Coordinate Recovery Strategy]
+entity: "${entity}"
+intent: "${intent}"
+isMaritime: ${isMaritime}
+expectedEnvironment: ${isMaritime ? 'water' : 'land'}
+strategy: "AI_RECOVERY_PROMPT"`);
+
   let promptText = `You are performing coordinate recovery for a strictly locked entity identity.
 Requested Entity: "${entity}" (extracted from query: "${rawQuery}", intent: ${intent}).
 
@@ -3805,7 +3874,12 @@ CRITICAL INSTRUCTIONS:
 - Recover precise real-world decimal latitude and longitude coordinates for THIS specific entity only.
 - Do NOT substitute another entity, shipwreck, vessel, battle, landmark, or location.
 - If this specific entity cannot be confidently located, return lat: 997, lng: 997 (or null coordinates).
-
+${isMaritime ? `
+MARITIME DISCOVERY SITE CONSTRAINTS:
+- The requested entity is a physical maritime discovery site or shipwreck located in a body of water (sea, ocean, gulf, bay, coastal water, or reef).
+- The coordinates MUST correspond to the actual physical offshore or underwater discovery site / wreck location, NOT an inland land coordinate, island municipality, administrative center, museum, or nearby land city.
+- Expected environment: WATER / OFFSHORE / REEF.
+` : ''}
 Return a strictly valid JSON object:
 {
   "requestedEntity": "${entity}",

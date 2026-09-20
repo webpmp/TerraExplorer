@@ -1,14 +1,15 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, ZoomIn, ZoomOut, Loader2, Star, X, Lock, Unlock, Palette, Settings } from 'lucide-react';
+import { Search, ZoomIn, ZoomOut, Loader2, Star, X, Palette, Settings, Volume2, VolumeX } from 'lucide-react';
 import { SkinType } from '../types';
 import { isCelestialBodySupported, detectCelestialBody } from '../services/celestialCapabilities';
 import { narrationService } from '../services/narrationService';
+import { generateContextualChips, ContextualChip } from '../services/followUpService';
 
 interface ControlsProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
-  onSearch: (query: string) => void;
+  onSearch: (query: string, isExplicitChip?: boolean) => void;
   onTraceRoute: (text: string) => void;
   isSearching: boolean;
   searchError?: string | null;
@@ -19,12 +20,17 @@ interface ControlsProps {
   paused: boolean;
   isTraceModalOpen: boolean;
   onToggleTraceModal: (isOpen: boolean) => void;
-  isZoomLocked: boolean;
-  onToggleZoomLock: () => void;
+  isZoomLocked?: boolean;
+  onToggleZoomLock?: () => void;
+  isNarrationEnabled?: boolean;
+  onToggleNarration?: () => void;
+  isNarrationAvailable?: boolean;
+  showNews?: boolean;
   onCycleSkin?: () => void;
   isScanningArea?: boolean;
   scanningStatusText?: string | null;
   activeWaypointTitle?: string | null;
+  activeLocationContext?: { name: string; entityType?: string; description?: string; notable?: any[]; news?: any[]; followUps?: any[] } | null;
   onCancelScan?: () => void;
   onToggleSettings?: () => void;
   onOpenSettingsTab?: (tab: 'providers' | 'general' | 'appearance' | 'audio') => void;
@@ -156,10 +162,15 @@ const Controls: React.FC<ControlsProps> = ({
   onToggleTraceModal,
   isZoomLocked,
   onToggleZoomLock,
+  isNarrationEnabled = true,
+  onToggleNarration,
+  isNarrationAvailable = true,
+  showNews = true,
   onCycleSkin,
   isScanningArea = false,
   scanningStatusText = null,
   activeWaypointTitle = null,
+  activeLocationContext = null,
   onCancelScan,
   onToggleSettings,
   onOpenSettingsTab,
@@ -233,7 +244,7 @@ const Controls: React.FC<ControlsProps> = ({
     return () => clearInterval(interval);
   }, [scanningStatusText]);
 
-  const isScanStatusQuery = (q: string) => {
+    const isScanStatusQuery = (q: string) => {
     const upper = q.trim().toUpperCase();
     return upper.startsWith("STARTING SCAN") ||
            upper.startsWith("LOCATING AREA") ||
@@ -247,6 +258,7 @@ const Controls: React.FC<ControlsProps> = ({
            upper.includes("WAYPOINTS FOUND") ||
            upper.startsWith("PREPARING WAYPOINT") ||
            upper.startsWith("PREPARING NARRATION") ||
+           upper.startsWith("RESEARCHING FOLLOW-UP") ||
            upper === "SCAN CANCELLED" ||
            upper === "SCAN FAILED";
   };
@@ -316,7 +328,10 @@ const Controls: React.FC<ControlsProps> = ({
       statusText: "text-gray-200 font-sans",
       statusDismiss: "text-white/40 hover:text-white transition-colors p-0.5 rounded-full",
       copyright: "text-gray-500 font-sans",
-      modal: "bg-black/80 backdrop-blur-md border border-cyan-400/30 text-white rounded-xl shadow-2xl"
+      modal: "bg-black/80 backdrop-blur-md border border-cyan-400/30 text-white rounded-xl shadow-2xl",
+      chip: isOSM
+        ? "px-3 py-1 bg-black/75 hover:bg-black/90 text-white border border-white/20 rounded-full text-xs font-mono transition-all shadow-md active:scale-95 cursor-pointer backdrop-blur-md"
+        : "px-3 py-1 bg-black/60 hover:bg-white/20 text-white border border-white/20 rounded-full text-xs font-mono transition-all shadow-md active:scale-95 cursor-pointer backdrop-blur-md"
     },
     'retro-green': {
       btn: "bg-black border border-green-400 text-green-300 hover:bg-green-400 hover:text-black rounded-none font-retro",
@@ -334,7 +349,8 @@ const Controls: React.FC<ControlsProps> = ({
       statusText: "text-green-300 font-retro",
       statusDismiss: "text-green-400/70 hover:text-green-200 transition-colors p-0.5",
       copyright: "text-green-400/60 font-retro uppercase tracking-widest",
-      modal: "bg-black/85 backdrop-blur-sm border-2 border-green-400 text-green-300 font-retro shadow-[0_0_20px_rgba(74,222,128,0.2)] rounded-none"
+      modal: "bg-black/85 backdrop-blur-sm border-2 border-green-400 text-green-300 font-retro shadow-[0_0_20px_rgba(74,222,128,0.2)] rounded-none",
+      chip: "px-3 py-1 bg-black hover:bg-green-400 hover:text-black text-green-300 border border-green-400 rounded-none text-xs font-retro uppercase tracking-wider transition-colors active:scale-95 cursor-pointer"
     },
     'retro-amber': {
       btn: "bg-black border border-amber-400 text-amber-300 hover:bg-amber-400 hover:text-black rounded-none font-retro",
@@ -352,7 +368,8 @@ const Controls: React.FC<ControlsProps> = ({
       statusText: "text-amber-300 font-retro",
       statusDismiss: "text-amber-400/70 hover:text-amber-200 transition-colors p-0.5",
       copyright: "text-amber-400/60 font-retro uppercase tracking-widest",
-      modal: "bg-black/85 backdrop-blur-sm border-2 border-amber-400 text-amber-300 font-retro shadow-[0_0_20px_rgba(251,191,36,0.2)] rounded-none"
+      modal: "bg-black/85 backdrop-blur-sm border-2 border-amber-400 text-amber-300 font-retro shadow-[0_0_20px_rgba(251,191,36,0.2)] rounded-none",
+      chip: "px-3 py-1 bg-black hover:bg-amber-400 hover:text-black text-amber-300 border border-amber-400 rounded-none text-xs font-retro uppercase tracking-wider transition-colors active:scale-95 cursor-pointer"
     },
     'parchment': {
       btn: "bg-[#f4ead5] border border-[#8b5a2b] text-[#5c3a21] hover:bg-[#e8d5b5] hover:text-[#3e2723] rounded shadow-[2px_2px_4px_rgba(0,0,0,0.2)] font-sans",
@@ -369,7 +386,8 @@ const Controls: React.FC<ControlsProps> = ({
       statusText: "text-[#522B07] font-sans",
       statusDismiss: "text-[#8b5a2b]/70 hover:text-[#3e2723] transition-colors p-0.5",
       copyright: "text-white/50 font-sans",
-      modal: "text-[#3e2723] font-sans shadow-[0_4px_20px_rgba(0,0,0,0.4)]"
+      modal: "text-[#3e2723] font-sans shadow-[0_4px_20px_rgba(0,0,0,0.4)]",
+      chip: "px-3 py-1 bg-[#f4ead5] hover:bg-[#e8d5b5] text-[#5c3a21] hover:text-[#3e2723] border border-[#8b5a2b] rounded-full text-xs font-sans shadow-[2px_2px_4px_rgba(0,0,0,0.2)] transition-colors active:scale-95 cursor-pointer"
     }
   };
 
@@ -391,13 +409,31 @@ const Controls: React.FC<ControlsProps> = ({
     }
   };
 
+  // Contextual question & news chips
+  const chips = activeLocationContext ? generateContextualChips(activeLocationContext, showNews) : [];
+
+  const handleChipClick = (chip: ContextualChip) => {
+    if (chip.type === 'news' && chip.url) {
+      window.open(chip.url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    narrationService.prime();
+    setQuery("");
+    onSearch(chip.query || chip.label, true);
+  };
+
   // Format placeholder for retro skins, clear on focus.
+  // When an active location context is present, display "Ask about {name}..."
   // When an active waypoint title is provided (during route navigation) and no active user search/focus is happening, display it.
-  const activePlaceholderText = (activeWaypointTitle && !scanningStatusText) ? activeWaypointTitle : placeholder;
-  const displayPlaceholder = isFocused ? "" : (skin === 'modern' ? activePlaceholderText : activePlaceholderText.toUpperCase());
+  const activePlaceholderText = (activeLocationContext && !scanningStatusText)
+    ? `Ask about ${activeLocationContext.name}...`
+    : (activeWaypointTitle && !scanningStatusText)
+    ? activeWaypointTitle
+    : placeholder;
+  const displayPlaceholder = isFocused ? "" : (skin === 'modern' || skin === 'parchment' ? activePlaceholderText : activePlaceholderText.toUpperCase());
 
   return (
-    <div className="absolute bottom-6 left-0 right-0 z-20 flex flex-col items-center gap-4 pointer-events-none px-4">
+    <div className="absolute bottom-2.5 left-0 right-0 z-20 flex flex-col items-center gap-2 pointer-events-none px-4">
       <style>{`
         @keyframes search-orbit {
           from {
@@ -472,6 +508,13 @@ const Controls: React.FC<ControlsProps> = ({
         }
         .modern-osm-hover:hover {
           background-color: rgba(0, 0, 0, 0.25);
+        }
+        .no-scrollbar {
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+        .no-scrollbar::-webkit-scrollbar {
+          display: none;
         }
       `}</style>
 
@@ -573,12 +616,16 @@ const Controls: React.FC<ControlsProps> = ({
           <ZoomIn size={20} />
         </button>
         <button
-          onClick={onToggleZoomLock}
-          className={`p-3 transition-all active:scale-95 ${theme.btn} ${isZoomLocked ? theme.favActive : ''}`}
-          aria-label={isZoomLocked ? "Zoom locked" : "Zoom enabled"}
-          title={isZoomLocked ? "Zoom locked" : "Zoom enabled"}
+          onClick={onToggleNarration}
+          disabled={!isNarrationAvailable}
+          className={`p-3 transition-all active:scale-95 ${theme.btn} ${
+            isNarrationEnabled ? theme.favActive : ''
+          } ${!isNarrationAvailable ? 'opacity-40 cursor-not-allowed' : ''}`}
+          aria-label={!isNarrationAvailable ? "Narration unavailable" : isNarrationEnabled ? "Narration On" : "Narration Off"}
+          title={!isNarrationAvailable ? "Narration unavailable" : isNarrationEnabled ? "Narration On" : "Narration Off"}
+          data-testid="narration-toolbar-toggle"
         >
-          {isZoomLocked ? <Lock size={20} /> : <Unlock size={20} />}
+          {isNarrationEnabled ? <Volume2 size={20} /> : <VolumeX size={20} />}
         </button>
 
 
@@ -617,6 +664,32 @@ const Controls: React.FC<ControlsProps> = ({
             </button>
         )}
       </div>
+
+      {/* Contextual Question & News Chips (Positioned between toolbar and search field) */}
+      {chips.length > 0 && (!scanningStatusText || scanningStatusText.toUpperCase().includes("RESEARCHING FOLLOW-UP")) && (
+        <div
+          className="w-full max-w-[532px] overflow-x-auto no-scrollbar pointer-events-auto z-20 animate-in fade-in slide-in-from-bottom-1 duration-200"
+          data-testid="contextual-chips-container"
+        >
+          <div className="flex items-center justify-start gap-1.5 flex-nowrap w-max px-2 min-w-full">
+            {chips.map((chip, idx) => (
+              <button
+                key={chip.id || idx}
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  handleChipClick(chip);
+                }}
+                className={`${theme.chip} whitespace-nowrap shrink-0`}
+                data-testid={`contextual-chip-${idx}`}
+              >
+                {skin === 'retro-green' || skin === 'retro-amber' ? chip.label.toUpperCase() : chip.label}
+              </button>
+            ))}
+            <div className="w-1 shrink-0" aria-hidden="true" />
+          </div>
+        </div>
+      )}
 
       {/* Search Input */}
       <form onSubmit={handleSubmit} className="w-full max-w-[532px] pointer-events-auto relative group">

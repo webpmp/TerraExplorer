@@ -112,11 +112,20 @@ export interface ImageMetadata {
   source?: string;
 }
 
+export interface FollowUpItem {
+  id: string;
+  question: string;
+  answer: string;
+  images?: Array<string | ImageMetadata>;
+  createdAt?: string;
+}
+
 export interface LocationInfo {
   name: string;
   type: LocationType;
   entityType?: string;
   description: string;
+  followUps?: FollowUpItem[];
   population?: PopulationInfo | null;
   climate?: ClimateInfo | null;
   notable?: NotableItem[];
@@ -306,6 +315,14 @@ export type NewsProvider = 'gemini' | 'newsapi' | 'newsdata' | 'nyt';
 export type DocumentaryDuration = number | 'short' | 'cinematic' | 'long';
 export type NarrationProviderType = 'system' | 'kokoro' | 'orpheus';
 
+export interface NarrationContentConfig {
+  summary: boolean;
+  notable: boolean;
+  climate: boolean;
+  explore: boolean;
+  news: boolean;
+}
+
 export interface UserSettings {
   aiProvider: AIProvider;
   lmStudioUrl: string;
@@ -318,6 +335,7 @@ export interface UserSettings {
   documentaryMode?: boolean;
   documentaryDuration?: number;
   narrationEnabled?: boolean;
+  narrationContent?: NarrationContentConfig;
   narrationProvider?: NarrationProviderType;
   narrationVoice?: string;
   kokoroVoice?: string;
@@ -414,6 +432,7 @@ export interface Waypoint {
   historicalPeriod?: string;
   entities?: string[];
   notable?: NotableItem[];
+  followUps?: FollowUpItem[];
   historicalConfidence?: {
     level: 'high' | 'medium' | 'low';
     reasoning: string;
@@ -450,6 +469,7 @@ export interface FavoriteLocation {
   lng: number;
   type: 'location' | 'route';
   waypoints?: Waypoint[];
+  followUps?: FollowUpItem[];
   notes?: string;
 }
 
