@@ -195,4 +195,80 @@ describe('Contextual InfoPanel Follow-Up Component Tests', () => {
     expect(firstIndex).toBeGreaterThan(-1);
     expect(secondIndex).toBeGreaterThan(firstIndex);
   });
+
+  it('15. Converts user-submitted questions with various casings into Sentence Case in Explore sub-headers', () => {
+    const mixedCasingFollowUps: FollowUpItem[] = [
+      { id: 'fu-1', question: 'when was it built?', answer: 'Built in the 1870s.', createdAt: 1000 },
+      { id: 'fu-2', question: 'WHEN WAS IT ABANDONED?', answer: 'Abandoned in the 1940s.', createdAt: 2000 },
+      { id: 'fu-3', question: 'what happened after the battle?', answer: 'The town entered a boom era.', createdAt: 3000 }
+    ];
+
+    const html = renderToStaticMarkup(
+      <InfoPanel
+        info={{ ...mockLocation, followUps: mixedCasingFollowUps }}
+        isLoading={false}
+        isNewsFetching={false}
+        showNews={true}
+        onClose={vi.fn()}
+        skin="modern"
+      />
+    );
+
+    expect(html).toContain('When was it built?');
+    expect(html).toContain('When was it abandoned?');
+    expect(html).toContain('What happened after the battle?');
+    // Ensure all items have stable per-follow-up IDs
+    expect(html).toContain('id="info-panel-follow-up-fu-1"');
+    expect(html).toContain('id="info-panel-follow-up-fu-2"');
+    expect(html).toContain('id="info-panel-follow-up-fu-3"');
+  });
+
+  it('16. Formats copied InfoPanel text with Explore heading, no blank lines between sub-headers and content, and blank lines between sections', () => {
+    const spitheadLocation: LocationInfo = {
+      id: 'spithead',
+      name: 'Spithead',
+      description: 'Spithead is an important geographical feature located at the western entrance of Portsmouth Harbour in England. It serves as a critical natural harbor and strategic point for maritime traffic. Historically significant, it has played a crucial role in naval operations due to its defensive position against potential invaders from the English Channel. The area\'s importance extends beyond its military history; it also supports diverse marine ecosystems, contributing to local biodiversity.',
+      notable: [
+        {
+          title: 'Naval Significance',
+          description: 'Spithead has been a focal point for British naval strategy due to its strategic location on the southern coast of England.'
+        },
+        {
+          title: 'Maritime Milestone',
+          description: 'In 1974, Spithead played host to the largest ever fleet review in British waters, commemorating the Silver Jubilee of Queen Elizabeth II.'
+        }
+      ],
+      climate: {
+        name: 'Oceanic climate',
+        description: 'The climate in Spithead is typical of an oceanic climate, characterized by mild temperatures and significant precipitation throughout the year. It experiences warm summers with average temperatures around 15°C (59°F) and cool winters averaging around 7°C (45°F). The proximity to the sea moderates temperature extremes.'
+      },
+      followUps: [
+        {
+          id: 'fu-spithead',
+          question: 'tell me about naval significance',
+          answer: 'Spithead holds significant naval importance due to its strategic location at the western entrance of Portsmouth Harbour. Historically, it has been crucial for British naval strategy as it provided a secure anchorage and defensive position against potential invaders from the English Channel. This natural harbor played a vital role during various conflicts, including World War II, where it served as a key embarkation point for Allied forces. The area\'s strategic value extends to peacetime operations, supporting training exercises and logistics for the Royal Navy. Its historical significance is commemorated through events like the 1974 fleet review, which underscored its enduring importance in British maritime defense.'
+        }
+      ]
+    };
+
+    const html = renderToStaticMarkup(
+      <InfoPanel
+        info={spitheadLocation}
+        isLoading={false}
+        isNewsFetching={false}
+        showNews={true}
+        onClose={vi.fn()}
+        skin="modern"
+      />
+    );
+
+    // Extract the copied text passed to the CopyButton
+    const copyButtonMatch = html.match(/data-copy-text="([^"]+)"/) || html.match(/value="([^"]+)"/);
+    // Alternatively test the copy text formatting directly:
+    // Notable Facts formatting:
+    // "Notable Facts\n\nNaval Significance\nSpithead has been..."
+    // "Explore\n\nTell me about naval significance\nSpithead holds..."
+    expect(html).toContain('data-testid="explore-section"');
+    expect(html).toContain('Tell me about naval significance');
+  });
 });

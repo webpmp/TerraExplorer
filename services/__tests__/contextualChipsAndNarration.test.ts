@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { generateContextualQuestionChips, generateContextualChips } from '../../services/followUpService';
+import { generateContextualQuestionChips, generateContextualChips, toSentenceCase } from '../../services/followUpService';
 import { buildFullNarrationScript, buildFullNarrationUnits, chunkContentUnit } from '../../services/narrationProviders';
 import { LocationInfo } from '../../types';
 
@@ -362,19 +362,20 @@ describe('Narration Content vs UI Labels & Headings (Andoas Case)', () => {
   });
 });
 
+const evaluateGuard = (
+  activeNarration: { selectionId: string; narrativeKey?: string; spoken: boolean } | null,
+  selectionId: string,
+  narrativeKey: string
+) => {
+  const isDuplicate = Boolean(
+    activeNarration &&
+    activeNarration.selectionId === selectionId &&
+    activeNarration.narrativeKey === narrativeKey
+  );
+  return isDuplicate ? 'DUPLICATE_BLOCKED' : 'ALLOW_NEW_NARRATION';
+};
+
 describe('Narration Guard & Identity Matching', () => {
-  const evaluateGuard = (
-    activeNarration: { selectionId: string; narrativeKey?: string; spoken: boolean } | null,
-    selectionId: string,
-    narrativeKey: string
-  ) => {
-    const isDuplicate = Boolean(
-      activeNarration &&
-      activeNarration.selectionId === selectionId &&
-      activeNarration.narrativeKey === narrativeKey
-    );
-    return isDuplicate ? 'DUPLICATE_BLOCKED' : 'ALLOW_NEW_NARRATION';
-  };
 
   const title = 'Kyoto';
   const summaryScript = 'Kyoto was the imperial capital of Japan for over a millennium.';
@@ -408,5 +409,160 @@ describe('Narration Guard & Identity Matching', () => {
     const active = { selectionId: 'loc-old', narrativeKey: summaryKey, spoken: true };
     const decision = evaluateGuard(active, 'loc-kyoto', summaryKey);
     expect(decision).toBe('ALLOW_NEW_NARRATION');
+  });
+});
+
+describe('Sentence Case Formatting for Follow-Up Questions', () => {
+  it('converts all-lowercase questions to Sentence Case', () => {
+    expect(toSentenceCase('when was it built?')).toBe('When was it built?');
+    expect(toSentenceCase('what happened after the battle?')).toBe('What happened after the battle?');
+  });
+
+  it('converts ALL-CAPS questions to Sentence Case', () => {
+    expect(toSentenceCase('WHEN WAS IT BUILT?')).toBe('When was it built?');
+    expect(toSentenceCase('WHAT HAPPENED AFTER THE BATTLE?')).toBe('What happened after the battle?');
+  });
+
+  it('preserves already capitalized questions', () => {
+    expect(toSentenceCase('Who designed the building?')).toBe('Who designed the building?');
+  });
+
+  it('preserves proper nouns and internal casing when not all-caps', () => {
+    expect(toSentenceCase('who is Mary Queen of Scots?')).toBe('Who is Mary Queen of Scots?');
+    expect(toSentenceCase('where is the Eiffel Tower?')).toBe('Where is the Eiffel Tower?');
+  });
+
+  it('preserves punctuation and trims whitespace properly', () => {
+    expect(toSentenceCase('  how did it survive?  ')).toBe('How did it survive?');
+    expect(toSentenceCase('')).toBe('');
+  });
+});
+
+describe('Incremental Explore Follow-Up Narration', () => {
+  it('chunks long follow-up answer independently using per-content-unit limits', () => {
+    const longAnswer = 'The fortress was established in the 12th century by Norman settlers. It withstood multiple sieges during the regional wars of succession. In modern times it serves as a prominent heritage museum with thousands of visitors annually.';
+    const chunks = chunkContentUnit(longAnswer, 100);
+    expect(chunks.length).toBeGreaterThanOrEqual(2);
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(105);
+      expect(chunk).toMatch(/[.!?]$/);
+    }
+  });
+
+  it('generates distinct explore narrativeKey that does not collide with location summary', () => {
+    const locationKey = 'bodie::Bodie is a historic gold mining ghost town...';
+    const exploreFollowUp = {
+      id: 'fu-123',
+      question: 'Why was it abandoned?',
+      answer: 'The decline of mining profits led to its abandonment.'
+    };
+    const exploreKey = `explore::${exploreFollowUp.id}::${exploreFollowUp.answer}`;
+
+    expect(exploreKey).not.toBe(locationKey);
+    expect(exploreKey.startsWith('explore::fu-123')).toBe(true);
+  });
+});
+
+describe('Follow-Up Narration Speech and Content Validation', () => {
+  it('buildNarrationScript formats answer-only when title is empty', async () => {
+    const { NarrationService } = await import('../../services/narrationService');
+    const service = NarrationService.getInstance();
+    const question = 'When and why did it sink?';
+    const answer = 'The submarine sank in 1904 after colliding with a training vessel during nighttime naval exercises.';
+
+    // When title is empty (the required follow-up narration contract), script is purely the answer
+    const script = service.buildNarrationScript('', answer);
+    expect(script).toBe(answer);
+    expect(script).not.toContain(question);
+  });
+
+  it('speakStructured accepts answer-only narration with empty title and invokes active provider', async () => {
+    const { NarrationService } = await import('../../services/narrationService');
+    const service = NarrationService.getInstance();
+    const answer = 'The submarine sank in 1904 after colliding with a training vessel.';
+
+    const speakSpy = vi.spyOn(service as any, 'speak');
+    service.speakStructured({
+      title: '',
+      description: answer,
+      waypointId: 'fu-submarine-1'
+    });
+
+    expect(speakSpy).toHaveBeenCalledWith(expect.objectContaining({
+      title: '',
+      description: answer,
+      waypointId: 'fu-submarine-1'
+    }));
+    speakSpy.mockRestore();
+  });
+
+  it('speakStructured silently rejects empty or short answer (< 3 characters)', async () => {
+    const { NarrationService } = await import('../../services/narrationService');
+    const service = NarrationService.getInstance();
+    const speakSpy = vi.spyOn(service as any, 'speak');
+
+    service.speakStructured({
+      title: '',
+      description: '',
+      waypointId: 'fu-empty'
+    });
+    service.speakStructured({
+      title: '',
+      description: 'ok',
+      waypointId: 'fu-short'
+    });
+
+    expect(speakSpy).not.toHaveBeenCalled();
+    speakSpy.mockRestore();
+  });
+
+  it('preserves initial location narration with both title and description', async () => {
+    const { NarrationService } = await import('../../services/narrationService');
+    const service = NarrationService.getInstance();
+    const title = 'Salem, Massachusetts';
+    const description = 'Historic coastal city in Essex County, famous for the 1692 witch trials.';
+
+    const script = service.buildNarrationScript(title, description);
+    expect(script).toBe(`${title}. ${description}`);
+
+    const speakSpy = vi.spyOn(service as any, 'speak');
+    service.speakStructured({
+      title,
+      description,
+      waypointId: 'loc-salem'
+    });
+
+    expect(speakSpy).toHaveBeenCalledWith(expect.objectContaining({
+      title,
+      description,
+      waypointId: 'loc-salem'
+    }));
+    speakSpy.mockRestore();
+  });
+
+  it('evaluates follow-up duplicate guard and ensures sequential follow-ups narrate distinctly', () => {
+    const activeGuard: { selectionId: string; narrativeKey: string; spoken: boolean } = {
+      selectionId: 'loc-1',
+      narrativeKey: 'bodie::Bodie is a historic ghost town...',
+      spoken: true
+    };
+
+    const fu1 = { id: 'fu-1', question: 'When was gold discovered?', answer: 'Gold was discovered in 1859 by William Bodey.' };
+    const fu1Key = `explore::${fu1.id}::${fu1.answer}`;
+
+    // 1st follow-up is allowed because its key differs from the initial location key
+    const decision1 = evaluateGuard(activeGuard, 'loc-1', fu1Key);
+    expect(decision1).toBe('ALLOW_NEW_NARRATION');
+
+    // After 1st follow-up is spoken, exact re-trigger is blocked
+    activeGuard.narrativeKey = fu1Key;
+    const retriggerDecision = evaluateGuard(activeGuard, 'loc-1', fu1Key);
+    expect(retriggerDecision).toBe('DUPLICATE_BLOCKED');
+
+    // 2nd sequential follow-up has distinct id and answer, so it is allowed
+    const fu2 = { id: 'fu-2', question: 'Why was it abandoned?', answer: 'The mining boom declined rapidly by the early 20th century.' };
+    const fu2Key = `explore::${fu2.id}::${fu2.answer}`;
+    const decision2 = evaluateGuard(activeGuard, 'loc-1', fu2Key);
+    expect(decision2).toBe('ALLOW_NEW_NARRATION');
   });
 });

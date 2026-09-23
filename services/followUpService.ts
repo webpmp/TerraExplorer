@@ -18,6 +18,31 @@ export interface ContextualChip {
 }
 
 /**
+ * Converts a follow-up question or string to clean Sentence Case:
+ * - Capitalizes the first alphabetic character.
+ * - If the text is all-uppercase, converts subsequent letters to lowercase.
+ * - Preserves natural wording, proper nouns with existing casing, and punctuation.
+ */
+export function toSentenceCase(str: string): string {
+  if (!str || typeof str !== 'string') return '';
+  const trimmed = str.trim();
+  if (!trimmed) return '';
+
+  const letters = trimmed.replace(/[^a-zA-Z]/g, '');
+  const isAllCaps = letters.length > 1 && letters === letters.toUpperCase();
+
+  const working = isAllCaps ? trimmed.toLowerCase() : trimmed;
+
+  const firstLetterMatch = working.match(/[a-zA-Z]/);
+  if (!firstLetterMatch || firstLetterMatch.index === undefined) {
+    return working;
+  }
+
+  const idx = firstLetterMatch.index;
+  return working.slice(0, idx) + working[idx].toUpperCase() + working.slice(idx + 1);
+}
+
+/**
  * Generates dynamic, location-aware question suggestions tailored to the active location.
  * Uses location name, entity type, summary cues, notable facts, and climate,
  * while omitting questions already answered in existing follow-ups.

@@ -11,7 +11,8 @@ import MarkerProjectionBeam from './components/MarkerProjectionBeam';
 import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import SettingsPanel from './components/SettingsPanel';
-import { getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, EnrichmentMetrics, cancelFeatureInfoRequests, isLMStudioNoModelError, LM_STUDIO_NO_MODEL_MESSAGE, LM_STUDIO_NO_MODEL_INSTRUCTION, isLMStudioContextOverflowError, LM_STUDIO_CONTEXT_OVERFLOW_MESSAGE, LM_STUDIO_CONTEXT_OVERFLOW_INSTRUCTION, isSourceRetrievalError } from './services/geminiService';
+import { getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, EnrichmentMetrics, cancelFeatureInfoRequests, isLMStudioNoModelError, LM_STUDIO_NO_MODEL_MESSAGE, LM_STUDIO_NO_MODEL_INSTRUCTION, isLMStudioContextOverflowError, LM_STUDIO_CONTEXT_OVERFLOW_MESSAGE, LM_STUDIO_CONTEXT_OVERFLOW_INSTRUCTION, isSourceRetrievalError, recoverLocationMetadata } from './services/geminiService';
+import { fetchAndValidateImages } from './services/imageService';
 import { getEstimatedClimate } from './services/geographic/climateEstimator';
 import { enrichLocationInfo, mergeLocationInfo, fetchAndValidateLocationNews } from './services/locationService';
 import { resolveGeographicMetadata } from './services/geographic/geographicResolver';
@@ -21,7 +22,7 @@ import { logTraceTiming, initTraceTiming, recordWP1SubstantiveReady } from './se
 import { getWaypointStableId, findNextRouteWaypoint } from './utils/routeSequenceUtils';
 import { resolveCanonicalNarrative } from './utils/narrativeResolver';
 import { evaluateDescriptionReadiness } from './utils/descriptionReadiness';
-import { cleanNarrationText, buildFullNarrationScript, buildFullNarrationUnits } from './services/narrationProviders';
+import { cleanNarrationText, buildFullNarrationScript, buildFullNarrationUnits, chunkContentUnit } from './services/narrationProviders';
 import { classifyFollowUpIntent, researchFollowUp } from './services/followUpService';
 import { logWaypointSnapshot } from './utils/pipelineDebug';
 import { fetchLiveNews } from './services/newsService';
@@ -2051,6 +2052,80 @@ const App: React.FC = () => {
     });
   }, [releaseRoutePriority]);
 
+  const maybeTriggerExploreNarration = useCallback((followUpItem: FollowUpItem) => {
+    const currentSettings = userSettingsRef.current;
+    if (!currentSettings.narrationEnabled) {
+      console.log('[FollowUpNarration] SKIPPED reason="narration disabled"');
+      return;
+    }
+    if (currentSettings.narrationContent?.explore === false) {
+      console.log('[FollowUpNarration] SKIPPED reason="EXPLORE content disabled"');
+      return;
+    }
+    const cleanAnswer = cleanNarrationText(followUpItem.answer || '').trim();
+    if (!cleanAnswer || cleanAnswer.length < 3) {
+      console.log('[FollowUpNarration] SKIPPED reason="answer not substantive"');
+      return;
+    }
+
+    const stableId = activeSelectionIdRef.current || 'explore-follow-up';
+    const narrativeKey = `explore::${followUpItem.id}::${cleanAnswer}`;
+
+    const isDuplicate = Boolean(
+      activeNarrationRef.current &&
+      activeNarrationRef.current.narrativeKey === narrativeKey
+    );
+    if (isDuplicate) {
+      console.log(`[NarrationGuard] DUPLICATE_BLOCKED exploreId="${followUpItem.id}"`);
+      return;
+    }
+
+    const limit = currentSettings.narrationLimit || 600;
+    const chunks = chunkContentUnit(cleanAnswer, limit);
+    const exploreUnits: NarrationUnit[] = chunks.map(chunk => ({
+      section: 'EXPLORE',
+      text: chunk
+    }));
+
+    activeNarrationRef.current = {
+      selectionId: stableId,
+      narrativeKey,
+      spoken: true
+    };
+
+    const activeProvider = currentSettings.narrationProvider || 'system';
+    console.log(`[FollowUpNarration] ANSWER_READY id="${followUpItem.id}" answerLength=${cleanAnswer.length}`);
+    console.log(`[FollowUpNarration] NARRATE answerOnly id="${followUpItem.id}"`);
+
+    narrationService.speakStructured({
+      waypointId: `${stableId}-explore-${followUpItem.id}`,
+      title: '',
+      description: cleanAnswer,
+      units: exploreUnits,
+      provider: activeProvider,
+      voiceURI: currentSettings.narrationVoice,
+      kokoroVoice: currentSettings.kokoroVoice || 'am_michael',
+      orpheusVoice: currentSettings.orpheusVoice || 'tara',
+      limit,
+      speed: currentSettings.narrationSpeed,
+      volume: currentSettings.narrationVolume,
+      onStart: () => {
+        console.log(`[NarrationPlayback] EXPLORE_START id="${followUpItem.id}"`);
+      },
+      onEnd: () => {
+        console.log(`[FollowUpNarration] COMPLETE id="${followUpItem.id}"`);
+      },
+      onError: (err: any) => {
+        console.warn('[Narration] speakStructured explore error:', err);
+        if (activeProvider === 'kokoro' || activeProvider === 'orpheus') {
+          const defaultMsg = activeProvider === 'kokoro' ? 'Kokoro TTS Service unavailable' : 'Orpheus TTS Bridge unavailable';
+          const msg = err?.message || defaultMsg;
+          setSearchError(msg);
+        }
+      }
+    });
+  }, []);
+
   useEffect(() => {
     narrationService.setProvider(userSettings.narrationProvider || 'system');
     if (userSettings.kokoroVoice) narrationService.setKokoroVoice(userSettings.kokoroVoice);
@@ -3816,6 +3891,8 @@ const App: React.FC = () => {
           }
 
           setScanningStatusText(null);
+          // Automatically narrate newly completed Explore answer if narration is enabled
+          maybeTriggerExploreNarration(followUpItem);
           return;
         } catch (err: any) {
           if (currentSearchId !== activeSearchRequestIdRef.current || abortController.signal.aborted) {
@@ -3887,6 +3964,7 @@ const App: React.FC = () => {
     setScanningStatusText(`LOCATING ${parsedQuery.entity.toUpperCase()}`);
 
     try {
+      console.log(`[PRESENTATION] PREPARING searchId=${searchId} query="${cleanQuery}"`);
       // 3. Unified entity resolver lookup
       const pipelineResult = await runSearchPipeline({
           rawQuery: cleanQuery,
@@ -3900,6 +3978,7 @@ const App: React.FC = () => {
       }
 
       setScanningStatusText(null);
+      console.log(`[PRESENTATION] PIPELINE_READY searchId=${searchId} isValid=${pipelineResult.isValid} mode=${pipelineResult.mode}`);
       console.log(`[SearchNarration] PIPELINE_COMPLETED query="${cleanQuery}" isValid=${pipelineResult.isValid} mode=${pipelineResult.mode} hasFinalData=${!!(pipelineResult as any).finalData}`);
 
       if (pipelineResult.mode === 'route') {
@@ -3933,104 +4012,166 @@ const App: React.FC = () => {
       const hasValidCoords = pipelineResult.isValid && (pipelineResult as any).finalData && !pipelineResult.error && (pipelineResult as any).finalData.coordinates;
       const isValidNonPointResult = pipelineResult.isValid && (pipelineResult as any).finalData && !pipelineResult.error && (pipelineResult as any).finalData.singleLocation === false;
 
-      if (isValidNonPointResult) {
-        const finalData = (pipelineResult as any).finalData!;
-        console.log(`[SearchNarration] NON_POINT_RESULT_DISPLAYED name="${finalData.name}" scope="${finalData.geographicScope}"`);
+      if (isValidNonPointResult || hasValidCoords) {
+        let finalData = { ...(pipelineResult as any).finalData };
 
-        activeScanIdRef.current += 1;
-        setScanningArea(null);
-        setIsScanningArea(false);
-        setScanStatus(null);
-        scanFullyProcessedRef.current = true;
-        programmaticTransitionUntilRef.current = Date.now() + 1500;
-
-        setAutoRotate(false);
-        setInteractionState('PIN_SELECTED');
-        setMarkers([]);
-        setSelectedMarkerId(null);
-        setSelectedMarkerCoordinates(null);
-        selectedMarkerCoordinatesRef.current = null;
-        setLocationInfo(finalData);
-        locationInfoRef.current = finalData;
-        setIsDiscoveryLoading(false);
-
-        if (finalData.description) {
-          maybeTriggerNarration(finalData);
+        // Presentation Readiness Gate: 1. Enrichment
+        const descReadiness = evaluateDescriptionReadiness(finalData.description, finalData.name);
+        if (!descReadiness.isReady) {
+          console.log(`[PRESENTATION] ENRICHING searchId=${searchId} reason="${descReadiness.reason}"`);
+          try {
+            const enriched = await recoverLocationMetadata(
+              finalData.name,
+              finalData.historicalContext || cleanQuery,
+              finalData.coordinates ? { latitude: finalData.coordinates.lat, longitude: finalData.coordinates.lng } : undefined,
+              abortController.signal
+            );
+            if (enriched && enriched.description) {
+              finalData = {
+                ...finalData,
+                ...enriched,
+                description: enriched.description,
+                historicalContext: enriched.historicalContext || finalData.historicalContext,
+                significance: enriched.significance || finalData.significance,
+                culturalSignificance: enriched.culturalSignificance || finalData.culturalSignificance,
+                curiosities: enriched.curiosities || finalData.curiosities,
+                quickFacts: enriched.quickFacts || finalData.quickFacts,
+              };
+            }
+          } catch (enrichErr) {
+            console.warn(`[PRESENTATION] Enrichment fallback warning:`, enrichErr);
+          }
         }
-      } else if (hasValidCoords) {
-        const finalData = (pipelineResult as any).finalData!;
-        const { lat, lng } = finalData.coordinates;
 
-        const searchMarker: MapMarker = {
-          id: `search-${Date.now()}`,
-          name: finalData.name,
-          lat: lat,
-          lng: lng,
-          populationClass: 'large',
-          coordinateSource: finalData.coordinateSource,
-          isApproximate: finalData.isApproximate,
-          exactLocationKnown: finalData.exactLocationKnown,
-          confirmedWreckLocation: finalData.confirmedWreckLocation,
-          entityType: finalData.entityType,
-          intent: finalData.intent,
-          historicalContext: finalData.historicalContext,
-          canonicalName: finalData.canonicalName
+        if (currentSearchId !== activeSearchRequestIdRef.current || abortController.signal.aborted) {
+          return;
+        }
+
+        console.log(`[PRESENTATION] ENRICHMENT_READY searchId=${searchId} descLength=${finalData.description?.length || 0}`);
+
+        // Presentation Readiness Gate: 2. Image Fetching & Validation
+        const searchContext = {
+          searchId: searchId || undefined,
+          waypointId: (finalData as any).id || finalData.name
         };
 
-        console.log(`[SearchNarration] SEARCH_RESULT_CREATED name="${finalData.name}" markerId="${searchMarker.id}"`);
-
-        // Invalidate any in-flight background scans and suppress scan state
-        activeScanIdRef.current += 1;
-        setScanningArea(null);
-        setIsScanningArea(false);
-        setScanStatus(null);
-        scanFullyProcessedRef.current = true;
-        programmaticTransitionUntilRef.current = Date.now() + 1500;
-
-        console.log(`[Camera] NEW_LOCATION_COMMITTED name="${finalData.name}" lat=${lat.toFixed(4)} lng=${lng.toFixed(4)}`);
-        console.log('[Camera] DESTINATION_COMMITTED ownership transferred');
-        setAutoRotate(false);
-        setInteractionState('PIN_SELECTED');
-
-        (finalData as any).id = searchMarker.id;
-        setMarkers([searchMarker]);
-        console.log(`[Marker Lifecycle] DISCOVERY_RESULTS_SET count=1`);
-        activeSelectionIdRef.current = searchMarker.id;
-        console.log(`[SearchNarration] ACTIVE_SELECTION_SET id="${searchMarker.id}"`);
-        setSelectedMarkerId(searchMarker.id);
-        const newCoords = { lat, lng };
-        setSelectedMarkerCoordinates(newCoords);
-        selectedMarkerCoordinatesRef.current = newCoords;
-        console.log(`[SearchNarration] LOCATION_INFO_SET id="${(finalData as any).id}" name="${finalData.name}"`);
-        setLocationInfo(finalData);
-        locationInfoRef.current = finalData;
-        setIsDiscoveryLoading(false);
-        console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
-
-        if (userSettings.documentaryMode) {
-          console.log('[Camera] OSM_TRANSITION_STARTED');
-          startDocumentaryFlow({
-            id: searchMarker.id,
-            name: searchMarker.name,
-            lat,
-            lng,
-            description: finalData.description
-          });
-        } else {
-          setIsDocumentaryActive(false);
-          const baseGlobeDist = getBaseGlobeDistance();
-          cameraStateRef.current.themeSuggestedDistance = baseGlobeDist;
-          cameraStateRef.current.routeSuggestedDistance = baseGlobeDist;
-          cameraStateRef.current.targetRotation = { lat, lng };
-
-          console.log(`[Camera] GLOBE_ROTATION_STARTED to lat=${lat.toFixed(4)} lng=${lng.toFixed(4)}`);
-          requestAnimationFrame(() => {
-             reconcileCameraState();
-          });
+        let foundImages: any[] = [];
+        try {
+          foundImages = await fetchAndValidateImages(finalData, searchContext);
+        } catch (imgErr) {
+          console.warn(`[PRESENTATION] Image fetch warning:`, imgErr);
         }
 
-        if (finalData.description) {
-          maybeTriggerNarration(finalData);
+        if (currentSearchId !== activeSearchRequestIdRef.current || abortController.signal.aborted) {
+          return;
+        }
+
+        finalData.images = foundImages || [];
+        if (foundImages && foundImages.length > 0 && foundImages[0]?.url) {
+          finalData.primaryImage = foundImages[0];
+        }
+        console.log(`[PRESENTATION] IMAGES_READY searchId=${searchId} count=${finalData.images.length}`);
+        console.log(`[PRESENTATION] READY searchId=${searchId}`);
+
+        if (isValidNonPointResult) {
+          console.log(`[SearchNarration] NON_POINT_RESULT_DISPLAYED name="${finalData.name}" scope="${finalData.geographicScope}"`);
+
+          activeScanIdRef.current += 1;
+          setScanningArea(null);
+          setIsScanningArea(false);
+          setScanStatus(null);
+          scanFullyProcessedRef.current = true;
+          programmaticTransitionUntilRef.current = Date.now() + 1500;
+
+          setAutoRotate(false);
+          setInteractionState('PIN_SELECTED');
+          setMarkers([]);
+          setSelectedMarkerId(null);
+          setSelectedMarkerCoordinates(null);
+          selectedMarkerCoordinatesRef.current = null;
+          setLocationInfo(finalData);
+          locationInfoRef.current = finalData;
+          setIsDiscoveryLoading(false);
+          console.log(`[PRESENTATION] COMMITTED searchId=${searchId}`);
+
+          if (finalData.description) {
+            maybeTriggerNarration(finalData);
+          }
+        } else {
+          const { lat, lng } = finalData.coordinates;
+
+          const searchMarker: MapMarker = {
+            id: `search-${Date.now()}`,
+            name: finalData.name,
+            lat: lat,
+            lng: lng,
+            populationClass: 'large',
+            coordinateSource: finalData.coordinateSource,
+            isApproximate: finalData.isApproximate,
+            exactLocationKnown: finalData.exactLocationKnown,
+            confirmedWreckLocation: finalData.confirmedWreckLocation,
+            entityType: finalData.entityType,
+            intent: finalData.intent,
+            historicalContext: finalData.historicalContext,
+            canonicalName: finalData.canonicalName
+          };
+
+          console.log(`[SearchNarration] SEARCH_RESULT_CREATED name="${finalData.name}" markerId="${searchMarker.id}"`);
+
+          // Invalidate any in-flight background scans and suppress scan state
+          activeScanIdRef.current += 1;
+          setScanningArea(null);
+          setIsScanningArea(false);
+          setScanStatus(null);
+          scanFullyProcessedRef.current = true;
+          programmaticTransitionUntilRef.current = Date.now() + 1500;
+
+          console.log(`[Camera] NEW_LOCATION_COMMITTED name="${finalData.name}" lat=${lat.toFixed(4)} lng=${lng.toFixed(4)}`);
+          console.log('[Camera] DESTINATION_COMMITTED ownership transferred');
+          setAutoRotate(false);
+          setInteractionState('PIN_SELECTED');
+
+          (finalData as any).id = searchMarker.id;
+          setMarkers([searchMarker]);
+          console.log(`[Marker Lifecycle] DISCOVERY_RESULTS_SET count=1`);
+          activeSelectionIdRef.current = searchMarker.id;
+          console.log(`[SearchNarration] ACTIVE_SELECTION_SET id="${searchMarker.id}"`);
+          setSelectedMarkerId(searchMarker.id);
+          const newCoords = { lat, lng };
+          setSelectedMarkerCoordinates(newCoords);
+          selectedMarkerCoordinatesRef.current = newCoords;
+          console.log(`[SearchNarration] LOCATION_INFO_SET id="${(finalData as any).id}" name="${finalData.name}"`);
+          setLocationInfo(finalData);
+          locationInfoRef.current = finalData;
+          setIsDiscoveryLoading(false);
+          console.log(`[PRESENTATION] COMMITTED searchId=${searchId}`);
+          console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
+
+          if (userSettings.documentaryMode) {
+            console.log('[Camera] OSM_TRANSITION_STARTED');
+            startDocumentaryFlow({
+              id: searchMarker.id,
+              name: searchMarker.name,
+              lat,
+              lng,
+              description: finalData.description
+            });
+          } else {
+            setIsDocumentaryActive(false);
+            const baseGlobeDist = getBaseGlobeDistance();
+            cameraStateRef.current.themeSuggestedDistance = baseGlobeDist;
+            cameraStateRef.current.routeSuggestedDistance = baseGlobeDist;
+            cameraStateRef.current.targetRotation = { lat, lng };
+
+            console.log(`[Camera] GLOBE_ROTATION_STARTED to lat=${lat.toFixed(4)} lng=${lng.toFixed(4)}`);
+            requestAnimationFrame(() => {
+               reconcileCameraState();
+            });
+          }
+
+          if (finalData.description) {
+            maybeTriggerNarration(finalData);
+          }
         }
 
       } else {
@@ -5116,6 +5257,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         })()}
         onCancelScan={handleCancelScan}
         onCycleSkin={handleCycleSkin}
+        isSettingsOpen={isSettingsOpen}
         onToggleSettings={() => setIsSettingsOpen(!isSettingsOpen)}
         onOpenSettingsTab={handleOpenSettingsTab}
         isOSMDisplayed={isOSMActive}

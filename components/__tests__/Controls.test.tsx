@@ -468,6 +468,62 @@ describe('Controls Contextual Question Chips & Follow-Up Lifecycle', () => {
     );
     expect(htmlOff).toContain('aria-label="Narration Off"');
   });
+
+  test('contextual chips container includes container wrapper for horizontal scrolling with overflow indicator affordances', () => {
+    const html = renderToStaticMarkup(
+      <Controls {...baseProps} activeLocationContext={sampleLocation} showNews={true} />
+    );
+    expect(html).toContain('data-testid="contextual-chips-container"');
+    expect(html).toContain('overflow-x-auto');
+    expect(html).toContain('no-scrollbar');
+    expect(html).toContain('flex-1');
+    expect(html).toContain('min-w-0');
+    expect(html).toContain('max-w-[532px]');
+  });
+
+  test('parchment theme renders contextual chips as underlined text-links without pill backgrounds or borders', () => {
+    const html = renderToStaticMarkup(
+      <Controls {...baseProps} skin="parchment" activeLocationContext={sampleLocation} showNews={true} />
+    );
+    expect(html).toContain('data-testid="contextual-chips-container"');
+    expect(html).toContain('text-[#f4ead5] underline underline-offset-2 decoration-[#f4ead5]/70');
+  });
+
+  test('Settings button has active styling when isSettingsOpen is true across themes', () => {
+    const htmlOpenModern = renderToStaticMarkup(
+      <Controls {...baseProps} onToggleSettings={vi.fn()} skin="modern" isSettingsOpen={true} />
+    );
+    expect(htmlOpenModern).toContain('aria-label="Settings"');
+    expect(htmlOpenModern).toContain('text-yellow-400');
+    expect(htmlOpenModern).toContain('border-yellow-400');
+    expect(htmlOpenModern).toContain('bg-black/60');
+
+    const htmlOpenParchment = renderToStaticMarkup(
+      <Controls {...baseProps} onToggleSettings={vi.fn()} skin="parchment" isSettingsOpen={true} />
+    );
+    expect(htmlOpenParchment).toContain('text-[#b8860b]');
+
+    const htmlOpenRetroGreen = renderToStaticMarkup(
+      <Controls {...baseProps} onToggleSettings={vi.fn()} skin="retro-green" isSettingsOpen={true} />
+    );
+    expect(htmlOpenRetroGreen).toContain('text-green-400');
+  });
+
+  test('Settings button has inactive styling when isSettingsOpen is false', () => {
+    const htmlClosed = renderToStaticMarkup(
+      <Controls {...baseProps} onToggleSettings={vi.fn()} skin="modern" isSettingsOpen={false} />
+    );
+    expect(htmlClosed).toContain('aria-label="Settings"');
+  });
+
+  test('Trace Route button has active styling when isTraceModalOpen is true', () => {
+    const htmlTraceOpen = renderToStaticMarkup(
+      <Controls {...baseProps} skin="modern" isTraceModalOpen={true} />
+    );
+    expect(htmlTraceOpen).toContain('text-yellow-400');
+    expect(htmlTraceOpen).toContain('border-yellow-400');
+    expect(htmlTraceOpen).toContain('bg-black/60');
+  });
 });
 
 

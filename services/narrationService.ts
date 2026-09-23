@@ -230,20 +230,25 @@ export class NarrationService {
 
   /**
    * Speaks structured title and description.
-   * Enforces that BOTH title and description are available before speaking.
+   * Enforces that description is available before speaking.
    */
   public speakStructured(options: NarrationSpeakOptions): void {
-    const cleanTitle = this.cleanNarrationText(options.title);
-    const cleanDesc = this.cleanNarrationText(options.description);
+    const cleanTitle = this.cleanNarrationText(options.title || '');
+    const cleanDesc = this.cleanNarrationText(options.description || '');
 
-    if (!cleanTitle || !cleanDesc || cleanDesc.trim().length < 3) {
+    if (!cleanDesc || cleanDesc.trim().length < 3) {
       console.log(`[SearchNarration] REJECTED: no narration text (cleanTitle="${cleanTitle}", cleanDescLength=${cleanDesc.trim().length})`);
       return;
     }
 
-    const stableId = options.waypointId || cleanTitle;
-    logTraceNarration(stableId, cleanTitle, 'narration request started', `descLength=${cleanDesc.length}`);
-    console.log(`[SearchNarration] SPEAK_CALLED title="${cleanTitle}" descLength=${cleanDesc.length}`);
+    const stableId = options.waypointId || cleanTitle || 'narration';
+    if (cleanTitle) {
+      logTraceNarration(stableId, cleanTitle, 'narration request started', `descLength=${cleanDesc.length}`);
+      console.log(`[SearchNarration] SPEAK_CALLED title="${cleanTitle}" descLength=${cleanDesc.length}`);
+    } else {
+      logTraceNarration(stableId, 'narration', 'narration request started', `descLength=${cleanDesc.length}`);
+      console.log(`[SearchNarration] SPEAK_CALLED descLength=${cleanDesc.length}`);
+    }
     this.speak(options);
   }
 
@@ -253,14 +258,14 @@ export class NarrationService {
   public speak(options: NarrationSpeakOptions): void {
     this.cancel();
 
-    const script = this.buildNarrationScript(options.title, options.description);
+    const script = this.buildNarrationScript(options.title || '', options.description || '');
     if (!script) {
       console.log('[SearchNarration] REJECTED: no narration script');
       return;
     }
 
-    const stableId = options.waypointId || options.title;
-    logTraceNarration(stableId, options.title, 'narration source ready', `scriptLength=${script.length}`);
+    const stableId = options.waypointId || options.title || 'narration';
+    logTraceNarration(stableId, options.title || 'narration', 'narration source ready', `scriptLength=${script.length}`);
 
     const provider = this.getActiveProvider(options.provider);
     provider.speak(script, options);

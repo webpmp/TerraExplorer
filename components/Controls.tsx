@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Search, ZoomIn, ZoomOut, Loader2, Star, X, Palette, Settings, Volume2, VolumeX } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Search, ZoomIn, ZoomOut, Loader2, Star, X, Palette, Settings, Volume2, VolumeX, ChevronLeft, ChevronRight } from 'lucide-react';
 import { SkinType } from '../types';
 import { isCelestialBodySupported, detectCelestialBody } from '../services/celestialCapabilities';
 import { narrationService } from '../services/narrationService';
@@ -32,6 +32,7 @@ interface ControlsProps {
   activeWaypointTitle?: string | null;
   activeLocationContext?: { name: string; entityType?: string; description?: string; notable?: any[]; news?: any[]; followUps?: any[] } | null;
   onCancelScan?: () => void;
+  isSettingsOpen?: boolean;
   onToggleSettings?: () => void;
   onOpenSettingsTab?: (tab: 'providers' | 'general' | 'appearance' | 'audio') => void;
   isOSMDisplayed?: boolean;
@@ -172,6 +173,7 @@ const Controls: React.FC<ControlsProps> = ({
   activeWaypointTitle = null,
   activeLocationContext = null,
   onCancelScan,
+  isSettingsOpen = false,
   onToggleSettings,
   onOpenSettingsTab,
   isOSMDisplayed,
@@ -183,6 +185,24 @@ const Controls: React.FC<ControlsProps> = ({
   const [isFocused, setIsFocused] = useState(false);
   const [traceText, setTraceText] = useState("");
   const prevPausedRef = useRef(paused);
+
+  const chipsContainerRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateScrollIndicators = useCallback(() => {
+    const el = chipsContainerRef.current;
+    if (!el) {
+      setCanScrollLeft(false);
+      setCanScrollRight(false);
+      return;
+    }
+    const { scrollLeft, scrollWidth, clientWidth } = el;
+    const maxScrollLeft = scrollWidth - clientWidth;
+    const tolerance = 2;
+    setCanScrollLeft(scrollLeft > tolerance);
+    setCanScrollRight(maxScrollLeft - scrollLeft > tolerance);
+  }, []);
 
   // Initialize placeholder on mount
   useEffect(() => {
@@ -316,7 +336,7 @@ const Controls: React.FC<ControlsProps> = ({
       // Zoom Active (Cyan)
       btnActive: "bg-cyan-900/80 border-cyan-400 text-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.5)] hover:bg-cyan-800",
       // Favorite Active (Yellow/Gold for high contrast Star)
-      favActive: "bg-yellow-500/20 border-yellow-400 text-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.5)] hover:bg-yellow-500/30",
+      favActive: "bg-black/60 border-yellow-400 text-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.5)]",
 
       inputWrapper: "bg-black/80 backdrop-blur-xl border border-white/20 rounded-full shadow-2xl focus-within:border-cyan-500/70",
       inputIcon: "text-gray-300",
@@ -387,7 +407,7 @@ const Controls: React.FC<ControlsProps> = ({
       statusDismiss: "text-[#8b5a2b]/70 hover:text-[#3e2723] transition-colors p-0.5",
       copyright: "text-white/50 font-sans",
       modal: "text-[#3e2723] font-sans shadow-[0_4px_20px_rgba(0,0,0,0.4)]",
-      chip: "px-3 py-1 bg-[#f4ead5] hover:bg-[#e8d5b5] text-[#5c3a21] hover:text-[#3e2723] border border-[#8b5a2b] rounded-full text-xs font-sans shadow-[2px_2px_4px_rgba(0,0,0,0.2)] transition-colors active:scale-95 cursor-pointer"
+      chip: "px-1.5 py-0.5 text-[#f4ead5] underline underline-offset-2 decoration-[#f4ead5]/70 hover:text-white hover:decoration-white text-xs font-sans transition-colors active:scale-95 cursor-pointer"
     }
   };
 
@@ -411,6 +431,18 @@ const Controls: React.FC<ControlsProps> = ({
 
   // Contextual question & news chips
   const chips = activeLocationContext ? generateContextualChips(activeLocationContext, showNews) : [];
+
+  useEffect(() => {
+    updateScrollIndicators();
+    const el = chipsContainerRef.current;
+    if (!el) return;
+    el.addEventListener('scroll', updateScrollIndicators, { passive: true });
+    window.addEventListener('resize', updateScrollIndicators);
+    return () => {
+      el.removeEventListener('scroll', updateScrollIndicators);
+      window.removeEventListener('resize', updateScrollIndicators);
+    };
+  }, [chips, updateScrollIndicators]);
 
   const handleChipClick = (chip: ContextualChip) => {
     if (chip.type === 'news' && chip.url) {
@@ -579,8 +611,8 @@ const Controls: React.FC<ControlsProps> = ({
       {/* Zoom & View Controls */}
       <div className="flex gap-2 pointer-events-auto">
         <button
-          onClick={() => onToggleTraceModal(true)}
-          className={`p-3 transition-all active:scale-95 ${theme.btn}`}
+          onClick={() => onToggleTraceModal(!isTraceModalOpen)}
+          className={`p-3 transition-all active:scale-95 ${theme.btn} ${isTraceModalOpen ? theme.favActive : ''}`}
           aria-label="Trace Route"
           title="Trace Route from Text"
         >
@@ -656,7 +688,7 @@ const Controls: React.FC<ControlsProps> = ({
         {onToggleSettings && (
             <button
               onClick={onToggleSettings}
-              className={`p-3 transition-all active:scale-95 ${theme.btn}`}
+              className={`p-3 transition-all active:scale-95 ${theme.btn} ${isSettingsOpen ? theme.favActive : ''}`}
               aria-label="Settings"
               title="Settings"
             >
@@ -667,27 +699,63 @@ const Controls: React.FC<ControlsProps> = ({
 
       {/* Contextual Question & News Chips (Positioned between toolbar and search field) */}
       {chips.length > 0 && (!scanningStatusText || scanningStatusText.toUpperCase().includes("RESEARCHING FOLLOW-UP")) && (
-        <div
-          className="w-full max-w-[532px] overflow-x-auto no-scrollbar pointer-events-auto z-20 animate-in fade-in slide-in-from-bottom-1 duration-200"
-          data-testid="contextual-chips-container"
-        >
-          <div className="flex items-center justify-start gap-1.5 flex-nowrap w-max px-2 min-w-full">
-            {chips.map((chip, idx) => (
-              <button
-                key={chip.id || idx}
-                type="button"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  handleChipClick(chip);
-                }}
-                className={`${theme.chip} whitespace-nowrap shrink-0`}
-                data-testid={`contextual-chip-${idx}`}
-              >
-                {skin === 'retro-green' || skin === 'retro-amber' ? chip.label.toUpperCase() : chip.label}
-              </button>
-            ))}
-            <div className="w-1 shrink-0" aria-hidden="true" />
+        <div className="flex items-center w-full max-w-[532px] pointer-events-auto z-20">
+          {canScrollLeft && (
+            <div
+              className={`shrink-0 flex items-center justify-center pr-1 pointer-events-none select-none ${
+                skin === 'retro-green'
+                  ? 'text-green-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(74,222,128,0.8)]'
+                  : skin === 'retro-amber'
+                  ? 'text-amber-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(251,191,36,0.8)]'
+                  : skin === 'parchment'
+                  ? 'text-[#f4ead5] font-sans text-xs font-bold'
+                  : 'text-cyan-400/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]'
+              }`}
+              data-testid="chips-scroll-left-indicator"
+              aria-hidden="true"
+            >
+              <ChevronLeft size={14} strokeWidth={2.5} />
+            </div>
+          )}
+          <div
+            ref={chipsContainerRef}
+            className="flex-1 min-w-0 overflow-x-auto no-scrollbar animate-in fade-in slide-in-from-bottom-1 duration-200"
+            data-testid="contextual-chips-container"
+          >
+            <div className="flex items-center justify-start gap-1.5 flex-nowrap w-max px-2 min-w-full">
+              {chips.map((chip, idx) => (
+                <button
+                  key={chip.id || idx}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    handleChipClick(chip);
+                  }}
+                  className={`${theme.chip} whitespace-nowrap shrink-0`}
+                  data-testid={`contextual-chip-${idx}`}
+                >
+                  {skin === 'retro-green' || skin === 'retro-amber' ? chip.label.toUpperCase() : chip.label}
+                </button>
+              ))}
+            </div>
           </div>
+          {canScrollRight && (
+            <div
+              className={`shrink-0 flex items-center justify-center pl-1 pointer-events-none select-none ${
+                skin === 'retro-green'
+                  ? 'text-green-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(74,222,128,0.8)]'
+                  : skin === 'retro-amber'
+                  ? 'text-amber-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(251,191,36,0.8)]'
+                  : skin === 'parchment'
+                  ? 'text-[#f4ead5] font-sans text-xs font-bold'
+                  : 'text-cyan-400/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]'
+              }`}
+              data-testid="chips-scroll-right-indicator"
+              aria-hidden="true"
+            >
+              <ChevronRight size={14} strokeWidth={2.5} />
+            </div>
+          )}
         </div>
       )}
 

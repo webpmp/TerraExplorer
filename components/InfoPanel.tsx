@@ -24,6 +24,7 @@ import {
 import { resolveCanonicalNarrative } from '../utils/narrativeResolver';
 import { evaluateDescriptionReadiness } from '../utils/descriptionReadiness';
 import { generateDefaultRouteName, normalizeSemanticEntityTitle, isCoordinateTitle } from '../services/queryNormalizer';
+import { toSentenceCase } from '../services/followUpService';
 export { classifyContext, isPureGeographicLabel, sanitizeContextMarkdown, resolveCanonicalNarrative, evaluateDescriptionReadiness };
 
 
@@ -1797,18 +1798,22 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const prevFollowUpsLengthRef = useRef(0);
   useEffect(() => {
     const currentLength = info?.followUps?.length || 0;
-    if (currentLength > prevFollowUpsLengthRef.current) {
-      setTimeout(() => {
-        const exploreEl = document.getElementById('info-panel-explore-section');
-        if (exploreEl) {
-          exploreEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        } else if (scrollRef.current) {
-          scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-        }
-      }, 100);
+    if (currentLength > prevFollowUpsLengthRef.current && info?.followUps) {
+      const newItem = info.followUps[currentLength - 1];
+      if (newItem) {
+        setTimeout(() => {
+          const itemEl = document.getElementById(`info-panel-follow-up-${newItem.id}`) ||
+            document.querySelector(`[data-testid="follow-up-item-${newItem.id}"]`);
+          if (itemEl) {
+            itemEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          } else if (scrollRef.current) {
+            scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+          }
+        }, 100);
+      }
     }
     prevFollowUpsLengthRef.current = currentLength;
-  }, [info?.followUps?.length]);
+  }, [info?.followUps]);
 
 
   const lastLocationNameRef = useRef<string | null>(null);
@@ -2062,6 +2067,16 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     const currentSearchId = (info as any)?.searchId || (rawInfo as any)?.searchId || '';
     const waypointKey = `${info.name}::${currentWaypointId}::${currentSearchId}`;
 
+    if (Array.isArray(info?.images)) {
+      lastFetchedWaypointKeyRef.current = waypointKey;
+      setImages(info.images);
+      setWikiImage(info.images[0]?.url || null);
+      if ((info as any)?.waypoint?.sequence === 1 || (rawInfo as any)?.waypoint?.sequence === 1) {
+        console.log(`[TRACE ROUTE][Waypoint 1] images ready: count=${info.images.length}`);
+      }
+      return;
+    }
+
     // If this waypoint was already fetched and has results, do not re-issue redundant network queries
     if (lastFetchedWaypointKeyRef.current === waypointKey && images.length > 0) {
       return;
@@ -2304,17 +2319,15 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       render: () => {
         const routeText = info.routeContext?.text?.trim() || "";
         const descText = info.description?.trim() || "";
-        const routeReadiness = evaluateDescriptionReadiness(routeText, info.name);
-        const descReadiness = evaluateDescriptionReadiness(descText, info.name);
         const isDescLoading = isLoading || (rawInfo as any)?.sectionState?.description === 'loading';
-        const hasRoute = !isDescLoading && routeReadiness.isReady && !!info.routeContext && routeText.length > 0;
+        const hasRoute = !isDescLoading && !!info.routeContext && routeText.length > 0 && !isPlaceholderString(routeText);
         const isDuplicateHeader = Boolean(
           info.routeContext?.title &&
           (displayTitle.trim().toLowerCase() === info.routeContext.title.trim().toLowerCase() ||
            (displaySubtitle && displaySubtitle.trim().toLowerCase() === info.routeContext.title.trim().toLowerCase()))
         );
         const renderRouteContext = !isDuplicateHeader && hasRoute;
-        const hasDesc = !isDescLoading && descText.length > 0 && descReadiness.isReady && !isPlaceholderString(descText) && (!renderRouteContext || descText !== routeText);
+        const hasDesc = !isDescLoading && descText.length > 0 && !isPlaceholderString(descText) && (!renderRouteContext || descText !== routeText);
         if (!hasDesc && !renderRouteContext && !isDescLoading) return null;
 
         return (
@@ -2512,13 +2525,13 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       copyText: () => {
         if (!info || !Array.isArray(info.notable) || info.notable.length === 0) return '';
         const uniqueFacts = deduplicateNotableFacts(info.notable);
-        let txt = `Notable Facts\n\n`;
-        txt += uniqueFacts.map((n: any) => {
-          const title = normalizeDisplayText(n.title || n.name || (typeof n === 'string' ? n : ''));
-          const desc = normalizeDisplayText(n.description || n.summary || '');
+        if (uniqueFacts.length === 0) return '';
+        const factsTxt = uniqueFacts.map((n: any) => {
+          const title = normalizeDisplayText(n.title || n.name || (typeof n === 'string' ? n : '')).trim();
+          const desc = normalizeDisplayText(n.description || n.summary || '').trim();
           return `${title}${desc ? `\n${desc}` : ''}`;
-        }).join('\n\n');
-        return txt.trim();
+        }).filter(Boolean).join('\n\n');
+        return factsTxt ? `Notable Facts\n\n${factsTxt}` : '';
       },
       render: () => {
         if (!Array.isArray(info.notable) || info.notable.length === 0) return null;
@@ -2572,27 +2585,31 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     modernContext: {
       copyText: () => {
          if (!info) return '';
-         let txt = '';
+         const parts: string[] = [];
          if (info.climate && !isPlaceholderString(info.climate.name)) {
-             txt += `Climate\n${info.climate.name}\n${!isPlaceholderString(info.climate.description) ? info.climate.description : ''}\n\n`;
+             let climTxt = `Climate\n\n${info.climate.name.trim()}`;
+             if (info.climate.description && !isPlaceholderString(info.climate.description)) {
+               climTxt += `\n${info.climate.description.trim()}`;
+             }
+             parts.push(climTxt);
          }
          if (info.population) {
-             txt += `Population\n`;
+             let popTxt = `Population\n`;
              if (info.population.historical && !isPlaceholderString(info.population.historical.formattedValue)) {
                  const histLabel = info.population.historical.label && !info.population.historical.label.toLowerCase().includes('population') ? info.population.historical.label : 'Historical';
-                 txt += `${histLabel}: ${info.population.historical.formattedValue}`;
+                 popTxt += `${histLabel}: ${info.population.historical.formattedValue}`;
                  if (info.population.historical.timeframe && !isPlaceholderString(info.population.historical.timeframe)) {
-                     txt += ` (${info.population.historical.timeframe})`;
+                     popTxt += ` (${info.population.historical.timeframe})`;
                  }
-                 txt += `\n`;
+                 popTxt += `\n`;
              }
              if (info.population.current && !isPlaceholderString(info.population.current.formattedValue)) {
                  const label = getPopulationLabel(info.population.current);
-                 txt += `${label}: ${info.population.current.formattedValue}\n`;
+                 popTxt += `${label}: ${info.population.current.formattedValue}\n`;
              }
-             txt += `\n`;
+             parts.push(popTxt.trim());
          }
-         return txt.trim();
+         return parts.join('\n\n').trim();
       },
       render: () => {
         const hasPop = info.population && ((info.population.historical && !isPlaceholderString(info.population.historical.formattedValue)) || (info.population.current && !isPlaceholderString(info.population.current.formattedValue)));
@@ -2802,30 +2819,47 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
   const fullCopyText = useMemo(() => {
       if (!info) return '';
-      let txt = `${info.name || 'Location'}\n\n`;
-      // 1. Non-news sections
+      const sections: string[] = [];
+
+      // Title + Overview
+      const title = (info.name || 'Location').trim();
+      const overviewRenderer = SECTION_RENDERERS.overview;
+      const overviewText = overviewRenderer?.copyText ? overviewRenderer.copyText().trim() : (info.description || '').trim();
+      if (overviewText) {
+        sections.push(`${title}\n\n${overviewText}`);
+      } else if (title) {
+        sections.push(title);
+      }
+
+      // 1. Non-news sections from schema
       schema.ui.sections.forEach((section: any) => {
-          if (section.id === 'liveNews' || section.id === 'news') return;
+          if (section.id === 'overview' || section.id === 'liveNews' || section.id === 'news') return;
           const renderer = SECTION_RENDERERS[section.id];
           if (renderer && renderer.copyText) {
-              const copyData = renderer.copyText();
-              if (copyData) txt += copyData + '\n\n';
+              const copyData = renderer.copyText().trim();
+              if (copyData) sections.push(copyData);
           }
       });
+
       // 2. Explore / Follow-up Section
       if (info.followUps && info.followUps.length > 0) {
-        txt += `EXPLORE\n\n`;
-        info.followUps.forEach((fu: FollowUpItem) => {
-          txt += `${fu.question}\n${fu.answer}\n\n`;
-        });
+        let exploreTxt = `Explore\n\n`;
+        exploreTxt += info.followUps.map((fu: FollowUpItem) => {
+          const q = toSentenceCase(fu.question || '').trim();
+          const a = (fu.answer || '').trim();
+          return `${q}\n${a}`;
+        }).join('\n\n');
+        sections.push(exploreTxt.trim());
       }
+
       // 3. News Section
       const newsRenderer = SECTION_RENDERERS.liveNews;
       if (newsRenderer && newsRenderer.copyText) {
-        const copyData = newsRenderer.copyText();
-        if (copyData) txt += copyData + '\n\n';
+        const copyData = newsRenderer.copyText().trim();
+        if (copyData) sections.push(copyData);
       }
-      return txt.trim();
+
+      return sections.join('\n\n').trim();
   }, [info, schema]);
 
   const isLMStudioNoModel = (info as any)?.errorType === 'LM_STUDIO_NO_MODEL' ||
@@ -3099,10 +3133,10 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                          />
                          <div className="space-y-4">
                            {info.followUps.map((fu: FollowUpItem, idx: number) => (
-                             <div key={fu.id || `fu-${idx}`} className="space-y-1.5 relative group/fu" data-testid={`follow-up-item-${fu.id}`}>
+                             <div key={fu.id || `fu-${idx}`} id={`info-panel-follow-up-${fu.id}`} className="space-y-1.5 relative group/fu" data-testid={`follow-up-item-${fu.id}`}>
                                <div className="flex items-start justify-between gap-2">
                                  <h4 className={`${semanticTitleStyle} flex-1`}>
-                                   {fu.question}
+                                   {toSentenceCase(fu.question)}
                                  </h4>
                                  {onDeleteFollowUp && (
                                    <button
