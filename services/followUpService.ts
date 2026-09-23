@@ -43,9 +43,84 @@ export function toSentenceCase(str: string): string {
 }
 
 /**
- * Generates dynamic, location-aware question suggestions tailored to the active location.
- * Uses location name, entity type, summary cues, notable facts, and climate,
- * while omitting questions already answered in existing follow-ups.
+ * Evaluates whether a question candidate is broad, generic, or redundant with
+ * information already presented in the InfoPanel or previous follow-ups.
+ */
+export function isBroadOrRedundantQuestion(
+  question: string,
+  location: LocationInfo | Waypoint | null
+): boolean {
+  if (!question || typeof question !== 'string') return true;
+  const q = question.trim().toLowerCase();
+  if (q.length < 5) return true;
+
+  // 1. Broad overview/summary patterns that repeat the main InfoPanel description
+  const broadSummaryPatterns = [
+    /^what\s+is\s+.+\s+best\s+known\s+for\??$/i,
+    /^what\s+is\s+the\s+history\s+of\s+.+\??$/i,
+    /^tell\s+me\s+about\s+(?:the\s+)?history\b/i,
+    /^tell\s+me\s+about\s+(?:its\s+)?cultural\s+(?:heritage|hub|importance)\b/i,
+    /^tell\s+me\s+about\s+(?:cultural\s+hub|overview|general\s+facts?|background|general\s+info|summary|landmarks?|highlights?|features?)\b/i,
+    /^what\s+makes\s+(?:this\s+location|it|.+)\s+unique\??$/i,
+    /^what\s+notable\s+landmarks\s+are\s+here\??$/i,
+    /^what\s+is\s+(?:this\s+place|it)\??$/i,
+    /^why\s+is\s+.+\s+culturally\s+important\??$/i
+  ];
+
+  if (broadSummaryPatterns.some(pat => pat.test(q))) {
+    return true;
+  }
+
+  if (!location) return false;
+
+  const locName = (location.name || '').trim().toLowerCase();
+  const shortName = locName.split(',')[0].trim();
+  if (shortName.length > 2 && (q === `tell me about ${shortName}` || q === `tell me about ${shortName}?`)) {
+    return true;
+  }
+
+  // 2. Section label wrappers without specific entity/action focus
+  const notable = Array.isArray(location.notable) ? location.notable : [];
+  for (const item of notable) {
+    const rawTitle = (typeof item === 'string' ? item : (item.title || item.name || '')).trim().toLowerCase();
+    if (['cultural hub', 'overview', 'general facts', 'background', 'history', 'preserved state', 'main features', 'highlights', 'significance', 'economy'].includes(rawTitle)) {
+      if (q === `tell me about ${rawTitle}` || q === `tell me about ${rawTitle}?`) {
+        return true;
+      }
+    }
+  }
+
+  // 3. Check against previously explored follow-ups in location.followUps
+  if (Array.isArray(location.followUps) && location.followUps.length > 0) {
+    const isExplored = location.followUps.some(fu => {
+      const existingQ = (fu.question || '').toLowerCase().trim();
+      if (existingQ === q) return true;
+
+      // Extract substantive core keywords (>4 chars) ignoring common question boilerplate
+      const stopWords = new Set(['about', 'where', 'which', 'their', 'there', 'would', 'could', 'should', 'today', 'first', 'after', 'before', 'these', 'those', 'other', 'being']);
+      const qKeywords = q.replace(/[?.,!]/g, '').split(/\s+/).filter(w => w.length > 4 && !stopWords.has(w));
+      const existingKeywords = existingQ.replace(/[?.,!]/g, '').split(/\s+/).filter(w => w.length > 4 && !stopWords.has(w));
+      if (qKeywords.length === 0 || existingKeywords.length === 0) return false;
+
+      const overlap = qKeywords.filter(k => existingKeywords.includes(k));
+      return overlap.length >= Math.min(2, qKeywords.length) && overlap.length >= Math.min(2, existingKeywords.length);
+    });
+
+    if (isExplored) return true;
+  }
+
+  return false;
+}
+
+interface QuestionCandidate {
+  question: string;
+  dimension: 'CAUSE_CONSEQUENCE' | 'LANDMARK_STRUCTURE' | 'HISTORICAL_DEVELOPMENT' | 'CULTURE_DAILY_LIFE' | 'GEOGRAPHY_ENVIRONMENT';
+}
+
+/**
+ * Generates dynamic, gap-oriented question suggestions tailored to the active location.
+ * Analyzes substantive entities, landmarks, events, and environmental cues from the InfoPanel,
+ * strictly rejecting broad summary requests and questions already explored.
  */
 export const generateContextualQuestionChips = (
   location: LocationInfo | Waypoint | null
@@ -57,7 +132,8 @@ export const generateContextualQuestionChips = (
   const rawName = location.name.trim();
   const shortName = rawName.split(',')[0].trim() || rawName;
   const rawType = ((location as any).entityType || (location as any).type || '').toLowerCase();
-  const desc = ((location as any).description || (location as any).context || '').toLowerCase();
+  const rawDesc = ((location as any).description || (location as any).context || '');
+  const desc = rawDesc.toLowerCase();
   const notable = Array.isArray(location.notable) ? location.notable : [];
   const notableText = notable.map((n: any) => {
     if (typeof n === 'string') return n;
@@ -65,119 +141,183 @@ export const generateContextualQuestionChips = (
   }).join(' ').toLowerCase();
   const combinedContext = `${desc} ${notableText}`;
 
-  // Existing answered questions to avoid repeating
-  const existingQuestions = Array.isArray(location.followUps)
-    ? location.followUps.map(fu => (fu.question || '').toLowerCase().trim())
-    : [];
+  const candidates: QuestionCandidate[] = [];
 
-  const candidates: string[] = [];
-
-  const isAlreadyAnswered = (q: string): boolean => {
-    const qLower = q.toLowerCase().trim();
-    return existingQuestions.some(existing => {
-      if (existing === qLower) return true;
-      const coreKeywords = qLower.replace(/[?.,!]/g, '').split(/\s+/).filter(w => w.length > 4);
-      const matchCount = coreKeywords.filter(w => existing.includes(w)).length;
-      return coreKeywords.length > 0 && matchCount >= Math.min(3, coreKeywords.length);
-    });
+  // Helper to add candidate
+  const addCandidate = (q: string, dimension: QuestionCandidate['dimension']) => {
+    const formatted = toSentenceCase(q.trim());
+    if (formatted && !isBroadOrRedundantQuestion(formatted, location)) {
+      if (!candidates.some(c => c.question.toLowerCase() === formatted.toLowerCase())) {
+        candidates.push({ question: formatted, dimension });
+      }
+    }
   };
 
-  // 1. Dynamic questions derived from Notable Facts
+  // 1. Specific Questions derived from Notable Facts (Landmarks, Structures, Key Highlights)
   for (const item of notable) {
     const title = typeof item === 'string' ? item.trim() : (item.title || item.name || '').trim();
-    if (title && title.length > 2 && title.length < 35 && !title.toLowerCase().includes('fact')) {
-      const q = `Tell me about ${title}`;
-      if (!isAlreadyAnswered(q)) {
-        candidates.push(q);
-      }
-      if (candidates.length >= 2) break;
+    const itemDesc = typeof item === 'object' && item ? (item.description || item.summary || '').trim() : '';
+    const itemDescLower = itemDesc.toLowerCase();
+    const titleLower = title.toLowerCase();
+
+    if (!title || title.length < 2 || title.length > 45) continue;
+
+    // Skip generic category titles
+    if (['cultural hub', 'overview', 'general facts', 'background', 'history', 'highlights', 'economy'].includes(titleLower)) {
+      continue;
+    }
+
+    if (titleLower.includes('templo mayor')) {
+      addCandidate("What can you see at Templo Mayor today?", 'LANDMARK_STRUCTURE');
+    } else if (titleLower.includes('standard mill') || (itemDescLower.includes('stamping mill') || itemDescLower.includes('gold ore'))) {
+      addCandidate(`How did the ${title} process gold ore?`, 'LANDMARK_STRUCTURE');
+    } else if (titleLower.includes('preserved state') || itemDescLower.includes('arrested decay')) {
+      addCandidate(`How is ${shortName} maintained in a state of arrested decay?`, 'CAUSE_CONSEQUENCE');
+    } else if (titleLower.includes('fushimi inari') || itemDescLower.includes('torii')) {
+      addCandidate("What is the significance of the thousands of vermilion torii gates?", 'LANDMARK_STRUCTURE');
+    } else if (itemDescLower.includes('built') || itemDescLower.includes('constructed') || itemDescLower.includes('designed') || titleLower.includes('bridge') || titleLower.includes('tower')) {
+      addCandidate(`How was ${title} constructed?`, 'LANDMARK_STRUCTURE');
+    } else if (titleLower.includes('palace') || titleLower.includes('museum') || titleLower.includes('temple') || titleLower.includes('monument') || titleLower.includes('cathedral') || titleLower.includes('church') || itemDescLower.includes('famous') || itemDescLower.includes('known for') || itemDescLower.includes('museum') || itemDescLower.includes('palace') || itemDescLower.includes('temple') || itemDescLower.includes('monument')) {
+      addCandidate(`What can visitors discover at ${title} today?`, 'LANDMARK_STRUCTURE');
+    } else {
+      addCandidate(`What role did ${title} play in the history of ${shortName}?`, 'HISTORICAL_DEVELOPMENT');
     }
   }
 
-  // 2. Entity Type Specializations
+  // 2. Specific Entity & Environmental Mentions from Description & Context
+  // Waterways & Geological Features (e.g. Lake Texcoco, Tennessee River, Caldera, Glacier)
+  if (desc.includes('lake texcoco') || combinedContext.includes('lake texcoco')) {
+    addCandidate("What happened to Lake Texcoco?", 'GEOGRAPHY_ENVIRONMENT');
+  } else if (desc.includes('lake') || desc.includes('river') || desc.includes('bay') || desc.includes('harbor')) {
+    const lakeMatch = rawDesc.match(/Lake\s+([A-Z][a-zA-Z]+)/);
+    const riverMatch = rawDesc.match(/([A-Z][a-zA-Z]+)\s+River/);
+    if (lakeMatch) {
+      addCandidate(`What happened to Lake ${lakeMatch[1]} over time?`, 'GEOGRAPHY_ENVIRONMENT');
+    } else if (riverMatch) {
+      addCandidate(`Why was the settlement founded along the ${riverMatch[1]} River?`, 'GEOGRAPHY_ENVIRONMENT');
+    }
+  }
+
+  // Island / Causeway / Ancient City Origins (e.g., Tenochtitlan, Venice)
+  if (desc.includes('tenochtitlan') || combinedContext.includes('tenochtitlan')) {
+    addCandidate("Why was Tenochtitlan built on an island?", 'CAUSE_CONSEQUENCE');
+    addCandidate("How did Aztec traditions influence modern Mexico City?", 'CULTURE_DAILY_LIFE');
+  }
+
+  // Conquest / Battles / Treaties / Historical Changes
+  if (desc.includes('spanish conquest') || combinedContext.includes('spanish conquest') || desc.includes('conquest')) {
+    addCandidate(`How did the Spanish conquest change ${shortName}?`, 'HISTORICAL_DEVELOPMENT');
+  }
+
+  // Disasters / Earthquakes / Rebuilding
+  if (desc.includes('earthquake') || desc.includes('fire') || desc.includes('eruption') || desc.includes('disaster')) {
+    if (desc.includes('earthquake')) {
+      addCandidate(`How did ${shortName} rebuild after major earthquakes?`, 'HISTORICAL_DEVELOPMENT');
+    } else if (desc.includes('fire')) {
+      addCandidate(`How did the fire impact the development of ${shortName}?`, 'HISTORICAL_DEVELOPMENT');
+    } else {
+      addCandidate(`How did the disaster reshape ${shortName}?`, 'HISTORICAL_DEVELOPMENT');
+    }
+  }
+
+  // Elevation & Geography
+  if (desc.includes('elevation') || desc.includes('altitude') || desc.includes('valley of mexico') || desc.includes('meters above sea level') || desc.includes('feet above sea level')) {
+    addCandidate(`Why is the elevation of ${shortName} significant?`, 'GEOGRAPHY_ENVIRONMENT');
+  }
+
+  // 3. Entity Type Focused Explorations
   // Shipwrecks / Maritime discovery
   if (rawType.includes('shipwreck') || combinedContext.includes('shipwreck') || combinedContext.includes('sank') || combinedContext.includes('sunk') || combinedContext.includes('wreckage') || combinedContext.includes('wreck site')) {
-    candidates.push("When and why did it sink?");
-    candidates.push("Who discovered the wreck?");
-    candidates.push("What artifacts were recovered?");
-    candidates.push("What condition is it in today?");
+    addCandidate("When and why did the vessel sink?", 'CAUSE_CONSEQUENCE');
+    addCandidate("Who discovered the wreck site?", 'HISTORICAL_DEVELOPMENT');
+    addCandidate("What artifacts were recovered from the wreck?", 'CULTURE_DAILY_LIFE');
+    addCandidate("What condition is the wreck in today?", 'LANDMARK_STRUCTURE');
   }
-  // Ghost towns / Abandoned settlements
+  // Ghost towns / Abandoned settlements / Mining booms
   else if (rawType.includes('ghost') || rawType.includes('abandon') || combinedContext.includes('abandon') || combinedContext.includes('ghost town') || combinedContext.includes('deserted') || combinedContext.includes('boom town') || combinedContext.includes('mining town') || rawName.toLowerCase().includes('ghost town')) {
-    candidates.push(`Why was ${shortName} abandoned?`);
-    candidates.push("What was daily life like?");
-    candidates.push("What structures survive today?");
+    addCandidate(`Why was ${shortName} abandoned?`, 'CAUSE_CONSEQUENCE');
+    addCandidate(`What was daily life like for miners in ${shortName}?`, 'CULTURE_DAILY_LIFE');
+    addCandidate(`What structures survive in ${shortName} today?`, 'LANDMARK_STRUCTURE');
     if (combinedContext.includes('mine') || combinedContext.includes('gold') || combinedContext.includes('silver')) {
-      candidates.push("Tell me about the mining operations");
+      addCandidate(`How was gold ore extracted in ${shortName}?`, 'LANDMARK_STRUCTURE');
     }
   }
   // Archaeological sites / Ancient ruins / Pyramids / Temples
   else if (rawType.includes('archaeological') || rawType.includes('ruin') || rawType.includes('ancient') || combinedContext.includes('archaeolog') || combinedContext.includes('ancient') || combinedContext.includes('pyramid') || combinedContext.includes('temple') || rawType.includes('monument')) {
-    candidates.push("When was it built and by whom?");
-    candidates.push("What was its original purpose?");
-    candidates.push("What major discoveries were made here?");
-    candidates.push("What can visitors see today?");
+    addCandidate(`What was the original civic or religious purpose of ${shortName}?`, 'CAUSE_CONSEQUENCE');
+    addCandidate("What major discoveries were uncovered during excavations?", 'LANDMARK_STRUCTURE');
+    addCandidate(`What rituals or ceremonies took place at ${shortName}?`, 'CULTURE_DAILY_LIFE');
+    addCandidate(`What can visitors see at the site today?`, 'LANDMARK_STRUCTURE');
   }
   // Battles / Historical events / Castles / Forts
   else if (rawType.includes('battle') || rawType.includes('historical_event') || combinedContext.includes('battle') || combinedContext.includes('siege') || combinedContext.includes('treaty') || combinedContext.includes('war') || rawType.includes('castle') || rawType.includes('fort')) {
-    candidates.push("What led to this event?");
-    candidates.push("Who were the key figures involved?");
-    candidates.push("What was the outcome and legacy?");
-    candidates.push("What marks this site today?");
+    addCandidate("What strategic factors led to this event?", 'CAUSE_CONSEQUENCE');
+    addCandidate("Who were the key military commanders involved?", 'HISTORICAL_DEVELOPMENT');
+    addCandidate("What were the long-term historical consequences?", 'HISTORICAL_DEVELOPMENT');
+    addCandidate(`What defensive features did the fortifications have?`, 'LANDMARK_STRUCTURE');
   }
   // National parks / Natural features / Mountains / Volcanoes / Canyons / Waterfalls
   else if (rawType.includes('park') || rawType.includes('mountain') || rawType.includes('canyon') || rawType.includes('natural') || rawType.includes('volcano') || rawType.includes('waterfall') || rawType.includes('lake') || rawType.includes('glacier')) {
-    candidates.push("How was it formed?");
-    candidates.push("What wildlife lives here?");
-    candidates.push("What are the most notable features?");
-    candidates.push("What is the best time of year to visit?");
+    addCandidate("How was this geological formation created?", 'GEOGRAPHY_ENVIRONMENT');
+    addCandidate("What unique wildlife or ecosystems exist here?", 'GEOGRAPHY_ENVIRONMENT');
+    addCandidate("What are the most notable geographic features?", 'LANDMARK_STRUCTURE');
+    addCandidate("How has the landscape changed over time?", 'HISTORICAL_DEVELOPMENT');
   }
   // Populated Places / Cities / Settlements
   else {
-    candidates.push(`What is ${shortName} best known for?`);
-    candidates.push(`What is the history of ${shortName}?`);
-    candidates.push("What notable landmarks are here?");
-    candidates.push("What makes this location unique?");
+    addCandidate(`How did the founding of ${shortName} influence the surrounding region?`, 'HISTORICAL_DEVELOPMENT');
+    addCandidate(`What historical events shaped the layout of ${shortName}?`, 'CAUSE_CONSEQUENCE');
+    addCandidate(`What was daily life like for early inhabitants of ${shortName}?`, 'CULTURE_DAILY_LIFE');
+    addCandidate(`What major archaeological discoveries were found beneath ${shortName}?`, 'LANDMARK_STRUCTURE');
   }
 
-  // 3. Summary Content Cues
-  if (desc.includes('architect') || desc.includes('cathedral') || desc.includes('designed by')) {
-    candidates.push("What is its architectural significance?");
-  }
-  if (desc.includes('disaster') || desc.includes('fire') || desc.includes('earthquake') || desc.includes('eruption')) {
-    candidates.push("How did it recover from the disaster?");
-  }
+  // 4. Climate & Environmental Specifics
   if (location.climate && (typeof location.climate === 'object' ? location.climate.name : location.climate)) {
-    candidates.push("What is the climate like throughout the year?");
+    const climateName = typeof location.climate === 'object' ? location.climate.name : location.climate;
+    addCandidate(`How does the ${climateName} climate affect daily life here?`, 'GEOGRAPHY_ENVIRONMENT');
   }
 
-  // Deduplicate and filter out already answered questions
-  const uniqueChips: string[] = [];
-  for (const c of candidates) {
-    const cleanChip = c.trim();
-    if (cleanChip && !isAlreadyAnswered(cleanChip) && !uniqueChips.includes(cleanChip)) {
-      uniqueChips.push(cleanChip);
+  // 5. Select Complementary Questions Across Distinct Dimensions
+  const selectedQuestions: string[] = [];
+  const usedDimensions = new Set<string>();
+
+  // Pass 1: One question per distinct dimension to ensure diversity
+  for (const cand of candidates) {
+    if (!usedDimensions.has(cand.dimension) && !selectedQuestions.includes(cand.question)) {
+      selectedQuestions.push(cand.question);
+      usedDimensions.add(cand.dimension);
     }
-    if (uniqueChips.length >= 4) break;
+    if (selectedQuestions.length >= 4) break;
   }
 
-  // Conservative fallback if too few chips generated
-  if (uniqueChips.length < 3) {
-    const fallbacks = [
-      `What is ${shortName} best known for?`,
-      `What is the history of ${shortName}?`,
-      "What notable landmarks are here?",
-      "What makes this location unique?"
-    ];
-    for (const fb of fallbacks) {
-      if (!isAlreadyAnswered(fb) && !uniqueChips.includes(fb)) {
-        uniqueChips.push(fb);
+  // Pass 2: Fill remaining slots up to 4 if needed from remaining valid candidates
+  if (selectedQuestions.length < 3) {
+    for (const cand of candidates) {
+      if (!selectedQuestions.includes(cand.question)) {
+        selectedQuestions.push(cand.question);
       }
-      if (uniqueChips.length >= 3) break;
+      if (selectedQuestions.length >= 4) break;
     }
   }
 
-  return uniqueChips.slice(0, 4);
+  // Fallback if still under 3 (strictly specific and non-redundant)
+  if (selectedQuestions.length < 3) {
+    const specificFallbacks: QuestionCandidate[] = [
+      { question: `How did the early settlers adapt to the environment in ${shortName}?`, dimension: 'GEOGRAPHY_ENVIRONMENT' },
+      { question: `What major historical developments took place in ${shortName}?`, dimension: 'HISTORICAL_DEVELOPMENT' },
+      { question: `What architectural structures survive in ${shortName} today?`, dimension: 'LANDMARK_STRUCTURE' },
+      { question: `What was daily life like during the founding of ${shortName}?`, dimension: 'CULTURE_DAILY_LIFE' }
+    ];
+
+    for (const fb of specificFallbacks) {
+      if (!isBroadOrRedundantQuestion(fb.question, location) && !selectedQuestions.includes(fb.question)) {
+        selectedQuestions.push(fb.question);
+      }
+      if (selectedQuestions.length >= 3) break;
+    }
+  }
+
+  return selectedQuestions.slice(0, 4);
 };
 
 /**
@@ -552,6 +692,18 @@ export const researchFollowUp = async (
         .join('\n')
     : '';
 
+  const climateText = activeLocation.climate
+    ? (typeof activeLocation.climate === 'object'
+        ? `${activeLocation.climate.name || ''}: ${activeLocation.climate.description || ''}`
+        : String(activeLocation.climate))
+    : '';
+
+  const existingFollowUpsText = Array.isArray(activeLocation.followUps) && activeLocation.followUps.length > 0
+    ? activeLocation.followUps
+        .map((fu, idx) => `Q${idx + 1}: ${fu.question}\nA${idx + 1}: ${fu.answer}`)
+        .join('\n\n')
+    : '';
+
   const systemInstruction = `You are an intelligent educational research engine for TerraExplorer.
 You answer follow-up questions about specific geographic locations clearly, factually, and engagingly.
 You MUST respond with a valid JSON object matching the requested schema: {"answer": "..."}.
@@ -564,23 +716,29 @@ Entity Type: ${entityType}
 ${locationString ? `Geographic Region: ${locationString}` : ''}
 ${lat !== undefined && lng !== undefined ? `Coordinates: ${lat}, ${lng}` : ''}
 
-EXISTING LOCATION SUMMARY:
+CURRENT INFOPANEL CONTENT (ALREADY PRESENTED TO AND READ BY THE USER):
+Summary:
 ${desc}
 
-${notable ? `NOTABLE FACTS:\n${notable}\n` : ''}
+${notable ? `Notable Facts:\n${notable}\n` : ''}
+${climateText ? `Climate:\n${climateText}\n` : ''}
+${existingFollowUpsText ? `Previously Explored Questions & Answers (Already Shown):\n${existingFollowUpsText}\n` : ''}
+
 USER FOLLOW-UP QUESTION:
 ${question.trim()}
 
-CRITICAL INSTRUCTIONS:
-1. Provide a direct, substantive, and well-researched answer to the user's question specifically about "${locName}".
-2. Retain the location context so the answer does not drift to similarly named places or unrelated subjects.
-3. Keep the tone engaging, informative, and concise (1-3 readable paragraphs).
-4. Do NOT start with conversational filler like "Certainly!" or "Sure, here is the answer:". Go directly into the factual response.
-5. All text MUST be strictly in English.
+CRITICAL INSTRUCTIONS FOR NON-REPETITIVE, DELTA-ORIENTED ANSWER:
+1. The user has ALREADY READ the Existing Location Summary, Notable Facts, Climate, and previous Q&As above.
+2. Do NOT repeat or re-summarize that existing information.
+3. Your answer must be DELTA-ORIENTED: focus directly on NEW, deeper information that answers the specific question and expands the user's understanding beyond what is already visible in the InfoPanel.
+4. You may briefly reference an existing fact ONLY when strictly necessary as context to explain new details. Do NOT restate the overall background or repeat the summary.
+5. Provide a direct, factual, and engaging answer specifically to "${question.trim()}".
+6. Keep the tone engaging, informative, and concise (1-3 paragraphs). Go directly into the factual response without conversational filler (e.g., "Certainly!", "Sure, here is the answer:").
+7. All text MUST be strictly in English.
 
 Return a JSON object:
 {
-  "answer": "Substantive educational answer text..."
+  "answer": "Substantive educational answer text providing new details not in the InfoPanel..."
 }`;
 
   console.log(`[researchFollowUp] Starting follow-up research for location="${locName}" question="${question}"`);

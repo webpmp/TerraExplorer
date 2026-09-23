@@ -204,6 +204,77 @@ const Controls: React.FC<ControlsProps> = ({
     setCanScrollRight(maxScrollLeft - scrollLeft > tolerance);
   }, []);
 
+  const handleScrollLeft = useCallback((e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const container = chipsContainerRef.current;
+    if (!container) return;
+
+    const chipElements = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-testid^="contextual-chip-"]')
+    );
+    if (chipElements.length === 0) return;
+
+    const baseOffset = chipElements[0].offsetLeft;
+    const currentScrollLeft = container.scrollLeft;
+    const tolerance = 4;
+
+    // Find previous chip (last chip whose start position is strictly before current scroll position)
+    let targetLeft = 0;
+    for (let i = chipElements.length - 1; i >= 0; i--) {
+      const chipStart = chipElements[i].offsetLeft - baseOffset;
+      if (chipStart < currentScrollLeft - tolerance) {
+        targetLeft = chipStart;
+        break;
+      }
+    }
+
+    targetLeft = Math.max(0, targetLeft);
+    if (typeof container.scrollTo === 'function') {
+      container.scrollTo({ left: targetLeft, behavior: 'smooth' });
+    } else {
+      container.scrollLeft = targetLeft;
+    }
+  }, []);
+
+  const handleScrollRight = useCallback((e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const container = chipsContainerRef.current;
+    if (!container) return;
+
+    const chipElements = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-testid^="contextual-chip-"]')
+    );
+    if (chipElements.length === 0) return;
+
+    const baseOffset = chipElements[0].offsetLeft;
+    const currentScrollLeft = container.scrollLeft;
+    const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
+    const tolerance = 4;
+
+    // Find next chip (first chip whose start position is strictly after current scroll position)
+    let targetLeft = maxScrollLeft;
+    for (let i = 0; i < chipElements.length; i++) {
+      const chipStart = chipElements[i].offsetLeft - baseOffset;
+      if (chipStart > currentScrollLeft + tolerance) {
+        targetLeft = chipStart;
+        break;
+      }
+    }
+
+    targetLeft = Math.min(maxScrollLeft, targetLeft);
+    if (typeof container.scrollTo === 'function') {
+      container.scrollTo({ left: targetLeft, behavior: 'smooth' });
+    } else {
+      container.scrollLeft = targetLeft;
+    }
+  }, []);
+
   // Initialize placeholder on mount
   useEffect(() => {
     setPlaceholder(generateSuggestion());
@@ -429,7 +500,34 @@ const Controls: React.FC<ControlsProps> = ({
     }
   };
 
-  // Contextual question & news chips
+  // Gradient edge-fade mask for Modern theme contextual chips to avoid abrupt clipping
+  const getModernChipsMaskStyle = (): React.CSSProperties => {
+    if (skin !== 'modern') return {};
+    const fadeDistance = '10px';
+    if (canScrollLeft && canScrollRight) {
+      const mask = `linear-gradient(to right, transparent 0px, black ${fadeDistance}, black calc(100% - ${fadeDistance}), transparent 100%)`;
+      return {
+        maskImage: mask,
+        WebkitMaskImage: mask
+      };
+    }
+    if (canScrollLeft) {
+      const mask = `linear-gradient(to right, transparent 0px, black ${fadeDistance}, black 100%)`;
+      return {
+        maskImage: mask,
+        WebkitMaskImage: mask
+      };
+    }
+    if (canScrollRight) {
+      const mask = `linear-gradient(to right, black 0px, black calc(100% - ${fadeDistance}), transparent 100%)`;
+      return {
+        maskImage: mask,
+        WebkitMaskImage: mask
+      };
+    }
+    return {};
+  };
+
   const chips = activeLocationContext ? generateContextualChips(activeLocationContext, showNews) : [];
 
   useEffect(() => {
@@ -701,24 +799,28 @@ const Controls: React.FC<ControlsProps> = ({
       {chips.length > 0 && (!scanningStatusText || scanningStatusText.toUpperCase().includes("RESEARCHING FOLLOW-UP")) && (
         <div className="flex items-center w-full max-w-[532px] pointer-events-auto z-20">
           {canScrollLeft && (
-            <div
-              className={`shrink-0 flex items-center justify-center pr-1 pointer-events-none select-none ${
+            <button
+              type="button"
+              onClick={handleScrollLeft}
+              className={`shrink-0 flex items-center justify-center p-1 mr-1.5 select-none cursor-pointer transition-opacity hover:opacity-80 active:scale-95 touch-manipulation ${
                 skin === 'retro-green'
                   ? 'text-green-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(74,222,128,0.8)]'
                   : skin === 'retro-amber'
                   ? 'text-amber-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(251,191,36,0.8)]'
                   : skin === 'parchment'
                   ? 'text-[#f4ead5] font-sans text-xs font-bold'
-                  : 'text-cyan-400/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]'
+                  : 'bg-black/60 rounded-full text-cyan-400/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]'
               }`}
               data-testid="chips-scroll-left-indicator"
-              aria-hidden="true"
+              aria-label="Scroll follow-up questions left"
+              title="Previous questions"
             >
               <ChevronLeft size={14} strokeWidth={2.5} />
-            </div>
+            </button>
           )}
           <div
             ref={chipsContainerRef}
+            style={getModernChipsMaskStyle()}
             className="flex-1 min-w-0 overflow-x-auto no-scrollbar animate-in fade-in slide-in-from-bottom-1 duration-200"
             data-testid="contextual-chips-container"
           >
@@ -740,21 +842,24 @@ const Controls: React.FC<ControlsProps> = ({
             </div>
           </div>
           {canScrollRight && (
-            <div
-              className={`shrink-0 flex items-center justify-center pl-1 pointer-events-none select-none ${
+            <button
+              type="button"
+              onClick={handleScrollRight}
+              className={`shrink-0 flex items-center justify-center p-1 ml-1.5 select-none cursor-pointer transition-opacity hover:opacity-80 active:scale-95 touch-manipulation ${
                 skin === 'retro-green'
                   ? 'text-green-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(74,222,128,0.8)]'
                   : skin === 'retro-amber'
                   ? 'text-amber-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(251,191,36,0.8)]'
                   : skin === 'parchment'
                   ? 'text-[#f4ead5] font-sans text-xs font-bold'
-                  : 'text-cyan-400/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]'
+                  : 'bg-black/60 rounded-full text-cyan-400/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]'
               }`}
               data-testid="chips-scroll-right-indicator"
-              aria-hidden="true"
+              aria-label="Scroll follow-up questions right"
+              title="More questions"
             >
               <ChevronRight size={14} strokeWidth={2.5} />
-            </div>
+            </button>
           )}
         </div>
       )}

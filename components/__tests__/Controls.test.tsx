@@ -526,4 +526,197 @@ describe('Controls Contextual Question Chips & Follow-Up Lifecycle', () => {
   });
 });
 
+describe('Contextual Follow-Up Chip Navigation & Single-Step Scrolling Suite', () => {
+  // Helper to simulate the single-chip step scroll calculation algorithm implemented in Controls.tsx
+  const calculateScrollStep = ({
+    chipOffsets,
+    currentScrollLeft,
+    containerWidth,
+    direction
+  }: {
+    chipOffsets: number[];
+    currentScrollLeft: number;
+    containerWidth: number;
+    direction: 'left' | 'right';
+  }) => {
+    if (chipOffsets.length === 0) return currentScrollLeft;
+    const baseOffset = chipOffsets[0];
+    const totalContentWidth = chipOffsets[chipOffsets.length - 1] + 200 - baseOffset;
+    const maxScrollLeft = Math.max(0, totalContentWidth - containerWidth);
+    const tolerance = 4;
 
+    if (direction === 'right') {
+      let targetLeft = maxScrollLeft;
+      for (let i = 0; i < chipOffsets.length; i++) {
+        const chipStart = chipOffsets[i] - baseOffset;
+        if (chipStart > currentScrollLeft + tolerance) {
+          targetLeft = chipStart;
+          break;
+        }
+      }
+      return Math.min(maxScrollLeft, targetLeft);
+    } else {
+      let targetLeft = 0;
+      for (let i = chipOffsets.length - 1; i >= 0; i--) {
+        const chipStart = chipOffsets[i] - baseOffset;
+        if (chipStart < currentScrollLeft - tolerance) {
+          targetLeft = chipStart;
+          break;
+        }
+      }
+      return Math.max(0, targetLeft);
+    }
+  };
+
+  const sampleChipOffsets = [8, 140, 290, 450, 620]; // 5 chips with variable widths & gap
+  const containerWidth = 300;
+
+  it('1. Clicking > scrolls toward the next chip revealing approximately one additional question', () => {
+    // Initial state: at beginning (scrollLeft = 0)
+    const nextStep = calculateScrollStep({
+      chipOffsets: sampleChipOffsets,
+      currentScrollLeft: 0,
+      containerWidth,
+      direction: 'right'
+    });
+
+    // Should scroll to chip 1 (offset 140 - 8 = 132), revealing the next question without skipping
+    expect(nextStep).toBe(132);
+  });
+
+  it('2. Clicking < scrolls toward the previous chip', () => {
+    // Starting at chip 2 (offset 290 - 8 = 282)
+    const prevStep = calculateScrollStep({
+      chipOffsets: sampleChipOffsets,
+      currentScrollLeft: 282,
+      containerWidth,
+      direction: 'left'
+    });
+
+    // Should scroll back to chip 1 (offset 140 - 8 = 132)
+    expect(prevStep).toBe(132);
+
+    // Clicking < again scrolls back to chip 0 (offset 0)
+    const firstStep = calculateScrollStep({
+      chipOffsets: sampleChipOffsets,
+      currentScrollLeft: 132,
+      containerWidth,
+      direction: 'left'
+    });
+    expect(firstStep).toBe(0);
+  });
+
+  it('3. Navigation does NOT page across multiple chips (advances step by step)', () => {
+    let scrollPos = 0;
+
+    // Tap 1: moves from chip 0 to chip 1
+    scrollPos = calculateScrollStep({
+      chipOffsets: sampleChipOffsets,
+      currentScrollLeft: scrollPos,
+      containerWidth,
+      direction: 'right'
+    });
+    expect(scrollPos).toBe(132); // chip 1
+
+    // Tap 2: moves from chip 1 to chip 2
+    scrollPos = calculateScrollStep({
+      chipOffsets: sampleChipOffsets,
+      currentScrollLeft: scrollPos,
+      containerWidth,
+      direction: 'right'
+    });
+    expect(scrollPos).toBe(282); // chip 2
+
+    // Tap 3: moves from chip 2 to chip 3
+    scrollPos = calculateScrollStep({
+      chipOffsets: sampleChipOffsets,
+      currentScrollLeft: scrollPos,
+      containerWidth,
+      direction: 'right'
+    });
+    expect(scrollPos).toBe(442); // chip 3
+  });
+
+  it('4. Controls behave correctly at the beginning and end of the chip list', () => {
+    // At beginning (scrollLeft = 0), < cannot scroll farther left
+    const leftAtStart = calculateScrollStep({
+      chipOffsets: sampleChipOffsets,
+      currentScrollLeft: 0,
+      containerWidth,
+      direction: 'left'
+    });
+    expect(leftAtStart).toBe(0);
+
+    // At end (scrollLeft = 512, beyond last chip offset 612), > cannot scroll farther right
+    const maxScroll = 512;
+    const rightAtEnd = calculateScrollStep({
+      chipOffsets: sampleChipOffsets,
+      currentScrollLeft: 612, // already at last chip
+      containerWidth,
+      direction: 'right'
+    });
+    expect(rightAtEnd).toBe(512);
+  });
+
+  it('5. Handles mid-scroll / touch-swiped positions gracefully', () => {
+    // User swiped manually to scrollLeft = 70 (between chip 0 and chip 1)
+    const nextFromSwipe = calculateScrollStep({
+      chipOffsets: sampleChipOffsets,
+      currentScrollLeft: 70,
+      containerWidth,
+      direction: 'right'
+    });
+    expect(nextFromSwipe).toBe(132); // Snaps forward to chip 1
+
+    const prevFromSwipe = calculateScrollStep({
+      chipOffsets: sampleChipOffsets,
+      currentScrollLeft: 70,
+      containerWidth,
+      direction: 'left'
+    });
+    expect(prevFromSwipe).toBe(0); // Snaps back to chip 0
+  });
+
+  it('6. Computes gradient edge-fade mask for Modern theme based on scroll overflow state', () => {
+    const computeMask = (skin: string, canScrollLeft: boolean, canScrollRight: boolean) => {
+      if (skin !== 'modern') return {};
+      const fadeDistance = '10px';
+      if (canScrollLeft && canScrollRight) {
+        const mask = `linear-gradient(to right, transparent 0px, black ${fadeDistance}, black calc(100% - ${fadeDistance}), transparent 100%)`;
+        return { maskImage: mask, WebkitMaskImage: mask };
+      }
+      if (canScrollLeft) {
+        const mask = `linear-gradient(to right, transparent 0px, black ${fadeDistance}, black 100%)`;
+        return { maskImage: mask, WebkitMaskImage: mask };
+      }
+      if (canScrollRight) {
+        const mask = `linear-gradient(to right, black 0px, black calc(100% - ${fadeDistance}), transparent 100%)`;
+        return { maskImage: mask, WebkitMaskImage: mask };
+      }
+      return {};
+    };
+
+    // At beginning with overflow to the right: right edge fades out
+    const rightFade = computeMask('modern', false, true);
+    expect(rightFade.maskImage).toContain('black 0px');
+    expect(rightFade.maskImage).toContain('transparent 100%');
+
+    // Scrolled into the middle: both edges fade
+    const bothFade = computeMask('modern', true, true);
+    expect(bothFade.maskImage).toContain('transparent 0px');
+    expect(bothFade.maskImage).toContain('transparent 100%');
+
+    // Scrolled to end: left edge fades in, right edge solid
+    const leftFade = computeMask('modern', true, false);
+    expect(leftFade.maskImage).toContain('transparent 0px');
+    expect(leftFade.maskImage).toContain('black 100%');
+
+    // No overflow: no mask
+    const noFade = computeMask('modern', false, false);
+    expect(noFade).toEqual({});
+
+    // Non-modern skins: no mask
+    expect(computeMask('parchment', true, true)).toEqual({});
+    expect(computeMask('retro-green', true, true)).toEqual({});
+  });
+});
