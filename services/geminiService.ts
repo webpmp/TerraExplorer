@@ -806,6 +806,40 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
         notable: []
       };
       suggestedZoom = deterministicRes.suggestedZoom || 8;
+    } else {
+      // Check deterministic historical knowledge base before geocoding
+      const histKnowledge =
+        getHistoricalEntityKnowledge(lookupKey) ||
+        getHistoricalEntityKnowledge(aliasResolved) ||
+        getHistoricalEntityKnowledge(query.toLowerCase().trim()) ||
+        getHistoricalEntityKnowledge(rawAliasResolved);
+
+      if (histKnowledge?.approximateCoordinates) {
+        const coordSource = (histKnowledge.approximateCoordinates.source || 'deterministic') as CoordinateSource;
+        resolvedData = {
+          name: histKnowledge.entity,
+          canonicalName: histKnowledge.entity,
+          type: (histKnowledge.entityType === 'shipwreck' || histKnowledge.entityType === 'shipwreck_site')
+            ? LocationType.POI
+            : (histKnowledge.entityType === 'city' ? LocationType.CITY : LocationType.POI),
+          entityType: histKnowledge.entityType === 'shipwreck' ? 'shipwreck_site' : histKnowledge.entityType,
+          coordinates: { ...histKnowledge.approximateCoordinates },
+          coordinateSource: coordSource,
+          coordinateTrust: coordSource === 'deterministic' ? 'verified' : 'provisional',
+          identityStatus: 'verified' as GeographicIdentityStatus,
+          isApproximate: !histKnowledge.exactLocationConfirmed,
+          exactLocationKnown: histKnowledge.exactLocationKnown ?? true,
+          confirmedWreckLocation: histKnowledge.confirmedWreckLocation ?? true,
+          country: histKnowledge.country,
+          state: histKnowledge.state,
+          city: histKnowledge.nearbyCity || (histKnowledge as any).city,
+          description: histKnowledge.historicalContext || histKnowledge.sourceRationale || `Information on ${histKnowledge.entity}.`,
+          funFacts: [],
+          notable: histKnowledge.notable ? histKnowledge.notable.map(n => typeof n === 'string' ? { title: n, description: '' } : n) : []
+        };
+        suggestedZoom = 8;
+        console.log(`[HISTORICAL KNOWLEDGE DETERMINISTIC RESOLUTION]\nentity="${histKnowledge.entity}"\nsource=${coordSource}\ncoordinates=${resolvedData.coordinates.lat},${resolvedData.coordinates.lng}\nconfidence=${histKnowledge.confidence}\ncountry=${histKnowledge.country || 'unknown'}`);
+      }
     }
 
     // Step 2.5: Authoritative Nominatim / OSM Resolution before AI

@@ -11,7 +11,7 @@ import { getEstimatedClimate, getClimateDescription, isClimateConflicting } from
 import { reverseGeocode, enrichSettlementPopulation, isPopulationBearingEntity } from './geographic/geographicResolver';
 import { isPlaceholderString } from '../components/InfoPanel';
 import { validateEarthGeography } from './celestialCapabilities';
-import { getHistoricalEntityKnowledge, toCanonicalTitleCase, isMaritimeHistoricalEntity } from './geographic/historicalCoordinateValidator';
+import { validateHistoricalCoordinate, getHistoricalEntityKnowledge, toCanonicalTitleCase, isMaritimeHistoricalEntity } from './geographic/historicalCoordinateValidator';
 import { determineHistoricalEventScope, logHistoricalEventScope } from './geographic/historicalEventScope';
 import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
 import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation, isInvalidCanonicalName } from './geographic/entityIdentityValidator';
@@ -120,6 +120,51 @@ export const SearchStage = (request: SearchRequest | string): EntityResolutionRe
 };
 
 export const IntentStage = SearchStage;
+
+type HistoricalKnowledgeWithCoordinates = NonNullable<ReturnType<typeof getHistoricalEntityKnowledge>> & {
+  approximateCoordinates: NonNullable<NonNullable<ReturnType<typeof getHistoricalEntityKnowledge>>['approximateCoordinates']>;
+};
+
+function applyHistoricalKnowledgeRecovery(
+  target: any,
+  histKnowledge: HistoricalKnowledgeWithCoordinates,
+  logPrefix: string
+): {
+  finalSource: CoordinateSource;
+  finalTrust: 'verified' | 'provisional' | 'unverified';
+  finalStatus: 'verified' | 'ambiguous' | 'unverified';
+  coordinatesValid: boolean;
+  error: string | undefined;
+} {
+  const coordSource = (histKnowledge.approximateCoordinates.source || 'deterministic') as CoordinateSource;
+  target.name = histKnowledge.entity;
+  target.canonicalName = histKnowledge.entity;
+  target.coordinates = { ...histKnowledge.approximateCoordinates };
+  target.entityType = histKnowledge.entityType === 'shipwreck' ? 'shipwreck_site' : histKnowledge.entityType;
+  target.coordinateSource = coordSource;
+  target.coordinateTrust = coordSource === 'deterministic' ? 'verified' : 'provisional';
+  target.identityStatus = 'verified';
+  target.isApproximate = !histKnowledge.exactLocationConfirmed;
+  target.exactLocationKnown = histKnowledge.exactLocationKnown ?? true;
+  target.confirmedWreckLocation = histKnowledge.confirmedWreckLocation ?? true;
+  target.country = histKnowledge.country || (histKnowledge.allowedCountries && histKnowledge.allowedCountries.length > 0 ? histKnowledge.allowedCountries[0] : undefined);
+  target.state = histKnowledge.state || undefined;
+  target.city = histKnowledge.nearbyCity || (histKnowledge as any).city || undefined;
+  target.county = undefined;
+  target.region = undefined;
+  target.locationString = undefined;
+  target.description = target.description || histKnowledge.historicalContext || histKnowledge.sourceRationale || "";
+
+  console.log(`[${logPrefix}]\nentity="${histKnowledge.entity}"\nsource=${coordSource}\ncoordinates=${target.coordinates.lat},${target.coordinates.lng}\nconfidence=${histKnowledge.confidence}\ncountry=${histKnowledge.country || 'unknown'}`);
+
+  return {
+    finalSource: coordSource,
+    finalTrust: coordSource === 'deterministic' ? 'verified' : 'provisional',
+    finalStatus: 'verified',
+    coordinatesValid: true,
+    error: undefined
+  };
+}
 
 export const ResolutionStage = async (entityResult: EntityResolutionResult): Promise<FinalLocationResult> => {
   const signal = entityResult.intentResult.normalized.request.signal;
@@ -502,19 +547,82 @@ historicalValidationReason: ${histValidation?.reason || 'none'}
 corroborationPresent: ${histCorroborated}
 trustGateDecision: ${isUnverifiedAi ? 'REJECT' : 'PASS'}`);
 
+       const histKnowledgeForValidation =
+         getHistoricalEntityKnowledge(resolvedEntityLookup) ||
+         getHistoricalEntityKnowledge(resolvedData.name || '') ||
+         getHistoricalEntityKnowledge(resolvedEntityName) ||
+         getHistoricalEntityKnowledge(originalQueryEntity);
+
+       if (histKnowledgeForValidation && resolvedData.coordinates) {
+         const kbCoords = histKnowledgeForValidation.approximateCoordinates;
+         const isAlreadyKbCoords = kbCoords != null &&
+           Math.abs(resolvedData.coordinates.lat - kbCoords.lat) < 0.0001 &&
+           Math.abs(resolvedData.coordinates.lng - kbCoords.lng) < 0.0001;
+
+         if (!isAlreadyKbCoords) {
+           const histCoordValidation = await validateHistoricalCoordinate(
+             histKnowledgeForValidation.entity,
+             resolvedData.coordinates,
+             {
+               rawQuery: entityResult.intentResult.normalized.request.rawQuery,
+               intent: entityResult.intentResult.intent,
+               entityType: histKnowledgeForValidation.entityType === "shipwreck" ? "shipwreck_site" : histKnowledgeForValidation.entityType,
+               candidateEntityType: (resolvedData as any).entityType,
+               expectedRegion: histKnowledgeForValidation.expectedRegion,
+               locationDescription: histKnowledgeForValidation.historicalContext,
+               coordinateSource: finalSource
+             }
+           );
+
+           if (!histCoordValidation.valid) {
+             console.warn(`[HISTORICAL COORDINATE MISMATCH] Candidate coordinates (${resolvedData.coordinates.lat}, ${resolvedData.coordinates.lng}) for historical entity "${histKnowledgeForValidation.entity}" rejected (${histCoordValidation.reason}).`);
+             if (histKnowledgeForValidation.approximateCoordinates) {
+               const recovered = applyHistoricalKnowledgeRecovery(
+                 resolvedData,
+                 histKnowledgeForValidation,
+                 "HISTORICAL KNOWLEDGE SAFETY NET RECOVERY"
+               );
+               finalSource = recovered.finalSource;
+               finalTrust = recovered.finalTrust;
+               finalStatus = recovered.finalStatus;
+               coordinatesValid = recovered.coordinatesValid;
+               error = recovered.error;
+             } else {
+               coordinatesValid = false;
+               resolvedData.coordinates = undefined;
+               error = "HISTORICAL_COORDINATE_MISMATCH";
+             }
+           }
+         }
+       }
+
        if (isUnverifiedAi) {
          const rejectedProposal = {
            proposedCoordinates: { ...resolvedData.coordinates },
            source: finalSource,
            trust: finalTrust,
            identityStatus: finalStatus,
-           rejectionReason: entityInKb ? 'KB_ENTITY_REQUIRES_DETERMINISTIC_COORDINATES' : 'UNVERIFIED_AI_COORDINATES'
+           rejectionReason: entityInKb ? "KB_ENTITY_REQUIRES_DETERMINISTIC_COORDINATES" : "UNVERIFIED_AI_COORDINATES"
          };
          (resolvedData as any).rejectedAiProposal = rejectedProposal;
-         console.log(`[COORDINATE TRUST GATE]\nResult: REJECT\nProposed Coordinates: ${JSON.stringify(resolvedData.coordinates)}\nSource: ${finalSource}\nTrust: ${finalTrust}\nIdentityStatus: ${finalStatus}\nEntity: "${resolvedData.name || resolvedEntityName}"\nOriginalQuery: "${originalQueryEntity}"\nEntityInKB: ${entityInKb}\nRejection Reason: ${entityInKb ? 'AI_COORDINATES_REJECTED_FOR_KB_KNOWN_ENTITY' : 'AI_COORDINATES_REQUIRE_CORROBORATION'}`);
-         coordinatesValid = false;
-         resolvedData.coordinates = undefined;
-         error = "UNRESOLVED_ENTITY";
+         console.log(`[COORDINATE TRUST GATE]\nResult: REJECT\nProposed Coordinates: ${JSON.stringify(resolvedData.coordinates)}\nSource: ${finalSource}\nTrust: ${finalTrust}\nIdentityStatus: ${finalStatus}\nEntity: "${resolvedData.name || resolvedEntityName}"\nOriginalQuery: "${originalQueryEntity}"\nEntityInKB: ${entityInKb}\nRejection Reason: ${entityInKb ? "AI_COORDINATES_REJECTED_FOR_KB_KNOWN_ENTITY" : "AI_COORDINATES_REQUIRE_CORROBORATION"}`);
+
+         if (histKnowledgeForValidation?.approximateCoordinates) {
+           const recovered = applyHistoricalKnowledgeRecovery(
+             resolvedData,
+             histKnowledgeForValidation,
+             "HISTORICAL KNOWLEDGE SAFETY NET RECOVERY FROM UNVERIFIED AI"
+           );
+           finalSource = recovered.finalSource;
+           finalTrust = recovered.finalTrust;
+           finalStatus = recovered.finalStatus;
+           coordinatesValid = recovered.coordinatesValid;
+           error = recovered.error;
+         } else {
+           coordinatesValid = false;
+           resolvedData.coordinates = undefined;
+           error = "UNRESOLVED_ENTITY";
+         }
        } else {
          console.log(`[COORDINATE TRUST GATE]\nResult: PASS\nCoordinates: ${JSON.stringify(resolvedData.coordinates)}\nSource: ${finalSource}\nTrust: ${finalTrust}\nIdentityStatus: ${finalStatus}\nEntity: "${resolvedData.name || resolvedEntityName}"\nEntityInKB: ${entityInKb}`);
        }
