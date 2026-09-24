@@ -5261,6 +5261,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         onToggleSettings={() => setIsSettingsOpen(!isSettingsOpen)}
         onOpenSettingsTab={handleOpenSettingsTab}
         isOSMDisplayed={isOSMActive}
+        parchmentRingRadius={maskRadius}
       />
     </div>
   );

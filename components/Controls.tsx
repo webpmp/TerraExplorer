@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Search, ZoomIn, ZoomOut, Loader2, Star, X, Palette, Settings, Volume2, VolumeX, ChevronLeft, ChevronRight } from 'lucide-react';
 import { SkinType } from '../types';
 import { isCelestialBodySupported, detectCelestialBody } from '../services/celestialCapabilities';
@@ -37,7 +37,17 @@ interface ControlsProps {
   onOpenSettingsTab?: (tab: 'providers' | 'general' | 'appearance' | 'audio') => void;
   isOSMDisplayed?: boolean;
   isOSMActive?: boolean;
+  parchmentRingRadius?: number;
 }
+
+export const computeParchmentRingRadius = (width: number, height: number): number => {
+  if (width <= 0 || height <= 0) return 500;
+  const fovRadians = (45 * Math.PI) / 180;
+  const aspect = width / height;
+  const baseDistance = aspect <= 1.28985 ? 3.0 : (3.0 * 1.28985) / aspect;
+  const globeVisualRadius = height / (2 * baseDistance * Math.tan(fovRadians / 2));
+  return globeVisualRadius * 1.025;
+};
 
 // Custom Icon for Trace Route
 const TraceRouteIcon = () => (
@@ -177,14 +187,157 @@ const Controls: React.FC<ControlsProps> = ({
   onToggleSettings,
   onOpenSettingsTab,
   isOSMDisplayed,
-  isOSMActive
+  isOSMActive,
+  parchmentRingRadius
 }) => {
   const isOSM = isOSMDisplayed ?? isOSMActive ?? false;
+  const [viewportSize, setViewportSize] = useState({
+    width: typeof window !== 'undefined' ? window.innerWidth : 1920,
+    height: typeof window !== 'undefined' ? window.innerHeight : 1080
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleResize = () => {
+      setViewportSize({ width: window.innerWidth, height: window.innerHeight });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const searchFormRef = useRef<HTMLFormElement>(null);
+  const [searchWidth, setSearchWidth] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      return Math.min(532, Math.max(0, window.innerWidth - 32));
+    }
+    return 532;
+  });
+
+  const updateSearchWidth = useCallback(() => {
+    if (searchFormRef.current) {
+      const w = searchFormRef.current.offsetWidth;
+      if (w > 0) {
+        setSearchWidth(w);
+        return;
+      }
+    }
+    if (typeof window !== 'undefined') {
+      setSearchWidth(Math.min(532, Math.max(0, window.innerWidth - 32)));
+    }
+  }, []);
+
+  useEffect(() => {
+    updateSearchWidth();
+    if (typeof window === 'undefined') return;
+    const formEl = searchFormRef.current;
+    if (formEl && typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => {
+        updateSearchWidth();
+      });
+      ro.observe(formEl);
+      return () => ro.disconnect();
+    }
+    window.addEventListener('resize', updateSearchWidth);
+    return () => window.removeEventListener('resize', updateSearchWidth);
+  }, [updateSearchWidth]);
+
+  const ringRadius = (parchmentRingRadius && parchmentRingRadius > 0)
+    ? parchmentRingRadius
+    : computeParchmentRingRadius(viewportSize.width, viewportSize.height);
+
+  // Position 7 controls across the horizontal span of the search field along the circular ring
+  // k in {-3, -2, -1, 0, 1, 2, 3} corresponding to 6 equal intervals across searchWidth
+  // Y coordinate is derived strictly from the circle equation x^2 + y^2 = R^2 => y = sqrt(R^2 - x^2)
+  const getRingPositionStyle = (colIndex: number): React.CSSProperties => {
+    const k = colIndex - 3;
+    const x = (k * searchWidth) / 6;
+    const y = Math.sqrt(Math.max(0, ringRadius * ringRadius - x * x));
+    return {
+      position: 'absolute',
+      left: '0px',
+      top: '0px',
+      transform: `translate(calc(-50% + ${x.toFixed(2)}px), calc(-50% + ${y.toFixed(2)}px))`,
+    };
+  };
+
   const [query, setQuery] = useState("");
   const [placeholder, setPlaceholder] = useState("Search location...");
   const [isFocused, setIsFocused] = useState(false);
   const [traceText, setTraceText] = useState("");
   const prevPausedRef = useRef(paused);
+
+  const chips = activeLocationContext ? generateContextualChips(activeLocationContext, showNews) : [];
+
+  const handleChipClick = (chip: ContextualChip) => {
+    if (chip.type === 'news' && chip.url) {
+      window.open(chip.url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    narrationService.prime();
+    setQuery("");
+    onSearch(chip.query || chip.label, true);
+  };
+
+  const parchmentChips = (skin === 'parchment' && (!scanningStatusText || scanningStatusText.toUpperCase().includes("RESEARCHING FOLLOW-UP"))) ? chips : [];
+  const hasParchmentFollowUps = skin === 'parchment' && !!activeLocationContext && parchmentChips.length > 0;
+
+  // Format placeholder for retro skins, clear on focus.
+  // When an active location context is present, display "Ask about {name}..."
+  // When an active waypoint title is provided (during route navigation) and no active user search/focus is happening, display it.
+  const activePlaceholderText = (activeLocationContext && !scanningStatusText)
+    ? `Ask about ${activeLocationContext.name}...`
+    : (activeWaypointTitle && !scanningStatusText)
+    ? activeWaypointTitle
+    : placeholder;
+  const displayPlaceholder = isFocused ? "" : (skin === 'modern' || skin === 'parchment' ? (activeLocationContext ? activePlaceholderText : placeholder) : activePlaceholderText.toUpperCase());
+
+  // Parchment follow-up navigation sequence: index 0 is the default manual "Ask about [location]..." entry,
+  // followed by any contextual question/news chips. Only active when follow-ups are available for an explored location.
+  const parchmentItems = useMemo(() => {
+    if (!hasParchmentFollowUps) {
+      return [];
+    }
+    const defaultManualItem = {
+      id: '__default_manual__',
+      type: 'manual' as const,
+      label: activePlaceholderText,
+    };
+    return [
+      defaultManualItem,
+      ...parchmentChips.map((chip, idx) => ({
+        id: chip.id || `chip-${idx}`,
+        type: chip.type,
+        label: chip.label,
+        chip,
+      })),
+    ];
+  }, [hasParchmentFollowUps, activePlaceholderText, parchmentChips]);
+
+  const [parchmentItemIndex, setParchmentItemIndex] = useState(0);
+  const [isManualInputMode, setIsManualInputMode] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setParchmentItemIndex(0);
+    setIsManualInputMode(false);
+  }, [activeLocationContext?.name]);
+
+  const effectiveParchmentIndex = parchmentItems.length > 0
+    ? ((parchmentItemIndex % parchmentItems.length) + parchmentItems.length) % parchmentItems.length
+    : 0;
+  const currentParchmentItem = parchmentItems.length > 0 ? parchmentItems[effectiveParchmentIndex] : null;
+
+  const handlePrevParchmentChip = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setParchmentItemIndex((prev) => (prev - 1 + parchmentItems.length) % parchmentItems.length);
+  };
+
+  const handleNextParchmentChip = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setParchmentItemIndex((prev) => (prev + 1) % parchmentItems.length);
+  };
 
   const chipsContainerRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -374,7 +527,16 @@ const Controls: React.FC<ControlsProps> = ({
     }
     if (query.trim()) {
       console.log(`[SearchNarration] SEARCH_SUBMITTED query="${query.trim()}"`);
+      setIsManualInputMode(false);
       onSearch(query);
+    } else if (skin === 'parchment' && currentParchmentItem) {
+      if (currentParchmentItem.type === 'manual') {
+        setIsManualInputMode(true);
+        setTimeout(() => inputRef.current?.focus(), 0);
+      } else if (currentParchmentItem.chip) {
+        console.log(`[SearchNarration] PARCHMENT_FOLLOWUP_SUBMITTED chip="${currentParchmentItem.label}"`);
+        handleChipClick(currentParchmentItem.chip);
+      }
     } else {
       const effectiveCandidate = (activeWaypointTitle && !scanningStatusText) ? activeWaypointTitle : placeholder;
       if (effectiveCandidate && effectiveCandidate !== "Search location..." && effectiveCandidate !== "SEARCH LOCATION...") {
@@ -463,9 +625,9 @@ const Controls: React.FC<ControlsProps> = ({
       chip: "px-3 py-1 bg-black hover:bg-amber-400 hover:text-black text-amber-300 border border-amber-400 rounded-none text-xs font-retro uppercase tracking-wider transition-colors active:scale-95 cursor-pointer"
     },
     'parchment': {
-      btn: "bg-[#f4ead5] border border-[#8b5a2b] text-[#5c3a21] hover:bg-[#e8d5b5] hover:text-[#3e2723] rounded shadow-[2px_2px_4px_rgba(0,0,0,0.2)] font-sans",
-      btnActive: "bg-[#d2b48c] text-[#3e2723] border-[#5c3a21] shadow-[inset_1px_1px_3px_rgba(0,0,0,0.3)]",
-      favActive: "bg-[#e8d5b5] text-[#b8860b] border-[#b8860b] shadow-[0_0_10px_rgba(184,134,11,0.3)] hover:bg-[#d2b48c] hover:text-[#8b6508]",
+      btn: "bg-transparent text-[#4a2a16] hover:text-[#fff3dc] hover:scale-110 parchment-glyph-contrast font-sans",
+      btnActive: "bg-transparent text-[#f4ead5] hover:text-[#fff3dc] parchment-glyph-contrast",
+      favActive: "!text-[#f4ead5] hover:text-[#fff3dc]",
 
       inputWrapper: "backdrop-blur-md border-0 rounded-none shadow-none",
       inputIcon: "text-[#8b5a2b]",
@@ -476,9 +638,9 @@ const Controls: React.FC<ControlsProps> = ({
       statusRow: "text-[#5c3a21] font-sans shadow-sm",
       statusText: "text-[#522B07] font-sans",
       statusDismiss: "text-[#8b5a2b]/70 hover:text-[#3e2723] transition-colors p-0.5",
-      copyright: "text-white/50 font-sans",
+      copyright: "text-[#6b4f35] font-sans",
       modal: "text-[#3e2723] font-sans shadow-[0_4px_20px_rgba(0,0,0,0.4)]",
-      chip: "px-1.5 py-0.5 text-[#f4ead5] underline underline-offset-2 decoration-[#f4ead5]/70 hover:text-white hover:decoration-white text-xs font-sans transition-colors active:scale-95 cursor-pointer"
+      chip: "px-1.5 py-0.5 text-[#f4ead5] underline underline-offset-2 decoration-[#f4ead5]/70 hover:text-[#fff3dc] hover:decoration-[#fff3dc] text-xs font-sans transition-colors active:scale-95 cursor-pointer"
     }
   };
 
@@ -528,8 +690,6 @@ const Controls: React.FC<ControlsProps> = ({
     return {};
   };
 
-  const chips = activeLocationContext ? generateContextualChips(activeLocationContext, showNews) : [];
-
   useEffect(() => {
     updateScrollIndicators();
     const el = chipsContainerRef.current;
@@ -542,28 +702,88 @@ const Controls: React.FC<ControlsProps> = ({
     };
   }, [chips, updateScrollIndicators]);
 
-  const handleChipClick = (chip: ContextualChip) => {
-    if (chip.type === 'news' && chip.url) {
-      window.open(chip.url, '_blank', 'noopener,noreferrer');
-      return;
-    }
-    narrationService.prime();
-    setQuery("");
-    onSearch(chip.query || chip.label, true);
-  };
 
-  // Format placeholder for retro skins, clear on focus.
-  // When an active location context is present, display "Ask about {name}..."
-  // When an active waypoint title is provided (during route navigation) and no active user search/focus is happening, display it.
-  const activePlaceholderText = (activeLocationContext && !scanningStatusText)
-    ? `Ask about ${activeLocationContext.name}...`
-    : (activeWaypointTitle && !scanningStatusText)
-    ? activeWaypointTitle
-    : placeholder;
-  const displayPlaceholder = isFocused ? "" : (skin === 'modern' || skin === 'parchment' ? activePlaceholderText : activePlaceholderText.toUpperCase());
+  const traceRouteButton = (
+    <button
+      onClick={() => onToggleTraceModal(!isTraceModalOpen)}
+      className={`p-3 transition-all active:scale-95 ${theme.btn} ${isTraceModalOpen ? theme.favActive : ''}`}
+      aria-label="Trace Route"
+      title="Trace Route from Text"
+    >
+      <TraceRouteIcon />
+    </button>
+  );
+
+  const favoritesButton = (
+    <button
+      onClick={onToggleShowFavorites}
+      className={`p-3 transition-all active:scale-95 ${theme.btn} ${showFavorites ? theme.favActive : ''}`}
+      aria-label="Toggle Favorites"
+      title="Show/Hide Favorites"
+    >
+      <Star size={20} className={showFavorites ? "fill-current" : ""} />
+    </button>
+  );
+
+  const zoomOutButton = (
+    <button
+      onClick={onZoomOut}
+      className={`p-3 transition-all active:scale-95 ${theme.btn}`}
+      aria-label="Zoom Out"
+    >
+      <ZoomOut size={20} />
+    </button>
+  );
+
+  const zoomInButton = (
+    <button
+      onClick={onZoomIn}
+      className={`p-3 transition-all active:scale-95 ${theme.btn}`}
+      aria-label="Zoom In"
+    >
+      <ZoomIn size={20} />
+    </button>
+  );
+
+  const narrationButton = (
+    <button
+      onClick={onToggleNarration}
+      disabled={!isNarrationAvailable}
+      className={`p-3 transition-all active:scale-95 ${theme.btn} ${
+        isNarrationEnabled ? theme.favActive : ''
+      } ${!isNarrationAvailable ? 'opacity-40 cursor-not-allowed' : ''}`}
+      aria-label={!isNarrationAvailable ? "Narration unavailable" : isNarrationEnabled ? "Narration On" : "Narration Off"}
+      title={!isNarrationAvailable ? "Narration unavailable" : isNarrationEnabled ? "Narration On" : "Narration Off"}
+      data-testid="narration-toolbar-toggle"
+    >
+      {isNarrationEnabled ? <Volume2 size={20} /> : <VolumeX size={20} />}
+    </button>
+  );
+
+  const themeButton = onCycleSkin ? (
+    <button
+      onClick={onCycleSkin}
+      className={`p-3 transition-all active:scale-95 ${theme.btn}`}
+      aria-label="Switch Theme"
+      title="Switch Theme"
+    >
+      <Palette size={20} />
+    </button>
+  ) : null;
+
+  const settingsButton = onToggleSettings ? (
+    <button
+      onClick={onToggleSettings}
+      className={`p-3 transition-all active:scale-95 ${theme.btn} ${isSettingsOpen ? theme.favActive : ''}`}
+      aria-label="Settings"
+      title="Settings"
+    >
+      <Settings size={20} />
+    </button>
+  ) : null;
 
   return (
-    <div className="absolute bottom-2.5 left-0 right-0 z-20 flex flex-col items-center gap-2 pointer-events-none px-4">
+    <>
       <style>{`
         @keyframes search-orbit {
           from {
@@ -632,6 +852,12 @@ const Controls: React.FC<ControlsProps> = ({
         .active-search-glow-parchment {
           animation: search-pulse-glow-parchment 2s infinite ease-in-out;
         }
+        .parchment-glyph-contrast {
+          filter: drop-shadow(0.75px 0 0 rgba(200, 168, 120, 0.95))
+                  drop-shadow(-0.75px 0 0 rgba(200, 168, 120, 0.95))
+                  drop-shadow(0 0.75px 0 rgba(200, 168, 120, 0.95))
+                  drop-shadow(0 -0.75px 0 rgba(200, 168, 120, 0.95));
+        }
         .orbiting-dot {
           stroke-dasharray: 20 980;
           animation: search-orbit 3s linear infinite;
@@ -647,7 +873,6 @@ const Controls: React.FC<ControlsProps> = ({
           display: none;
         }
       `}</style>
-
 
       {/* Trace Route Modal */}
       {isTraceModalOpen && (
@@ -706,97 +931,63 @@ const Controls: React.FC<ControlsProps> = ({
           </div>
       )}
 
-      {/* Zoom & View Controls */}
-      <div className="flex gap-2 pointer-events-auto">
-        <button
-          onClick={() => onToggleTraceModal(!isTraceModalOpen)}
-          className={`p-3 transition-all active:scale-95 ${theme.btn} ${isTraceModalOpen ? theme.favActive : ''}`}
-          aria-label="Trace Route"
-          title="Trace Route from Text"
+      {/* Parchment Ring Controls (Independent fixed layer placed along the circular globe ring) */}
+      {skin === 'parchment' && (
+        <div
+          className="fixed pointer-events-none z-20"
+          style={{
+            top: 'calc(50% - 15px)',
+            left: '50%',
+            width: 0,
+            height: 0,
+          }}
+          data-testid="parchment-ring-controls"
         >
-           <TraceRouteIcon />
-        </button>
-        <button
-          onClick={onToggleShowFavorites}
-          className={`p-3 transition-all active:scale-95 ${theme.btn} ${showFavorites ? theme.favActive : ''}`}
-          aria-label="Toggle Favorites"
-          title="Show/Hide Favorites"
-        >
-          <Star size={20} className={showFavorites ? "fill-current" : ""} />
-        </button>
-        <div className={`w-px mx-1 self-stretch ${
-          skin === 'parchment'
-            ? (isOSM ? 'bg-[#8b5a2b]/30' : 'bg-white/20')
-            : skin === 'modern'
-            ? (isOSM ? 'bg-black/60' : 'bg-white/20')
-            : 'bg-white/20'
-        }`}></div>
-        <button
-          onClick={onZoomOut}
-          className={`p-3 transition-all active:scale-95 ${theme.btn}`}
-          aria-label="Zoom Out"
-        >
-          <ZoomOut size={20} />
-        </button>
-        <button
-          onClick={onZoomIn}
-          className={`p-3 transition-all active:scale-95 ${theme.btn}`}
-          aria-label="Zoom In"
-        >
-          <ZoomIn size={20} />
-        </button>
-        <button
-          onClick={onToggleNarration}
-          disabled={!isNarrationAvailable}
-          className={`p-3 transition-all active:scale-95 ${theme.btn} ${
-            isNarrationEnabled ? theme.favActive : ''
-          } ${!isNarrationAvailable ? 'opacity-40 cursor-not-allowed' : ''}`}
-          aria-label={!isNarrationAvailable ? "Narration unavailable" : isNarrationEnabled ? "Narration On" : "Narration Off"}
-          title={!isNarrationAvailable ? "Narration unavailable" : isNarrationEnabled ? "Narration On" : "Narration Off"}
-          data-testid="narration-toolbar-toggle"
-        >
-          {isNarrationEnabled ? <Volume2 size={20} /> : <VolumeX size={20} />}
-        </button>
+          <div style={getRingPositionStyle(0)} className="pointer-events-auto">{traceRouteButton}</div>
+          <div style={getRingPositionStyle(1)} className="pointer-events-auto">{favoritesButton}</div>
+          <div style={getRingPositionStyle(2)} className="pointer-events-auto">{zoomOutButton}</div>
+          <div style={getRingPositionStyle(3)} className="pointer-events-auto">{zoomInButton}</div>
+          <div style={getRingPositionStyle(4)} className="pointer-events-auto">{narrationButton}</div>
+          {themeButton && <div style={getRingPositionStyle(5)} className="pointer-events-auto">{themeButton}</div>}
+          {settingsButton && <div style={getRingPositionStyle(6)} className="pointer-events-auto">{settingsButton}</div>}
+        </div>
+      )}
 
-
-        {onCycleSkin && (
-          <>
+      {/* Main Bottom Container (Fixed at the bottom across all themes) */}
+      <div className="absolute bottom-2.5 left-0 right-0 z-20 flex flex-col items-center gap-2 pointer-events-none px-4">
+        {/* Toolbar for non-parchment themes */}
+        {skin !== 'parchment' && (
+          <div className="flex gap-2 pointer-events-auto">
+            {traceRouteButton}
+            {favoritesButton}
             <div className={`w-px mx-1 self-stretch ${
-              skin === 'parchment'
-                ? (isOSM ? 'bg-[#8b5a2b]/30' : 'bg-white/20')
-                : skin === 'modern'
+              skin === 'modern'
                 ? (isOSM ? 'bg-black/60' : 'bg-white/20')
-                : skin === 'retro-green'
-                ? 'bg-green-400/30'
-                : skin === 'retro-amber'
-                ? 'bg-amber-400/30'
                 : 'bg-white/20'
             }`}></div>
-            <button
-              onClick={onCycleSkin}
-              className={`p-3 transition-all active:scale-95 ${theme.btn}`}
-              aria-label="Switch Theme"
-              title="Switch Theme"
-            >
-              <Palette size={20} />
-            </button>
-          </>
+            {zoomOutButton}
+            {zoomInButton}
+            {narrationButton}
+            {themeButton && (
+              <>
+                <div className={`w-px mx-1 self-stretch ${
+                  skin === 'modern'
+                    ? (isOSM ? 'bg-black/60' : 'bg-white/20')
+                    : skin === 'retro-green'
+                    ? 'bg-green-400/30'
+                    : skin === 'retro-amber'
+                    ? 'bg-amber-400/30'
+                    : 'bg-white/20'
+                }`}></div>
+                {themeButton}
+              </>
+            )}
+            {settingsButton}
+          </div>
         )}
 
-        {onToggleSettings && (
-            <button
-              onClick={onToggleSettings}
-              className={`p-3 transition-all active:scale-95 ${theme.btn} ${isSettingsOpen ? theme.favActive : ''}`}
-              aria-label="Settings"
-              title="Settings"
-            >
-              <Settings size={20} />
-            </button>
-        )}
-      </div>
-
-      {/* Contextual Question & News Chips (Positioned between toolbar and search field) */}
-      {chips.length > 0 && (!scanningStatusText || scanningStatusText.toUpperCase().includes("RESEARCHING FOLLOW-UP")) && (
+      {/* Contextual Question & News Chips (Positioned between toolbar and search field for non-parchment skins) */}
+      {skin !== 'parchment' && chips.length > 0 && (!scanningStatusText || scanningStatusText.toUpperCase().includes("RESEARCHING FOLLOW-UP")) && (
         <div className="flex items-center w-full max-w-[532px] pointer-events-auto z-20">
           {canScrollLeft && (
             <button
@@ -807,8 +998,6 @@ const Controls: React.FC<ControlsProps> = ({
                   ? 'text-green-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(74,222,128,0.8)]'
                   : skin === 'retro-amber'
                   ? 'text-amber-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(251,191,36,0.8)]'
-                  : skin === 'parchment'
-                  ? 'text-[#f4ead5] font-sans text-xs font-bold'
                   : 'bg-black/60 rounded-full text-cyan-400/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]'
               }`}
               data-testid="chips-scroll-left-indicator"
@@ -850,8 +1039,6 @@ const Controls: React.FC<ControlsProps> = ({
                   ? 'text-green-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(74,222,128,0.8)]'
                   : skin === 'retro-amber'
                   ? 'text-amber-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(251,191,36,0.8)]'
-                  : skin === 'parchment'
-                  ? 'text-[#f4ead5] font-sans text-xs font-bold'
                   : 'bg-black/60 rounded-full text-cyan-400/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]'
               }`}
               data-testid="chips-scroll-right-indicator"
@@ -865,7 +1052,7 @@ const Controls: React.FC<ControlsProps> = ({
       )}
 
       {/* Search Input */}
-      <form onSubmit={handleSubmit} className="w-full max-w-[532px] pointer-events-auto relative group">
+      <form ref={searchFormRef} onSubmit={handleSubmit} className="w-full max-w-[532px] pointer-events-auto relative group">
         <div className={theme.glow}></div>
         {skin === 'parchment' ? (
           <div className="relative w-full [isolation:isolate]">
@@ -873,24 +1060,90 @@ const Controls: React.FC<ControlsProps> = ({
             {showSearchGlow && (
               <div className="absolute inset-[-3px] z-0 pointer-events-none active-search-glow-parchment" />
             )}
+
+            {/* Outside Navigation Controls: Previous / Next follow-up question */}
+            {parchmentItems.length > 1 && !isManualInputMode && !query && !scanningStatusText && (
+              <button
+                type="button"
+                onClick={handlePrevParchmentChip}
+                className="absolute -left-9 top-1/2 -translate-y-1/2 p-1 text-[#8b5a2b] hover:text-[#fff3dc] transition-colors cursor-pointer select-none z-10"
+                aria-label="Previous question"
+                title="Previous question"
+                data-testid="parchment-prev-chip"
+              >
+                <ChevronLeft size={20} strokeWidth={2.5} />
+              </button>
+            )}
+
+            {parchmentItems.length > 1 && !isManualInputMode && !query && !scanningStatusText && (
+              <button
+                type="button"
+                onClick={handleNextParchmentChip}
+                className="absolute -right-9 top-1/2 -translate-y-1/2 p-1 text-[#8b5a2b] hover:text-[#fff3dc] transition-colors cursor-pointer select-none z-10"
+                aria-label="Next question"
+                title="Next question"
+                data-testid="parchment-next-chip"
+              >
+                <ChevronRight size={20} strokeWidth={2.5} />
+              </button>
+            )}
+
             {/* Inner container: parchment background behind crisp content */}
-            <div className={`relative flex items-center transition-all ${skin === 'parchment' ? '[isolation:isolate]' : 'overflow-hidden'} ${theme.inputWrapper}`}>
+            <div className={`relative flex items-center transition-all [isolation:isolate] ${theme.inputWrapper}`}>
               <div className="parchment-background" aria-hidden="true" />
-              <div className="relative z-[1] flex items-center w-full">
+              <div className="relative z-[1] flex items-center w-full min-w-0">
                 <Search className={`ml-4 shrink-0 ${theme.inputIcon}`} size={20} />
-                <input
-                  type="text"
-                  value={query}
-                  onChange={(e) => {
-                    if (searchError && onClearError) onClearError();
-                    setQuery(e.target.value);
-                  }}
-                  onFocus={handleInputFocus}
-                  onBlur={() => setIsFocused(false)}
-                  placeholder={displayPlaceholder}
-                  disabled={!!scanningStatusText}
-                  className={`w-full bg-transparent border-none px-4 py-4 focus:ring-0 outline-none ${theme.inputField}`}
-                />
+
+                <div className="relative flex-1 min-w-0 flex items-center h-full">
+                  {hasParchmentFollowUps && currentParchmentItem && !isManualInputMode && !query && !scanningStatusText ? (
+                    <div
+                      className="w-full flex items-center overflow-x-auto no-scrollbar px-3 z-10"
+                      onMouseEnter={(e) => {
+                        const el = e.currentTarget;
+                        if (el.scrollWidth > el.clientWidth) {
+                          el.scrollTo({ left: el.scrollWidth - el.clientWidth, behavior: 'smooth' });
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        const el = e.currentTarget;
+                        el.scrollTo({ left: 0, behavior: 'smooth' });
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (currentParchmentItem.type === 'manual') {
+                            setIsManualInputMode(true);
+                            setTimeout(() => inputRef.current?.focus(), 0);
+                          } else if (currentParchmentItem.chip) {
+                            handleChipClick(currentParchmentItem.chip);
+                          }
+                        }}
+                        className="w-full text-left whitespace-nowrap text-sm text-[#522B07] font-mono cursor-pointer hover:text-[#3e2723] focus:outline-none select-none py-4"
+                        data-testid="parchment-followup-suggestion"
+                        aria-label={currentParchmentItem.type === 'manual' ? currentParchmentItem.label : `Follow-up question: ${currentParchmentItem.label}`}
+                      >
+                        {currentParchmentItem.label}
+                      </button>
+                    </div>
+                  ) : (
+                    <input
+                      ref={inputRef}
+                      type="text"
+                      value={query}
+                      onChange={(e) => {
+                        if (searchError && onClearError) onClearError();
+                        setQuery(e.target.value);
+                      }}
+                      onFocus={handleInputFocus}
+                      onBlur={() => setIsFocused(false)}
+                      placeholder={hasParchmentFollowUps ? "" : displayPlaceholder}
+                      disabled={!!scanningStatusText}
+                      autoFocus={isManualInputMode}
+                      className={`w-full bg-transparent border-none px-3 py-4 focus:ring-0 outline-none ${theme.inputField}`}
+                    />
+                  )}
+                </div>
 
                 {query && !scanningStatusText && (
                   <button
@@ -906,14 +1159,35 @@ const Controls: React.FC<ControlsProps> = ({
                   </button>
                 )}
 
-                <button
-                  type={scanningStatusText ? "button" : "submit"}
-                  onClick={scanningStatusText ? handleCancelClick : undefined}
-                  disabled={isSearching && !scanningStatusText}
-                  className={`mr-2 px-4 py-2 transition-colors disabled:opacity-50 ${theme.submitBtn}`}
-                >
-                  {scanningStatusText ? "CANCEL" : isSearching ? <Loader2 size={18} className="animate-spin" /> : "EXPLORE"}
-                </button>
+                {isManualInputMode && !scanningStatusText && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setQuery("");
+                      setIsManualInputMode(false);
+                      setParchmentItemIndex(0);
+                      if (searchError && onClearError) onClearError();
+                    }}
+                    className="mr-2 px-2 py-1 text-sm font-sans font-bold uppercase tracking-wider text-[#5c3a21] hover:text-[#3e2723] transition-colors cursor-pointer select-none"
+                    aria-label="Cancel manual question"
+                    data-testid="parchment-cancel-manual"
+                  >
+                    CANCEL
+                  </button>
+                )}
+
+                {(!hasParchmentFollowUps || isManualInputMode || query || scanningStatusText || isSearching) && (
+                  <button
+                    type={scanningStatusText ? "button" : "submit"}
+                    onClick={scanningStatusText ? handleCancelClick : undefined}
+                    disabled={isSearching && !scanningStatusText}
+                    className={`mr-2 px-4 py-2 transition-colors disabled:opacity-50 ${theme.submitBtn}`}
+                  >
+                    {scanningStatusText ? "CANCEL" : isSearching ? <Loader2 size={18} className="animate-spin" /> : "EXPLORE"}
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1019,15 +1293,15 @@ const Controls: React.FC<ControlsProps> = ({
       })()}
 
       {/* Copyright & Map Attribution Text */}
-      <div className={`text-[10px] md:text-xs text-center -mt-1 ${theme.copyright}`}>
-        © {new Date().getFullYear()} TerraExplorer by Chris Adkins • All Rights Reserved<br />
-        Map data ©{' '}
+      <div className={`text-[10px] md:text-xs text-center ${theme.copyright}`}>
+        © {new Date().getFullYear()} TerraExplorer by Chris Adkins • All Rights Reserved • Map data ©{' '}
         <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" className="underline hover:opacity-80 pointer-events-auto">OpenStreetMap contributors</a>
         {' '}• ©{' '}
         <a href="https://carto.com/attribution/" target="_blank" rel="noopener noreferrer" className="underline hover:opacity-80 pointer-events-auto">CARTO</a>
       </div>
     </div>
-  );
+  </>
+);
 };
 
 export default Controls;
