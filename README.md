@@ -8,43 +8,54 @@
 
 TerraExplorer is an interactive 3D globe application for exploring locations, discovering geographic information, and building journeys across the world.
 
-Search for cities, landmarks, historical sites, and points of interest, explore locations on a 3D globe or street-level map, view AI-generated information and current news, listen to location narration, and use Trace Route to turn articles, URLs, or text into connected geographic journeys.
+Search for cities, landmarks, historical sites, and points of interest, explore locations on a 3D globe or street-level map, ask contextual follow-up questions or your own questions to learn more, listen to location narration, and use Trace Route to turn articles, URLs, or text into connected geographic journeys. You can also view current news relevant to the locations you explore.
 
-<p align="center" style="background-color:black; padding:20px;">
-  <a href="assets/machu-picchu-parchment.png">
-    <img src="assets/machu-picchu-parchment.png"
-         alt="TerraExplorer Parchment Theme"
-         width="200"
-         style="margin:5px;">
-  </a>
-  <a href="assets/machu-picchu-modern.png">
-    <img src="assets/machu-picchu-modern.png"
-         alt="TerraExplorer Modern Theme"
-         width="200"
-         style="margin:5px;">
-  </a>
-  <a href="assets/machu-picchu-crt-green.png">
-    <img src="assets/machu-picchu-crt-green.png"
-         alt="TerraExplorer CRT Green Theme"
-         width="200"
-         style="margin:5px;">
-  </a>
-  <a href="assets/machu-picchu-crt-amber.png">
-    <img src="assets/machu-picchu-crt-amber.png"
-         alt="TerraExplorer CRT Amber Theme"
-         width="200"
-         style="margin:5px;">
-  </a>
-</p>
+<table align="center" style="background-color:black; border:0; border-collapse:collapse; padding:20px;">
+  <tr>
+    <td style="border:0; padding:8px;">
+      <a href="assets/machu-picchu-parchment.png">
+        <img src="assets/machu-picchu-parchment.png"
+             alt="TerraExplorer Parchment Theme"
+             width="200"
+             style="border:0;">
+      </a>
+    </td>
+    <td style="border:0; padding:8px;">
+      <a href="assets/machu-picchu-modern.png">
+        <img src="assets/machu-picchu-modern.png"
+             alt="TerraExplorer Modern Theme"
+             width="200"
+             style="border:0;">
+      </a>
+    </td>
+    <td style="border:0; padding:8px;">
+      <a href="assets/machu-picchu-crt-green.png">
+        <img src="assets/machu-picchu-crt-green.png"
+             alt="TerraExplorer CRT Green Theme"
+             width="200"
+             style="border:0;">
+      </a>
+    </td>
+    <td style="border:0; padding:8px;">
+      <a href="assets/machu-picchu-crt-amber.png">
+        <img src="assets/machu-picchu-crt-amber.png"
+             alt="TerraExplorer CRT Amber Theme"
+             width="200"
+             style="border:0;">
+      </a>
+    </td>
+  </tr>
+</table>
 
 ## Features
 
 - **3D Globe:** Rotate, zoom, and explore the Earth from orbit to street level.
 - **Smart Search:** Find locations using natural-language queries.
 - **AI Location Insights:** Generate summaries, facts, population, climate, and other geographic information using Google Gemini or local LM Studio inference.
-- **Street Maps:** Switch to detailed CARTO vector maps based on OpenStreetMap data.
-- **Documentary Mode:** Experience cinematic camera transitions from the globe to selected locations.
-- **Location Narration:** Listen to location titles and descriptions using System Voice, ultra-fast local Kokoro TTS, or local Orpheus TTS.
+- **Contextual Follow-Up Questions:** Continue exploring a location with contextually relevant suggested questions or ask your own follow-up question. Answers are displayed directly in the location information panel.
+- **Street Maps:** Switch from the 3D globe to a detailed street map to explore locations, roads, landmarks, and surrounding areas more closely.
+- **Documentary Mode:** Experience cinematic camera transitions and a guided visual presentation as you explore locations. Documentary Mode works independently, but is especially immersive when combined with Narration.
+- **Location Narration:** Listen to location descriptions and other exploration content as TerraExplorer reads it aloud using System Voice, Kokoro TTS, or Orpheus TTS.
 - **Real-Time News:** View current news relevant to selected locations.
 - **Trace Route:** Extract locations from articles, URLs, or text and build connected journeys.
 - **Favorites & Notes:** Save locations and attach personal notes.
