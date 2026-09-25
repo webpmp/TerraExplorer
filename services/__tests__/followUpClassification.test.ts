@@ -24,9 +24,36 @@ describe('Contextual Follow-Up Classification', () => {
     expect(classifyFollowUpIntent('Show me photos of it today', bodieLocation).intent).toBe('FOLLOW_UP');
     expect(classifyFollowUpIntent('Who lived there?', bodieLocation).intent).toBe('FOLLOW_UP');
     expect(classifyFollowUpIntent('When did its population peak?', bodieLocation).intent).toBe('FOLLOW_UP');
+    expect(classifyFollowUpIntent('Why was it important?', bodieLocation).intent).toBe('FOLLOW_UP');
+    expect(classifyFollowUpIntent('What happened there?', bodieLocation).intent).toBe('FOLLOW_UP');
+    expect(classifyFollowUpIntent('What happened here?', bodieLocation).intent).toBe('FOLLOW_UP');
+    expect(classifyFollowUpIntent('How did it end?', bodieLocation).intent).toBe('FOLLOW_UP');
   });
 
-  it('3. Continuation / omitted subject questions classify as FOLLOW_UP', () => {
+  it('3. Continuation / omitted subject questions classify as FOLLOW_UP (without pronouns or location name)', () => {
+    // Primary regression: manually typed questions without pronouns or location name
+    expect(classifyFollowUpIntent('where were the major battles?', bodieLocation, false, false).intent).toBe('FOLLOW_UP');
+    expect(classifyFollowUpIntent('where did the fighting occur?', bodieLocation, false, false).intent).toBe('FOLLOW_UP');
+    expect(classifyFollowUpIntent('who were the key commanders?', bodieLocation, false, false).intent).toBe('FOLLOW_UP');
+    expect(classifyFollowUpIntent('when did the fighting begin?', bodieLocation, false, false).intent).toBe('FOLLOW_UP');
+    expect(classifyFollowUpIntent('what happened here?', bodieLocation, false, false).intent).toBe('FOLLOW_UP');
+    expect(classifyFollowUpIntent('why was it important?', bodieLocation, false, false).intent).toBe('FOLLOW_UP');
+
+    // Historical event active location
+    const civilWarLocation: LocationInfo = {
+      id: 'civil-war-loc',
+      name: 'American Civil War',
+      canonicalName: 'Civil War',
+      coordinates: { lat: 38.8951, lng: -77.0364 },
+      description: 'The American Civil War was fought between the Union and the Confederacy.',
+      entityType: 'historical_event'
+    };
+    expect(classifyFollowUpIntent('where were the major battles?', civilWarLocation, false, false).intent).toBe('FOLLOW_UP');
+    expect(classifyFollowUpIntent('where did the fighting occur?', civilWarLocation, false, false).intent).toBe('FOLLOW_UP');
+    expect(classifyFollowUpIntent('who were the key commanders?', civilWarLocation, false, false).intent).toBe('FOLLOW_UP');
+    expect(classifyFollowUpIntent('when did the fighting begin?', civilWarLocation, false, false).intent).toBe('FOLLOW_UP');
+
+    // Continuation phrase questions
     expect(classifyFollowUpIntent('Tell me more about the mines', bodieLocation).intent).toBe('FOLLOW_UP');
     expect(classifyFollowUpIntent('More details on the gold rush', bodieLocation).intent).toBe('FOLLOW_UP');
     expect(classifyFollowUpIntent('What about the cemetery?', bodieLocation).intent).toBe('FOLLOW_UP');
@@ -39,6 +66,16 @@ describe('Contextual Follow-Up Classification', () => {
   });
 
   it('5. Clearly new locations / entities classify as NEW_SEARCH', () => {
+    // 7 Required NEW_SEARCH boundary cases with active context
+    expect(classifyFollowUpIntent('where is Paris?', bodieLocation).intent).toBe('NEW_SEARCH');
+    expect(classifyFollowUpIntent('where was the Battle of Gettysburg?', bodieLocation).intent).toBe('NEW_SEARCH');
+    expect(classifyFollowUpIntent('tell me about Paris', bodieLocation).intent).toBe('NEW_SEARCH');
+    expect(classifyFollowUpIntent('tell me about the American Civil War', bodieLocation).intent).toBe('NEW_SEARCH');
+    expect(classifyFollowUpIntent('what happened in London?', bodieLocation).intent).toBe('NEW_SEARCH');
+    expect(classifyFollowUpIntent('what happened during World War II?', bodieLocation).intent).toBe('NEW_SEARCH');
+    expect(classifyFollowUpIntent('where is Mount Fuji?', bodieLocation).intent).toBe('NEW_SEARCH');
+
+    // Other explicit new searches
     expect(classifyFollowUpIntent('Paris', bodieLocation).intent).toBe('NEW_SEARCH');
     expect(classifyFollowUpIntent('Nevada', bodieLocation).intent).toBe('NEW_SEARCH');
     expect(classifyFollowUpIntent('Ghost towns in Nevada', bodieLocation).intent).toBe('NEW_SEARCH');

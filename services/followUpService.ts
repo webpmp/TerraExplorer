@@ -2,6 +2,8 @@ import { LocationInfo, Waypoint, FollowUpItem, ImageMetadata, NewsItem } from '.
 import { generateContentWithRetry, modelName } from './geminiService';
 import { fetchAndValidateImages } from './imageService';
 import { parseAndExtract } from '../utils/jsonParser';
+import { getHistoricalEntityKnowledge } from './geographic/historicalCoordinateValidator';
+import { getAuthoritativeEventModel } from './geographic/historicalRouteRegistry';
 
 export interface FollowUpClassificationResult {
   intent: 'FOLLOW_UP' | 'NEW_SEARCH' | 'ROUTE_LEVEL_QUERY';
@@ -437,7 +439,7 @@ export const classifyFollowUpIntent = (
   const hasPronounReference = /\b(it|its|there|they|them|that|this|here)\b/i.test(clean);
 
   // - Follow-up phrasing with continuation / question starters
-  const isQuestionContinuation = /^(?:why|what|who|when|how|where|tell\s+me|show\s+me|can\s+you\s+tell|can\s+you\s+show|describe|explain|photos?|images?|pictures?|more\s+details|more\s+info|details\s+on)\b/i.test(clean);
+  const isQuestionContinuation = /^(?:why|what|who|when|how|where|tell\s+me|show\s+me|can\s+you\s+tell|can\s+you\s+show|describe|explain|photos?|images?|pictures?|more\s+details|more\s+info|details\s+on)\b/i.test(clean) || clean.endsWith('?');
 
   if (mentionsActiveLocation && isQuestionContinuation) {
     return {
@@ -453,55 +455,151 @@ export const classifyFollowUpIntent = (
     };
   }
 
-  // Omitted subject question patterns that clearly continue topic of active location
-  const omittedSubjectPatterns = [
-    /^\s*why\s+(?:was|is|did|were)\s+(?:it\s+)?(?:abandoned|founded|built|destroyed|evacuated|closed|deserted|attacked|chosen|created|discovered|named)\s*\??\s*$/i,
-    /^\s*what\s+(?:was|is)\s+(?:daily\s+life|life|the\s+population|the\s+history|the\s+purpose|the\s+weather|the\s+climate|the\s+legacy|the\s+significance|the\s+economy|the\s+origin)\s*(?:like|there)?\s*\??\s*$/i,
-    /^\s*what\s+(?:about|remains|survives|exists|happened\s+next|happened\s+here|happened\s+after|is\s+left)\s*(?:today|now|there)?\b/i,
-    /^\s*who\s+(?:lived|died|ruled|governed|discovered|founded|built|explored|worked)\s*(?:here|there)?\s*\??\s*$/i,
-    /^\s*when\s+(?:did\s+that\s+happen|was\s+it\s+founded|was\s+it\s+built|was\s+it\s+abandoned|did\s+it\s+happen|was\s+it\s+discovered)\s*\??\s*$/i,
-    /^\s*how\s+many\s+(?:residents|people|miners|soldiers|citizens|inhabitants|structures|buildings|mines)\s*\??\s*$/i,
-    /^\s*tell\s+me\s+more\s+about\s+(?:the\s+)?(.+?)\s*\??\s*$/i,
-    /^\s*(?:more\s+details|more\s+info|more\s+information)\s+(?:on|about)\s+(?:the\s+)?(.+?)\s*\??\s*$/i,
-    /^\s*show\s+(?:me\s+)?(?:more\s+)?(?:photos?|pictures?|images?)\s*(?:of\s+it)?\s*(?:today|now)?\s*\??\s*$/i
-  ];
+  // 5. Non-question queries (e.g. "Paris", "Austin, Texas", "Nevada", "Mount Fuji", "Mines", "History") default to NEW_SEARCH
+  if (!isQuestionContinuation) {
+    return {
+      intent: 'NEW_SEARCH',
+      reasoning: 'Non-question query is treated as a new location search'
+    };
+  }
 
-  for (const pattern of omittedSubjectPatterns) {
-    if (pattern.test(clean)) {
+
+
+  // Helper to determine whether an extracted candidate represents an independent/external named entity
+  const isExternalNamedEntity = (rawCandidate: string): boolean => {
+    if (!rawCandidate || typeof rawCandidate !== 'string') return false;
+    const trimmed = rawCandidate.trim();
+    if (trimmed.length < 2) return false;
+
+    const cleanCandidate = trimmed.replace(/^(?:the|a|an)\s+/i, '').replace(/[?.,!;:]+$/, '').trim();
+    if (!cleanCandidate) return false;
+
+    const candidateLower = cleanCandidate.toLowerCase();
+
+    // If candidate explicitly matches active location name/alias, it is not external
+    if (namesToCheck.some(n => n === candidateLower || candidateLower.includes(n) || n.includes(candidateLower))) {
+      return false;
+    }
+
+    // If candidate is found in the active location's description, notable items, or context, it is contextual
+    const activeContextText = `${activeLocation.name || ''} ${(activeLocation as any).description || ''} ${(activeLocation as any).context || ''} ${Array.isArray(activeLocation.notable) ? activeLocation.notable.map((n: any) => typeof n === 'string' ? n : (n.title || n.name || '')).join(' ') : ''}`.toLowerCase();
+    if (activeContextText.includes(candidateLower)) {
+      return false;
+    }
+
+    // Common generic continuation terms that describe aspects of a location/event rather than distinct named entities
+    const genericContextualTerms = new Set([
+      'major battles', 'battles', 'fighting', 'key commanders', 'commanders',
+      'mines', 'gold mines', 'settlers', 'early settlers', 'history', 'overview',
+      'general facts', 'background', 'landmarks', 'highlights', 'economy',
+      'climate', 'weather', 'geography', 'ruins', 'buildings', 'structures',
+      'founders', 'leaders', 'people', 'inhabitants', 'residents', 'events',
+      'cause', 'consequences', 'significance', 'culture', 'daily life',
+      'population', 'cemetery', 'railway', 'gold rush', 'discovery', 'first settlers'
+    ]);
+    if (genericContextualTerms.has(candidateLower)) {
+      return false;
+    }
+
+    // 1. Authoritative registry check (case-insensitive, e.g. "Battle of Gettysburg", "World War II", "American Civil War", "Paris", "London")
+    if (
+      getHistoricalEntityKnowledge(cleanCandidate) ||
+      getHistoricalEntityKnowledge(candidateLower) ||
+      getAuthoritativeEventModel(cleanCandidate) ||
+      getAuthoritativeEventModel(candidateLower)
+    ) {
+      return true;
+    }
+
+    // 2. Check for proper noun capitalization in the substantive words of the candidate
+    // (e.g. "Battle of Gettysburg", "World War II", "American Civil War", "Paris", "Mount Fuji", "London")
+    const words = cleanCandidate.split(/\s+/);
+    const substantiveWords = words.filter(
+      w => !['of', 'and', 'the', 'in', 'at', 'for', 'on', 'de', 'la', 'von', 'during', 'after', 'before'].includes(w.toLowerCase())
+    );
+    if (
+      substantiveWords.length > 0 &&
+      substantiveWords.every(w => /^(?:[A-Z][a-zA-Z0-9'-]*|[IVXLCDM]+)$/.test(w))
+    ) {
+      return true;
+    }
+
+    return false;
+  };
+
+  // 6. Check for strong new search signals within question/continuation forms:
+  // - Navigation / discovery commands targeting an external location (e.g. "Take me to Paris", "Find Mount Everest", "Places to visit in Japan")
+  const navCommandMatch = clean.match(
+    /^\s*(?:find|locate|search\s+for|take\s+me\s+to|navigate\s+to|places\s+to\s+visit\s+in|ghost\s+towns\s+in|castles\s+in|best\s+\w+\s+in)\s+(.+?)\s*\??\s*$/i
+  );
+  if (navCommandMatch) {
+    const candidate = navCommandMatch[1].toLowerCase().trim();
+    if (!hasPronounReference && !namesToCheck.some(n => n === candidate || candidate.includes(n))) {
       return {
-        intent: 'FOLLOW_UP',
-        reasoning: 'Omitted subject question continuation for active location'
+        intent: 'NEW_SEARCH',
+        reasoning: 'Query introduces a new location or entity via navigation command'
       };
     }
   }
 
-  // 5. Check for strong new search signals:
-  // - Clear new geographic entities or destinations (e.g. "Paris", "Ghost towns in Nevada", "Best castles in Scotland", "Find the Titanic", "Mount Fuji", "Show me places to visit in Japan")
-  const newLocationSearchPatterns = [
-    /^\s*(?:find|locate|search\s+for|show\s+me|take\s+me\s+to|where\s+is|where\s+are|where\s+was|places\s+to\s+visit\s+in|ghost\s+towns\s+in|castles\s+in|best\s+\w+\s+in)\s+([A-Z][a-zA-Z\s,]+)\s*\??\s*$/i,
-    /^[A-Z][a-zA-Z\s]+,\s*[A-Z][a-zA-Z\s]+$/i, // e.g. "Calico, California" or "Austin, Texas"
-    /^[A-Z][a-zA-Z\s]+$/i // Single proper noun or title like "Paris", "Nevada", "Mount Fuji"
-  ];
-
-  for (const pattern of newLocationSearchPatterns) {
-    const match = clean.match(pattern);
-    if (match) {
-      const candidateEntity = (match[1] || clean).toLowerCase().trim();
-      // If the candidate entity is NOT our active location, it is a new search!
-      if (!namesToCheck.some(n => n === candidateEntity || candidateEntity.includes(n))) {
-        return {
-          intent: 'NEW_SEARCH',
-          reasoning: 'Query introduces a new location or entity'
-        };
-      }
+  // - Explicit "where is / where are / where was / where were [Entity]" (e.g. "Where is Paris?", "Where was the Battle of Gettysburg?", "Where is Mount Fuji?")
+  const whereMatch = clean.match(
+    /^\s*where\s+(?:is|are|was|were)\s+(?:located\s+|found\s+|situated\s+)?(.+?)(?:\s+located|\s+found|\s+situated)?\s*\??\s*$/i
+  );
+  if (whereMatch) {
+    const candidate = whereMatch[1].trim();
+    if (!hasPronounReference && isExternalNamedEntity(candidate)) {
+      return {
+        intent: 'NEW_SEARCH',
+        reasoning: 'Query asks for the location of an external entity'
+      };
     }
   }
 
-  // 6. Default conservative fallback:
-  // Ambiguous queries without clear follow-up grammar remain NEW_SEARCH
+  // - Explicit "tell me about [Entity]" targeting a named entity (e.g. "Tell me about Paris", "Tell me about the American Civil War")
+  const tellMeMatch = clean.match(/^\s*tell\s+me\s+(?:about|more\s+about)\s+(.+?)\s*\??\s*$/i);
+  if (tellMeMatch) {
+    const candidate = tellMeMatch[1].trim();
+    if (!hasPronounReference && isExternalNamedEntity(candidate)) {
+      return {
+        intent: 'NEW_SEARCH',
+        reasoning: 'Query asks about an explicit new entity'
+      };
+    }
+  }
+
+  // - Scoped queries targeting an external location or event (e.g. "What happened in London?", "What happened during World War II?", "Who was the mayor of Chicago?")
+  const scopedEntityMatch = clean.match(
+    /\b(?:in|at|during|throughout|after|before)\s+([A-Z][a-zA-Z0-9\s,'-]+)\s*\??\s*$/i
+  );
+  if (scopedEntityMatch) {
+    const candidate = scopedEntityMatch[1].trim();
+    if (!hasPronounReference && isExternalNamedEntity(candidate)) {
+      return {
+        intent: 'NEW_SEARCH',
+        reasoning: 'Query is scoped to a different named location or event'
+      };
+    }
+  }
+
+  // - Check for any explicit independent named entity introduced in the query (e.g. "What happened during World War II?", "Why was the Berlin Wall built?")
+  const queryWithoutOpener = clean
+    .replace(/^\s*(?:what|where|who|when|why|how|tell\s+me\s+about|tell\s+me|can\s+you\s+tell|show\s+me|describe|explain|did|was|were|is|are)\s+(?:did|was|were|is|are|happened\s+(?:to|in|at|during)?|took\s+place\s+(?:in|at|during)?|about\s+)?/i, '')
+    .replace(/[?.,!;:]+$/, '')
+    .trim();
+
+  if (queryWithoutOpener && !hasPronounReference && isExternalNamedEntity(queryWithoutOpener)) {
+    return {
+      intent: 'NEW_SEARCH',
+      reasoning: 'Query references an independent named entity'
+    };
+  }
+
+  // 7. Contextual continuation question with omitted subject:
+  // Query is a question or continuation asking about aspects of the active location
   return {
-    intent: 'NEW_SEARCH',
-    reasoning: 'Query does not exhibit clear follow-up grammar or reference to active location'
+    intent: 'FOLLOW_UP',
+    reasoning: 'Contextual question continuation for active location'
   };
 };
 
