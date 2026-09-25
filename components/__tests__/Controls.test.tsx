@@ -110,6 +110,115 @@ describe('Controls Search Error Presentation', () => {
     expect(html).not.toContain('group/error-tooltip');
     expect(html).not.toContain('animate-pulse');
   });
+
+  test('non-parchment themes reserve vertical layout footprint (min-h-[38px]) even when searchError is null', () => {
+    const nonParchmentSkins: SkinType[] = ['modern', 'retro-green', 'retro-amber'];
+
+    nonParchmentSkins.forEach((skin) => {
+      const htmlNoError = renderToStaticMarkup(
+        <Controls {...baseProps} skin={skin} searchError={null} />
+      );
+
+      // Stable reserved container is present even without an error
+      expect(htmlNoError).toContain('class="w-full max-w-[532px] min-h-[38px] -mt-2.5 pointer-events-none flex flex-col justify-start"');
+      expect(htmlNoError).not.toContain('role="status"');
+
+      const htmlWithError = renderToStaticMarkup(
+        <Controls {...baseProps} skin={skin} searchError="No results found for this query." onClearError={vi.fn()} />
+      );
+
+      // Stable reserved container wraps the error
+      expect(htmlWithError).toContain('class="w-full max-w-[532px] min-h-[38px] -mt-2.5 pointer-events-none flex flex-col justify-start"');
+      expect(htmlWithError).toContain('role="status"');
+      expect(htmlWithError).toContain('No results found for this query.');
+    });
+  });
+
+  test('parchment theme does not use the reserved-space container', () => {
+    const htmlNoError = renderToStaticMarkup(
+      <Controls {...baseProps} skin="parchment" searchError={null} />
+    );
+    expect(htmlNoError).not.toContain('min-h-[38px]');
+
+    const htmlWithError = renderToStaticMarkup(
+      <Controls {...baseProps} skin="parchment" searchError="No results found for this query." onClearError={vi.fn()} />
+    );
+    expect(htmlWithError).not.toContain('min-h-[38px]');
+    expect(htmlWithError).toContain('parchment-background');
+    expect(htmlWithError).toContain('role="status"');
+  });
+});
+
+describe('Controls Parchment Active-Search Glow Tattered Edge Silhouette', () => {
+  const baseProps = {
+    onZoomIn: vi.fn(),
+    onZoomOut: vi.fn(),
+    onSearch: vi.fn(),
+    onTraceRoute: vi.fn(),
+    isSearching: false,
+    skin: 'parchment' as SkinType,
+    showFavorites: false,
+    onToggleShowFavorites: vi.fn(),
+    paused: false,
+    isTraceModalOpen: false,
+    onToggleTraceModal: vi.fn(),
+    isZoomLocked: false,
+    onToggleZoomLock: vi.fn(),
+  };
+
+  test('parchment active-search glow uses static url(#tattered-deckle-edge) drop-shadow and continuous opacity keyframes', () => {
+    const htmlActive = renderToStaticMarkup(
+      <Controls {...baseProps} skin="parchment" isSearching={true} />
+    );
+
+    // Glow layer is attached to parchment-background
+    expect(htmlActive).toContain('parchment-background active-search-glow-parchment');
+    // Does not render a rectangular inset glow wrapper
+    expect(htmlActive).not.toContain('inset-[-3px]');
+
+    // Static filter is applied to .active-search-glow-parchment with url(#tattered-deckle-edge) drop-shadow
+    expect(htmlActive).toContain('.active-search-glow-parchment {');
+    expect(htmlActive).toContain('url(#tattered-deckle-edge)');
+    expect(htmlActive).toContain('drop-shadow(0 0 3px rgba(215, 180, 125, 0.70))');
+
+    // Keyframes animate continuous opacity without re-evaluating the SVG filter
+    expect(htmlActive).toContain('@keyframes search-pulse-glow-parchment');
+    expect(htmlActive).toContain('opacity: 0.20;');
+    expect(htmlActive).toContain('opacity: 1;');
+  });
+
+  test('parchment search background when inactive does not have active-search-glow-parchment', () => {
+    const htmlInactive = renderToStaticMarkup(
+      <Controls {...baseProps} skin="parchment" isSearching={false} scanningStatusText={null} />
+    );
+
+    const formMatch = htmlInactive.match(/<form[\s\S]*?<\/form>/)?.[0];
+    expect(formMatch).toContain('class="parchment-background"');
+    expect(formMatch).not.toContain('active-search-glow-parchment');
+  });
+
+  test('non-parchment themes apply their own dedicated glow classes and do not use active-search-glow-parchment', () => {
+    const modernHtml = renderToStaticMarkup(
+      <Controls {...baseProps} skin="modern" isSearching={true} />
+    );
+    const modernForm = modernHtml.match(/<form[\s\S]*?<\/form>/)?.[0];
+    expect(modernForm).toContain('active-search-glow-modern');
+    expect(modernForm).not.toContain('active-search-glow-parchment');
+
+    const greenHtml = renderToStaticMarkup(
+      <Controls {...baseProps} skin="retro-green" isSearching={true} />
+    );
+    const greenForm = greenHtml.match(/<form[\s\S]*?<\/form>/)?.[0];
+    expect(greenForm).toContain('active-search-glow-green');
+    expect(greenForm).not.toContain('active-search-glow-parchment');
+
+    const amberHtml = renderToStaticMarkup(
+      <Controls {...baseProps} skin="retro-amber" isSearching={true} />
+    );
+    const amberForm = amberHtml.match(/<form[\s\S]*?<\/form>/)?.[0];
+    expect(amberForm).toContain('active-search-glow-amber');
+    expect(amberForm).not.toContain('active-search-glow-parchment');
+  });
 });
 
 describe('Controls Modern Theme OSM Button Hover Contrast', () => {

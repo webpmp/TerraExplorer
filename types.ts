@@ -460,6 +460,18 @@ export interface Waypoint {
     evidence: string;
     source: string;
   };
+  climate?: ClimateInfo | null;
+  population?: PopulationInfo | null;
+  images?: Array<string | ImageMetadata>;
+  primaryImage?: string | ImageMetadata;
+  imageCaption?: string;
+  imageAttribution?: string;
+  imageCredit?: string;
+  imageSource?: string;
+  contextNotes?: string[];
+  news?: NewsItem[];
+  savedSnapshot?: LocationInfo;
+  isSaved?: boolean;
 }
 
 export interface FavoriteLocation {
@@ -471,6 +483,30 @@ export interface FavoriteLocation {
   waypoints?: Waypoint[];
   followUps?: FollowUpItem[];
   notes?: string;
+  canonicalName?: string;
+  entityType?: string;
+  locationType?: LocationType;
+  description?: string;
+  historicalContext?: string;
+  climate?: ClimateInfo | null;
+  population?: PopulationInfo | null;
+  notable?: NotableItem[];
+  contextNotes?: string[];
+  locationString?: string;
+  primaryImage?: string | ImageMetadata;
+  images?: Array<string | ImageMetadata>;
+  imageCaption?: string;
+  imageAttribution?: string;
+  imageCredit?: string;
+  imageSource?: string;
+  relatedEntities?: any[];
+  news?: NewsItem[];
+  routeContext?: {
+    title: string;
+    text: string;
+  };
+  savedSnapshot?: LocationInfo;
+  isSaved?: boolean;
 }
 
 import { ResolvedEntity } from './domain';

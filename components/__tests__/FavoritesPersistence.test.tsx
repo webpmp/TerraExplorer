@@ -357,5 +357,170 @@ describe('Favorites & Route Renaming Persistence Suite', () => {
       });
     }
   });
+
+  describe('Saved InfoPanel Snapshot Restoration & Re-Enrichment Prevention', () => {
+    it('Test 1: Complete saved location snapshot preserves description, historicalContext, notable facts, climate, and followUps', () => {
+      const savedLocation: FavoriteLocation = {
+        id: 'fav-santa-maria-1',
+        name: 'Santa Maria Shipwreck',
+        canonicalName: 'Santa Maria',
+        lat: 19.76,
+        lng: -72.20,
+        type: 'location',
+        entityType: 'shipwreck',
+        description: 'The flagship of Christopher Columbus on his 1492 voyage.',
+        historicalContext: 'Ran aground on a coral reef on Christmas Day 1492 near Cap-Haïtien.',
+        climate: { name: 'Tropical', description: 'Warm maritime climate' },
+        notable: [
+          { title: 'Flagship of 1492', description: 'Columbus flagship during his first transatlantic voyage.' }
+        ],
+        contextNotes: ['Authoritative 1492 marine archaeological site'],
+        images: [
+          { url: 'https://images.example.com/santa-maria.jpg', caption: 'Replica of Santa Maria', attribution: 'Photo © Archive' }
+        ],
+        primaryImage: 'https://images.example.com/santa-maria.jpg',
+        imageCaption: 'Replica of Santa Maria',
+        imageAttribution: 'Photo © Archive',
+        followUps: [
+          { id: 'fu-1', question: 'What happened to the crew?', answer: 'The crew built the settlement of La Navidad from the ship timbers.' }
+        ],
+        isSaved: true,
+        savedSnapshot: {
+          id: 'fav-santa-maria-1',
+          name: 'Santa Maria Shipwreck',
+          canonicalName: 'Santa Maria',
+          type: 'Point of Interest' as any,
+          coordinates: { lat: 19.76, lng: -72.20 },
+          description: 'The flagship of Christopher Columbus on his 1492 voyage.',
+          historicalContext: 'Ran aground on a coral reef on Christmas Day 1492 near Cap-Haïtien.',
+          climate: { name: 'Tropical', description: 'Warm maritime climate' },
+          notable: [
+            { title: 'Flagship of 1492', description: 'Columbus flagship during his first transatlantic voyage.' }
+          ],
+          contextNotes: ['Authoritative 1492 marine archaeological site'],
+          images: [
+            { url: 'https://images.example.com/santa-maria.jpg', caption: 'Replica of Santa Maria', attribution: 'Photo © Archive' }
+          ],
+          primaryImage: 'https://images.example.com/santa-maria.jpg',
+          imageCaption: 'Replica of Santa Maria',
+          imageAttribution: 'Photo © Archive',
+          followUps: [
+            { id: 'fu-1', question: 'What happened to the crew?', answer: 'The crew built the settlement of La Navidad from the ship timbers.' }
+          ],
+          news: [],
+          status: 'success',
+          sectionState: { description: 'ready', news: 'idle', images: 'ready', nearby: 'ready' }
+        }
+      };
+
+      const storage: Record<string, string> = {
+        'terraexplorer_favorites': JSON.stringify([savedLocation])
+      };
+
+      const originalLocalStorage = globalThis.localStorage;
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: {
+          getItem: (k: string) => storage[k] || null,
+          setItem: (k: string, v: string) => { storage[k] = v; },
+          removeItem: (k: string) => { delete storage[k]; },
+          clear: () => {}
+        },
+        writable: true,
+        configurable: true
+      });
+
+      try {
+        const loaded = loadInitialFavorites();
+        expect(loaded).toHaveLength(1);
+        const restored = loaded[0];
+
+        expect(restored.name).toBe('Santa Maria Shipwreck');
+        expect(restored.description).toBe('The flagship of Christopher Columbus on his 1492 voyage.');
+        expect(restored.historicalContext).toBe('Ran aground on a coral reef on Christmas Day 1492 near Cap-Haïtien.');
+        expect(restored.notable).toHaveLength(1);
+        expect(restored.notable![0].title).toBe('Flagship of 1492');
+        expect(restored.climate?.name).toBe('Tropical');
+        expect(restored.images).toHaveLength(1);
+        expect((restored.images![0] as any).caption).toBe('Replica of Santa Maria');
+        expect(restored.followUps).toHaveLength(1);
+        expect(restored.followUps![0].question).toBe('What happened to the crew?');
+        expect(restored.savedSnapshot).toBeDefined();
+        expect(restored.savedSnapshot?.sectionState?.description).toBe('ready');
+      } finally {
+        Object.defineProperty(globalThis, 'localStorage', {
+          value: originalLocalStorage,
+          writable: true,
+          configurable: true
+        });
+      }
+    });
+
+    it('Test 2: Saved route waypoints preserve distinct snapshots and images across all route stops', () => {
+      const multiWpRoute: FavoriteLocation = {
+        id: 'fav-custom-expedition',
+        name: 'Historic Expedition',
+        lat: 10,
+        lng: 20,
+        type: 'route',
+        isSaved: true,
+        waypoints: [
+          {
+            id: 'wp-exp-1',
+            name: 'Waypoint Alpha',
+            lat: 10,
+            lng: 20,
+            description: 'Departure staging base.',
+            historicalContext: 'Established in 1890.',
+            images: [{ url: 'https://example.com/alpha.jpg', caption: 'Alpha Port' }],
+            isSaved: true
+          },
+          {
+            id: 'wp-exp-2',
+            name: 'Waypoint Beta',
+            lat: 12,
+            lng: 22,
+            description: 'Mountain pass crossing.',
+            historicalContext: 'Traversed during winter 1891.',
+            images: [{ url: 'https://example.com/beta.jpg', caption: 'Beta Peak' }],
+            isSaved: true
+          }
+        ]
+      };
+
+      const storage: Record<string, string> = {
+        'terraexplorer_favorites': JSON.stringify([multiWpRoute])
+      };
+
+      const originalLocalStorage = globalThis.localStorage;
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: {
+          getItem: (k: string) => storage[k] || null,
+          setItem: (k: string, v: string) => { storage[k] = v; },
+          removeItem: (k: string) => { delete storage[k]; },
+          clear: () => {}
+        },
+        writable: true,
+        configurable: true
+      });
+
+      try {
+        const loaded = loadInitialFavorites();
+        expect(loaded).toHaveLength(1);
+        const restoredRoute = loaded[0];
+
+        expect(restoredRoute.waypoints).toHaveLength(2);
+        expect(restoredRoute.waypoints![0].description).toBe('Departure staging base.');
+        expect(restoredRoute.waypoints![0].images![0]).toEqual({ url: 'https://example.com/alpha.jpg', caption: 'Alpha Port' });
+        expect(restoredRoute.waypoints![1].description).toBe('Mountain pass crossing.');
+        expect(restoredRoute.waypoints![1].images![0]).toEqual({ url: 'https://example.com/beta.jpg', caption: 'Beta Peak' });
+      } finally {
+        Object.defineProperty(globalThis, 'localStorage', {
+          value: originalLocalStorage,
+          writable: true,
+          configurable: true
+        });
+      }
+    });
+  });
 });
 

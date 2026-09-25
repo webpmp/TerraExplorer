@@ -825,16 +825,10 @@ const Controls: React.FC<ControlsProps> = ({
         }
         @keyframes search-pulse-glow-parchment {
           0%, 100% {
-            box-shadow: 0 0 2px rgba(200, 170, 120, 0.20), 0 0 5px rgba(120, 95, 65, 0.08);
-            opacity: 0.45;
+            opacity: 0.20;
           }
-          30% {
-            box-shadow: 0 0 3px rgba(200, 170, 120, 0.30), 0 0 7px rgba(120, 95, 65, 0.12);
-            opacity: 0.65;
-          }
-          60% {
-            box-shadow: 0 0 6px rgba(210, 180, 130, 0.55), 0 0 12px rgba(120, 95, 65, 0.18);
-            opacity: 0.95;
+          50% {
+            opacity: 1;
           }
         }
         .active-search-glow-modern {
@@ -850,7 +844,10 @@ const Controls: React.FC<ControlsProps> = ({
           background-color: rgba(20, 10, 0, 0.2) !important;
         }
         .active-search-glow-parchment {
-          animation: search-pulse-glow-parchment 2s infinite ease-in-out;
+          filter: url(#tattered-deckle-edge)
+                  drop-shadow(0 0 3px rgba(215, 180, 125, 0.70))
+                  drop-shadow(0 0 7px rgba(180, 130, 70, 0.45)) !important;
+          animation: search-pulse-glow-parchment 3s infinite ease-in-out;
         }
         .parchment-glyph-contrast {
           filter: drop-shadow(0.75px 0 0 rgba(200, 168, 120, 0.95))
@@ -934,7 +931,7 @@ const Controls: React.FC<ControlsProps> = ({
       {/* Parchment Ring Controls (Independent fixed layer placed along the circular globe ring) */}
       {skin === 'parchment' && (
         <div
-          className="fixed pointer-events-none z-20"
+          className="fixed pointer-events-none z-[19]"
           style={{
             top: 'calc(50% - 15px)',
             left: '50%',
@@ -1056,11 +1053,6 @@ const Controls: React.FC<ControlsProps> = ({
         <div className={theme.glow}></div>
         {skin === 'parchment' ? (
           <div className="relative w-full [isolation:isolate]">
-            {/* Outer wrapper: renders glow with no clipping, z-0, extending beyond input boundaries */}
-            {showSearchGlow && (
-              <div className="absolute inset-[-3px] z-0 pointer-events-none active-search-glow-parchment" />
-            )}
-
             {/* Outside Navigation Controls: Previous / Next follow-up question */}
             {parchmentItems.length > 1 && !isManualInputMode && !query && !scanningStatusText && (
               <button
@@ -1088,8 +1080,11 @@ const Controls: React.FC<ControlsProps> = ({
               </button>
             )}
 
-            {/* Inner container: parchment background behind crisp content */}
+            {/* Inner container: parchment background with tattered-edge silhouette glow behind crisp content */}
             <div className={`relative flex items-center transition-all [isolation:isolate] ${theme.inputWrapper}`}>
+              {showSearchGlow && (
+                <div className="parchment-background active-search-glow-parchment" aria-hidden="true" />
+              )}
               <div className="parchment-background" aria-hidden="true" />
               <div className="relative z-[1] flex items-center w-full min-w-0">
                 <Search className={`ml-4 shrink-0 ${theme.inputIcon}`} size={20} />
@@ -1235,62 +1230,118 @@ const Controls: React.FC<ControlsProps> = ({
       </form>
 
       {/* Search Error / Status Message */}
-      {searchError && (() => {
-        const hasGuidance = searchError.includes('Settings > Providers') || searchError.includes('Settings &gt; Providers');
-        const mainMessage = hasGuidance
-          ? searchError.replace(/\s*\(?Settings\s*(>|&gt;)\s*Providers\)?\s*$/i, '').trim()
-          : searchError;
-        const handleOpenProviders = () => {
-          if (onOpenSettingsTab) {
-            onOpenSettingsTab('providers');
-          } else if (onToggleSettings) {
-            onToggleSettings();
-          }
-        };
+      {skin === 'parchment' ? (
+        searchError && (() => {
+          const hasGuidance = searchError.includes('Settings > Providers') || searchError.includes('Settings &gt; Providers');
+          const mainMessage = hasGuidance
+            ? searchError.replace(/\s*\(?Settings\s*(>|&gt;)\s*Providers\)?\s*$/i, '').trim()
+            : searchError;
+          const handleOpenProviders = () => {
+            if (onOpenSettingsTab) {
+              onOpenSettingsTab('providers');
+            } else if (onToggleSettings) {
+              onToggleSettings();
+            }
+          };
 
-        return (
-          <div
-            className={`relative w-full max-w-[532px] pointer-events-auto flex items-start justify-between px-3.5 py-2 -mt-2.5 text-xs transition-all animate-in fade-in duration-200 ${skin === 'parchment' ? '[isolation:isolate]' : ''} ${theme.statusRow}`}
-            role="status"
-            aria-live="polite"
-          >
-            {skin === 'parchment' && (
+          return (
+            <div
+              className={`relative w-full max-w-[532px] pointer-events-auto flex items-start justify-between px-3.5 py-2 -mt-2.5 text-xs transition-all animate-in fade-in duration-200 [isolation:isolate] ${theme.statusRow}`}
+              role="status"
+              aria-live="polite"
+            >
               <div className="parchment-background" aria-hidden="true" />
-            )}
-            <div className="relative z-[1] flex items-start justify-between w-full min-w-0 gap-2">
-              <span className={`break-words whitespace-normal leading-relaxed text-xs ${theme.statusText} flex flex-wrap items-center gap-x-1.5`}>
-                <span>{mainMessage}</span>
-                {hasGuidance && (
-                  <span className="opacity-90 inline-flex items-center">
-                    (
-                    {onOpenSettingsTab || onToggleSettings ? (
-                      <button
-                        type="button"
-                        onClick={handleOpenProviders}
-                        className="underline hover:opacity-100 transition-opacity font-semibold cursor-pointer"
-                      >
-                        Settings &gt; Providers
-                      </button>
-                    ) : (
-                      <span>Settings &gt; Providers</span>
-                    )}
-                    )
-                  </span>
-                )}
-              </span>
-              <button
-                type="button"
-                onClick={onClearError}
-                className={`ml-2 shrink-0 mt-0.5 ${theme.statusDismiss}`}
-                aria-label="Dismiss error"
-                title="Dismiss"
-              >
-                <X size={14} />
-              </button>
+              <div className="relative z-[1] flex items-start justify-between w-full min-w-0 gap-2">
+                <span className={`break-words whitespace-normal leading-relaxed text-xs ${theme.statusText} flex flex-wrap items-center gap-x-1.5`}>
+                  <span>{mainMessage}</span>
+                  {hasGuidance && (
+                    <span className="opacity-90 inline-flex items-center">
+                      (
+                      {onOpenSettingsTab || onToggleSettings ? (
+                        <button
+                          type="button"
+                          onClick={handleOpenProviders}
+                          className="underline hover:opacity-100 transition-opacity font-semibold cursor-pointer"
+                        >
+                          Settings &gt; Providers
+                        </button>
+                      ) : (
+                        <span>Settings &gt; Providers</span>
+                      )}
+                      )
+                    </span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  onClick={onClearError}
+                  className={`ml-2 shrink-0 mt-0.5 ${theme.statusDismiss}`}
+                  aria-label="Dismiss error"
+                  title="Dismiss"
+                >
+                  <X size={14} />
+                </button>
+              </div>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })()
+      ) : (
+        <div className="w-full max-w-[532px] min-h-[38px] -mt-2.5 pointer-events-none flex flex-col justify-start">
+          {searchError && (() => {
+            const hasGuidance = searchError.includes('Settings > Providers') || searchError.includes('Settings &gt; Providers');
+            const mainMessage = hasGuidance
+              ? searchError.replace(/\s*\(?Settings\s*(>|&gt;)\s*Providers\)?\s*$/i, '').trim()
+              : searchError;
+            const handleOpenProviders = () => {
+              if (onOpenSettingsTab) {
+                onOpenSettingsTab('providers');
+              } else if (onToggleSettings) {
+                onToggleSettings();
+              }
+            };
+
+            return (
+              <div
+                className={`relative w-full pointer-events-auto flex items-start justify-between px-3.5 py-2 text-xs transition-all animate-in fade-in duration-200 ${theme.statusRow}`}
+                role="status"
+                aria-live="polite"
+              >
+                <div className="relative z-[1] flex items-start justify-between w-full min-w-0 gap-2">
+                  <span className={`break-words whitespace-normal leading-relaxed text-xs ${theme.statusText} flex flex-wrap items-center gap-x-1.5`}>
+                    <span>{mainMessage}</span>
+                    {hasGuidance && (
+                      <span className="opacity-90 inline-flex items-center">
+                        (
+                        {onOpenSettingsTab || onToggleSettings ? (
+                          <button
+                            type="button"
+                            onClick={handleOpenProviders}
+                            className="underline hover:opacity-100 transition-opacity font-semibold cursor-pointer"
+                          >
+                            Settings &gt; Providers
+                          </button>
+                        ) : (
+                          <span>Settings &gt; Providers</span>
+                        )}
+                        )
+                      </span>
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={onClearError}
+                    className={`ml-2 shrink-0 mt-0.5 ${theme.statusDismiss}`}
+                    aria-label="Dismiss error"
+                    title="Dismiss"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
 
       {/* Copyright & Map Attribution Text */}
       <div className={`text-[10px] md:text-xs text-center ${theme.copyright}`}>

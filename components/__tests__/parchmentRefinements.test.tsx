@@ -268,6 +268,8 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
     );
     expect(parchmentControls).toContain('[isolation:isolate]');
     expect(parchmentControls).toContain('relative z-[1]');
+    expect(parchmentControls).toContain('z-[19]');
+    expect(parchmentInfo).toContain('z-30');
   });
 
   test('7. Drop shadows are removed from Explorations and Settings in Parchment theme, preserved in InfoPanel and other skins', () => {

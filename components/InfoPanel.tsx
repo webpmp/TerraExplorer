@@ -1303,6 +1303,7 @@ export const getCleanDescriptionLines = (info: any) => {
     // and strip redundant notable facts / quick facts sections from description narrative.
     const lines: string[] = [];
     let skippingNotableSection = false;
+    const seenContextHeadings = new Set<string>();
 
     for (let i = 0; i < rawLines.length; i++) {
       const line = rawLines[i];
@@ -1335,6 +1336,17 @@ export const getCleanDescriptionLines = (info: any) => {
 
         const classification = classifyContext(nextLine);
         if (classification.category && classification.isMeaningful) {
+          const headingKey = classification.heading.toLowerCase();
+          if (seenContextHeadings.has(headingKey)) {
+            // Already emitted this semantic context heading.
+            // Check if the following line is also duplicate/already in lines
+            const nextLineNorm = nextLine.trim().toLowerCase();
+            if (lines.some(l => l.trim().toLowerCase() === nextLineNorm || (nextLineNorm.length > 20 && l.trim().toLowerCase().includes(nextLineNorm)))) {
+              i++;
+            }
+            continue;
+          }
+          seenContextHeadings.add(headingKey);
           lines.push(`## ${classification.heading}`);
         } else if (classification.isGeographicOnly) {
           if (nextLine && isPureGeographicLabel(nextLine)) {
@@ -1345,6 +1357,15 @@ export const getCleanDescriptionLines = (info: any) => {
           // Keep content as plain narrative without fake context heading
         }
       } else {
+        if (line.startsWith('#')) {
+          const normH = headingClean.toLowerCase();
+          if (seenContextHeadings.has(normH)) {
+            continue;
+          }
+          if (/^(?:historical\s+context|film\s*(?:&|and)\s*media|cultural\s+context|scientific\s*(?:\/|&|\s+and\s+)\s*geographic\s+context)$/i.test(headingClean)) {
+            seenContextHeadings.add(normH);
+          }
+        }
         lines.push(line);
       }
     }
@@ -2428,17 +2449,31 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
                       const isHeuristicHeading = hasSubsequentContent && cleanedText.split(' ').length <= 8 && cleanedText.length < 60 && !cleanedText.match(/[.!?:;]$/) && !cleanedText.match(/^[a-z]/) && lines[i+1] && !lines[i+1].match(/^[-*]\s/);
 
+                      const isContextSectionHeading = /^(?:historical\s+context|historical\s+background|history|cultural\s+context|film\s*(?:&|and)\s*media|scientific\s*(?:\/|&|\s+and\s+)\s*geographic\s+context|significance)$/i.test(cleanedText.trim());
+
                       if (isMarkdownHeading && hasSubsequentContent) {
-                        blocks.push(
-                          <h3
-                            key={`h-${i}`}
-                            className={`font-semibold uppercase tracking-wider ${
-                              isRetro ? 'text-green-300 font-retro' : isParchment ? 'text-[#3e2723] font-serif' : 'text-cyan-300'
-                            } text-xs mt-3 mb-1`}
-                          >
-                            {cleanedText}
-                          </h3>
-                        );
+                        if (isContextSectionHeading) {
+                          blocks.push(
+                            <SectionHeader
+                              key={`h-${i}`}
+                              title={cleanedText}
+                              theme={theme}
+                              isRetro={isRetro}
+                              isParchment={isParchment}
+                            />
+                          );
+                        } else {
+                          blocks.push(
+                            <h3
+                              key={`h-${i}`}
+                              className={`font-semibold uppercase tracking-wider ${
+                                isRetro ? 'text-green-300 font-retro' : isParchment ? 'text-[#3e2723] font-serif' : 'text-cyan-300'
+                              } text-xs mt-3 mb-1`}
+                            >
+                              {cleanedText}
+                            </h3>
+                          );
+                        }
                       } else {
                         const isFirstParagraph = !blocks.some(b => (b as any).type === 'p');
                         if (isParchment && isFirstParagraph && cleanedText.length > 0) {
@@ -2524,7 +2559,12 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     notable: {
       copyText: () => {
         if (!info || !Array.isArray(info.notable) || info.notable.length === 0) return '';
-        const uniqueFacts = deduplicateNotableFacts(info.notable);
+        const uniqueFacts = deduplicateNotableFacts(info.notable).filter((rawN: any) => {
+          const n = parseNotableFactItem(rawN) || rawN;
+          const title = normalizeDisplayText(n.title || n.name || (typeof n === 'string' ? n : '')).trim();
+          if (/^(?:historical\s+context|historical\s+background|history|context)$/i.test(title)) return false;
+          return true;
+        });
         if (uniqueFacts.length === 0) return '';
         const factsTxt = uniqueFacts.map((n: any) => {
           const title = normalizeDisplayText(n.title || n.name || (typeof n === 'string' ? n : '')).trim();
@@ -2535,7 +2575,12 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       },
       render: () => {
         if (!Array.isArray(info.notable) || info.notable.length === 0) return null;
-        const uniqueFacts = deduplicateNotableFacts(info.notable);
+        const uniqueFacts = deduplicateNotableFacts(info.notable).filter((rawN: any) => {
+          const n = parseNotableFactItem(rawN) || rawN;
+          const title = normalizeDisplayText(n.title || n.name || (typeof n === 'string' ? n : '')).trim();
+          if (/^(?:historical\s+context|historical\s+background|history|context)$/i.test(title)) return false;
+          return true;
+        });
         if (uniqueFacts.length === 0) return null;
 
         return (
@@ -2888,7 +2933,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   return (
     <>
       <div
-        className={`absolute top-[282px] right-8 z-20 w-80 md:w-96 max-h-[calc(100vh-342px)] flex flex-col gap-3 animate-in slide-in-from-right-12 fade-in duration-500 pointer-events-none ${isParchment ? 'group' : ''}`}
+        className={`absolute top-[282px] right-8 z-30 w-80 md:w-96 max-h-[calc(100vh-342px)] flex flex-col gap-3 animate-in slide-in-from-right-12 fade-in duration-500 pointer-events-none ${isParchment ? 'group' : ''}`}
         data-testid="info-panel"
         data-infopanel="true"
         onWheel={(e) => e.stopPropagation()}

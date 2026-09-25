@@ -2,7 +2,13 @@ import React from 'react';
 import { describe, it, expect } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import InfoPanel from '../InfoPanel';
-import { classifyContext, isPureGeographicLabel, sanitizeContextMarkdown } from '../../utils/contextClassification';
+import {
+  classifyContext,
+  isPureGeographicLabel,
+  sanitizeContextMarkdown,
+  isContextSubsumedByDescription
+} from '../../utils/contextClassification';
+import { resolveCanonicalNarrative } from '../../utils/narrativeResolver';
 
 describe('InfoPanel Context Classification & Rendering Suite', () => {
   describe('1. Semantic Context Classification Unit Tests', () => {
@@ -241,6 +247,335 @@ Northern Ireland`;
       expect(sanitized).not.toContain('## Historical context');
       expect(sanitized).not.toContain('Northern Ireland');
       expect(sanitized).toBe('Greenwood Park is an estate in County Down.');
+    });
+
+    it('deduplicates Historical Context section and prevents duplicate headers for Santa Maria', () => {
+      const santaMariaLocation = {
+        name: 'Santa Maria',
+        canonicalName: 'Santa Maria',
+        entityType: 'shipwreck',
+        locationString: 'Cap-Haïtien, Haiti',
+        coordinates: { lat: 19.76, lng: -72.20 },
+        description: `The Santa Maria was a Spanish caravel that famously played a pivotal role in Christopher Columbus's first voyage to the Americas in 1492.\n\n## Historical Context\n\nColumbus's flagship during his 1492 voyage; ran aground on a reef on Christmas Day 1492 off the coast of present-day Cap-Haïtien, Haiti.`,
+        historicalContext: `Columbus's flagship during his 1492 voyage; ran aground on a reef on Christmas Day 1492 off the coast of present-day Cap-Haïtien, Haiti.`,
+        notable: [
+          {
+            title: 'Historical Context',
+            description: `Columbus's flagship during his 1492 voyage; ran aground on a reef on Christmas Day 1492 off the coast of present-day Cap-Haïtien, Haiti.`
+          }
+        ],
+        waypoint: {
+          name: 'Santa Maria'
+        }
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={santaMariaLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      // Match all occurrences of "Historical Context" in rendered markup
+      const occurrences = (html.match(/Historical Context/g) || []).length;
+      expect(occurrences).toBe(1);
+
+      // Verify the content is present
+      expect(html).toContain('Columbus&#x27;s flagship during his 1492 voyage');
+    });
+  });
+
+  describe('3. Semantic Overlap and Hierarchy Suite (Historical Context vs Primary Description)', () => {
+    it('Case 1: Santa Maria LM Studio description suppresses redundant Historical Context section', () => {
+      const lmStudioDescription = `The wreck site of the Santa Maria is located in unknown waters off the coast of Haiti. This site holds significant historical importance as it represents a key moment in Columbus's voyages to the New World. The ship, commanded by Christopher Columbus, ran aground on December 25, 1492, during his first voyage across the Atlantic Ocean. After attempting to refloat the vessel, it was eventually abandoned and left to decay over time. Today, the remains serve as a reminder of one of the pivotal events in world history that marked the beginning of European exploration and colonization of the Americas.`;
+      const deterministicHistoricalContext = `Columbus's flagship during his 1492 voyage; ran aground on a reef on Christmas Day 1492 near present-day Cap-Haïtien, Haiti.`;
+
+      const santaMariaLocation = {
+        name: 'Santa Maria',
+        canonicalName: 'Santa Maria',
+        entityType: 'shipwreck',
+        locationString: 'Haiti',
+        coordinates: { lat: 19.76, lng: -72.20 },
+        description: lmStudioDescription,
+        historicalContext: deterministicHistoricalContext,
+        climate: {
+          name: 'Oceanic climate',
+          description: 'The climate around this site is characterized by high humidity and warm temperatures.'
+        },
+        notable: [
+          {
+            title: 'Historical Significance',
+            description: 'The Santa Maria’s wreck site marks one of the earliest instances of European contact with indigenous peoples of the Americas.'
+          },
+          {
+            title: 'Archaeological Importance',
+            description: 'The remains provide invaluable insights into 15th-century maritime technology and Columbus\'s expeditions.'
+          }
+        ]
+      };
+
+      const canonicalResult = resolveCanonicalNarrative(santaMariaLocation);
+      expect(canonicalResult.narrativeText).not.toContain('## Historical Context');
+      expect(canonicalResult.narrativeText).toContain('The wreck site of the Santa Maria is located in unknown waters off the coast of Haiti.');
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={santaMariaLocation}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      // Historical Context header should NOT be present in narrative
+      expect(html).not.toContain('Historical Context');
+      // Main description, notable facts, and climate should be present
+      expect(html).toContain('The wreck site of the Santa Maria is located');
+      expect(html).toContain('Notable Facts');
+      expect(html).toContain('Historical Significance');
+      expect(html).toContain('Archaeological Importance');
+      expect(html).toContain('Climate');
+      expect(html).toContain('Oceanic climate');
+    });
+
+    it('Case 2: Context adds new information and IS emitted', () => {
+      const basicDescription = 'Temüjin was a nomad leader on the Asian steppe.';
+      const newContext = 'In 1206, Temüjin united the nomadic tribes and was proclaimed Genghis Khan, establishing the Mongol Empire.';
+
+      const location = {
+        name: 'Mongol Steppe',
+        canonicalName: 'Mongol Steppe',
+        description: basicDescription,
+        historicalContext: newContext
+      };
+
+      const canonicalResult = resolveCanonicalNarrative(location);
+      expect(canonicalResult.narrativeText).toContain('## Historical Context');
+      expect(canonicalResult.narrativeText).toContain('In 1206, Temüjin united the nomadic tribes');
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={location}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('Historical Context');
+      expect(html).toContain('In 1206, Temüjin united the nomadic tribes');
+    });
+
+    it('Case 3: Different wording for the same event is recognized as overlapping', () => {
+      const baseDescription = 'The vessel ran aground on December 25, 1492 off the coast of Hispaniola.';
+      const contextSnippet = 'Shipwrecked on Christmas Day 1492 in the waters of Hispaniola.';
+
+      const isSubsumed = isContextSubsumedByDescription(contextSnippet, baseDescription);
+      expect(isSubsumed).toBe(true);
+    });
+
+    it('Case 4: Context contains genuinely new facts (e.g. La Navidad) and IS emitted', () => {
+      const baseDescription = 'The Santa Maria was Columbus\'s flagship during his first Atlantic voyage and was abandoned after running aground in 1492.';
+      const contextWithNewFact = 'The wreck occurred near present-day Cap-Haïtien, where Columbus established La Navidad, one of the earliest European settlements in the Americas.';
+
+      const location = {
+        name: 'Santa Maria',
+        canonicalName: 'Santa Maria',
+        description: baseDescription,
+        historicalContext: contextWithNewFact
+      };
+
+      const canonicalResult = resolveCanonicalNarrative(location);
+      expect(canonicalResult.narrativeText).toContain('## Historical Context');
+      expect(canonicalResult.narrativeText).toContain('La Navidad');
+      expect(canonicalResult.narrativeText).toContain('earliest European settlements');
+    });
+
+    it('Case 5: Existing notable facts remain unchanged in structured section', () => {
+      const location = {
+        name: 'Historic Fortress',
+        description: 'A fortified stronghold guarding the mountain pass.',
+        notable: [
+          {
+            title: 'Historical Significance',
+            description: 'Site of the 1380 battle that defined national borders.'
+          },
+          {
+            title: 'Archaeological Importance',
+            description: 'Excavations revealed intact 14th-century armaments and foundations.'
+          }
+        ]
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={location}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('Notable Facts');
+      expect(html).toContain('Historical Significance');
+      expect(html).toContain('Site of the 1380 battle');
+      expect(html).toContain('Archaeological Importance');
+      expect(html).toContain('Excavations revealed intact 14th-century');
+    });
+
+    it('Case 6: Non-historical locations continue rendering normally without Historical Context', () => {
+      const modernCity = {
+        name: 'Reykjavik',
+        canonicalName: 'Reykjavik',
+        entityType: 'city',
+        description: 'Reykjavik is the capital and largest city of Iceland, located on the southern shore of Faxaflói bay.',
+        climate: {
+          name: 'Subpolar oceanic',
+          description: 'Characterized by cool summers and relatively mild winters.'
+        },
+        population: {
+          current: {
+            value: 135000,
+            formattedValue: '135,000',
+            source: 'census'
+          }
+        }
+      };
+
+      const canonicalResult = resolveCanonicalNarrative(modernCity);
+      expect(canonicalResult.narrativeText).not.toContain('Historical Context');
+      expect(canonicalResult.narrativeText).toBe('Reykjavik is the capital and largest city of Iceland, located on the southern shore of Faxaflói bay.');
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={modernCity}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).not.toContain('Historical Context');
+      expect(html).toContain('Reykjavik is the capital and largest city');
+      expect(html).toContain('Climate');
+      expect(html).toContain('Subpolar oceanic');
+      expect(html).toContain('Population');
+      expect(html).toContain('135,000');
+    });
+
+    it('Stress-Test Case A: Same entity, different event -> Historical Context MUST remain', () => {
+      const description = "The Santa Maria was Columbus's flagship during his first Atlantic voyage.";
+      const historicalContext = "The ship ran aground on Christmas Day 1492 near present-day Cap-Haïtien, Haiti.";
+
+      const isSubsumed = isContextSubsumedByDescription(historicalContext, description);
+      expect(isSubsumed).toBe(false);
+
+      const canonical = resolveCanonicalNarrative({ name: 'Santa Maria', description, historicalContext });
+      expect(canonical.narrativeText).toContain('## Historical Context');
+      expect(canonical.narrativeText).toContain('ran aground on Christmas Day 1492');
+    });
+
+    it('Stress-Test Case B: Same entity, different historical fact -> Historical Context MUST remain', () => {
+      const description = "The Santa Maria was one of Columbus's ships during his 1492 voyage.";
+      const historicalContext = "The wreck occurred near the site where Columbus established La Navidad.";
+
+      const isSubsumed = isContextSubsumedByDescription(historicalContext, description);
+      expect(isSubsumed).toBe(false);
+
+      const canonical = resolveCanonicalNarrative({ name: 'Santa Maria', description, historicalContext });
+      expect(canonical.narrativeText).toContain('## Historical Context');
+      expect(canonical.narrativeText).toContain('La Navidad');
+    });
+
+    it('Stress-Test Case C: Same event, different wording -> Historical Context is suppressed', () => {
+      const description = "The Santa Maria ran aground on December 25, 1492.";
+      const historicalContext = "Columbus's flagship ran aground on Christmas Day 1492.";
+
+      const isSubsumed = isContextSubsumedByDescription(historicalContext, description);
+      expect(isSubsumed).toBe(true);
+
+      const canonical = resolveCanonicalNarrative({ name: 'Santa Maria', description, historicalContext });
+      expect(canonical.narrativeText).not.toContain('## Historical Context');
+    });
+
+    it('Stress-Test Case D: Same event plus new geographic detail -> Historical Context MUST remain', () => {
+      const description = "The Santa Maria ran aground on December 25, 1492.";
+      const historicalContext = "Columbus's flagship ran aground on Christmas Day 1492 near present-day Cap-Haïtien, Haiti.";
+
+      const isSubsumed = isContextSubsumedByDescription(historicalContext, description);
+      expect(isSubsumed).toBe(false);
+
+      const canonical = resolveCanonicalNarrative({ name: 'Santa Maria', description, historicalContext });
+      expect(canonical.narrativeText).toContain('## Historical Context');
+      expect(canonical.narrativeText).toContain('Cap-Haïtien, Haiti');
+    });
+
+    it('Stress-Test Case E: Shared subject but entirely different fact -> Historical Context MUST remain', () => {
+      const description = "The Santa Maria was commanded by Christopher Columbus.";
+      const historicalContext = "The wreck site lies approximately 1,000 meters offshore near Cap-Haïtien.";
+
+      const isSubsumed = isContextSubsumedByDescription(historicalContext, description);
+      expect(isSubsumed).toBe(false);
+
+      const canonical = resolveCanonicalNarrative({ name: 'Santa Maria', description, historicalContext });
+      expect(canonical.narrativeText).toContain('## Historical Context');
+      expect(canonical.narrativeText).toContain('1,000 meters offshore');
+    });
+
+    it('Stress-Test Case F: Existing Santa Maria full example -> Historical Context is suppressed', () => {
+      const lmStudioDescription = `The wreck site of the Santa Maria is located in unknown waters off the coast of Haiti. This site holds significant historical importance as it represents a key moment in Columbus's voyages to the New World. The ship, commanded by Christopher Columbus, ran aground on December 25, 1492, during his first voyage across the Atlantic Ocean. After attempting to refloat the vessel, it was eventually abandoned and left to decay over time. Today, the remains serve as a reminder of one of the pivotal events in world history that marked the beginning of European exploration and colonization of the Americas.`;
+      const deterministicHistoricalContext = `Columbus's flagship during his 1492 voyage; ran aground on a reef on Christmas Day 1492 near present-day Cap-Haïtien, Haiti.`;
+
+      const isSubsumed = isContextSubsumedByDescription(deterministicHistoricalContext, lmStudioDescription);
+      expect(isSubsumed).toBe(true);
+
+      const canonical = resolveCanonicalNarrative({
+        name: 'Santa Maria',
+        description: lmStudioDescription,
+        historicalContext: deterministicHistoricalContext
+      });
+      expect(canonical.narrativeText).not.toContain('## Historical Context');
+    });
+
+    it('Stress-Test: Same date, different historical event -> Historical Context MUST remain', () => {
+      const description = "Santa Maria ran aground on December 25, 1492.";
+      const historicalContext = "Columbus departed Spain on December 25, 1492.";
+
+      const isSubsumed = isContextSubsumedByDescription(historicalContext, description);
+      expect(isSubsumed).toBe(false);
+
+      const canonical = resolveCanonicalNarrative({ name: 'Santa Maria', description, historicalContext });
+      expect(canonical.narrativeText).toContain('## Historical Context');
+      expect(canonical.narrativeText).toContain('departed Spain');
+    });
+
+    it('Stress-Test: Distinct historical role / vessel classification is preserved', () => {
+      const description = "The Santa Maria was Columbus's flagship.";
+      const historicalContext = "The Santa Maria was built as a 15th-century Spanish caravel.";
+
+      const isSubsumed = isContextSubsumedByDescription(historicalContext, description);
+      expect(isSubsumed).toBe(false);
+
+      const canonical = resolveCanonicalNarrative({ name: 'Santa Maria', description, historicalContext });
+      expect(canonical.narrativeText).toContain('## Historical Context');
+      expect(canonical.narrativeText).toContain('caravel');
     });
   });
 });

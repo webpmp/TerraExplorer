@@ -4,7 +4,8 @@ import {
   isPureGeographicLabel,
   CONTEXT_CATEGORY_HEADINGS,
   sanitizeContextMarkdown,
-  ContextCategory
+  ContextCategory,
+  isContextSubsumedByDescription
 } from './contextClassification';
 import { normalizeDescription } from './descriptionNormalization';
 import { evaluateDescriptionReadiness } from './descriptionReadiness';
@@ -218,13 +219,14 @@ export function resolveCanonicalNarrative(
 
   // Group candidates by semantic category
   const categorizedContext: Partial<Record<ContextCategory, string[]>> = {};
+  const currentBaseNarrative = combinedDescParts.join('\n\n');
 
   for (const item of contextCandidates) {
     const snippet = normalizeDisplayText(String(item.val)).trim();
     if (!snippet || isPlaceholderString(snippet) || isPureGeographicLabel(snippet)) {
       continue;
     }
-    if (combinedDescParts.some((p) => p.includes(snippet))) {
+    if (combinedDescParts.some((p) => p.includes(snippet)) || isContextSubsumedByDescription(snippet, currentBaseNarrative)) {
       continue;
     }
     if (
@@ -258,9 +260,12 @@ export function resolveCanonicalNarrative(
     if (snippets && snippets.length > 0) {
       const heading = CONTEXT_CATEGORY_HEADINGS[category];
       const mergedText = snippets.join(' ');
+      const headingRegex = new RegExp(`^#{1,3}\\s*${heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'im');
       if (
         mergedText &&
-        !combinedDescParts.some((p) => p.includes(mergedText)) &&
+        !combinedDescParts.some((p) => p.includes(mergedText) || mergedText.includes(p)) &&
+        !isContextSubsumedByDescription(mergedText, currentBaseNarrative) &&
+        !combinedDescParts.some((p) => headingRegex.test(p)) &&
         (!routeContextText ||
           (!routeContextText.includes(mergedText) && !mergedText.includes(routeContextText)))
       ) {
