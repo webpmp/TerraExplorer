@@ -25,7 +25,8 @@ import {
   buildFullNarrationUnits,
   removeLeadingTitleFromDescription,
   capDescriptionForNarration,
-  splitNarrationIntoSegments
+  splitNarrationIntoSegments,
+  normalizeNarrationText
 } from './narrationProviders';
 
 import { resolveCanonicalNarrative } from '../utils/narrativeResolver';
@@ -45,7 +46,8 @@ export {
   removeLeadingTitleFromDescription,
   capDescriptionForNarration,
   splitNarrationIntoSegments,
-  resolveCanonicalNarrative
+  resolveCanonicalNarrative,
+  normalizeNarrationText
 };
 
 /**

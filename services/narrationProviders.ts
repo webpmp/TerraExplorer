@@ -8,6 +8,9 @@
 import { NarrationProviderType } from '../types';
 import { logTraceNarration, logProviderStart, logProviderComplete } from './waypointPipelineService';
 import { logTraceTiming } from './traceTimingService';
+import { normalizeNarrationText } from '../utils/narrationTextNormalization';
+
+export { normalizeNarrationText };
 
 export interface NarrationUnit {
   section: 'SUMMARY' | 'NOTABLE' | 'CLIMATE' | 'EXPLORE' | 'NEWS';
@@ -732,8 +735,9 @@ export class SystemVoiceProvider implements INarrationProvider {
           window.speechSynthesis.resume();
         }
 
-        const utterance = new SpeechSynthesisUtterance(chunkText);
-        console.log(`[SearchNarration] UTTERANCE_CREATED textLength=${chunkText.length}`);
+        const spokenText = normalizeNarrationText(chunkText);
+        const utterance = new SpeechSynthesisUtterance(spokenText);
+        console.log(`[SearchNarration] UTTERANCE_CREATED textLength=${spokenText.length}`);
         this.currentUtterance = utterance;
         this.activeUtterances.add(utterance);
 
@@ -760,7 +764,7 @@ export class SystemVoiceProvider implements INarrationProvider {
           if (currentIndex === 0) {
             this.isSpeakingInternal = true;
             this.startKeepAlive();
-            console.log(`[SearchNarration] SPEECH_ONSTART text="${chunkText.slice(0, 60)}..."`);
+            console.log(`[SearchNarration] SPEECH_ONSTART text="${spokenText.slice(0, 60)}..."`);
             console.log('[narrationService] SPEECH_ONSTART');
             logTraceNarration(stableId, waypointName, 'TTS generation started');
             logTraceNarration(stableId, waypointName, 'playback started');
@@ -950,11 +954,12 @@ export class OrpheusTTSProvider implements INarrationProvider {
     signal: AbortSignal,
     onFirstChunk?: () => void
   ): Promise<Float32Array> {
+    const normalizedText = normalizeNarrationText(text);
     const fetchFn = (typeof window !== 'undefined' && typeof window.fetch === 'function') ? window.fetch : fetch;
     const response = await fetchFn(this.bridgeUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, voice }),
+      body: JSON.stringify({ text: normalizedText, voice }),
       signal
     });
 
@@ -1347,11 +1352,12 @@ export class OrpheusTTSProvider implements INarrationProvider {
     logTraceNarration(stableId, waypointName, 'TTS request started', `provider="orpheus" voice="${voice}" scriptLength=${textToSend.length}`);
     logTraceTiming('ORPHEUS_HTTP_REQUEST_STARTED', stableId, waypointName, `scriptLength=${textToSend.length} voice="${voice}"`);
 
+    const normalizedText = normalizeNarrationText(textToSend);
     const fetchFn = (typeof window !== 'undefined' && typeof window.fetch === 'function') ? window.fetch : fetch;
     const response = await fetchFn(this.bridgeUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: textToSend, voice }),
+      body: JSON.stringify({ text: normalizedText, voice }),
       signal
     });
 
@@ -1626,11 +1632,12 @@ export class KokoroTTSProvider implements INarrationProvider {
     speed: number,
     signal: AbortSignal
   ): Promise<{ pcmData: Float32Array; sampleRate: number; duration: number }> {
+    const normalizedText = normalizeNarrationText(text);
     const fetchFn = (typeof window !== 'undefined' && typeof window.fetch === 'function') ? window.fetch : fetch;
     const response = await fetchFn(this.bridgeUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, voice, speed }),
+      body: JSON.stringify({ text: normalizedText, voice, speed }),
       signal
     });
 
