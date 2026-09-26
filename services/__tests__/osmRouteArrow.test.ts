@@ -4,6 +4,7 @@ import {
   calculateArrowheadCorners,
   estimateOSMLabelBounds,
   doesArrowheadCollide,
+  densifyGeodesicPath,
   DEFAULT_ARROW_BACK_OFFSET,
   MARKER_CLEARANCE,
   LABEL_COLLISION_MARGIN,
@@ -304,5 +305,58 @@ describe('OSM Route Connecting Path Directional Arrow Suite', () => {
     const labelInside = { left: 28, top: 22, right: 32, bottom: 25 };
     const collidesLabel = doesArrowheadCollide(tip, -Math.PI / 2, { x: 0, y: 0 }, 1, labelInside);
     expect(collidesLabel).toBe(true);
+  });
+
+  describe('OSM Great-Circle Densification Suite (densifyGeodesicPath)', () => {
+    it('densifies a sparse two-point ocean crossing into intermediate geodesic points', () => {
+      // Stromness, Orkney (58.965, -3.296) to Whalefish Islands, Greenland (69.25, -53.53)
+      const sparsePath = [
+        { lat: 58.965, lng: -3.296 },
+        { lat: 69.25, lng: -53.53 }
+      ];
+
+      const densified = densifyGeodesicPath(sparsePath);
+
+      expect(densified.length).toBeGreaterThan(2);
+      expect(densified[0]).toEqual(sparsePath[0]);
+      expect(densified[densified.length - 1]).toEqual(sparsePath[1]);
+
+      // Intermediate points should be smoothly interpolated
+      for (const pt of densified) {
+        expect(Number.isFinite(pt.lat)).toBe(true);
+        expect(Number.isFinite(pt.lng)).toBe(true);
+      }
+    });
+
+    it('preserves existing intermediate multi-point path vertices in exact topological sequence', () => {
+      // A -> B -> C: densified should contain A, subpoints, B, subpoints, C
+      const multiPointPath = [
+        { lat: 50.0, lng: -4.0 },
+        { lat: 35.0, lng: -20.0 },
+        { lat: -10.0, lng: -30.0 }
+      ];
+
+      const densified = densifyGeodesicPath(multiPointPath);
+
+      expect(densified.length).toBeGreaterThan(3);
+      expect(densified[0]).toEqual(multiPointPath[0]);
+      expect(densified[densified.length - 1]).toEqual(multiPointPath[2]);
+
+      // Check that the intermediate vertex B is preserved exactly in the resulting sequence
+      const containsMidVertex = densified.some(pt => Math.abs(pt.lat - 35.0) < 0.0001 && Math.abs(pt.lng - -20.0) < 0.0001);
+      expect(containsMidVertex).toBe(true);
+    });
+
+    it('does not over-subdivide very short local segments', () => {
+      const localPath = [
+        { lat: 51.500, lng: -0.120 },
+        { lat: 51.505, lng: -0.125 }
+      ];
+
+      const densified = densifyGeodesicPath(localPath);
+      // Under threshold angular distance, sparse points remain unaltered
+      expect(densified.length).toBe(2);
+      expect(densified).toEqual(localPath);
+    });
   });
 });

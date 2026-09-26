@@ -114,6 +114,14 @@ export function formatYearToSpeech(yearInput: string | number): string {
     const remainder = year % 100;
     const centuryWords = formatNumber0to99(century);
 
+    // 1800 - 1899: "eighteen hundred forty-five" or "eighteen hundred"
+    if (century === 18) {
+      if (remainder === 0) {
+        return 'eighteen hundred';
+      }
+      return `eighteen hundred ${formatNumber0to99(remainder)}`;
+    }
+
     if (remainder === 0) {
       return `${centuryWords} hundred`;
     }
@@ -182,15 +190,35 @@ const DATE_WITHOUT_YEAR_REGEX = new RegExp(
   'gi'
 );
 
+const MONTH_DAY_RANGE_WITH_YEAR_REGEX = new RegExp(
+  `\\b(${MONTHS_PATTERN})\\.?\\s+([12][0-9]|3[01]|0?[1-9])(?:st|nd|rd|th)?\\s*(?:–|-|to)\\s*([12][0-9]|3[01]|0?[1-9])(?:st|nd|rd|th)?(?:,\\s*|\\s+)(\\d{1,4})\\b`,
+  'gi'
+);
+
+const MONTH_YEAR_REGEX = new RegExp(
+  `\\b(${MONTHS_PATTERN})\\.?\\s+(\\d{3,4})\\b`,
+  'gi'
+);
+
+const SEASONS_PATTERN = 'Winter|Spring|Summer|Autumn|Fall|Late\\s+Winter|Early\\s+Winter|Late\\s+Spring|Early\\s+Spring|Late\\s+Summer|Early\\s+Summer|Late\\s+Autumn|Early\\s+Autumn|Late\\s+Fall|Early\\s+Fall|Mid-Winter|Mid-Summer';
+
 /**
- * Normalizes written calendar dates (e.g. "December 5, 1914", "June 28, 1914", "January 1")
- * into spoken words (e.g. "December fifth, nineteen fourteen", "June twenty-eighth, nineteen fourteen", "January first").
- * 
- * Conservative: Only matches recognized Month + Day (+ Year) patterns.
+ * Normalizes written calendar dates into spoken words.
  */
 function normalizeDates(text: string): string {
-  // 1. Match Month Day, Year
-  let result = text.replace(DATE_WITH_YEAR_REGEX, (_match, monthStr, dayStr, yearStr) => {
+  // 1. Match Month Day-Day, Year (e.g. "May 16-21, 1804")
+  let result = text.replace(MONTH_DAY_RANGE_WITH_YEAR_REGEX, (_match, monthStr, day1Str, day2Str, yearStr) => {
+    const canonicalMonth = MONTH_NAMES[monthStr.toLowerCase()] || monthStr;
+    const day1Num = parseInt(day1Str, 10);
+    const day2Num = parseInt(day2Str, 10);
+    const day1Ordinal = DAY_ORDINALS[day1Num] || day1Str;
+    const day2Ordinal = DAY_ORDINALS[day2Num] || day2Str;
+    const yearSpeech = formatYearToSpeech(yearStr);
+    return `${canonicalMonth} ${day1Ordinal} to ${day2Ordinal}, ${yearSpeech}`;
+  });
+
+  // 2. Match Month Day, Year
+  result = result.replace(DATE_WITH_YEAR_REGEX, (_match, monthStr, dayStr, yearStr) => {
     const canonicalMonth = MONTH_NAMES[monthStr.toLowerCase()] || monthStr;
     const dayNum = parseInt(dayStr, 10);
     const dayOrdinal = DAY_ORDINALS[dayNum] || dayStr;
@@ -198,7 +226,7 @@ function normalizeDates(text: string): string {
     return `${canonicalMonth} ${dayOrdinal}, ${yearSpeech}`;
   });
 
-  // 2. Match standalone Month Day
+  // 3. Match standalone Month Day
   result = result.replace(DATE_WITHOUT_YEAR_REGEX, (_match, monthStr, dayStr) => {
     const canonicalMonth = MONTH_NAMES[monthStr.toLowerCase()] || monthStr;
     const dayNum = parseInt(dayStr, 10);
@@ -206,12 +234,75 @@ function normalizeDates(text: string): string {
     return `${canonicalMonth} ${dayOrdinal}`;
   });
 
+  // 4. Match Month Year (e.g. "July 1845", "April 1916")
+  result = result.replace(MONTH_YEAR_REGEX, (_match, monthStr, yearStr) => {
+    const canonicalMonth = MONTH_NAMES[monthStr.toLowerCase()] || monthStr;
+    const yearSpeech = formatYearToSpeech(yearStr);
+    return `${canonicalMonth} ${yearSpeech}`;
+  });
+
+  return result;
+}
+
+/**
+ * Normalizes year ranges (e.g. "1845–1846", "1845-1846", "1845–46", "1845-48", "1804-1805").
+ */
+function normalizeYearRanges(text: string): string {
+  // Full 4-digit to 4-digit or 3-digit to 3-digit ranges: 1845–1846, 1845-1846, 1200–1205
+  let result = text.replace(/\b([12][0-9]{3}|[1-9][0-9]{2})\s*(?:–|-)\s*([12][0-9]{3}|[1-9][0-9]{2})\b/g, (_match, startYear, endYear) => {
+    return `${formatYearToSpeech(startYear)} to ${formatYearToSpeech(endYear)}`;
+  });
+
+  // 4-digit to 2-digit abbreviated ranges: 1845–46, 1845-48, 1914–18
+  result = result.replace(/\b([12][0-9]{3})\s*(?:–|-)\s*([0-9]{2})\b/g, (_match, startYearStr, endAbbrStr) => {
+    const startYear = parseInt(startYearStr, 10);
+    const century = Math.floor(startYear / 100);
+    const endRemainder = parseInt(endAbbrStr, 10);
+    const endYear = century * 100 + endRemainder;
+    return `${formatYearToSpeech(startYear)} to ${formatYearToSpeech(endYear)}`;
+  });
+
+  return result;
+}
+
+/**
+ * Normalizes standalone historical year contexts without converting general numerical measurements:
+ * - Season + Year (e.g. "Winter 1845-1846", "Summer 1846")
+ * - Leading timestamp / timeline entry (e.g. "1846: The ships...")
+ * - Historical prepositions (e.g. "in 1845", "during 1846", "by 1914", "since 1845", "around 1206", "between 1845 and 1848", "discovered in 2014", "resting place ... discovered in 2016")
+ * 
+ * Excludes units and measurements (meters, km, miles, kg, feet, passengers, people, men, items, etc.).
+ */
+function normalizeHistoricalYears(text: string): string {
+  // 1. Season + Year (e.g. "Winter 1845", "Summer 1846", "Late Winter 1845")
+  const seasonYearRegex = new RegExp(`\\b(${SEASONS_PATTERN})\\s+([12][0-9]{3}|[1-9][0-9]{2})\\b`, 'gi');
+  let result = text.replace(seasonYearRegex, (_match, season, yearStr) => {
+    return `${season} ${formatYearToSpeech(yearStr)}`;
+  });
+
+  // 2. Leading year with colon at start of sentence/string/clause (e.g. "1846: The ships...", "May 19, 1845: The...", "1206: Temüjin...")
+  // Note: if preceded by date, date normalizer already handled year, colon is preserved
+  result = result.replace(/(?:^|(?<=[.!?\n]\s*))\b([12][0-9]{3}|[1-9][0-9]{2})\s*:\s*/g, (_match, yearStr) => {
+    return `${formatYearToSpeech(yearStr)}: `;
+  });
+
+  // 3. Preposition + Year (e.g. "in 1845", "during 1914", "by 1848", "since 1845", "around 1206", "until 1848", "from 1845", "circa 1845")
+  // Negative lookahead ensures we don't match quantities followed by unit words: meters, km, feet, miles, etc.
+  result = result.replace(/\b(in|during|by|since|around|until|from|circa|c\.)\s+([12][0-9]{3}|[1-9][0-9]{2})\b(?!\s*(?:meters?|m\b|kilomet(?:er|re)s?|km\b|miles?|ft\b|feet|inches|in\b|yards?|yd\b|percent|%|hours?|hrs?|minutes?|mins?|seconds?|secs?|days?|weeks?|months?|passengers?|people|men|crew|soldiers?|troops?|ships?|vessels?|guns?|cannons?|rounds?|tonnes?|tons?|pounds?|lbs?|kg\b|kilograms?|dollars?|\$|euros?|pounds?|gbp\b|usd\b))/gi, (_match, prep, yearStr) => {
+    return `${prep} ${formatYearToSpeech(yearStr)}`;
+  });
+
+  // 4. "discovered in / founded in / built in / established in / died in / born in / abandoned in + Year"
+  result = result.replace(/\b(discovered|founded|established|built|constructed|abandoned|sunk|sunken|launched|departed|arrived|died|born|signed|chartered|conquered|annexed)\s+in\s+([12][0-9]{3}|[1-9][0-9]{2})\b/gi, (_match, verb, yearStr) => {
+    return `${verb} in ${formatYearToSpeech(yearStr)}`;
+  });
+
   return result;
 }
 
 /**
  * Normalizes narration text immediately before speech synthesis.
- * Improves spoken pronunciation of historical terms and calendar dates.
+ * Improves spoken pronunciation of historical terms, date ranges, and calendar dates.
  * 
  * Requirements:
  * - Deterministic, synchronous, side-effect free
@@ -223,6 +314,8 @@ export function normalizeNarrationText(text: string): string {
 
   let normalized = normalizeWorldWar(text);
   normalized = normalizeDates(normalized);
+  normalized = normalizeYearRanges(normalized);
+  normalized = normalizeHistoricalYears(normalized);
 
   return normalized;
 }

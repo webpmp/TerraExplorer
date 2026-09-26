@@ -1,4 +1,5 @@
 import { RouteWaypointMembership } from '../../types';
+import { resolveWaterAwareRoute, isMaritimeJourney } from './waterRoutingService';
 
 export interface AuthoritativeRouteAnchor {
   id: string;
@@ -726,13 +727,20 @@ export function buildCanonicalEventTopology(eventTitle: string): {
     });
   }
 
+  const effectiveRouteType = isSingleSequentialRoute ? 'expedition' : 'multi_location_campaign';
+  const effectiveEvidenceMode = isSingleSequentialRoute ? 'DOCUMENTED_ROUTE' : 'MULTI_ROUTE_EVENT';
+
+  const resolvedWaypoints = isMaritimeJourney({ title: model.eventTitle, routeType: effectiveRouteType }, undefined, route)
+    ? resolveWaterAwareRoute(route, { title: model.eventTitle, routeType: effectiveRouteType })
+    : route;
+
   return {
     title: model.eventTitle,
-    routeType: isSingleSequentialRoute ? 'expedition' : 'multi_location_campaign',
-    routeEvidenceMode: isSingleSequentialRoute ? 'DOCUMENTED_ROUTE' : 'MULTI_ROUTE_EVENT',
+    routeType: effectiveRouteType,
+    routeEvidenceMode: effectiveEvidenceMode,
     isSequential: isSingleSequentialRoute,
     routeGroups,
-    route
+    route: resolvedWaypoints
   };
 }
 

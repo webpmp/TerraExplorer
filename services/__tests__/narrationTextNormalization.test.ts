@@ -34,7 +34,7 @@ describe('Narration Text Normalization Utility', () => {
     it('leaves unrelated Roman numerals unchanged', () => {
       expect(normalizeNarrationText('King Henry VIII reigned over England.')).toBe('King Henry VIII reigned over England.');
       expect(normalizeNarrationText('Read Chapter I and Section II before continuing.')).toBe('Read Chapter I and Section II before continuing.');
-      expect(normalizeNarrationText('Pope John Paul II visited in 1979.')).toBe('Pope John Paul II visited in 1979.');
+      expect(normalizeNarrationText('Pope John Paul II visited in 1979.')).toBe('Pope John Paul II visited in nineteen seventy-nine.');
       expect(normalizeNarrationText('Louis XIV built Versailles.')).toBe('Louis XIV built Versailles.');
     });
   });
@@ -44,7 +44,7 @@ describe('Narration Text Normalization Utility', () => {
       expect(normalizeNarrationText('December 5, 1914')).toBe('December fifth, nineteen fourteen');
       expect(normalizeNarrationText('June 28, 1914')).toBe('June twenty-eighth, nineteen fourteen');
       expect(normalizeNarrationText('July 4, 1776')).toBe('July fourth, seventeen seventy-six');
-      expect(normalizeNarrationText('April 15, 1865')).toBe('April fifteenth, eighteen sixty-five');
+      expect(normalizeNarrationText('April 15, 1865')).toBe('April fifteenth, eighteen hundred sixty-five');
       expect(normalizeNarrationText('October 14, 1066')).toBe('October fourteenth, ten sixty-six');
       expect(normalizeNarrationText('January 1, 2000')).toBe('January first, two thousand');
       expect(normalizeNarrationText('August 12, 2024')).toBe('August twelfth, twenty twenty-four');
@@ -101,7 +101,7 @@ describe('Narration Text Normalization Utility', () => {
     it('does not rewrite standalone numbers that are not part of dates', () => {
       expect(normalizeNarrationText('The mountain rises 1914 meters above sea level.')).toBe('The mountain rises 1914 meters above sea level.');
       expect(normalizeNarrationText('There were 500 passengers aboard ship 402.')).toBe('There were 500 passengers aboard ship 402.');
-      expect(normalizeNarrationText('Located along Route 66 in 1984.')).toBe('Located along Route 66 in 1984.');
+      expect(normalizeNarrationText('Located along Route 66 at mile 1984.')).toBe('Located along Route 66 at mile 1984.');
       expect(normalizeNarrationText('Coordinates: 45.1234, -122.5678')).toBe('Coordinates: 45.1234, -122.5678');
       expect(normalizeNarrationText('January 45 is not a valid date.')).toBe('January 45 is not a valid date.');
     });
@@ -113,12 +113,59 @@ describe('Narration Text Normalization Utility', () => {
     });
   });
 
+  describe('Historical Date Ranges and Year Normalization', () => {
+    it('normalizes full four-digit year ranges with hyphens and en dashes', () => {
+      expect(normalizeNarrationText('1845–1846')).toBe('eighteen hundred forty-five to eighteen hundred forty-six');
+      expect(normalizeNarrationText('1845-1846')).toBe('eighteen hundred forty-five to eighteen hundred forty-six');
+      expect(normalizeNarrationText('1804-1805')).toBe('eighteen hundred four to eighteen hundred five');
+      expect(normalizeNarrationText('1914–1918')).toBe('nineteen fourteen to nineteen eighteen');
+    });
+
+    it('normalizes abbreviated year ranges', () => {
+      expect(normalizeNarrationText('1845–46')).toBe('eighteen hundred forty-five to eighteen hundred forty-six');
+      expect(normalizeNarrationText('1845-48')).toBe('eighteen hundred forty-five to eighteen hundred forty-eight');
+      expect(normalizeNarrationText('1914–18')).toBe('nineteen fourteen to nineteen eighteen');
+    });
+
+    it('normalizes Month Year and Season Year combinations', () => {
+      expect(normalizeNarrationText('July 1845')).toBe('July eighteen hundred forty-five');
+      expect(normalizeNarrationText('Late July 1845')).toBe('Late July eighteen hundred forty-five');
+      expect(normalizeNarrationText('Winter 1845-1846')).toBe('Winter eighteen hundred forty-five to eighteen hundred forty-six');
+      expect(normalizeNarrationText('Summer 1846')).toBe('Summer eighteen hundred forty-six');
+      expect(normalizeNarrationText('April 1916')).toBe('April nineteen sixteen');
+    });
+
+    it('normalizes leading timestamps and historical preposition year references', () => {
+      expect(normalizeNarrationText('1846: The ships circumnavigated this island before heading south.'))
+        .toBe('eighteen hundred forty-six: The ships circumnavigated this island before heading south.');
+      expect(normalizeNarrationText('1206: Temüjin unites the Mongol tribes.'))
+        .toBe('twelve oh six: Temüjin unites the Mongol tribes.');
+      expect(normalizeNarrationText('discovered in 2014'))
+        .toBe('discovered in twenty fourteen');
+      expect(normalizeNarrationText('discovered in 2016'))
+        .toBe('discovered in twenty sixteen');
+      expect(normalizeNarrationText('died in 1847'))
+        .toBe('died in eighteen hundred forty-seven');
+      expect(normalizeNarrationText('abandoned in 1848'))
+        .toBe('abandoned in eighteen hundred forty-eight');
+    });
+
+    it('does not convert non-year quantities and measurements', () => {
+      expect(normalizeNarrationText('The mountain rises 1914 meters above sea level.')).toBe('The mountain rises 1914 meters above sea level.');
+      expect(normalizeNarrationText('There were 1845 passengers aboard.')).toBe('There were 1845 passengers aboard.');
+      expect(normalizeNarrationText('Coordinates: 45.1234, -122.5678')).toBe('Coordinates: 45.1234, -122.5678');
+      expect(normalizeNarrationText('Located along Route 66 in 1984.')).toBe('Located along Route 66 in nineteen eighty-four.');
+    });
+  });
+
   describe('Year to Spoken Words Formatting Helper', () => {
     it('formats various historical centuries and years correctly', () => {
       expect(formatYearToSpeech(1914)).toBe('nineteen fourteen');
       expect(formatYearToSpeech(1900)).toBe('nineteen hundred');
       expect(formatYearToSpeech(1905)).toBe('nineteen oh five');
-      expect(formatYearToSpeech(1865)).toBe('eighteen sixty-five');
+      expect(formatYearToSpeech(1865)).toBe('eighteen hundred sixty-five');
+      expect(formatYearToSpeech(1845)).toBe('eighteen hundred forty-five');
+      expect(formatYearToSpeech(1800)).toBe('eighteen hundred');
       expect(formatYearToSpeech(1776)).toBe('seventeen seventy-six');
       expect(formatYearToSpeech(1492)).toBe('fourteen ninety-two');
       expect(formatYearToSpeech(1066)).toBe('ten sixty-six');
@@ -126,6 +173,7 @@ describe('Narration Text Normalization Utility', () => {
       expect(formatYearToSpeech(2000)).toBe('two thousand');
       expect(formatYearToSpeech(2005)).toBe('two thousand five');
       expect(formatYearToSpeech(2010)).toBe('twenty ten');
+      expect(formatYearToSpeech(2014)).toBe('twenty fourteen');
       expect(formatYearToSpeech(2024)).toBe('twenty twenty-four');
       expect(formatYearToSpeech(793)).toBe('seven ninety-three');
       expect(formatYearToSpeech(800)).toBe('eight hundred');

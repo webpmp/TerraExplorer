@@ -638,6 +638,60 @@ export function slerpUnitVectors(v1: THREE.Vector3, v2: THREE.Vector3, t: number
   ).normalize();
 }
 
+/**
+ * Densifies a geographic path using spherical great-circle interpolation between each adjacent coordinate pair.
+ *
+ * Requirements:
+ * - Preserves all existing coordinate vertices in their exact sequential order (A -> B -> C remains A -> subpoints -> B -> subpoints -> C).
+ * - Generates intermediate great-circle points using slerpUnitVectors.
+ * - Scales step count dynamically with angular distance (approx 1 step per 1.5 degrees / ~150km, min 1, max 64 per leg).
+ * - Avoids modifying the input path array or exposing synthetic waypoints to application state.
+ */
+export function densifyGeodesicPath(
+  path: Array<{ lat: number; lng: number }>,
+  options?: { maxAngleStepDeg?: number; maxSubdivisions?: number }
+): Array<{ lat: number; lng: number }> {
+  if (!path || path.length < 2) return path || [];
+
+  const maxAngleStepDeg = options?.maxAngleStepDeg ?? 1.5;
+  const maxAngleStepRad = (maxAngleStepDeg * Math.PI) / 180;
+  const maxSubdivisions = options?.maxSubdivisions ?? 64;
+
+  const densified: Array<{ lat: number; lng: number }> = [path[0]];
+
+  for (let i = 0; i < path.length - 1; i++) {
+    const p1 = path[i];
+    const p2 = path[i + 1];
+
+    if (
+      typeof p1.lat !== 'number' || typeof p1.lng !== 'number' ||
+      typeof p2.lat !== 'number' || typeof p2.lng !== 'number'
+    ) {
+      densified.push(p2);
+      continue;
+    }
+
+    const v1 = latLngToVector3(p1.lat, p1.lng, 1.0).clone().normalize();
+    const v2 = latLngToVector3(p2.lat, p2.lng, 1.0).clone().normalize();
+
+    const angle = v1.angleTo(v2);
+
+    if (angle > maxAngleStepRad) {
+      const steps = Math.min(maxSubdivisions, Math.max(2, Math.ceil(angle / maxAngleStepRad)));
+      for (let s = 1; s < steps; s++) {
+        const t = s / steps;
+        const vInterp = slerpUnitVectors(v1, v2, t);
+        const geoInterp = vector3ToLatLng(vInterp);
+        densified.push(geoInterp);
+      }
+    }
+
+    densified.push(p2);
+  }
+
+  return densified;
+}
+
 export interface GlobeRouteGeometryOptions {
   waypoints: Waypoint[];
   skin: SkinType;
@@ -704,189 +758,205 @@ export function buildGlobeRouteGeometry(
         continue;
       }
 
-      const startVec = (markerPositions?.get(wp1.id) || latLngToVector3(wp1.lat, wp1.lng, globeRadius)).clone().normalize();
-      const endVec = (markerPositions?.get(wp2.id) || latLngToVector3(wp2.lat, wp2.lng, globeRadius)).clone().normalize();
+      const pathCoords = (wp1.pathGeometry && wp1.pathGeometry.length >= 2)
+        ? wp1.pathGeometry
+        : [{ lat: wp1.lat, lng: wp1.lng }, { lat: wp2.lat, lng: wp2.lng }];
 
-      const angle = startVec.angleTo(endVec);
-      if (angle < 0.0001) continue;
+      for (let k = 0; k < pathCoords.length - 1; k++) {
+        const subStart = pathCoords[k];
+        const subEnd = pathCoords[k + 1];
+        const isFirstSubLeg = (k === 0);
+        const isLastSubLeg = (k === pathCoords.length - 2);
 
-      const arcLength = angle * lineRadius;
+        const startVec = (isFirstSubLeg && markerPositions?.get(wp1.id))
+          ? markerPositions.get(wp1.id)!.clone().normalize()
+          : latLngToVector3(subStart.lat, subStart.lng, globeRadius).clone().normalize();
 
-      // Adaptively scale clearances for closely spaced waypoints so connecting line remains visible
-      const startClearance = Math.min(defaultClearance, arcLength * 0.25);
-      const endClearance = Math.min(defaultClearance, arcLength * 0.25);
+        const endVec = (isLastSubLeg && markerPositions?.get(wp2.id))
+          ? markerPositions.get(wp2.id)!.clone().normalize()
+          : latLngToVector3(subEnd.lat, subEnd.lng, globeRadius).clone().normalize();
 
-      const hasArrow = arcLength >= minSegmentLength;
+        const angle = startVec.angleTo(endVec);
+        if (angle < 0.0001) continue;
 
-      let arrowBaseArc = arcLength - endClearance;
+        const arcLength = angle * lineRadius;
 
-      // 1. Directional Arrow Geometry (pointing towards destination waypoint)
-      if (hasArrow) {
-        const sTip = Math.max(startClearance + arrowLength + 0.003, arcLength - arrowBackOffset);
-        const sBase = sTip - arrowLength;
-        arrowBaseArc = sBase;
+        // Adaptively scale clearances for closely spaced waypoints so connecting line remains visible
+        const startClearance = isFirstSubLeg ? Math.min(defaultClearance, arcLength * 0.25) : 0;
+        const endClearance = isLastSubLeg ? Math.min(defaultClearance, arcLength * 0.25) : 0;
 
-        const tTip = sTip / arcLength;
-        const tBase = sBase / arcLength;
+        const hasArrow = isLastSubLeg && arcLength >= minSegmentLength;
 
-        const pTip = slerpUnitVectors(startVec, endVec, tTip).multiplyScalar(lineRadius + 0.001);
-        const pBase = slerpUnitVectors(startVec, endVec, tBase).multiplyScalar(lineRadius + 0.001);
+        let arrowBaseArc = arcLength - endClearance;
 
-        const norm = pBase.clone().normalize();
-        const tangent = pTip.clone().sub(pBase).normalize();
-        const bitangent = new THREE.Vector3().crossVectors(norm, tangent).normalize();
+        // 1. Directional Arrow Geometry (pointing towards destination waypoint)
+        if (hasArrow) {
+          const sTip = Math.max(startClearance + arrowLength + 0.003, arcLength - arrowBackOffset);
+          const sBase = sTip - arrowLength;
+          arrowBaseArc = sBase;
 
-        const vTip = pTip.clone();
-        const vLeft = pBase.clone().addScaledVector(bitangent, arrowWidth / 2);
-        const vRight = pBase.clone().addScaledVector(bitangent, -arrowWidth / 2);
+          const tTip = sTip / arcLength;
+          const tBase = sBase / arcLength;
 
-        const { lat: arrowLat, lng: arrowLng } = vector3ToLatLng(pTip);
-        const arrowColorHex = getConnectingLineColor({
-          theme: skin,
-          mapLayer: 'globe',
-          backgroundContext: { lat: arrowLat, lng: arrowLng },
-          routeGroupId: segment.group.id
-        });
-        const arrowColor = new THREE.Color(arrowColorHex);
+          const pTip = slerpUnitVectors(startVec, endVec, tTip).multiplyScalar(lineRadius + 0.001);
+          const pBase = slerpUnitVectors(startVec, endVec, tBase).multiplyScalar(lineRadius + 0.001);
 
-        const tipIdx = vertexOffset;
-        const leftIdx = vertexOffset + 1;
-        const rightIdx = vertexOffset + 2;
-        vertexOffset += 3;
+          const norm = pBase.clone().normalize();
+          const tangent = pTip.clone().sub(pBase).normalize();
+          const bitangent = new THREE.Vector3().crossVectors(norm, tangent).normalize();
 
-        positions.push(vTip.x, vTip.y, vTip.z);
-        positions.push(vLeft.x, vLeft.y, vLeft.z);
-        positions.push(vRight.x, vRight.y, vRight.z);
+          const vTip = pTip.clone();
+          const vLeft = pBase.clone().addScaledVector(bitangent, arrowWidth / 2);
+          const vRight = pBase.clone().addScaledVector(bitangent, -arrowWidth / 2);
 
-        for (let k = 0; k < 3; k++) {
-          normals.push(norm.x, norm.y, norm.z);
-          colors.push(arrowColor.r, arrowColor.g, arrowColor.b);
+          const { lat: arrowLat, lng: arrowLng } = vector3ToLatLng(pTip);
+          const arrowColorHex = getConnectingLineColor({
+            theme: skin,
+            mapLayer: 'globe',
+            backgroundContext: { lat: arrowLat, lng: arrowLng },
+            routeGroupId: segment.group.id
+          });
+          const arrowColor = new THREE.Color(arrowColorHex);
+
+          const tipIdx = vertexOffset;
+          const leftIdx = vertexOffset + 1;
+          const rightIdx = vertexOffset + 2;
+          vertexOffset += 3;
+
+          positions.push(vTip.x, vTip.y, vTip.z);
+          positions.push(vLeft.x, vLeft.y, vLeft.z);
+          positions.push(vRight.x, vRight.y, vRight.z);
+
+          for (let m = 0; m < 3; m++) {
+            normals.push(norm.x, norm.y, norm.z);
+            colors.push(arrowColor.r, arrowColor.g, arrowColor.b);
+          }
+
+          indices.push(tipIdx, leftIdx, rightIdx);
+          indices.push(tipIdx, rightIdx, leftIdx);
         }
 
-        indices.push(tipIdx, leftIdx, rightIdx);
-        indices.push(tipIdx, rightIdx, leftIdx);
-      }
+        // 2. Dash Marks along Great Circle Arc (dashed pattern with rounded caps)
+        const sStart = startClearance;
+        const sEnd = hasArrow ? (arrowBaseArc - 0.003) : (arcLength - endClearance);
+        const usableLength = sEnd - sStart;
 
-      // 2. Dash Marks along Great Circle Arc (dashed pattern with rounded caps)
-      const sStart = startClearance;
-      const sEnd = hasArrow ? (arrowBaseArc - 0.003) : (arcLength - endClearance);
-      const usableLength = sEnd - sStart;
+        if (usableLength > 0.001) {
+          const count = Math.max(1, Math.floor((usableLength + gapLength) / cycleLength));
 
-      if (usableLength > 0.001) {
-        const count = Math.max(1, Math.floor((usableLength + gapLength) / cycleLength));
+          for (let j = 0; j < count; j++) {
+            const d0 = sStart + j * cycleLength;
+            const d1 = Math.min(sEnd, d0 + dashLength);
+            if (d1 <= d0 + 0.0005) continue;
 
-        for (let j = 0; j < count; j++) {
-          const d0 = sStart + j * cycleLength;
-          const d1 = Math.min(sEnd, d0 + dashLength);
-          if (d1 <= d0 + 0.0005) continue;
+            const subSteps = 2; // 2 sub-quads per dash for spherical curvature
+            const ringIndices: Array<[number, number]> = [];
 
-          const subSteps = 2; // 2 sub-quads per dash for spherical curvature
-          const ringIndices: Array<[number, number]> = [];
+            for (let m = 0; m <= subSteps; m++) {
+              const dCurr = d0 + (m / subSteps) * (d1 - d0);
+              const tCurr = dCurr / arcLength;
+              const pCenter = slerpUnitVectors(startVec, endVec, tCurr).multiplyScalar(lineRadius);
+              const norm = pCenter.clone().normalize();
 
-          for (let m = 0; m <= subSteps; m++) {
-            const dCurr = d0 + (m / subSteps) * (d1 - d0);
-            const tCurr = dCurr / arcLength;
-            const pCenter = slerpUnitVectors(startVec, endVec, tCurr).multiplyScalar(lineRadius);
-            const norm = pCenter.clone().normalize();
+              const tNext = Math.min(1.0, tCurr + 0.001);
+              const pNext = slerpUnitVectors(startVec, endVec, tNext).multiplyScalar(lineRadius);
+              const tangent = pNext.clone().sub(pCenter).normalize();
+              const bitangent = new THREE.Vector3().crossVectors(norm, tangent).normalize();
 
-            const tNext = Math.min(1.0, tCurr + 0.001);
-            const pNext = slerpUnitVectors(startVec, endVec, tNext).multiplyScalar(lineRadius);
-            const tangent = pNext.clone().sub(pCenter).normalize();
-            const bitangent = new THREE.Vector3().crossVectors(norm, tangent).normalize();
+              const vLeft = pCenter.clone().addScaledVector(bitangent, halfStroke);
+              const vRight = pCenter.clone().addScaledVector(bitangent, -halfStroke);
 
-            const vLeft = pCenter.clone().addScaledVector(bitangent, halfStroke);
-            const vRight = pCenter.clone().addScaledVector(bitangent, -halfStroke);
+              const { lat: dashLat, lng: dashLng } = vector3ToLatLng(pCenter);
+              const dashColorHex = getConnectingLineColor({
+                theme: skin,
+                mapLayer: 'globe',
+                backgroundContext: { lat: dashLat, lng: dashLng },
+                routeGroupId: segment.group.id
+              });
+              const dashColor = new THREE.Color(dashColorHex);
 
-            const { lat: dashLat, lng: dashLng } = vector3ToLatLng(pCenter);
-            const dashColorHex = getConnectingLineColor({
+              const lIdx = vertexOffset;
+              const rIdx = vertexOffset + 1;
+              vertexOffset += 2;
+              ringIndices.push([lIdx, rIdx]);
+
+              positions.push(vLeft.x, vLeft.y, vLeft.z);
+              positions.push(vRight.x, vRight.y, vRight.z);
+
+              for (let mNorm = 0; mNorm < 2; mNorm++) {
+                normals.push(norm.x, norm.y, norm.z);
+                colors.push(dashColor.r, dashColor.g, dashColor.b);
+              }
+            }
+
+            // Generate indexed triangles connecting consecutive rings
+            for (let m = 0; m < subSteps; m++) {
+              const [l0, r0] = ringIndices[m];
+              const [l1, r1] = ringIndices[m + 1];
+
+              // Top side
+              indices.push(l0, l1, r0);
+              indices.push(r0, l1, r1);
+              // Double-sided back
+              indices.push(l0, r0, l1);
+              indices.push(r0, r1, l1);
+            }
+
+            // Add semi-circular / rounded end-caps for high visual quality
+            // Start Cap (m=0)
+            const [startL, startR] = ringIndices[0];
+            const tStart = d0 / arcLength;
+            const pStartCenter = slerpUnitVectors(startVec, endVec, tStart).multiplyScalar(lineRadius);
+            const startNorm = pStartCenter.clone().normalize();
+            const tStartAhead = Math.min(1.0, tStart + 0.001);
+            const pStartAhead = slerpUnitVectors(startVec, endVec, tStartAhead).multiplyScalar(lineRadius);
+            const startTangent = pStartAhead.clone().sub(pStartCenter).normalize();
+            const pStartCap = pStartCenter.clone().addScaledVector(startTangent, -halfStroke);
+
+            const { lat: sLat, lng: sLng } = vector3ToLatLng(pStartCenter);
+            const sColorHex = getConnectingLineColor({
               theme: skin,
               mapLayer: 'globe',
-              backgroundContext: { lat: dashLat, lng: dashLng },
+              backgroundContext: { lat: sLat, lng: sLng },
               routeGroupId: segment.group.id
             });
-            const dashColor = new THREE.Color(dashColorHex);
+            const sColor = new THREE.Color(sColorHex);
 
-            const lIdx = vertexOffset;
-            const rIdx = vertexOffset + 1;
-            vertexOffset += 2;
-            ringIndices.push([lIdx, rIdx]);
+            const startCapIdx = vertexOffset++;
+            positions.push(pStartCap.x, pStartCap.y, pStartCap.z);
+            normals.push(startNorm.x, startNorm.y, startNorm.z);
+            colors.push(sColor.r, sColor.g, sColor.b);
 
-            positions.push(vLeft.x, vLeft.y, vLeft.z);
-            positions.push(vRight.x, vRight.y, vRight.z);
+            indices.push(startL, startR, startCapIdx);
+            indices.push(startL, startCapIdx, startR);
 
-            for (let k = 0; k < 2; k++) {
-              normals.push(norm.x, norm.y, norm.z);
-              colors.push(dashColor.r, dashColor.g, dashColor.b);
-            }
+            // End Cap (m=subSteps)
+            const [endL, endR] = ringIndices[subSteps];
+            const tEnd = d1 / arcLength;
+            const pEndCenter = slerpUnitVectors(startVec, endVec, tEnd).multiplyScalar(lineRadius);
+            const endNorm = pEndCenter.clone().normalize();
+            const tEndAhead = Math.min(1.0, tEnd + 0.001);
+            const pEndAhead = slerpUnitVectors(startVec, endVec, tEndAhead).multiplyScalar(lineRadius);
+            const endTangent = pEndAhead.clone().sub(pEndCenter).normalize();
+            const pEndCap = pEndCenter.clone().addScaledVector(endTangent, halfStroke);
+
+            const { lat: eLat, lng: eLng } = vector3ToLatLng(pEndCenter);
+            const eColorHex = getConnectingLineColor({
+              theme: skin,
+              mapLayer: 'globe',
+              backgroundContext: { lat: eLat, lng: eLng },
+              routeGroupId: segment.group.id
+            });
+            const eColor = new THREE.Color(eColorHex);
+
+            const endCapIdx = vertexOffset++;
+            positions.push(pEndCap.x, pEndCap.y, pEndCap.z);
+            normals.push(endNorm.x, endNorm.y, endNorm.z);
+            colors.push(eColor.r, eColor.g, eColor.b);
+
+            indices.push(endL, endCapIdx, endR);
+            indices.push(endL, endR, endCapIdx);
           }
-
-          // Generate indexed triangles connecting consecutive rings
-          for (let m = 0; m < subSteps; m++) {
-            const [l0, r0] = ringIndices[m];
-            const [l1, r1] = ringIndices[m + 1];
-
-            // Top side
-            indices.push(l0, l1, r0);
-            indices.push(r0, l1, r1);
-            // Double-sided back
-            indices.push(l0, r0, l1);
-            indices.push(r0, r1, l1);
-          }
-
-          // Add semi-circular / rounded end-caps for high visual quality
-          // Start Cap (m=0)
-          const [startL, startR] = ringIndices[0];
-          const tStart = d0 / arcLength;
-          const pStartCenter = slerpUnitVectors(startVec, endVec, tStart).multiplyScalar(lineRadius);
-          const startNorm = pStartCenter.clone().normalize();
-          const tStartAhead = Math.min(1.0, tStart + 0.001);
-          const pStartAhead = slerpUnitVectors(startVec, endVec, tStartAhead).multiplyScalar(lineRadius);
-          const startTangent = pStartAhead.clone().sub(pStartCenter).normalize();
-          const pStartCap = pStartCenter.clone().addScaledVector(startTangent, -halfStroke);
-
-          const { lat: sLat, lng: sLng } = vector3ToLatLng(pStartCenter);
-          const sColorHex = getConnectingLineColor({
-            theme: skin,
-            mapLayer: 'globe',
-            backgroundContext: { lat: sLat, lng: sLng },
-            routeGroupId: segment.group.id
-          });
-          const sColor = new THREE.Color(sColorHex);
-
-          const startCapIdx = vertexOffset++;
-          positions.push(pStartCap.x, pStartCap.y, pStartCap.z);
-          normals.push(startNorm.x, startNorm.y, startNorm.z);
-          colors.push(sColor.r, sColor.g, sColor.b);
-
-          indices.push(startL, startR, startCapIdx);
-          indices.push(startL, startCapIdx, startR);
-
-          // End Cap (m=subSteps)
-          const [endL, endR] = ringIndices[subSteps];
-          const tEnd = d1 / arcLength;
-          const pEndCenter = slerpUnitVectors(startVec, endVec, tEnd).multiplyScalar(lineRadius);
-          const endNorm = pEndCenter.clone().normalize();
-          const tEndAhead = Math.min(1.0, tEnd + 0.001);
-          const pEndAhead = slerpUnitVectors(startVec, endVec, tEndAhead).multiplyScalar(lineRadius);
-          const endTangent = pEndAhead.clone().sub(pEndCenter).normalize();
-          const pEndCap = pEndCenter.clone().addScaledVector(endTangent, halfStroke);
-
-          const { lat: eLat, lng: eLng } = vector3ToLatLng(pEndCenter);
-          const eColorHex = getConnectingLineColor({
-            theme: skin,
-            mapLayer: 'globe',
-            backgroundContext: { lat: eLat, lng: eLng },
-            routeGroupId: segment.group.id
-          });
-          const eColor = new THREE.Color(eColorHex);
-
-          const endCapIdx = vertexOffset++;
-          positions.push(pEndCap.x, pEndCap.y, pEndCap.z);
-          normals.push(endNorm.x, endNorm.y, endNorm.z);
-          colors.push(eColor.r, eColor.g, eColor.b);
-
-          indices.push(endL, endCapIdx, endR);
-          indices.push(endL, endR, endCapIdx);
         }
       }
     }

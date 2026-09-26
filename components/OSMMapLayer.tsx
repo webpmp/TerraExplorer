@@ -30,6 +30,7 @@ import {
   calculateOSMRouteArrow,
   estimateOSMLabelBounds,
   clipLineToViewport,
+  densifyGeodesicPath,
   ROUTE_LINE_DASH_ARRAY,
   ROUTE_LINE_STROKE_WIDTH,
   getRouteLineOpacity,
@@ -1751,46 +1752,36 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                         return null;
                       }
 
+                      const rawPathCoords = (wp.pathGeometry && wp.pathGeometry.length >= 2)
+                        ? wp.pathGeometry
+                        : [{ lat: wp.lat, lng: wp.lng }, { lat: nextWp.lat, lng: nextWp.lng }];
+
+                      const pathCoords = densifyGeodesicPath(rawPathCoords);
+
                       const n = Math.pow(2, osmProjection.z);
+                      const projectCoord = (lat: number, lng: number, baseLng: number) => {
+                        let adjustedLng = lng;
+                        if (adjustedLng - baseLng > 180) adjustedLng -= 360;
+                        else if (adjustedLng - baseLng < -180) adjustedLng += 360;
 
-                      // Project wp1
-                      const x1 = ((wp.lng + 180) / 360) * n;
-                      const latRad1 = (Math.max(-85.0511, Math.min(85.0511, wp.lat)) * Math.PI) / 180;
-                      const y1 = ((1 - Math.log(Math.tan(latRad1) + 1 / Math.cos(latRad1)) / Math.PI) / 2) * n;
-                      const sx1 = osmProjection.screenCenterX + (x1 - osmProjection.exactX) * 256;
-                      const sy1 = osmProjection.screenCenterY + (y1 - osmProjection.exactY) * 256;
+                        const x = ((adjustedLng + 180) / 360) * n;
+                        const latRad = (Math.max(-85.0511, Math.min(85.0511, lat)) * Math.PI) / 180;
+                        const y = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n;
+                        return {
+                          x: osmProjection.screenCenterX + (x - osmProjection.exactX) * 256,
+                          y: osmProjection.screenCenterY + (y - osmProjection.exactY) * 256
+                        };
+                      };
 
-                      // Project wp2 (handling antimeridian wrap if needed)
-                      let lng2 = nextWp.lng;
-                      if (lng2 - wp.lng > 180) lng2 -= 360;
-                      else if (lng2 - wp.lng < -180) lng2 += 360;
-
-                      const x2 = ((lng2 + 180) / 360) * n;
-                      const latRad2 = (Math.max(-85.0511, Math.min(85.0511, nextWp.lat)) * Math.PI) / 180;
-                      const y2 = ((1 - Math.log(Math.tan(latRad2) + 1 / Math.cos(latRad2)) / Math.PI) / 2) * n;
-                      const sx2 = osmProjection.screenCenterX + (x2 - osmProjection.exactX) * 256;
-                      const sy2 = osmProjection.screenCenterY + (y2 - osmProjection.exactY) * 256;
+                      const screenPoints = pathCoords.map((c, idx) => projectCoord(c.lat, c.lng, idx === 0 ? c.lng : pathCoords[0].lng));
 
                       const segStyle = getRouteSegmentStyle(wp.segmentEvidence || segment.segmentEvidence, skin);
-
-                      // Clip line segment to viewport bounding box with margin to prevent SVG rasterizer overflow at high zoom
                       const viewportBounds = {
                         left: -200,
                         top: -200,
                         right: viewportSize.width + 200,
                         bottom: viewportSize.height + 200
                       };
-
-                      const clippedLine = clipLineToViewport(
-                        { x: sx1, y: sy1 },
-                        { x: sx2, y: sy2 },
-                        viewportBounds,
-                        segStyle.strokeDasharray
-                      );
-
-                      if (!clippedLine) {
-                        return null;
-                      }
 
                       const routeColor = getConnectingLineColor({
                         theme: skin,
@@ -1818,8 +1809,8 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                       });
                       const nextLayout = matchingNextMarker ? markerLayoutMap.get(matchingNextMarker.id ?? '') : null;
                       const nextMarkerCenter = {
-                        x: nextLayout ? nextLayout.x : (sx2 + nextVisualOffset.x),
-                        y: nextLayout ? nextLayout.y : (sy2 + nextVisualOffset.y)
+                        x: nextLayout ? nextLayout.x : (screenPoints[screenPoints.length - 1].x + nextVisualOffset.x),
+                        y: nextLayout ? nextLayout.y : (screenPoints[screenPoints.length - 1].y + nextVisualOffset.y)
                       };
 
                       const nextDisplayName =
@@ -1836,36 +1827,51 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                         'top'
                       );
 
+                      const lastP1 = screenPoints[screenPoints.length - 2];
+                      const lastP2 = screenPoints[screenPoints.length - 1];
+
                       const arrow = calculateOSMRouteArrow({
-                        start: { x: sx1, y: sy1 },
-                        end: { x: sx2, y: sy2 },
+                        start: lastP1,
+                        end: lastP2,
                         startMarkerRadius: 8,
                         destinationMarkerRadius: nextMarkerRadius,
                         destinationMarkerCenter: nextMarkerCenter,
                         destinationLabelBounds: nextLabelBounds
                       });
 
-                      const dx = sx2 - sx1;
-                      const dy = sy2 - sy1;
-                      const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+                      const clippedLines = [];
+                      for (let k = 0; k < screenPoints.length - 1; k++) {
+                        const cl = clipLineToViewport(
+                          screenPoints[k],
+                          screenPoints[k + 1],
+                          viewportBounds,
+                          segStyle.strokeDasharray
+                        );
+                        if (cl) clippedLines.push(cl);
+                      }
 
-                      console.log(`[OSM ROUTE SEGMENT]\nfromId=${wp.id}\nfromName=${wp.name}\nfromSequence=${wp.sequence}\ntoId=${nextWp.id}\ntoName=${nextWp.name}\ntoSequence=${nextWp.sequence}\nevidence=${wp.segmentEvidence || segment.segmentEvidence || 'DOCUMENTED_ROUTE_SEGMENT'}\nisSecondary=${segStyle.isSecondary}\nfromScreen=(${sx1.toFixed(1)}, ${sy1.toFixed(1)})\ntoScreen=(${sx2.toFixed(1)}, ${sy2.toFixed(1)})\nclippedP1=(${clippedLine.p1.x.toFixed(1)}, ${clippedLine.p1.y.toFixed(1)})\nclippedP2=(${clippedLine.p2.x.toFixed(1)}, ${clippedLine.p2.y.toFixed(1)})\ndashOffset=${clippedLine.dashOffset.toFixed(2)}\ndx=${dx.toFixed(1)}\ndy=${dy.toFixed(1)}\nangle=${angle.toFixed(1)}°`);
+                      if (clippedLines.length === 0) {
+                        return null;
+                      }
 
                       return (
                         <g key={`osm-route-seg-${segment.group.id}-${wp.id || i}-${nextWp.id || i + 1}`}>
                           {/* Thematic route line: solid/primary for DOCUMENTED_ROUTE_SEGMENT, faded/secondary for HIGH_LEVEL_HISTORICAL_ASSOCIATION */}
-                          <line
-                            x1={clippedLine.p1.x}
-                            y1={clippedLine.p1.y}
-                            x2={clippedLine.p2.x}
-                            y2={clippedLine.p2.y}
-                            stroke={routeColor}
-                            strokeWidth={segStyle.strokeWidth}
-                            strokeDasharray={segStyle.strokeDasharray}
-                            strokeDashoffset={clippedLine.dashOffset}
-                            strokeLinecap="round"
-                            opacity={segStyle.opacity}
-                          />
+                          {clippedLines.map((line, lineIdx) => (
+                            <line
+                              key={`osm-line-${lineIdx}`}
+                              x1={line.p1.x}
+                              y1={line.p1.y}
+                              x2={line.p2.x}
+                              y2={line.p2.y}
+                              stroke={routeColor}
+                              strokeWidth={segStyle.strokeWidth}
+                              strokeDasharray={segStyle.strokeDasharray}
+                              strokeDashoffset={line.dashOffset}
+                              strokeLinecap="round"
+                              opacity={segStyle.opacity}
+                            />
+                          ))}
                           {/* Subtle Directional Arrow pointing toward the next waypoint */}
                           {arrow && (
                             <polygon
