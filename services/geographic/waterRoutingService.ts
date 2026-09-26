@@ -832,7 +832,12 @@ export function simplifyWaterRoute(path: GeoCoordinates[]): GeoCoordinates[] {
 }
 
 /**
- * Determines whether a route, route group, or query context represents a maritime/water-based journey.
+ * Determines whether a route, route group, or query context represents a genuine maritime/oceanic journey.
+ *
+ * Requirements:
+ * - Requires strong, positive maritime evidence (oceanic navigation, sea voyages, naval vessels, shipwrecks, circumnavigations).
+ * - Generic historical terms such as "expedition", "march", or "river landing" never independently establish maritime status.
+ * - Prevents terrestrial expeditions (Lewis & Clark, Trail of Tears, Silk Road) from false-positive ocean routing.
  */
 export function isMaritimeJourney(
   routeContext?: Partial<Route> | {
@@ -846,7 +851,7 @@ export function isMaritimeJourney(
   group?: Partial<RouteGroup>,
   waypoints?: Waypoint[]
 ): boolean {
-  // 1. Explicit non-water exclusions
+  // 1. Text corpus from route and group metadata
   const textCorpus = [
     routeContext?.title,
     routeContext?.routeType,
@@ -858,26 +863,27 @@ export function isMaritimeJourney(
     group?.corridorDescription
   ].filter(Boolean).join(' ').toLowerCase();
 
-  if (
-    /\b(overland|hiking|hiking\s+trail|walking|bicycle|cycling|flight|aviation|rail|railway|train|highway|road\s+trip|march|caravan)\b/i.test(textCorpus) &&
-    !/\b(water\s+route|riverine|sea\s+route|naval|shipping|voyage|expedition|boat)\b/i.test(textCorpus)
-  ) {
+  // 2. Explicit non-water / overland indicators
+  const isExplicitOverland = /\b(overland|hiking|hiking\s+trail|walking|bicycle|cycling|flight|aviation|rail|railway|train|highway|road\s+trip|march|caravan)\b/i.test(textCorpus);
+  const hasStrongOceanicContext = /\b(ocean\s+voyage|circumnavigation|transatlantic|transpacific|sea\s+route|sea\s+voyage|open\s+ocean|naval\s+voyage|shipwreck|northwest\s+passage|strait\s+of\s+magellan|drake\s+passage)\b/i.test(textCorpus);
+
+  if (isExplicitOverland && !hasStrongOceanicContext) {
     return false;
   }
 
-  // 2. Explicit maritime indicators in route or group metadata
-  const maritimeKeywords = /\b(maritime|naval|ocean|sea|voyage|voyages|sailing|sail|circumnavigation|ship|shipping|fleet|boat|vessel|transatlantic|transpacific|crossing|strait|water\s+route|riverine|shackleton|endurance|magellan|columbus|cook|beagle|lusitania|titanic|batavia|franklin|erebus|terror|northwest\s+passage)\b/i;
+  // 3. Positive maritime indicators in route or group metadata
+  const maritimeKeywords = /\b(maritime|naval|ocean\s+voyage|oceanic|open\s+ocean|sea\s+route|sea\s+voyage|sailing\s+vessel|circumnavigation|shipwreck|shipwrecks|transatlantic|transpacific|strait\s+crossing|northwest\s+passage|cape\s+horn|drake\s+passage|weddell\s+sea|baffin\s+bay|shackleton|endurance|magellan|columbus|hms\s+erebus|hms\s+terror|hms\s+beagle|lusitania|titanic|batavia|franklin\s+expedition)\b/i;
 
   if (maritimeKeywords.test(textCorpus)) {
     return true;
   }
 
-  // 3. Waypoint inspection: check if waypoints represent maritime stops / shipwrecks / coastal ports
+  // 4. Waypoint inspection: check if waypoints represent genuine maritime stops / shipwrecks / oceanic ports
   if (waypoints && waypoints.length >= 2) {
     const maritimeWaypointCount = waypoints.filter(wp => {
       if (isMaritimeHistoricalEntity(wp)) return true;
       const wpText = `${wp.name} ${wp.canonicalName || ''} ${wp.context || ''} ${wp.description || ''} ${wp.significance || ''}`.toLowerCase();
-      return /\b(port|harbor|harbour|whaling|dock|bay|island|sea|ocean|departed\s+for|sailed|voyage|ship|expedition|ice\s+pack|coastal|river\s+landing)\b/i.test(wpText);
+      return /\b(seaport|ocean\s+port|naval\s+base|coastal\s+wharf|whaling\s+station|sea\s+ice|pack\s+ice|shipwreck|sailed\s+across|open\s+sea|oceanic)\b/i.test(wpText);
     }).length;
 
     if (maritimeWaypointCount >= Math.ceil(waypoints.length / 2)) {
@@ -903,7 +909,14 @@ export function resolveWaterAwareRoute(
 
   const isMaritime = isMaritimeJourney(routeContext, undefined, waypoints);
   if (!isMaritime) {
-    return waypoints;
+    // Invariant: A non-maritime waypoint collection returned through resolveWaterAwareRoute() must not contain pathGeometry.
+    return waypoints.map(wp => {
+      if (wp.pathGeometry) {
+        const { pathGeometry, ...cleanWp } = wp;
+        return cleanWp;
+      }
+      return wp;
+    });
   }
 
   // Clone waypoints shallowly to avoid mutating caller's original references

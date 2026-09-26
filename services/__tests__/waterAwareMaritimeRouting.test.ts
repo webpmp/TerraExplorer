@@ -260,6 +260,129 @@ describe('Water-Aware Maritime Routing Suite', () => {
         expect(wp.pathGeometry!.length).toBeGreaterThanOrEqual(2);
       }
     });
+
+    it('correctly classifies Lewis and Clark Expedition as non-maritime and preserves direct inland segments', () => {
+      const lcRouteContext = {
+        title: 'Lewis and Clark Expedition',
+        routeType: 'expedition',
+        description: 'The Corps of Discovery expedition across the western United States to the Pacific coast.'
+      };
+
+      // 1. Classification check
+      const isMaritime = isMaritimeJourney(lcRouteContext);
+      expect(isMaritime).toBe(false);
+
+      // 2. Canonical waypoints
+      const lcWaypoints: Waypoint[] = [
+        { id: 'wp-lc-1', name: 'Camp Dubois', lat: 38.8027, lng: -90.1012, sequence: 1 },
+        { id: 'wp-lc-2', name: 'St. Charles', lat: 38.7839, lng: -90.4812, sequence: 2 },
+        { id: 'wp-lc-3', name: 'Kaw Point', lat: 39.1172, lng: -94.6144, sequence: 3 },
+        { id: 'wp-lc-4', name: 'Sergeant Floyd Monument', lat: 42.4608, lng: -96.3819, sequence: 4 },
+        { id: 'wp-lc-5', name: 'Council Bluff', lat: 41.4550, lng: -96.0233, sequence: 5 },
+        { id: 'wp-lc-6', name: 'Spirit Mound', lat: 42.8683, lng: -96.9567, sequence: 6 },
+        { id: 'wp-lc-7', name: 'Fort Mandan', lat: 47.2961, lng: -101.3283, sequence: 7 },
+        { id: 'wp-lc-8', name: 'Knife River Indian Villages', lat: 47.3236, lng: -101.3853, sequence: 8 },
+        { id: 'wp-lc-9', name: 'Great Falls (Lower Portage)', lat: 47.5186, lng: -111.1969, sequence: 9 },
+        { id: 'wp-lc-10', name: 'Three Forks of the Missouri', lat: 45.9281, lng: -111.5511, sequence: 10 },
+        { id: 'wp-lc-11', name: 'Lemhi Pass', lat: 44.9708, lng: -113.4464, sequence: 11 },
+        { id: 'wp-lc-12', name: 'Fort Clatsop', lat: 46.1342, lng: -123.8803, sequence: 12 }
+      ];
+
+      const resolved = resolveWaterAwareRoute(lcWaypoints, lcRouteContext);
+      expect(resolved).toHaveLength(12);
+
+      // Verify all 12 waypoint names, sequences, and coordinates
+      expect(resolved.map(w => w.name)).toEqual([
+        'Camp Dubois',
+        'St. Charles',
+        'Kaw Point',
+        'Sergeant Floyd Monument',
+        'Council Bluff',
+        'Spirit Mound',
+        'Fort Mandan',
+        'Knife River Indian Villages',
+        'Great Falls (Lower Portage)',
+        'Three Forks of the Missouri',
+        'Lemhi Pass',
+        'Fort Clatsop'
+      ]);
+      expect(resolved.map(w => w.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+
+      // Verify that no oceanic pathGeometry is injected for overland waypoints
+      for (const wp of resolved) {
+        expect(wp.pathGeometry).toBeUndefined();
+      }
+    });
+
+    it('sanitizes and strips stale/persisted pathGeometry when a non-maritime route is processed', () => {
+      // Create a non-maritime overland route with deliberately bogus oceanic pathGeometry
+      const overlandWaypointsWithStaleGeometry: Waypoint[] = [
+        {
+          id: 'wp-lc-1',
+          name: 'Camp Dubois',
+          lat: 38.8027,
+          lng: -90.1012,
+          sequence: 1,
+          pathGeometry: [
+            { lat: 38.8027, lng: -90.1012 },
+            { lat: 25.0, lng: -85.0 }, // Bogus Gulf of Mexico point
+            { lat: 9.0, lng: -79.5 },  // Bogus Panama Canal point
+            { lat: 38.7839, lng: -90.4812 }
+          ]
+        },
+        {
+          id: 'wp-lc-2',
+          name: 'St. Charles',
+          lat: 38.7839,
+          lng: -90.4812,
+          sequence: 2,
+          pathGeometry: [
+            { lat: 38.7839, lng: -90.4812 },
+            { lat: 0.0, lng: -140.0 }, // Bogus Pacific Ocean point
+            { lat: 39.1172, lng: -94.6144 }
+          ]
+        },
+        {
+          id: 'wp-lc-3',
+          name: 'Kaw Point',
+          lat: 39.1172,
+          lng: -94.6144,
+          sequence: 3
+        }
+      ];
+
+      const routeContext = {
+        title: 'Lewis and Clark Expedition',
+        routeType: 'expedition'
+      };
+
+      const resolved = resolveWaterAwareRoute(overlandWaypointsWithStaleGeometry, routeContext);
+      expect(resolved).toHaveLength(3);
+
+      // Verify stale pathGeometry was stripped from all waypoints
+      expect(resolved[0].pathGeometry).toBeUndefined();
+      expect(resolved[1].pathGeometry).toBeUndefined();
+      expect(resolved[2].pathGeometry).toBeUndefined();
+
+      // Verify canonical coordinates remain completely uncorrupted
+      expect(resolved[0].lat).toBeCloseTo(38.8027, 4);
+      expect(resolved[0].lng).toBeCloseTo(-90.1012, 4);
+      expect(resolved[1].lat).toBeCloseTo(38.7839, 4);
+      expect(resolved[1].lng).toBeCloseTo(-90.4812, 4);
+      expect(resolved[2].lat).toBeCloseTo(39.1172, 4);
+      expect(resolved[2].lng).toBeCloseTo(-94.6144, 4);
+    });
+
+    it('correctly classifies Trail of Tears as non-maritime and preserves overland detachment routing', () => {
+      const totRouteContext = {
+        title: 'Trail of Tears',
+        routeType: 'multi_location_campaign',
+        routeEvidenceMode: 'MULTI_ROUTE_EVENT' as const
+      };
+
+      const isMaritime = isMaritimeJourney(totRouteContext);
+      expect(isMaritime).toBe(false);
+    });
   });
 
   // 6. Waypoint Identity

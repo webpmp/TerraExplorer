@@ -1010,9 +1010,7 @@ export const DEFAULT_SAVED_ROUTES: FavoriteLocation[] = [
 ].map(r => {
     if (r.type === 'route' && r.waypoints) {
         let waypoints = r.waypoints.map(wp => ({ ...wp, isSaved: true }));
-        if (isMaritimeJourney({ title: r.name }, undefined, waypoints)) {
-            waypoints = resolveWaterAwareRoute(waypoints, { title: r.name });
-        }
+        waypoints = resolveWaterAwareRoute(waypoints, { title: r.name });
         return {
             ...r,
             isSaved: true,
@@ -1099,9 +1097,8 @@ export function hydrateFavoritesList(parsed: any[]): FavoriteLocation[] {
                     };
                 });
 
-                if (isMaritimeJourney({ title: canonicalName }, undefined, updatedWaypoints)) {
-                    updatedWaypoints = resolveWaterAwareRoute(updatedWaypoints, { title: canonicalName });
-                }
+                // Resolve water geometry for maritime routes and sanitize/strip any obsolete pathGeometry for non-maritime routes
+                updatedWaypoints = resolveWaterAwareRoute(updatedWaypoints, { title: canonicalName });
 
                 return { ...f, name: canonicalName, isSaved: true, waypoints: updatedWaypoints };
             }
@@ -3010,6 +3007,88 @@ const App: React.FC = () => {
 
      console.log(`[Waypoint Lifecycle] WAYPOINT_NAVIGATE id="${stableId}" name="${wp.name}" isSavedWp=${isSavedWp}`);
 
+     // Set selection state immediately on waypoint activation
+     setSelectedMarkerId(stableId);
+     setSelectedMarkerCoordinates({ lat: wp.lat, lng: wp.lng });
+     setIsFocused(true);
+
+     // Trigger destination OSM tile prefetching in the background before camera arrives
+     if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
+       osmTileService.prefetchViewportTiles(
+         wp.lat,
+         wp.lng,
+         14,
+         skin,
+         worldDimensions.width > 0 ? worldDimensions.width : (typeof window !== 'undefined' ? window.innerWidth : 1920),
+         worldDimensions.height > 0 ? worldDimensions.height : (typeof window !== 'undefined' ? window.innerHeight : 1080)
+       );
+     }
+
+     // Immediately initiate camera navigation to authoritative waypoint coordinates
+     if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
+       const currentDist = currentCameraDistanceRef.current || (cameraControlsRef.current?.object?.position?.length()) || 4.5;
+       const bounds = osmViewportBoundsRef.current;
+       const isVisibleInOSMViewport = bounds
+         ? isMarkerInOSMViewport(wp.lat, wp.lng, bounds)
+         : ((isOSMActive || currentDist <= 1.45) && isDestinationComfortablyVisible(
+             previousGeoCenterRef.current,
+             currentDist,
+             { lat: wp.lat, lng: wp.lng },
+             {
+               viewportWidth: worldDimensions.width > 0 ? worldDimensions.width : (typeof window !== 'undefined' ? window.innerWidth : 1920),
+               viewportHeight: worldDimensions.height > 0 ? worldDimensions.height : (typeof window !== 'undefined' ? window.innerHeight : 1080)
+             }
+           ));
+
+       if (userSettings.documentaryMode) {
+         if (isOSMActive || currentDist <= 1.45) {
+           if (isVisibleInOSMViewport) {
+             documentaryController.cancel('waypoint_visible_in_viewport');
+             setIsDocumentaryActive(false);
+             navigateWaypointCamera(wp, fromWp);
+           } else {
+             const originWp = fromWp || {
+               id: 'current-camera-pos',
+               name: 'Current Viewport',
+               lat: previousGeoCenterRef.current.lat,
+               lng: previousGeoCenterRef.current.lng,
+               description: ''
+             };
+             startDocumentaryFlow(
+               {
+                 id: stableId,
+                 name: wp.name,
+                 lat: wp.lat,
+                 lng: wp.lng,
+                 description: wp.description || ''
+               },
+               originWp
+             );
+           }
+         } else {
+           startDocumentaryFlow(
+             {
+               id: stableId,
+               name: wp.name,
+               lat: wp.lat,
+               lng: wp.lng,
+               description: wp.description || ''
+             },
+             fromWp ? {
+               id: fromWp.id,
+               name: fromWp.name,
+               lat: fromWp.lat,
+               lng: fromWp.lng,
+               description: fromWp.description
+             } : undefined
+           );
+         }
+       } else {
+         setIsDocumentaryActive(false);
+         navigateWaypointCamera(wp, fromWp);
+       }
+     }
+
      // Check prefetch cache first
      const cachedEnrichment = waypointEnrichmentCache.get(stableId);
      const isCachedComplete = Boolean(
@@ -3054,90 +3133,8 @@ source=prefetch-cache`);
 
        setInteractionState('PIN_SELECTED');
        setLocationInfo(cachedEnrichment);
-       setSelectedMarkerId(stableId);
-       setSelectedMarkerCoordinates({ lat: wp.lat, lng: wp.lng });
-       setIsFocused(true);
        setIsInfoPanelLoading(false);
        setIsNewsFetching(false);
-
-       if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
-         osmTileService.prefetchViewportTiles(
-           wp.lat,
-           wp.lng,
-           14,
-           skin,
-           worldDimensions.width > 0 ? worldDimensions.width : (typeof window !== 'undefined' ? window.innerWidth : 1920),
-           worldDimensions.height > 0 ? worldDimensions.height : (typeof window !== 'undefined' ? window.innerHeight : 1080)
-         );
-       }
-
-       const currentDist = currentCameraDistanceRef.current || (cameraControlsRef.current?.object?.position?.length()) || 4.5;
-       const bounds = osmViewportBoundsRef.current;
-       const isVisibleInOSMViewport = (typeof wp.lat === 'number' && typeof wp.lng === 'number') && (
-         bounds
-           ? isMarkerInOSMViewport(wp.lat, wp.lng, bounds)
-           : ((isOSMActive || currentDist <= 1.45) && isDestinationComfortablyVisible(
-               previousGeoCenterRef.current,
-               currentDist,
-               { lat: wp.lat, lng: wp.lng },
-               {
-                 viewportWidth: worldDimensions.width > 0 ? worldDimensions.width : (typeof window !== 'undefined' ? window.innerWidth : 1920),
-                 viewportHeight: worldDimensions.height > 0 ? worldDimensions.height : (typeof window !== 'undefined' ? window.innerHeight : 1080)
-               }
-             ))
-       );
-
-       if (userSettings.documentaryMode) {
-         if (isOSMActive || currentDist <= 1.45) {
-           if (isVisibleInOSMViewport) {
-             documentaryController.cancel('waypoint_visible_in_viewport');
-             setIsDocumentaryActive(false);
-             if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
-               navigateWaypointCamera(wp, fromWp);
-             }
-           } else {
-             const originWp = fromWp || {
-               id: 'current-camera-pos',
-               name: 'Current Viewport',
-               lat: previousGeoCenterRef.current.lat,
-               lng: previousGeoCenterRef.current.lng,
-               description: ''
-             };
-             startDocumentaryFlow(
-               {
-                 id: stableId,
-                 name: wp.name,
-                 lat: wp.lat,
-                 lng: wp.lng,
-                 description: cachedEnrichment.description || wp.description
-               },
-               originWp
-             );
-           }
-         } else {
-           startDocumentaryFlow(
-             {
-               id: stableId,
-               name: wp.name,
-               lat: wp.lat,
-               lng: wp.lng,
-               description: cachedEnrichment.description || wp.description
-             },
-             fromWp ? {
-               id: fromWp.id,
-               name: fromWp.name,
-               lat: fromWp.lat,
-               lng: fromWp.lng,
-               description: fromWp.description
-             } : undefined
-           );
-         }
-       } else {
-         setIsDocumentaryActive(false);
-         if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
-           navigateWaypointCamera(wp, fromWp);
-         }
-       }
 
        console.log(`[Waypoint Lifecycle] ENRICHED_RECORD_RESOLVED id="${stableId}" name="${wp.name}" descLength=${cachedEnrichment.description?.length || 0} source="cache"`);
        console.log('[Scan Lifecycle] BACKGROUND_ENRICHMENT_COMPLETE');
@@ -3179,74 +3176,8 @@ source=${source}`);
        setSelectedMarkerId(stableId);
        setSelectedMarkerCoordinates({ lat: wp.lat, lng: wp.lng });
        setIsFocused(true);
-
-       const currentDist = currentCameraDistanceRef.current || (cameraControlsRef.current?.object?.position?.length()) || 4.5;
-       const bounds = osmViewportBoundsRef.current;
-       const isVisibleInOSMViewport = (typeof wp.lat === 'number' && typeof wp.lng === 'number') && (
-         bounds
-           ? isMarkerInOSMViewport(wp.lat, wp.lng, bounds)
-           : ((isOSMActive || currentDist <= 1.45) && isDestinationComfortablyVisible(
-               previousGeoCenterRef.current,
-               currentDist,
-               { lat: wp.lat, lng: wp.lng },
-               {
-                 viewportWidth: worldDimensions.width > 0 ? worldDimensions.width : (typeof window !== 'undefined' ? window.innerWidth : 1920),
-                 viewportHeight: worldDimensions.height > 0 ? worldDimensions.height : (typeof window !== 'undefined' ? window.innerHeight : 1080)
-               }
-             ))
-       );
-
-       if (userSettings.documentaryMode) {
-         if (isOSMActive || currentDist <= 1.45) {
-           if (isVisibleInOSMViewport) {
-             documentaryController.cancel('waypoint_visible_in_viewport');
-             setIsDocumentaryActive(false);
-             if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
-               navigateWaypointCamera(wp, fromWp);
-             }
-           } else {
-             const originWp = fromWp || {
-               id: 'current-camera-pos',
-               name: 'Current Viewport',
-               lat: previousGeoCenterRef.current.lat,
-               lng: previousGeoCenterRef.current.lng,
-               description: ''
-             };
-             startDocumentaryFlow(
-               {
-                 id: stableId,
-                 name: wp.name,
-                 lat: wp.lat,
-                 lng: wp.lng,
-                 description: payload.description || wp.description
-               },
-               originWp
-             );
-           }
-         } else {
-           startDocumentaryFlow(
-             {
-               id: stableId,
-               name: wp.name,
-               lat: wp.lat,
-               lng: wp.lng,
-               description: payload.description || wp.description
-             },
-             fromWp ? {
-               id: fromWp.id,
-               name: fromWp.name,
-               lat: fromWp.lat,
-               lng: fromWp.lng,
-               description: fromWp.description
-             } : undefined
-           );
-         }
-       } else {
-         setIsDocumentaryActive(false);
-         if (typeof wp.lat === 'number' && typeof wp.lng === 'number') {
-           navigateWaypointCamera(wp, fromWp);
-         }
-       }
+       setIsInfoPanelLoading(false);
+       setIsNewsFetching(false);
      };
 
      const snapshot = wp.savedSnapshot || matchingSavedWpInRoute?.savedSnapshot;
@@ -5471,16 +5402,17 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
       // If this route is currently active, update the map and info panel immediately
       if (activeRouteId === syncedFav.id && syncedFav.type === 'route' && syncedFav.waypoints) {
-          setRouteWaypoints(syncedFav.waypoints);
-          if (syncedFav.waypoints.length === 0) {
+          const sanitizedWaypoints = resolveWaterAwareRoute(syncedFav.waypoints, { title: syncedFav.name });
+          setRouteWaypoints(sanitizedWaypoints);
+          if (sanitizedWaypoints.length === 0) {
              setCurrentWaypointIndex(-1);
              setLocationInfo(null);
           } else {
-             const newIndex = (currentWaypointIndex >= 0 && currentWaypointIndex < syncedFav.waypoints.length)
+             const newIndex = (currentWaypointIndex >= 0 && currentWaypointIndex < sanitizedWaypoints.length)
                ? currentWaypointIndex
                : 0;
              setCurrentWaypointIndex(newIndex);
-             const currentWp = syncedFav.waypoints[newIndex];
+             const currentWp = sanitizedWaypoints[newIndex];
              if (currentWp) {
                setLocationInfo(prev => {
                  if (!prev) return prev;
@@ -5536,10 +5468,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
             // Toggle On
             setAutoRotate(false); // Stop rotation to ensure camera stays centered on waypoint
             if (fav.waypoints) {
-                let waypointsToUse = fav.waypoints;
-                if (isMaritimeJourney({ title: fav.name }, undefined, waypointsToUse)) {
-                    waypointsToUse = resolveWaterAwareRoute(waypointsToUse, { title: fav.name });
-                }
+                const waypointsToUse = resolveWaterAwareRoute(fav.waypoints, { title: fav.name });
                 setRouteWaypoints(waypointsToUse);
                 setActiveRouteId(fav.id);
                 activeRouteIdRef.current = fav.id;

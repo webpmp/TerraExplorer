@@ -352,6 +352,165 @@ export const HISTORICAL_ROUTE_REGISTRY: Record<string, HistoricalEventRouteModel
         ]
       }
     }
+  },
+  'lewis-and-clark': {
+    eventTitle: "Lewis and Clark Expedition",
+    eventPattern: /\b(?:lewis\s+(?:and|&)\s+clark|corps\s+of\s+discovery)\b/i,
+    routeGroups: {
+      'lewis-and-clark': {
+        id: 'lewis-and-clark',
+        name: "Lewis and Clark Expedition",
+        isSequential: true,
+        corridorDescription: "Overland and river expedition of the Corps of Discovery from Camp Dubois near St. Louis along the Missouri River, across the Rocky Mountains at Lemhi Pass, to Fort Clatsop on the Pacific Coast.",
+        documentedAnchors: [
+          {
+            id: 'camp-dubois',
+            name: "Camp Dubois",
+            canonicalName: "Camp Dubois",
+            lat: 38.8027,
+            lng: -90.1012,
+            waypointType: 'route_waypoint',
+            role: 'origin',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "Winter camp and official departure point of the Corps of Discovery in May 1804."
+          },
+          {
+            id: 'st-charles',
+            name: "St. Charles",
+            canonicalName: "St. Charles",
+            lat: 38.7839,
+            lng: -90.4812,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "May 1804: Final civilian embarkation point on the Missouri River before heading into unmapped western territory."
+          },
+          {
+            id: 'kaw-point',
+            name: "Kaw Point",
+            canonicalName: "Kaw Point",
+            lat: 39.1172,
+            lng: -94.6144,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "June 1804: Confluence of the Kansas and Missouri Rivers where the expedition encamped for three days."
+          },
+          {
+            id: 'sergeant-floyd-monument',
+            name: "Sergeant Floyd Monument",
+            canonicalName: "Sergeant Floyd Monument",
+            lat: 42.4608,
+            lng: -96.3819,
+            waypointType: 'historical_site',
+            role: 'transit',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "August 1804: Burial site of Sergeant Charles Floyd, the only member of the expedition to perish during the journey."
+          },
+          {
+            id: 'council-bluff',
+            name: "Council Bluff",
+            canonicalName: "Council Bluff",
+            lat: 41.4550,
+            lng: -96.0233,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "August 1804: Site of the first formal council between the expedition and representatives of the Oto and Missouri tribes."
+          },
+          {
+            id: 'spirit-mound',
+            name: "Spirit Mound",
+            canonicalName: "Spirit Mound",
+            lat: 42.8683,
+            lng: -96.9567,
+            waypointType: 'historical_site',
+            role: 'transit',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "August 1804: Prominent natural prairie mound visited by Lewis and Clark following local indigenous legends of spirit beings."
+          },
+          {
+            id: 'fort-mandan',
+            name: "Fort Mandan",
+            canonicalName: "Fort Mandan",
+            lat: 47.2961,
+            lng: -101.3283,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "Winter 1804–1805: Encampment among the Mandan and Hidatsa nations where Sacagawea and Toussaint Charbonneau joined the expedition."
+          },
+          {
+            id: 'knife-river-indian-villages',
+            name: "Knife River Indian Villages",
+            canonicalName: "Knife River Indian Villages",
+            lat: 47.3236,
+            lng: -101.3853,
+            waypointType: 'historical_site',
+            role: 'transit',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "Major indigenous trade and agricultural hub where the expedition gathered vital geographic intelligence."
+          },
+          {
+            id: 'great-falls-portage',
+            name: "Great Falls (Lower Portage)",
+            canonicalName: "Great Falls (Lower Portage)",
+            lat: 47.5186,
+            lng: -111.1969,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "June–July 1805: Arduous 18-mile overland portage around the series of five massive waterfalls on the upper Missouri."
+          },
+          {
+            id: 'three-forks',
+            name: "Three Forks of the Missouri",
+            canonicalName: "Three Forks of the Missouri",
+            lat: 45.9281,
+            lng: -111.5511,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "July 1805: Confluence of the Jefferson, Madison, and Gallatin Rivers, forming the headwaters of the Missouri River."
+          },
+          {
+            id: 'lemhi-pass',
+            name: "Lemhi Pass",
+            canonicalName: "Lemhi Pass",
+            lat: 44.9708,
+            lng: -113.4464,
+            waypointType: 'route_waypoint',
+            role: 'transit',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "August 1805: Mountain pass over the Continental Divide where Lewis first looked west beyond the boundaries of the Louisiana Purchase."
+          },
+          {
+            id: 'fort-clatsop',
+            name: "Fort Clatsop",
+            canonicalName: "Fort Clatsop",
+            lat: 46.1342,
+            lng: -123.8803,
+            waypointType: 'route_waypoint',
+            role: 'destination',
+            membershipType: 'ROUTE_EXCLUSIVE',
+            historicalContext: "Winter 1805–1806: Pacific coastal winter encampment near the mouth of the Columbia River before the return journey."
+          }
+        ],
+        documentedConsecutiveSegments: [
+          ['camp-dubois', 'st-charles'],
+          ['st-charles', 'kaw-point'],
+          ['kaw-point', 'sergeant-floyd-monument'],
+          ['sergeant-floyd-monument', 'council-bluff'],
+          ['council-bluff', 'spirit-mound'],
+          ['spirit-mound', 'fort-mandan'],
+          ['fort-mandan', 'knife-river-indian-villages'],
+          ['knife-river-indian-villages', 'great-falls-portage'],
+          ['great-falls-portage', 'three-forks'],
+          ['three-forks', 'lemhi-pass'],
+          ['lemhi-pass', 'fort-clatsop']
+        ]
+      }
+    }
   }
 };
 
@@ -403,6 +562,7 @@ export function resolveCanonicalRouteGroup(
   if (clean.includes('bell') || clean.includes('johnbell')) return eventModel.routeGroups['bell-route'] || null;
   if (clean.includes('water') || clean.includes('river') || clean.includes('boat')) return eventModel.routeGroups['water-route'] || null;
   if (clean.includes('shackleton') || clean.includes('endurance') || clean.includes('antarctic')) return eventModel.routeGroups['shackleton-endurance'] || null;
+  if (clean.includes('lewis') || clean.includes('clark') || clean.includes('discovery')) return eventModel.routeGroups['lewis-and-clark'] || null;
 
   return null;
 }
@@ -730,9 +890,7 @@ export function buildCanonicalEventTopology(eventTitle: string): {
   const effectiveRouteType = isSingleSequentialRoute ? 'expedition' : 'multi_location_campaign';
   const effectiveEvidenceMode = isSingleSequentialRoute ? 'DOCUMENTED_ROUTE' : 'MULTI_ROUTE_EVENT';
 
-  const resolvedWaypoints = isMaritimeJourney({ title: model.eventTitle, routeType: effectiveRouteType }, undefined, route)
-    ? resolveWaterAwareRoute(route, { title: model.eventTitle, routeType: effectiveRouteType })
-    : route;
+  const resolvedWaypoints = resolveWaterAwareRoute(route, { title: model.eventTitle, routeType: effectiveRouteType });
 
   return {
     title: model.eventTitle,
