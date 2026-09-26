@@ -51,7 +51,7 @@ Search for cities, landmarks, historical sites, and points of interest, explore 
 
 - **3D Globe:** Rotate, zoom, and explore the Earth from orbit to street level.
 - **Smart Search:** Find locations using natural-language queries.
-- **AI Location Insights:** Generate summaries, facts, population, climate, and other geographic information using Google Gemini or local LM Studio inference.
+- **AI Location Insights:** Generate summaries, facts, climate, and other geographic information using local LM Studio or Google Gemini inference.
 - **Contextual Follow-Up Questions:** Continue exploring a location with contextually relevant suggested questions or ask your own follow-up question. Answers are displayed directly in the location information panel.
 - **Street Maps:** Switch from the 3D globe to a detailed street map to explore locations, roads, landmarks, and surrounding areas more closely.
 - **Documentary Mode:** Experience cinematic camera transitions and a guided visual presentation as you explore locations. Documentary Mode works independently, but is especially immersive when combined with Narration.
