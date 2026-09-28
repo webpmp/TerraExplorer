@@ -14,6 +14,8 @@ import {
   getSequentialWaypointPairs
 } from '../../utils/routeSequenceUtils';
 import { Waypoint } from '../../types';
+import { doesSegmentIntersectLand, findWaterRoute } from '../geographic/waterRoutingService';
+import { generateRoute } from '../geminiService';
 
 describe('Ernest Shackleton Endurance Expedition - Route Sequencing & Registry Validation', () => {
   it('registers Shackleton Endurance Expedition in HISTORICAL_ROUTE_REGISTRY with 9 canonical anchors and 8 consecutive segments', () => {
@@ -294,6 +296,160 @@ describe('Ernest Shackleton Endurance Expedition - Route Sequencing & Registry V
     // Verify consecutive segment pairing
     const pairs = getSequentialWaypointPairs(canonical?.route as Waypoint[]);
     expect(pairs).toHaveLength(8);
+  });
+
+  it('validates water-aware routing pathGeometry on Shackleton canonical route waypoints', () => {
+    const canonical = buildCanonicalEventTopology("Ernest Shackleton's Endurance Expedition");
+    expect(canonical).toBeDefined();
+    const route = canonical?.route as Waypoint[];
+    expect(route).toHaveLength(9);
+
+    route.forEach((wp, idx) => {
+      console.log(`Waypoint ${idx + 1} (${wp.name}): pathGeometry points = ${wp.pathGeometry?.length ?? 0}`);
+      if (wp.pathGeometry) {
+        console.log(`  path: ${JSON.stringify(wp.pathGeometry)}`);
+      }
+    });
+
+    // Check Plymouth -> Buenos Aires (idx 0)
+    expect(route[0].pathGeometry).toBeDefined();
+    expect(route[0].pathGeometry!.length).toBeGreaterThan(2);
+
+    // Check Stromness -> Punta Arenas (idx 7)
+    expect(route[7].pathGeometry).toBeDefined();
+  });
+
+  it('diagnoses each segment of Shackleton route for land intersections', () => {
+    const canonical = buildCanonicalEventTopology("Ernest Shackleton's Endurance Expedition");
+    const route = canonical?.route as Waypoint[];
+
+    for (let i = 0; i < route.length - 1; i++) {
+      const from = route[i];
+      const to = route[i + 1];
+      const geom = from.pathGeometry || [{ lat: from.lat, lng: from.lng }, { lat: to.lat, lng: to.lng }];
+      console.log(`\n--- Leg ${i + 1}: ${from.name} -> ${to.name} (${geom.length} points) ---`);
+      for (let k = 0; k < geom.length - 1; k++) {
+        const p1 = geom[k];
+        const p2 = geom[k + 1];
+        const hit = doesSegmentIntersectLand(p1, p2);
+        console.log(`  Subsegment ${k} -> ${k + 1}: (${p1.lat.toFixed(2)}, ${p1.lng.toFixed(2)}) -> (${p2.lat.toFixed(2)}, ${p2.lng.toFixed(2)}) | intersectsLand: ${hit}`);
+        expect(hit).toBe(false);
+      }
+    }
+  });
+
+  it('runs generateRoute for Shackleton Expedition and preserves all 9 waypoints and water routing geometry', async () => {
+    const mockGenerateFn = async () => ({
+      text: JSON.stringify({
+        title: "Ernest Shackleton's Endurance Expedition",
+        routeType: "expedition",
+        routeEvidenceMode: "DOCUMENTED_ROUTE",
+        isSequential: true,
+        route: [
+          { name: "Plymouth", lat: 50.3755, lng: -4.1427, sequence: 1 },
+          { name: "Buenos Aires", lat: -34.6037, lng: -58.3816, sequence: 2 },
+          { name: "Grytviken", lat: -54.2811, lng: -36.5092, sequence: 3 },
+          { name: "Weddell Sea", lat: -76.5, lng: -35.0, sequence: 4 },
+          { name: "Endurance Sinks", lat: -69.08, lng: -51.5, sequence: 5 },
+          { name: "Elephant Island", lat: -61.1417, lng: -55.2333, sequence: 6 },
+          { name: "King Haakon Bay", lat: -54.15, lng: -37.2333, sequence: 7 },
+          { name: "Stromness", lat: -54.16, lng: -36.711, sequence: 8 },
+          { name: "Punta Arenas", lat: -53.1638, lng: -70.9171, sequence: 9 }
+        ]
+      })
+    });
+
+    const result = await generateRoute("Where did Ernest Shackleton's Endurance Expedition take place?", 'HISTORICAL_EVENT', mockGenerateFn);
+    expect(result.waypoints).toHaveLength(9);
+    expect(result.isSequential).toBe(true);
+
+    // Verify Plymouth -> Buenos Aires pathGeometry
+    expect(result.waypoints[0].pathGeometry).toBeDefined();
+    expect(result.waypoints[0].pathGeometry!.length).toBeGreaterThanOrEqual(2);
+
+    // Verify Stromness -> Punta Arenas pathGeometry
+    expect(result.waypoints[7].pathGeometry).toBeDefined();
+    expect(result.waypoints[7].pathGeometry!.length).toBeGreaterThanOrEqual(2);
+
+    // Verify no subsegment intersects land
+    for (let i = 0; i < result.waypoints.length - 1; i++) {
+      const from = result.waypoints[i];
+      const to = result.waypoints[i + 1];
+      const geom = from.pathGeometry || [{ lat: from.lat, lng: from.lng }, { lat: to.lat, lng: to.lng }];
+      for (let k = 0; k < geom.length - 1; k++) {
+        const hit = doesSegmentIntersectLand(geom[k], geom[k + 1]);
+        expect(hit).toBe(false);
+      }
+    }
+  }, 25000);
+
+  it('proves Stromness -> Punta Arenas enters via the Atlantic / Strait of Magellan corridor without cutting across South America', () => {
+    // 1. Direct line between Stromness and Punta Arenas MUST intersect land
+    const directIntersectsLand = doesSegmentIntersectLand(
+      { lat: -54.16, lng: -36.711 },
+      { lat: -53.1638, lng: -70.9171 }
+    );
+    expect(directIntersectsLand).toBe(true);
+
+    const canonical = buildCanonicalEventTopology("Ernest Shackleton's Endurance Expedition");
+    const route = canonical?.route as Waypoint[];
+    const stromnessWp = route[7]; // Stromness is index 7
+    const puntaArenasWp = route[8]; // Punta Arenas is index 8
+
+    expect(stromnessWp.name).toContain('Stromness');
+    expect(puntaArenasWp.name).toContain('Punta Arenas');
+
+    const geom = stromnessWp.pathGeometry;
+    expect(geom).toBeDefined();
+    expect(geom!.length).toBeGreaterThanOrEqual(3);
+
+    // Verify first coordinate is Stromness
+    expect(geom![0].lat).toBeCloseTo(-54.16, 2);
+    expect(geom![0].lng).toBeCloseTo(-36.711, 2);
+
+    // Verify last coordinate is Punta Arenas
+    const lastCoord = geom![geom!.length - 1];
+    expect(lastCoord.lat).toBeCloseTo(-53.1638, 2);
+    expect(lastCoord.lng).toBeCloseTo(-70.9171, 2);
+
+    // Verify intermediate waypoint passes through the Atlantic entrance of the Strait of Magellan (-52.3, -68.0)
+    // and Angostura (-52.6, -69.9) rather than cutting across Patagonia or Tierra del Fuego
+    const intermediateLngs = geom!.slice(1, -1).map(c => c.lng);
+    const hasAtlanticMagellanEntrance = intermediateLngs.some(lng => lng > -70.5 && lng < -65.0);
+    expect(hasAtlanticMagellanEntrance).toBe(true);
+
+    // Verify every subsegment is completely over water
+    for (let k = 0; k < geom!.length - 1; k++) {
+      const hit = doesSegmentIntersectLand(geom![k], geom![k + 1]);
+      expect(hit).toBe(false);
+    }
+  });
+
+  it('guarantees pathGeometry is strictly rendering geometry and does not pollute canonical waypoints', () => {
+    const canonical = buildCanonicalEventTopology("Ernest Shackleton's Endurance Expedition");
+    const waypoints = canonical?.route as Waypoint[];
+
+    // Must be exactly 9 waypoints
+    expect(waypoints).toHaveLength(9);
+
+    // Must have exactly 8 sequential segments
+    const segments = getSequentialRouteSegments(waypoints);
+    expect(segments).toHaveLength(1);
+    expect(segments[0].waypoints).toHaveLength(9);
+
+    const pairs = getSequentialWaypointPairs(waypoints);
+    expect(pairs).toHaveLength(8);
+
+    // Canonical IDs and names are intact
+    expect(waypoints[0].canonicalName).toBe('Plymouth');
+    expect(waypoints[1].canonicalName).toBe('Buenos Aires');
+    expect(waypoints[2].canonicalName).toBe('Grytviken');
+    expect(waypoints[3].canonicalName).toBe('Weddell Sea');
+    expect(waypoints[4].canonicalName).toBe('Endurance Sinks');
+    expect(waypoints[5].canonicalName).toBe('Elephant Island');
+    expect(waypoints[6].canonicalName).toBe('King Haakon Bay');
+    expect(waypoints[7].canonicalName).toBe('Stromness');
+    expect(waypoints[8].canonicalName).toBe('Punta Arenas');
   });
 });
 

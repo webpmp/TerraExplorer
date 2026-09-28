@@ -8,6 +8,7 @@ import { getConnectingLineColor } from '../../utils/routeLineColor';
 import { getThemeMarkerColors } from '../../utils/markerStyleUtils';
 import { runRoutePipeline } from '../routePipeline';
 import { parseAndExtract } from '../../utils/jsonParser';
+import { buildCanonicalEventTopology } from '../geographic/historicalRouteRegistry';
 
 describe('Historical Route Group Pipeline & Chronology Test Suite', () => {
 
@@ -392,6 +393,60 @@ describe('Historical Route Group Pipeline & Chronology Test Suite', () => {
         routeType: 'fixed_path'
       });
       expect(geom).not.toBeNull();
+    });
+
+    it('builds canonical 12-waypoint Lewis and Clark topology with 11 sequential segments and authoritative coordinates', () => {
+      const topology = buildCanonicalEventTopology('Lewis and Clark Expedition');
+      expect(topology).not.toBeNull();
+      expect(topology?.route).toBeDefined();
+      expect(topology!.route).toHaveLength(12);
+
+      // Verify all 12 waypoints in sequential order
+      const expectedWaypoints = [
+        { id: 'lewis-and-clark-camp-dubois', name: 'Camp Dubois', sequence: 1, lat: 38.8027, lng: -90.1012 },
+        { id: 'lewis-and-clark-st-charles', name: 'St. Charles', sequence: 2, lat: 38.7839, lng: -90.4812 },
+        { id: 'lewis-and-clark-kaw-point', name: 'Kaw Point', sequence: 3, lat: 39.1172, lng: -94.6144 },
+        { id: 'lewis-and-clark-sergeant-floyd-monument', name: 'Sergeant Floyd Monument', sequence: 4, lat: 42.4608, lng: -96.3819 },
+        { id: 'lewis-and-clark-council-bluff', name: 'Council Bluff', sequence: 5, lat: 41.4550, lng: -96.0233 },
+        { id: 'lewis-and-clark-spirit-mound', name: 'Spirit Mound', sequence: 6, lat: 42.8683, lng: -96.9567 },
+        { id: 'lewis-and-clark-fort-mandan', name: 'Fort Mandan', sequence: 7, lat: 47.2961, lng: -101.3283 },
+        { id: 'lewis-and-clark-knife-river-indian-villages', name: 'Knife River Indian Villages', sequence: 8, lat: 47.3236, lng: -101.3853 },
+        { id: 'lewis-and-clark-great-falls-portage', name: 'Great Falls (Lower Portage)', sequence: 9, lat: 47.5186, lng: -111.1969 },
+        { id: 'lewis-and-clark-three-forks', name: 'Three Forks of the Missouri', sequence: 10, lat: 45.9281, lng: -111.5511 },
+        { id: 'lewis-and-clark-lemhi-pass', name: 'Lemhi Pass', sequence: 11, lat: 44.9708, lng: -113.4464 },
+        { id: 'lewis-and-clark-fort-clatsop', name: 'Fort Clatsop', sequence: 12, lat: 46.1342, lng: -123.8803 }
+      ];
+
+      topology!.route.forEach((wp, i) => {
+        expect(wp.id).toBe(expectedWaypoints[i].id);
+        expect(wp.name).toBe(expectedWaypoints[i].name);
+        expect(wp.sequence).toBe(expectedWaypoints[i].sequence);
+        expect(wp.lat).toBeCloseTo(expectedWaypoints[i].lat, 3);
+        expect(wp.lng).toBeCloseTo(expectedWaypoints[i].lng, 3);
+      });
+
+      // Verify 11 sequential pairs
+      const pairs = getSequentialWaypointPairs(topology!.route, { isSequential: true });
+      expect(pairs).toHaveLength(11);
+
+      for (let i = 0; i < pairs.length; i++) {
+        expect(pairs[i][0].id).toBe(expectedWaypoints[i].id);
+        expect(pairs[i][1].id).toBe(expectedWaypoints[i + 1].id);
+      }
+
+      // Verify no waypoint contains stale pathGeometry
+      for (const wp of topology!.route) {
+        expect(wp.pathGeometry).toBeUndefined();
+      }
+
+      // Verify globe geometry generation succeeds without error
+      const geom = buildGlobeRouteGeometry({
+        waypoints: topology!.route,
+        skin: 'modern',
+        isSequential: true
+      });
+      expect(geom).not.toBeNull();
+      expect(geom?.getAttribute('position').count).toBeGreaterThan(0);
     });
   });
 

@@ -10,7 +10,7 @@
  * do not draw a connecting line. Preserve every marker.
  */
 
-import { Waypoint, Route, RouteGroup } from '../types';
+import { Waypoint, Route, RouteGroup, GeoCoordinates } from '../types';
 
 /**
  * Non-sequential route types by default.
@@ -463,6 +463,7 @@ export interface RouteSegment {
   group: RouteGroup;
   waypoints: Waypoint[];
   segmentEvidence?: 'DOCUMENTED_ROUTE_SEGMENT' | 'HIGH_LEVEL_HISTORICAL_ASSOCIATION' | 'INFERRED_CONNECTION';
+  pathGeometry?: GeoCoordinates[];
 }
 
 /**

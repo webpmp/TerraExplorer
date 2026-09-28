@@ -304,9 +304,9 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
       max_tokens: params.config?.maxOutputTokens ?? params.generationConfig?.maxOutputTokens ?? 4096
     };
 
-    if (isJson) {
-      payload.response_format = { type: "json_object" };
-    }
+    // Note: Do not send response_format: { type: "json_object" } to LM Studio endpoints,
+    // as many local LM Studio model runners return 400 Bad Request. System prompt instructions
+    // already enforce structured JSON generation.
 
     let normalizedBaseUrl = (baseUrl || 'http://localhost:1234/v1').trim().replace(/\/+$/, '');
     if (!normalizedBaseUrl.endsWith('/v1')) {
@@ -433,9 +433,9 @@ export const streamLocalLMStudioContent = async (
     max_tokens: params.config?.maxOutputTokens ?? params.generationConfig?.maxOutputTokens ?? 4096
   };
 
-  if (isJson) {
-    payload.response_format = { type: "json_object" };
-  }
+    // Note: Do not send response_format: { type: "json_object" } to LM Studio endpoints,
+    // as many local LM Studio model runners return 400 Bad Request. System prompt instructions
+    // already enforce structured JSON generation.
 
   let normalizedBaseUrl = (baseUrl || 'http://localhost:1234/v1').trim().replace(/\/+$/, '');
   if (!normalizedBaseUrl.endsWith('/v1')) {

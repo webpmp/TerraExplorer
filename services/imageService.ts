@@ -2143,9 +2143,12 @@ export function isHistoricalWaypointEntity(entity: {
   if (entity.intent === 'MULTI_LOCATION_DISCOVERY') return false;
   if (entity.metadataMode === 'modern_place') return false;
 
-  const title = (entity.routeTitle || entity.waypoint?.routeTitle || '').toLowerCase();
-  const context = (entity.historicalContext || entity.waypoint?.context || '').toLowerCase();
-  const combined = `${title} ${context}`;
+  const wp = entity.waypoint || {};
+  const name = (entity as any).name || (entity as any).canonicalName || wp.name || wp.canonicalName || '';
+  const desc = (entity as any).description || wp.description || '';
+  const title = (entity.routeTitle || (entity as any).routeGroupName || wp.routeTitle || wp.routeGroupName || '').toLowerCase();
+  const context = (entity.historicalContext || entity.significance || (entity as any).context || wp.context || wp.historicalContext || wp.significance || '').toLowerCase();
+  const combined = `${name} ${title} ${context} ${desc}`.toLowerCase();
 
   // If this is a filming / media / cinematic discovery, it is NOT an antique historical expedition
   if (
@@ -2174,23 +2177,36 @@ export function isHistoricalWaypointEntity(entity: {
     return false;
   }
 
-  const eType = (entity.entityType || entity.type || '').toString().toLowerCase();
+  const eType = (entity.entityType || entity.type || (entity as any).waypointType || wp.entityType || wp.type || wp.waypointType || '').toString().toLowerCase();
 
   const isExplicitHistoricalWaypointType =
     eType === 'historical_waypoint' ||
-    Boolean(entity.isHistoricalWaypoint);
+    eType === 'route_waypoint' ||
+    Boolean(entity.isHistoricalWaypoint) ||
+    Boolean(wp.isHistoricalWaypoint);
 
   const hasExplicitHistoricalRouteContext =
     Boolean(entity.routeGroupId) ||
+    Boolean(wp.routeGroupId) ||
     Boolean(entity.historicalRouteId) ||
+    Boolean(wp.historicalRouteId) ||
     Boolean(entity.historicalPeriod) ||
-    (Boolean(entity.routeTitle) && !combined.includes('guide') && !combined.includes('hours') && !combined.includes('highlights'));
+    Boolean(wp.historicalPeriod) ||
+    ((Boolean(entity.routeTitle) || Boolean(wp.routeTitle) || Boolean((entity as any).routeGroupName) || Boolean(wp.routeGroupName)) &&
+      !combined.includes('guide') && !combined.includes('hours') && !combined.includes('highlights'));
 
   const hasWaypointContext =
     Boolean(entity.historicalPeriod) ||
+    Boolean(wp.historicalPeriod) ||
     Boolean(entity.historicalContext) ||
+    Boolean(wp.historicalContext) ||
+    Boolean((entity as any).context) ||
+    Boolean(wp.context) ||
+    Boolean(entity.significance) ||
+    Boolean(wp.significance) ||
     eType.includes('battlefield') ||
-    eType.includes('historic');
+    eType.includes('historic') ||
+    /\b(1[0-9]{3}|20[0-2][0-9]|bce?|century|expedition|voyage|shipwreck|wreck|treaty|siege|battle)\b/i.test(combined);
 
   if (isExplicitHistoricalWaypointType && (hasExplicitHistoricalRouteContext || hasWaypointContext)) {
     return true;
@@ -2269,20 +2285,46 @@ export function extractHistoricalImageContext(info: any): HistoricalImageContext
     ...(Array.isArray(info?.relatedEntities) ? info.relatedEntities.map((e: any) => typeof e === 'string' ? e : e?.name) : [])
   ].filter(Boolean);
 
+  const rawNarrativeText = [
+    info?.description,
+    wp?.description,
+    info?.historicalContext,
+    wp?.historicalContext,
+    info?.context,
+    wp?.context,
+    info?.significance,
+    wp?.significance,
+    info?.routeContext?.text,
+    ...(Array.isArray(info?.notable) ? info.notable.map((n: any) => typeof n === 'string' ? n : n?.description || n?.title || '') : [])
+  ].filter(Boolean).join(' ');
+  const fullNarrative = rawNarrativeText.toLowerCase();
+
+  // Generic extraction of ships / vessels (e.g. HMS Erebus, HMS Terror, Endurance, James Caird, Santa Maria)
+  const vesselRegex = /\b(?:hms|uss|ss|rms|mv|ms|mt|sv|rv|ps)\s+([a-z0-9\s'-]+)/gi;
+  let vesselMatch: RegExpExecArray | null;
+  const discoveredVessels: string[] = [];
+  while ((vesselMatch = vesselRegex.exec(rawNarrativeText)) !== null) {
+    const vName = vesselMatch[0].trim();
+    if (vName && !discoveredVessels.some(v => v.toLowerCase() === vName.toLowerCase())) {
+      discoveredVessels.push(vName);
+    }
+  }
+
   const people = Array.from(new Set(rawEntities.map(e => String(e).trim()).filter(Boolean)));
-  const fullNarrative = `${info?.description || ''} ${wp?.description || ''} ${event}`.toLowerCase();
   const activityKeywords = [
     'preparation', 'preparations', 'departure', 'departed', 'keelboat', 'pirogue', 'boatmen',
     'encampment', 'camp', 'winter camp', 'fort', 'portage', 'council', 'meeting', 'treaty',
-    'battle', 'siege', 'march', 'crossing', 'landing', 'settlement', 'recruitment', 'expedition'
+    'battle', 'siege', 'march', 'crossing', 'landing', 'settlement', 'recruitment', 'expedition',
+    'shipwreck', 'wreck', 'graves', 'circumnavigate', 'circumnavigated', 'resting place'
   ];
   const activities = activityKeywords.filter(kw => fullNarrative.includes(kw));
 
   const artifactKeywords = [
     'keelboat', 'pirogue', 'canoe', 'journal', 'diary', 'map', 'compass', 'sextant',
-    'musket', 'rifle', 'peace medal', 'uniform', 'document', 'specimen'
+    'musket', 'rifle', 'peace medal', 'uniform', 'document', 'specimen', 'wreck', 'shipwreck',
+    ...discoveredVessels
   ];
-  const artifacts = artifactKeywords.filter(kw => fullNarrative.includes(kw));
+  const artifacts = Array.from(new Set(artifactKeywords.filter(kw => fullNarrative.includes(kw.toLowerCase()) || discoveredVessels.includes(kw))));
 
   const notableFacts: string[] = [];
   if (Array.isArray(info?.notable)) {
@@ -2313,93 +2355,90 @@ export function extractHistoricalImageContext(info: any): HistoricalImageContext
 
 export function buildHistoricalImageQueries(context: HistoricalImageContext): string[] {
   const queries: string[] = [];
-  const { exploration, event, period, year, cleanLocationName, waypointName, region, people, activities, artifacts } = context;
+  const { exploration, event, period, year, cleanLocationName, waypointName, region, country, people, activities, artifacts } = context;
 
-  // 1. Entity-first historical site / canonical entity queries (Highest Priority)
+  const cleanExploration = exploration
+    ? exploration.replace(/\s+route$/i, '').replace(/\s+trail$/i, '').replace(/\s+path$/i, '').trim()
+    : undefined;
+
+  // 1. Entity + Specific Historical Context / Exploration / Vessel (Highest Priority)
   if (cleanLocationName) {
+    // 1a. Canonical entity query
     queries.push(cleanLocationName);
-    if (context.country && context.country.toLowerCase() !== cleanLocationName.toLowerCase()) {
-      queries.push(`${cleanLocationName} ${context.country}`);
-      if (exploration) {
-        queries.push(`${cleanLocationName} ${context.country} ${exploration}`);
+
+    // 1b. Entity + cleaned exploration (e.g. "Beechey Island Franklin Expedition")
+    if (cleanExploration && cleanExploration.toLowerCase() !== cleanLocationName.toLowerCase()) {
+      queries.push(`${cleanLocationName} ${cleanExploration}`);
+      queries.push(`${cleanExploration} ${cleanLocationName}`);
+    }
+
+    // 1c. Entity + major historical artifact / vessel (e.g. "Terror Bay HMS Terror", "Queen Maud Gulf HMS Erebus")
+    if (artifacts && artifacts.length > 0) {
+      for (const art of artifacts.slice(0, 3)) {
+        queries.push(`${cleanLocationName} ${art}`.trim());
+        if (cleanExploration) {
+          queries.push(`${cleanLocationName} ${cleanExploration} ${art}`.trim());
+        }
       }
     }
-    queries.push(`${cleanLocationName} historic site`);
-    queries.push(`${cleanLocationName} historic buildings`);
-    queries.push(`${cleanLocationName} archaeological site`);
+
+    // 1d. Entity + activity (e.g. "Beechey Island graves", "Terror Bay wreck")
+    if (activities && activities.length > 0) {
+      for (const act of activities.slice(0, 3)) {
+        queries.push(`${cleanLocationName} ${act}`.trim());
+        if (cleanExploration) {
+          queries.push(`${cleanLocationName} ${cleanExploration} ${act}`.trim());
+        }
+      }
+    }
+
+    // 1e. Entity + country / region (e.g. "Whalefish Islands Greenland", "Stromness Orkney")
+    if (country && country.toLowerCase() !== cleanLocationName.toLowerCase()) {
+      queries.push(`${cleanLocationName} ${country}`);
+    }
     if (region && region.toLowerCase() !== cleanLocationName.toLowerCase()) {
       queries.push(`${cleanLocationName} ${region}`);
     }
-    if (exploration) {
-      queries.push(`${cleanLocationName} ${exploration}`);
-    }
-    if (year || period) {
-      queries.push(`${cleanLocationName} ${year || period}`);
-    }
-    queries.push(`historic ${cleanLocationName} painting engraving`);
 
-    // 2. Entity + historical event / treaty / battle / document
+    // 1f. Entity + historical event / treaty / battle / document
     if (event) {
       queries.push(`${cleanLocationName} ${event}`);
     }
 
-    // 3. exploration + entity + historical period (e.g. "Lewis and Clark Expedition St. Charles 1804")
-    if (exploration) {
-      if (year) {
-        queries.push(`${exploration} ${cleanLocationName} ${year}`.trim());
+    // 1g. Entity + year / period / historic site
+    if (year || period) {
+      queries.push(`${cleanLocationName} ${year || period}`);
+      if (cleanExploration) {
+        queries.push(`${cleanExploration} ${cleanLocationName} ${year || period}`.trim());
       }
-      if (region && region.toLowerCase() !== cleanLocationName.toLowerCase()) {
-        queries.push(`${exploration} ${cleanLocationName} ${region}`.trim());
-      }
-      // Entity-specific map/document query
-      queries.push(`${cleanLocationName} ${exploration} map`.trim());
-      queries.push(`${cleanLocationName} historical map`.trim());
     }
+    queries.push(`${cleanLocationName} historic site`);
+    queries.push(`${cleanLocationName} archaeological site`);
+    queries.push(`historic ${cleanLocationName} painting engraving`);
 
-    // 4. Entity + major historical activity / artifact
-    if (activities.length > 0) {
-      for (const act of activities.slice(0, 2)) {
-        queries.push(`${cleanLocationName} ${act}`.trim());
-        if (exploration) {
-          queries.push(`${exploration} ${cleanLocationName} ${act}`.trim());
-        }
-      }
-    }
-    if (artifacts.length > 0) {
-      for (const art of artifacts.slice(0, 2)) {
-        queries.push(`${cleanLocationName} ${art}`.trim());
-        if (exploration) {
-          queries.push(`${exploration} ${cleanLocationName} ${art}`.trim());
-        }
-      }
-    }
-    if (exploration && (exploration.toLowerCase().includes('lewis and clark') || exploration.toLowerCase().includes('discovery'))) {
-      queries.push(`${cleanLocationName} Lewis and Clark keelboat`.trim());
-    }
-
-    // 5. Named historical people + Entity
-    if (people.length > 0) {
+    // 1h. Named historical people + Entity
+    if (people && people.length > 0) {
       for (const p of people.slice(0, 2)) {
         queries.push(`${cleanLocationName} ${p}`.trim());
       }
     }
 
-    // 6. waypoint + historical period / 19th century / historic
-    if (year || period) {
-      queries.push(`${cleanLocationName} ${region || ''} ${year || period} historical`.trim());
+    if (cleanExploration) {
+      queries.push(`${cleanLocationName} ${cleanExploration} map`.trim());
+      queries.push(`${cleanLocationName} historical map`.trim());
     }
-  } else if (exploration) {
+  } else if (cleanExploration) {
     // If no cleanLocationName exists (general route search), build exploration-level queries
     if (event) {
-      queries.push(`${exploration} ${event} ${year || ''}`.trim());
+      queries.push(`${cleanExploration} ${event} ${year || ''}`.trim());
     }
-    if (activities.length > 0) {
+    if (activities && activities.length > 0) {
       for (const act of activities.slice(0, 3)) {
-        queries.push(`${exploration} ${act}`.trim());
+        queries.push(`${cleanExploration} ${act}`.trim());
       }
     }
-    queries.push(`${exploration} map ${region || ''}`.trim());
-    queries.push(`${exploration} historical illustration artwork`.trim());
+    queries.push(`${cleanExploration} map ${region || ''}`.trim());
+    queries.push(`${cleanExploration} historical illustration artwork`.trim());
   }
 
   // Fallback modern location query (placed last)
@@ -3896,6 +3935,13 @@ async function _fetchAndValidateImagesInternal(
     const cleanUrl = candidate.url.trim();
     if (!cleanUrl || seenUrls.has(cleanUrl)) return false;
 
+    const entityAliases = Array.from(new Set([
+      ...((info as any).aliases || []),
+      ...((info as any).alternateNames || []),
+      ...(histContext?.artifacts || []),
+      ...(histContext?.people || [])
+    ]));
+
     const validation = validateImageCandidate(candidate, {
       name: info.name,
       canonicalName: (info as any).canonicalName,
@@ -3914,7 +3960,7 @@ async function _fetchAndValidateImagesInternal(
       routeTitle: (info as any).routeTitle,
       waypoint: (info as any).waypoint,
       metadataMode: (info as any).metadataMode,
-      aliases: (info as any).aliases || (info as any).alternateNames,
+      aliases: entityAliases,
       query: (info as any).rawQuery || (info as any).query,
       rawQuery: (info as any).rawQuery,
       imageIntent: intentToUse
@@ -4147,6 +4193,43 @@ async function _fetchAndValidateImagesInternal(
       }
     } catch (e) {
       console.warn(`[IMAGE SEARCH] Failed query "${query}":`, e);
+    }
+
+    // If Wikipedia pageimages did not yield enough validated candidates, query Wikimedia Commons
+    if (validatedCandidates.length < maxPhotos) {
+      try {
+        const commonsEndpoint = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrnamespace=6&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=800&format=json&origin=*`;
+        const cRes = await fetch(commonsEndpoint);
+        if (cRes.ok) {
+          const cContentType = cRes.headers?.get('content-type') || '';
+          if (cContentType.includes('json')) {
+            const cData = await cRes.json();
+            const cPages = cData?.query?.pages;
+            if (cPages) {
+              const cSortedPageIds = Object.keys(cPages).sort((a, b) => ((cPages[a] as any).index || 0) - ((cPages[b] as any).index || 0));
+              for (const pId of cSortedPageIds) {
+                if (validatedCandidates.length >= maxPhotos) break;
+                const cPage = cPages[pId];
+                const imgInfo = cPage?.imageinfo?.[0];
+                if (imgInfo?.thumburl || imgInfo?.url) {
+                  const rawFileTitle = (cPage.title || '').replace(/^File:/i, '').replace(/\.[a-zA-Z0-9]+$/, '').replace(/_/g, ' ');
+                  const rawDesc = imgInfo.extmetadata?.ImageDescription?.value?.replace(/<[^>]*>/g, '').trim();
+                  const rawArtist = imgInfo.extmetadata?.Artist?.value?.replace(/<[^>]*>/g, '').trim() || imgInfo.extmetadata?.Credit?.value?.replace(/<[^>]*>/g, '').trim() || 'Wikimedia Commons';
+                  addCandidate({
+                    url: imgInfo.thumburl || imgInfo.url,
+                    title: rawFileTitle,
+                    description: rawDesc || rawFileTitle,
+                    caption: rawDesc ? (rawDesc.length > 120 ? rawDesc.slice(0, 117) + '...' : rawDesc) : rawFileTitle,
+                    attribution: rawArtist
+                  });
+                }
+              }
+            }
+          }
+        }
+      } catch (commonsErr) {
+        console.warn(`[IMAGE SEARCH] Commons query "${query}" warning:`, commonsErr);
+      }
     }
 
     // Stop searching early if we have reached the max photo target

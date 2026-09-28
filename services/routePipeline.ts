@@ -12,6 +12,7 @@ import { validateCandidateAgainstRegistry, validateDocumentedSegment, getAuthori
 import { validateHistoricalWaypointContent } from './historicalContentValidation';
 import { normalizeSemanticEntityTitle } from './queryNormalizer';
 import { isItineraryOrActivityPhrase, unwrapPhysicalEntityName } from './entityValidation';
+import { resolveWaterAwareRoute, isMaritimeJourney } from './geographic/waterRoutingService';
 
 /**
  * Normalizes raw/malformed AI route membership structures into a clean RouteWaypointMembership[] array
@@ -1822,8 +1823,23 @@ renderable: ${willDraw ? 'YES' : 'NO'}`);
     isSequential: rawIsSequential
   });
 
+  // Resolve water-aware routing geometry for maritime routes and detachments
+  const groupsToResolve = populatedRouteGroups.length > 0 ? populatedRouteGroups : finalRouteGroups;
+  for (const group of groupsToResolve) {
+    if (group.waypoints && group.waypoints.length >= 2) {
+      if (isMaritimeJourney({ title: rawTitle, routeType: effectiveRouteType, corridorDescription: group.description }, group, group.waypoints)) {
+        const resolvedGroupWps = resolveWaterAwareRoute(group.waypoints, { title: rawTitle, routeType: effectiveRouteType });
+        group.waypoints = resolvedGroupWps;
+      }
+    }
+  }
+
+  const finalWaypoints = isMaritimeJourney({ title: rawTitle, routeType: effectiveRouteType }, undefined, cleanItems)
+    ? resolveWaterAwareRoute(cleanItems, { title: rawTitle, routeType: effectiveRouteType })
+    : cleanItems;
+
   const finalRoute: Route = {
-    waypoints: cleanItems,
+    waypoints: finalWaypoints,
     title: rawTitle,
     routeConfidence: rawRouteConfidence,
     routeType: effectiveRouteType as any,

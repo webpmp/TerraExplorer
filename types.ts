@@ -472,6 +472,7 @@ export interface Waypoint {
   news?: NewsItem[];
   savedSnapshot?: LocationInfo;
   isSaved?: boolean;
+  pathGeometry?: GeoCoordinates[];
 }
 
 export interface FavoriteLocation {

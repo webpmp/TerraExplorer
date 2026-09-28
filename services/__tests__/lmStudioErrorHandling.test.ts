@@ -411,4 +411,38 @@ describe('LM Studio Missing Model Error Handling & Gemini Fallback', () => {
     expect(merged.errorMessage).toBeUndefined();
     expect(merged.errorInstruction).toBeUndefined();
   });
+
+  it('Omits response_format: { type: "json_object" } from LM Studio requests to prevent HTTP 400 rejection', async () => {
+    let capturedBody: any = null;
+
+    global.fetch = vi.fn().mockImplementation(async (url: string, options: any) => {
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  title: 'Lewis and Clark Expedition',
+                  waypoints: []
+                })
+              }
+            }
+          ]
+        })
+      } as unknown as Response;
+    });
+
+    await generateContentWithRetry({
+      contents: 'Generate structured JSON route data',
+      config: { responseMimeType: 'application/json' }
+    });
+
+    expect(capturedBody).toBeDefined();
+    expect(capturedBody.model).toBe('local-model');
+    // Crucial check: response_format must be omitted to prevent LM Studio 400 Bad Request
+    expect(capturedBody.response_format).toBeUndefined();
+  });
 });
