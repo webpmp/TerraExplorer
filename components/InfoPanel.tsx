@@ -25,7 +25,8 @@ import { resolveCanonicalNarrative } from '../utils/narrativeResolver';
 import { evaluateDescriptionReadiness } from '../utils/descriptionReadiness';
 import { generateDefaultRouteName, normalizeSemanticEntityTitle, isCoordinateTitle } from '../services/queryNormalizer';
 import { toSentenceCase } from '../services/followUpService';
-export { classifyContext, isPureGeographicLabel, sanitizeContextMarkdown, resolveCanonicalNarrative, evaluateDescriptionReadiness };
+import { getHeaderBackgroundImageUrl, getHeaderFocalPosition } from '../utils/imageHeaderUtils';
+export { classifyContext, isPureGeographicLabel, sanitizeContextMarkdown, resolveCanonicalNarrative, evaluateDescriptionReadiness, getHeaderBackgroundImageUrl, getHeaderFocalPosition };
 
 
 export const MedievalEmeraldBronzePinIcon: React.FC<{ width?: number; height?: number; className?: string }> = ({ width = 54, height = 38, className = '' }) => (
@@ -1747,6 +1748,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [wikiImage, setWikiImage] = useState<string | null>(null);
+  const [headerImageError, setHeaderImageError] = useState(false);
 
   const [showFavoriteDialog, setShowFavoriteDialog] = useState(false);
   const [favoriteNameInput, setFavoriteNameInput] = useState("");
@@ -1846,22 +1848,38 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     }
   }, [currentLocationIdentity, info?.followUps?.length]);
 
+  const exploreSectionRef = useRef<HTMLDivElement>(null);
+
   // 2. Only auto-scroll when a NEW follow-up item is appended dynamically to the current location (user-initiated follow-up)
   useEffect(() => {
     const currentLength = info?.followUps?.length || 0;
     // Only scroll if follow-ups grew incrementally on the SAME location
-    if (currentLength > prevFollowUpsLengthRef.current && prevFollowUpsLengthRef.current > 0 && info?.followUps) {
+    if (currentLength > prevFollowUpsLengthRef.current && info?.followUps && info.followUps.length > 0) {
       const newItem = info.followUps[currentLength - 1];
       if (newItem) {
-        setTimeout(() => {
-          const itemEl = document.getElementById(`info-panel-follow-up-${newItem.id}`) ||
-            document.querySelector(`[data-testid="follow-up-item-${newItem.id}"]`);
-          if (itemEl) {
-            itemEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-          } else if (scrollRef.current) {
-            scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+        const scrollToExplore = () => {
+          const exploreEl = exploreSectionRef.current || document.getElementById('info-panel-explore-section');
+          const container = scrollRef.current;
+
+          if (exploreEl && container) {
+            const containerRect = container.getBoundingClientRect();
+            const exploreRect = exploreEl.getBoundingClientRect();
+            const targetTop = container.scrollTop + (exploreRect.top - containerRect.top);
+            container.scrollTo({ top: targetTop, behavior: 'smooth' });
+          } else if (exploreEl && typeof exploreEl.scrollIntoView === 'function') {
+            exploreEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          } else if (container) {
+            container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
           }
-        }, 100);
+        };
+
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+          window.requestAnimationFrame(() => {
+            scrollToExplore();
+          });
+        } else {
+          scrollToExplore();
+        }
       }
     }
     prevFollowUpsLengthRef.current = currentLength;
@@ -1894,6 +1912,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       setCurrentImageIndex(0);
       setActiveTab('overview');
       setShowFavoriteDialog(false);
+      setHeaderImageError(false);
     }
 
     if (locationNewsRef.current !== locName) {
@@ -2255,8 +2274,19 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   };
 
   const theme = themes[skin];
+  const isModern = skin === 'modern';
   const isRetro = skin === 'retro-green' || skin === 'retro-amber';
   const isParchment = skin === 'parchment';
+
+  const headerBgImage = useMemo(() => {
+    if (!isModern || !info) return null;
+    return getHeaderBackgroundImageUrl(info, images);
+  }, [isModern, info, images]);
+
+  const headerFocalPosition = useMemo(() => {
+    if (!headerBgImage) return '50% 40%';
+    return getHeaderFocalPosition(info, headerBgImage.meta);
+  }, [info, headerBgImage]);
 
   const titleSize = isRetro ? 'text-2xl' : 'text-2xl';
   const subtextSize = isRetro ? 'text-sm' : 'text-xs';
@@ -3011,6 +3041,35 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           {/* Header */}
 
           <div className={`relative p-5 shrink-0 flex flex-col items-center ${skin === 'modern' ? 'border-b border-white/10' : ''} ${theme.header}`.replace(/\s+/g, ' ').trim()}>
+            {/* Subtle contextual background image treatment — modern theme only */}
+            {isModern && headerBgImage && !headerImageError && (
+              <div
+                className="absolute inset-0 overflow-hidden pointer-events-none select-none z-0"
+                aria-hidden="true"
+                data-testid="modern-header-background-image"
+              >
+                <img
+                  src={headerBgImage.url}
+                  alt=""
+                  role="presentation"
+                  onError={() => setHeaderImageError(true)}
+                  className="w-full h-full object-cover scale-110 opacity-20 filter contrast-125 brightness-75 mix-blend-luminosity transition-opacity duration-700 pointer-events-none select-none"
+                  style={{
+                    objectPosition: headerFocalPosition
+                  }}
+                />
+                {/* Dark tint and color-matching gradient overlays for seamless visual integration */}
+                <div
+                  className="absolute inset-0 bg-gradient-to-r from-blue-950/75 via-blue-900/50 to-cyan-950/75 mix-blend-multiply pointer-events-none"
+                  aria-hidden="true"
+                />
+                <div
+                  className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/60 pointer-events-none"
+                  aria-hidden="true"
+                />
+              </div>
+            )}
+
             {/* 1. Close X button */}
             <button onClick={onClose} className={`absolute top-3 right-3 p-1 z-50 ${isParchment ? '' : 'pointer-events-auto '}transition-colors ${theme.closeBtn}`} aria-label="Close panel">
               <X size={20} />
@@ -3092,7 +3151,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             )}
 
             {/* 3. Location title & geographic hierarchy */}
-            <div className="flex flex-col gap-2 items-center text-center w-full min-w-0">
+            <div className="relative z-10 flex flex-col gap-2 items-center text-center w-full min-w-0">
               <div className="flex flex-col items-center justify-center gap-1 w-full min-w-0">
                  <h2 className={`${titleSize} font-bold text-center w-full min-w-0 max-w-full whitespace-normal break-normal ${theme.locationTitle || theme.headerTitle}`}>
                    {displayTitle || (isError ? "Error" : isLoading ? "Searching..." : "Location Info")}
@@ -3237,7 +3296,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
                      {/* 2. EXPLORE / Follow-up Section */}
                      {info.followUps && info.followUps.length > 0 && (
-                       <div className="space-y-4 pt-3" data-testid="explore-section" id="info-panel-explore-section">
+                       <div className="space-y-4 pt-3" data-testid="explore-section" id="info-panel-explore-section" ref={exploreSectionRef}>
                          <SectionHeader
                            title="Explore"
                            theme={theme}

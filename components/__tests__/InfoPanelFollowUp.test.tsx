@@ -271,4 +271,21 @@ describe('Contextual InfoPanel Follow-Up Component Tests', () => {
     expect(html).toContain('data-testid="explore-section"');
     expect(html).toContain('Tell me about naval significance');
   });
+
+  it('17. InfoPanel renders Explore section container with id="info-panel-explore-section" and follow-up item anchors for scrolling', () => {
+    const html = renderToStaticMarkup(
+      <InfoPanel
+        info={{ ...mockLocation, followUps: sampleFollowUps }}
+        isLoading={false}
+        isNewsFetching={false}
+        showNews={true}
+        onClose={vi.fn()}
+        skin="modern"
+      />
+    );
+
+    expect(html).toContain('id="info-panel-explore-section"');
+    expect(html).toContain('id="info-panel-follow-up-fu-1"');
+    expect(html).toContain('id="info-panel-follow-up-fu-2"');
+  });
 });

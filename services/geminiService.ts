@@ -3830,7 +3830,7 @@ Output ONLY the JSON object.`;
 
 export const recoverLocationMetadata = async (
   entityName: string,
-  coordinates: GeoCoordinates,
+  coordinates?: GeoCoordinates,
   canonicalIdentity?: Partial<CanonicalGeographicEntity> & { country?: string; state?: string; city?: string; region?: string; county?: string; originalQuery?: string },
   signal?: AbortSignal
 ): Promise<Partial<EnrichmentResult> | null> => {
@@ -3851,7 +3851,9 @@ export const recoverLocationMetadata = async (
       countryName && countryName !== "Unknown country" ? countryName : null
     ].filter(Boolean).join(', ') || `${adminArea}, ${countryName}`;
 
-    console.log(`[LLM ENRICHMENT INPUT]\ncanonicalName="${entityTitle}"\nentityType="${entityTypeStr}"\nstate="${adminArea}"\ncountry="${countryName}"\ncoordinates=${coordinates.lat.toFixed(4)},${coordinates.lng.toFixed(4)}\nidentityStatus="${canonicalIdentity?.identityStatus || 'verified'}"`);
+    const hasCoords = coordinates && typeof coordinates.lat === 'number' && typeof coordinates.lng === 'number';
+
+    console.log(`[LLM ENRICHMENT INPUT]\ncanonicalName="${entityTitle}"\nentityType="${entityTypeStr}"\nstate="${adminArea}"\ncountry="${countryName}"\ncoordinates=${hasCoords ? `${coordinates.lat.toFixed(4)},${coordinates.lng.toFixed(4)}` : 'none'}\nidentityStatus="${canonicalIdentity?.identityStatus || 'verified'}"`);
 
     const contextDetails = [
       `Canonical entity: ${entityTitle}`,
@@ -3859,8 +3861,8 @@ export const recoverLocationMetadata = async (
       cityName ? `City/settlement: ${cityName}` : null,
       `State/region: ${adminArea}`,
       `Country: ${countryName}`,
-      `Latitude: ${coordinates.lat}`,
-      `Longitude: ${coordinates.lng}`,
+      hasCoords ? `Latitude: ${coordinates.lat}` : null,
+      hasCoords ? `Longitude: ${coordinates.lng}` : null,
       canonicalIdentity?.osmId ? `OSM ID: ${canonicalIdentity.osmId}` : null,
       canonicalIdentity?.osmType ? `OSM Type: ${canonicalIdentity.osmType}` : null,
       canonicalIdentity?.wikidataId ? `Wikidata ID: ${canonicalIdentity.wikidataId}` : null,
@@ -3887,12 +3889,7 @@ export const recoverLocationMetadata = async (
       Country:
       ${countryName}
 
-      Latitude:
-      ${coordinates.lat}
-
-      Longitude:
-      ${coordinates.lng}
-
+      ${hasCoords ? `Latitude:\n      ${coordinates.lat}\n\n      Longitude:\n      ${coordinates.lng}\n` : ''}
       ${originalQuery ? `The original user query "${originalQuery}" is provided only for reference.` : ''}
 
       You MUST generate information specifically about the verified canonical entity above.
@@ -3902,10 +3899,11 @@ export const recoverLocationMetadata = async (
       All description, history, climate, context notes, and notable facts must specifically refer to the verified geographic entity.
 
       CRITICAL INSTRUCTIONS:
-      1. You MUST describe THIS entity at THESE canonical coordinates (${coordinates.lat}, ${coordinates.lng}).
+      1. ${hasCoords ? `You MUST describe THIS entity at THESE canonical coordinates (${coordinates.lat}, ${coordinates.lng}).` : `You MUST describe THIS historical/geographic entity (${entityTitle}) in ${expectedLocationString}.`}
       2. Do not substitute another place with the same or similar name.
-      3. The coordinates, country, administrative area, and entity type are authoritative.
+      3. The ${hasCoords ? 'coordinates, ' : ''}country, administrative area, and entity type are authoritative.
       4. LANGUAGE REQUIREMENT: All text fields ("description", "climate", "contextNotes", "notable") MUST be written strictly in ENGLISH. Never return French, Spanish, German, Italian, or other non-English text.
+      5. POPULATION REQUIREMENT: Do not generate, estimate, or infer population. Always return population as null (demographic data is retrieved separately from authoritative registries). Do not output comma-formatted numbers.
 
       Current Date: ${currentDate}
 
@@ -3942,15 +3940,39 @@ export const recoverLocationMetadata = async (
       ${contextDetails}
 
       CRITICAL RULES:
-      1. You MUST output ONLY a single valid JSON object.
-      2. Describe ONLY ${entityTitle} in ${countryName} (${adminArea}) at coordinates ${coordinates.lat}, ${coordinates.lng}.
+      1. You MUST output ONLY a single valid JSON object. Do NOT include markdown fences, prose, or instruction headers.
+      2. Describe ONLY ${entityTitle} in ${countryName} (${adminArea})${hasCoords ? ` at coordinates ${coordinates.lat}, ${coordinates.lng}` : ''}.
       3. Do not confuse with other entities sharing a similar name.
       4. ALL text must be strictly in ENGLISH. Do NOT use French, Spanish, German, Italian, etc.
-      5. Do NOT use markdown fences (\`\`\`).
-      6. Do NOT output partial JSON or nested climate objects as root.
-      7. You MUST include ALL of the following top-level keys: "description", "population", "climate", "contextNotes", "notable".
+      5. Do NOT output partial JSON or nested climate objects as root.
+      6. You MUST include ALL of the following top-level keys: "name", "locationString", "description", "population", "climate", "contextNotes", "notable".
+      7. POPULATION: Always return "population": null. Do not generate numeric population estimates or comma-separated numbers.
       8. "description" must be substantive paragraphs in English about the entity, not just climate notes.
       9. "notable" MUST be an array of structured objects, each with "title" (short topic/feature name) and "description" (1-2 sentence explanation). Never return plain strings for notable.
+
+      OUTPUT FORMAT (Single JSON object ONLY):
+      {
+        "name": "${entityTitle}",
+        "locationString": "${expectedLocationString}",
+        "description": "2-4 substantive educational paragraphs in English explaining what this place is, why it exists, why it is significant, and why someone should care.",
+        "population": null,
+        "climate": {
+          "name": "string (e.g. Subpolar oceanic climate, Oceanic climate, Alpine climate, Humid subtropical climate, etc.)",
+          "description": "string (plain language climate summary in English)",
+          "koppenCode": "string (e.g. Cfa, Cfb, ET)"
+        },
+        "contextNotes": ["substantive fact 1 in English", "substantive fact 2 in English", "substantive fact 3 in English"],
+        "notable": [
+          {
+            "title": "Short Fact Title 1",
+            "description": "1-2 sentence substantive explanatory description of this fact in English."
+          },
+          {
+            "title": "Short Fact Title 2",
+            "description": "1-2 sentence substantive explanatory description of this fact in English."
+          }
+        ]
+      }
     `;
 
     const fetchAndParse = async (isRetry: boolean) => {

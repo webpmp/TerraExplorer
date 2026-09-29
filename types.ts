@@ -110,6 +110,8 @@ export interface ImageMetadata {
   description?: string;
   credit?: string;
   source?: string;
+  focalPoint?: string;
+  focalPosition?: string;
 }
 
 export interface FollowUpItem {
@@ -138,6 +140,7 @@ export interface LocationInfo {
   imageCredit?: string;
   imageSource?: string;
   imageSearchTerm?: string;
+  imageFocalPoint?: string;
   rawQuery?: string;
   query?: string;
   originalQuery?: string;

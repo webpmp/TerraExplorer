@@ -151,7 +151,16 @@ export const repairJson = (text: string): { repaired: string, repairs: string[] 
         repairs.push("Replaced Python literals (None, True, False) with JSON equivalents");
     }
 
-    // 1. Fix numeric separators (e.g., 1_670_000 -> 1670000)
+    // 1. Fix comma-formatted numbers in JSON property value positions (e.g., "population": 7,692,330 -> "population": 7692330)
+    const commaFormattedValueRegex = /:\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?)(?=[\s,\}\]])/g;
+    if (commaFormattedValueRegex.test(repaired)) {
+        repaired = repaired.replace(commaFormattedValueRegex, (match, num) => {
+            return ': ' + num.replace(/,/g, '');
+        });
+        repairs.push("Removed comma thousands separators from numeric property values");
+    }
+
+    // 1.1 Fix numeric separators with underscores (e.g., 1_670_000 -> 1670000)
     const numericSeparatorRegex = /([:\s\[,])([0-9]+(?:_[0-9]+)+)(?=[\s,\}\]])/g;
     if (numericSeparatorRegex.test(repaired)) {
         repaired = repaired.replace(numericSeparatorRegex, (match, prefix, num) => {

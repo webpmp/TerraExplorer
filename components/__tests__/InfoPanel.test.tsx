@@ -244,7 +244,7 @@ describe('Lightbox Metadata Integration', () => {
 
     // Verify ordering in rendered HTML output
     const descPos = html.indexOf('Zion National Park is a prominent sanctuary');
-    const imagePos = html.indexOf('<img src="https://upload.wikimedia.org/zion.jpg"');
+    const imagePos = html.indexOf('data-testid="stacked-image-carousel"');
     const notableHeaderPos = html.indexOf('Notable Facts');
     const narrowsPos = html.indexOf('The Narrows');
     const climateHeaderPos = html.indexOf('Climate');

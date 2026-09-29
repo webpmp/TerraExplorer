@@ -4612,8 +4612,18 @@ source=${source}`);
           try {
             const enriched = await recoverLocationMetadata(
               finalData.name,
-              finalData.historicalContext || cleanQuery,
-              finalData.coordinates ? { latitude: finalData.coordinates.lat, longitude: finalData.coordinates.lng } : undefined,
+              finalData.coordinates,
+              {
+                canonicalName: finalData.canonicalName || finalData.name,
+                entityType: finalData.entityType,
+                country: finalData.country,
+                state: finalData.state,
+                city: finalData.city,
+                county: finalData.county,
+                region: finalData.region,
+                originalQuery: cleanQuery,
+                historicalContext: finalData.historicalContext || cleanQuery,
+              },
               abortController.signal
             );
             if (enriched && enriched.description) {
