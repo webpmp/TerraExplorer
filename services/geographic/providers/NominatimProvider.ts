@@ -12,10 +12,11 @@ export class NominatimProvider implements DiscoveryProvider {
 
     const startTime = Date.now();
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutId = setTimeout(() => controller.abort(), 1500);
 
     try {
       const response = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'TerraExplorer/1.0' } });
+      clearTimeout(timeoutId);
       if (!response.ok) {
         this.lastStatus = response.status === 429 ? 'RATE_LIMITED' : 'FAILED';
         this.lastStatusMessage = `HTTP ${response.status}`;

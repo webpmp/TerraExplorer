@@ -275,16 +275,18 @@ export const VoyagerCeremonialBanner: React.FC<{
           {/* Left Region: extends from Left Arrow to Center */}
           <div className="relative flex-1 h-full flex items-center">
             {/* Previous Waypoint Button */}
-            <button
-              onClick={routeNav.onPrev}
-              className="pointer-events-auto ml-[10px] p-1 hover:text-white text-[#F3E5AB] opacity-80 hover:opacity-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] rounded z-10"
-              aria-label="Previous waypoint"
-            >
-              <ChevronLeft size={16} />
-            </button>
+            {!routeNav.isDiscoveryLoading && (
+              <button
+                onClick={routeNav.onPrev}
+                className="pointer-events-auto ml-[10px] p-1 hover:text-white text-[#F3E5AB] opacity-80 hover:opacity-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] rounded z-10"
+                aria-label="Previous waypoint"
+              >
+                <ChevronLeft size={16} />
+              </button>
+            )}
 
             {/* Geometrically centered WAYPOINT text */}
-            <div className="absolute left-[34px] right-0 inset-y-0 flex items-center justify-center pointer-events-none pr-3">
+            <div className={`absolute ${routeNav.isDiscoveryLoading ? 'left-0' : 'left-[34px]'} right-0 inset-y-0 flex items-center justify-center pointer-events-none pr-3`}>
               <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-[#F3E5AB] opacity-90 drop-shadow-sm select-none text-center truncate">
                 WAYPOINT
               </span>
@@ -297,22 +299,24 @@ export const VoyagerCeremonialBanner: React.FC<{
           {/* Right Region: extends from Center to Right Arrow */}
           <div className="relative flex-1 h-full flex items-center justify-end">
             {/* Geometrically centered N OF M text */}
-            <div className="absolute left-0 right-[34px] inset-y-0 flex items-center justify-center pointer-events-none pl-3">
+            <div className={`absolute left-0 ${routeNav.isDiscoveryLoading ? 'right-0' : 'right-[34px]'} inset-y-0 flex items-center justify-center pointer-events-none pl-3`}>
               <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-[#F3E5AB] opacity-90 drop-shadow-sm select-none text-center truncate">
-                {routeNav.routeGroupName && routeNav.routeLocalCurrent !== undefined && routeNav.routeLocalTotal !== undefined
-                  ? `${routeNav.routeLocalCurrent} OF ${routeNav.routeLocalTotal}`
-                  : `${routeNav.current} OF ${routeNav.total}`}
+                {routeNav.isDiscoveryLoading
+                  ? 'IDENTIFYING WAYPOINTS'
+                  : `${routeNav.routeLocalCurrent ?? routeNav.current} OF ${routeNav.routeLocalTotal ?? routeNav.total}`}
               </span>
             </div>
 
             {/* Next Waypoint Button */}
-            <button
-              onClick={routeNav.onNext}
-              className="pointer-events-auto mr-[10px] p-1 hover:text-white text-[#F3E5AB] opacity-80 hover:opacity-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] rounded z-10"
-              aria-label="Next waypoint"
-            >
-              <ChevronRight size={16} />
-            </button>
+            {!routeNav.isDiscoveryLoading && (
+              <button
+                onClick={routeNav.onNext}
+                className="pointer-events-auto mr-[10px] p-1 hover:text-white text-[#F3E5AB] opacity-80 hover:opacity-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] rounded z-10"
+                aria-label="Next waypoint"
+              >
+                <ChevronRight size={16} />
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1078,6 +1082,7 @@ interface InfoPanelProps {
   routeNav?: {
     current: number;
     total: number;
+    isDiscoveryLoading?: boolean;
     routeGroupName?: string;
     routeGroupId?: string;
     routeLocalCurrent?: number;
@@ -1264,9 +1269,9 @@ export const SectionHeader: React.FC<{
   );
 };
 
-import { parseNotableFactItem, deduplicateNotableFacts, normalizeFactComparisonKey } from '../utils/notableFactsUtils';
+import { parseNotableFactItem, deduplicateNotableFacts, filterAdditiveNotableFacts, normalizeFactComparisonKey } from '../utils/notableFactsUtils';
 import { normalizeDescription } from '../utils/descriptionNormalization';
-export { parseNotableFactItem, deduplicateNotableFacts, normalizeFactComparisonKey, normalizeDescription };
+export { parseNotableFactItem, deduplicateNotableFacts, filterAdditiveNotableFacts, normalizeFactComparisonKey, normalizeDescription };
 
 export const getCleanDescriptionLines = (info: any) => {
     if (!info || !info.description) return [];
@@ -1449,7 +1454,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   onEditRoute,
   onDeleteFollowUp
 }: InfoPanelProps) => {
-  const isMultiLocation = Boolean(routeNav?.total && routeNav.total > 1);
+  const isMultiLocation = Boolean((routeNav?.total && routeNav.total > 1) || routeNav?.isDiscoveryLoading);
   const isSingleLocation = !isMultiLocation;
 
   const info = React.useMemo(() => {
@@ -1816,10 +1821,36 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     return getScrollFadeMaskStyle(scrollFade.top, scrollFade.bottom);
   }, [scrollFade.top, scrollFade.bottom]);
 
-  const prevFollowUpsLengthRef = useRef(0);
+  const prevFollowUpsLengthRef = useRef(info?.followUps?.length || 0);
+  const lastLocationIdentityRef = useRef<string | null>(null);
+
+  const currentLocationIdentity = useMemo(() => {
+    if (!info) return null;
+    const stableId = (info as any)?.waypoint?.id || (info as any)?.id || info.name || '';
+    const coords = info.coordinates ? `${info.coordinates.lat?.toFixed(4)},${info.coordinates.lng?.toFixed(4)}` : '';
+    const routeId = info.routeTitle || (info.routeContext?.title) || '';
+    return `${stableId}_${coords}_${routeId}`;
+  }, [info]);
+
+  // 1. Reset InfoPanel scroll to top when selecting a new location, route, or waypoint
+  useEffect(() => {
+    if (!currentLocationIdentity) return;
+    const isNewLocation = lastLocationIdentityRef.current !== currentLocationIdentity;
+    lastLocationIdentityRef.current = currentLocationIdentity;
+
+    if (isNewLocation) {
+      prevFollowUpsLengthRef.current = info?.followUps?.length || 0;
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = 0;
+      }
+    }
+  }, [currentLocationIdentity, info?.followUps?.length]);
+
+  // 2. Only auto-scroll when a NEW follow-up item is appended dynamically to the current location (user-initiated follow-up)
   useEffect(() => {
     const currentLength = info?.followUps?.length || 0;
-    if (currentLength > prevFollowUpsLengthRef.current && info?.followUps) {
+    // Only scroll if follow-ups grew incrementally on the SAME location
+    if (currentLength > prevFollowUpsLengthRef.current && prevFollowUpsLengthRef.current > 0 && info?.followUps) {
       const newItem = info.followUps[currentLength - 1];
       if (newItem) {
         setTimeout(() => {
@@ -1845,6 +1876,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     lastLocationNameRef.current = locName;
 
     if (isNewLocation) {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = 0;
+      }
       if (Array.isArray(info?.images) && info.images.length > 0) {
         const mapped = info.images.map((img: any) => typeof img === 'string' ? { url: img } : img);
         setImages(mapped);
@@ -2559,7 +2593,20 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     notable: {
       copyText: () => {
         if (!info || !Array.isArray(info.notable) || info.notable.length === 0) return '';
-        const uniqueFacts = deduplicateNotableFacts(info.notable).filter((rawN: any) => {
+        const baseNarrativeTexts = [
+          info.description,
+          info.overview,
+          info.significance,
+          ...(Array.isArray(info.contextNotes) ? info.contextNotes : []),
+          info.locationString,
+          info.type,
+          info.category,
+          info.subtitle,
+          info.climate?.description,
+          info.historicalContext,
+          info.historicalBackground
+        ].filter(Boolean);
+        const uniqueFacts = filterAdditiveNotableFacts(info.notable, baseNarrativeTexts).filter((rawN: any) => {
           const n = parseNotableFactItem(rawN) || rawN;
           const title = normalizeDisplayText(n.title || n.name || (typeof n === 'string' ? n : '')).trim();
           if (/^(?:historical\s+context|historical\s+background|history|context)$/i.test(title)) return false;
@@ -2575,7 +2622,20 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       },
       render: () => {
         if (!Array.isArray(info.notable) || info.notable.length === 0) return null;
-        const uniqueFacts = deduplicateNotableFacts(info.notable).filter((rawN: any) => {
+        const baseNarrativeTexts = [
+          info.description,
+          info.overview,
+          info.significance,
+          ...(Array.isArray(info.contextNotes) ? info.contextNotes : []),
+          info.locationString,
+          info.type,
+          info.category,
+          info.subtitle,
+          info.climate?.description,
+          info.historicalContext,
+          info.historicalBackground
+        ].filter(Boolean);
+        const uniqueFacts = filterAdditiveNotableFacts(info.notable, baseNarrativeTexts).filter((rawN: any) => {
           const n = parseNotableFactItem(rawN) || rawN;
           const title = normalizeDisplayText(n.title || n.name || (typeof n === 'string' ? n : '')).trim();
           if (/^(?:historical\s+context|historical\s+background|history|context)$/i.test(title)) return false;
@@ -3083,19 +3143,27 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           {/* Route Navigation for non-Parchment themes */}
           {isMultiLocation && routeNav && !isParchment && (
              <div className={`relative z-[1] ${isParchment ? 'px-3 py-1 bg-transparent' : isRetro ? 'px-3 py-1.5 border-b border-current opacity-80' : 'px-3 py-1.5 border-b border-white/10 bg-white/5'} flex items-center justify-between min-w-0`}>
-                <button onClick={routeNav.onPrev} className={`p-1.5 rounded-full ${theme.navBtn} pointer-events-auto shrink-0`} aria-label="Previous waypoint">
-                    <ChevronLeft size={16} />
-                </button>
-                <div className="flex flex-col items-center text-center px-2 min-w-0">
+                {!routeNav.isDiscoveryLoading && (
+                  <button onClick={routeNav.onPrev} className={`p-1.5 rounded-full ${theme.navBtn} pointer-events-auto shrink-0`} aria-label="Previous waypoint">
+                      <ChevronLeft size={16} />
+                  </button>
+                )}
+                <div className={`flex flex-col items-center text-center px-2 min-w-0 ${routeNav.isDiscoveryLoading ? 'w-full justify-center' : ''}`}>
                     <span className={`${isRetro ? 'text-base' : 'text-xs'} font-bold uppercase tracking-widest ${theme.subtext}`}>
-                        {routeNav.routeGroupName && routeNav.routeLocalCurrent !== undefined && routeNav.routeLocalTotal !== undefined
-                          ? `Waypoint ${routeNav.routeLocalCurrent} of ${routeNav.routeLocalTotal}`
-                          : `Waypoint ${routeNav.current} of ${routeNav.total}`}
+                        {routeNav.isDiscoveryLoading
+                          ? 'IDENTIFYING WAYPOINTS'
+                          : `Waypoint ${routeNav.routeLocalCurrent ?? routeNav.current} of ${routeNav.routeLocalTotal ?? routeNav.total}`}
                     </span>
                 </div>
-                <button onClick={routeNav.onNext} className={`p-1.5 rounded-full ${theme.navBtn} pointer-events-auto shrink-0`} aria-label="Next waypoint">
-                    <ChevronRight size={16} />
-                </button>
+                {!routeNav.isDiscoveryLoading && (
+                  <button
+                    onClick={routeNav.onNext}
+                    className={`p-1.5 rounded-full ${theme.navBtn} pointer-events-auto shrink-0`}
+                    aria-label="Next waypoint"
+                  >
+                      <ChevronRight size={16} />
+                  </button>
+                )}
              </div>
           )}
 

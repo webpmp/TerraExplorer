@@ -1111,13 +1111,14 @@ export function getEntityDistanceToleranceKm(entityType?: string): number {
     type.includes('beach') ||
     type.includes('park') ||
     type.includes('natural') ||
+    type.includes('natural_feature') ||
     type.includes('waypoint') ||
     type.includes('historical')
   ) {
-    return 25; // 25km radius for natural features and historical waypoints
+    return 85; // 85km radius for natural features and historical waypoints
   }
   if (type.includes('city') || type.includes('town') || type.includes('village') || type.includes('settlement')) {
-    return 35; // 35km radius for cities/towns
+    return 50; // 50km radius for cities/towns
   }
   if (type.includes('state') || type.includes('province') || type.includes('region') || type.includes('county')) {
     return 250; // Regional radius
@@ -1505,6 +1506,7 @@ export function isDifferentNamedEntity(
     /\b(?:police department|fire department|sheriff|department of)\b/i,
     /\b(?:adx|admax|usp|penitentiary|correctional\s+(?:institution|facility|center)|federal\s+prison|state\s+prison|detention\s+center|prison)\b/i,
     /\b(?:nightingale|welch|kundera|actor|actress|director|singer|musician|politician|author|player|coach|nurse|novelist|athlete)\b/i,
+    /\b(?:saint|st\.|catherine\s+of|patriarch(?:ate)?\s+of|library\s+of|bishop\s+of|archbishop\s+of)\b/i,
     /\((?:drug|medication|pharmaceutical|album|song|single|band|film|tv\s+series|novel|magazine|comics)\)$/i
   ];
 
@@ -2140,7 +2142,6 @@ export function isHistoricalWaypointEntity(entity: {
   metadataMode?: string;
   significance?: string;
 }): boolean {
-  if (entity.intent === 'MULTI_LOCATION_DISCOVERY') return false;
   if (entity.metadataMode === 'modern_place') return false;
 
   const wp = entity.waypoint || {};
@@ -2264,7 +2265,7 @@ export function extractHistoricalImageContext(info: any): HistoricalImageContext
   // Clean location name: "Burkhan Khaldun (Mongolia)" -> "Burkhan Khaldun", "St. Charles, Missouri" -> "St. Charles"
   const cleanLocationName = rawWaypointName
     .replace(/\s*\([^)]*\)/g, '')
-    .split(/[,–-]/)[0]
+    .split(/[,–—]/)[0]
     .trim() || rawWaypointName;
   const region = (info?.state || info?.region || wp?.historicalRegion || wp?.modernLocation || '').trim();
   const country = (info?.country || wp?.country || '').trim();
@@ -2363,16 +2364,35 @@ export function buildHistoricalImageQueries(context: HistoricalImageContext): st
 
   // 1. Entity + Specific Historical Context / Exploration / Vessel (Highest Priority)
   if (cleanLocationName) {
-    // 1a. Canonical entity query
+    // 1a. Canonical entity query & canonical historical site variants (Highest Priority)
     queries.push(cleanLocationName);
+    queries.push(`${cleanLocationName} historic site`);
+    queries.push(`${cleanLocationName} historic buildings`);
+    queries.push(`${cleanLocationName} archaeological site`);
 
-    // 1b. Entity + cleaned exploration (e.g. "Beechey Island Franklin Expedition")
+    // 1b. Entity + historical event / treaty / battle / document
+    if (event) {
+      queries.push(`${cleanLocationName} ${event}`);
+    }
+
+    // 1c. Entity + cleaned exploration (e.g. "Beechey Island Franklin Expedition")
     if (cleanExploration && cleanExploration.toLowerCase() !== cleanLocationName.toLowerCase()) {
       queries.push(`${cleanLocationName} ${cleanExploration}`);
       queries.push(`${cleanExploration} ${cleanLocationName}`);
     }
 
-    // 1c. Entity + major historical artifact / vessel (e.g. "Terror Bay HMS Terror", "Queen Maud Gulf HMS Erebus")
+    // 1d. Lewis and Clark expedition specific queries
+    if (cleanExploration && /lewis\s+and\s+clark/i.test(cleanExploration)) {
+      queries.push(`${cleanExploration} keelboat`);
+      queries.push(`${cleanLocationName} ${cleanExploration} keelboat`);
+      queries.push(`${cleanExploration} map`);
+      queries.push(`${cleanLocationName} ${cleanExploration} map`);
+      if (year || period) {
+        queries.push(`${cleanExploration} ${year || period}`);
+      }
+    }
+
+    // 1e. Entity + major historical artifact / vessel (e.g. "Terror Bay HMS Terror", "Queen Maud Gulf HMS Erebus")
     if (artifacts && artifacts.length > 0) {
       for (const art of artifacts.slice(0, 3)) {
         queries.push(`${cleanLocationName} ${art}`.trim());
@@ -2382,7 +2402,7 @@ export function buildHistoricalImageQueries(context: HistoricalImageContext): st
       }
     }
 
-    // 1d. Entity + activity (e.g. "Beechey Island graves", "Terror Bay wreck")
+    // 1f. Entity + activity (e.g. "Beechey Island graves", "Terror Bay wreck")
     if (activities && activities.length > 0) {
       for (const act of activities.slice(0, 3)) {
         queries.push(`${cleanLocationName} ${act}`.trim());
@@ -2392,7 +2412,7 @@ export function buildHistoricalImageQueries(context: HistoricalImageContext): st
       }
     }
 
-    // 1e. Entity + country / region (e.g. "Whalefish Islands Greenland", "Stromness Orkney")
+    // 1g. Entity + country / region (e.g. "Whalefish Islands Greenland", "Stromness Orkney")
     if (country && country.toLowerCase() !== cleanLocationName.toLowerCase()) {
       queries.push(`${cleanLocationName} ${country}`);
     }
@@ -2400,23 +2420,16 @@ export function buildHistoricalImageQueries(context: HistoricalImageContext): st
       queries.push(`${cleanLocationName} ${region}`);
     }
 
-    // 1f. Entity + historical event / treaty / battle / document
-    if (event) {
-      queries.push(`${cleanLocationName} ${event}`);
-    }
-
-    // 1g. Entity + year / period / historic site
+    // 1h. Entity + year / period
     if (year || period) {
       queries.push(`${cleanLocationName} ${year || period}`);
       if (cleanExploration) {
         queries.push(`${cleanExploration} ${cleanLocationName} ${year || period}`.trim());
       }
     }
-    queries.push(`${cleanLocationName} historic site`);
-    queries.push(`${cleanLocationName} archaeological site`);
     queries.push(`historic ${cleanLocationName} painting engraving`);
 
-    // 1h. Named historical people + Entity
+    // 1i. Named historical people + Entity
     if (people && people.length > 0) {
       for (const p of people.slice(0, 2)) {
         queries.push(`${cleanLocationName} ${p}`.trim());
@@ -2603,7 +2616,7 @@ export function isGeographicPlaceEntity(
   }
 
   // Name check for prominent discrete entities or discrete descriptors
-  const discreteNameRegex = /\b(?:museum|monument|statue|tower|castle|fort|palace|temple|cathedral|basilica|acropolis|parthenon|colosseum|pyramid|sphinx|stonehenge|shipwreck|wreck\s+site|eiffel\s+tower|statue\s+of\s+liberty)\b/i;
+  const discreteNameRegex = /\b(?:museum|monument|statue|tower|castle|fort|palace|temple|cathedral|basilica|acropolis|parthenon|colosseum|pyramid|sphinx|stonehenge|shipwreck|wreck\s+site|eiffel\s+tower|statue\s+of\s+liberty|forbidden\s+city|forbidden|gugong)\b/i;
   if (discreteNameRegex.test(entityName)) {
     return false;
   }
@@ -2918,22 +2931,14 @@ Reason=${reason}`);
     ].filter(Boolean);
     const entityAliases = Array.from(new Set(rawAliases));
 
-    // Strict entity title match: Must NOT be accompanied by person names, correctional facilities, or incompatible classifications
+    // Strict entity title match: Must strictly match entity name/canonical name/aliases (with valid photo prefix/suffix), NOT arbitrary substring token matches
     const titleLower = title.toLowerCase().trim();
     const isExactTitleCandidate = entityAliases.some(alias => {
       if (alias.length < 3) return false;
       if (titleLower === alias) return true;
       if (titleLower.startsWith(`${alias} (`) || titleLower.startsWith(`${alias},`)) return true;
-      if (titleLower.startsWith(`${alias} cathedral`) || titleLower.startsWith(`${alias} duomo`) || titleLower.startsWith(`${alias} basilica`)) return true;
-      if (titleLower.startsWith(`historic ${alias}`) || titleLower.startsWith(`view of ${alias}`) || titleLower.startsWith(`map of ${alias}`)) return true;
-      // Word boundary match: ensure it doesn't match Florence Nightingale, Jack London, etc.
-      const boundaryRegex = new RegExp(`\\b${alias}\\b`, 'i');
-      if (boundaryRegex.test(titleLower)) {
-        // Ensure no overt conflicting person surname, facility, or media token in the title
-        const isConflicting = /\b(?:nightingale|welch|kundera|actor|actress|director|singer|musician|politician|author|player|coach|nurse|novelist|athlete|adx|penitentiary|prison)\b/i.test(titleLower) ||
-          /\((?:drug|medication|pharmaceutical|album|song|single|band|film|tv\s+series|novel|magazine|comics)\)$/i.test(titleLower);
-        return !isConflicting;
-      }
+      if (titleLower.startsWith(`${alias} cathedral`) || titleLower.startsWith(`${alias} duomo`) || titleLower.startsWith(`${alias} basilica`) || titleLower.startsWith(`${alias} ruins`) || titleLower.startsWith(`${alias} battlefield`)) return true;
+      if (titleLower.startsWith(`historic ${alias}`) || titleLower.startsWith(`view of ${alias}`) || titleLower.startsWith(`aerial view of ${alias}`) || titleLower.startsWith(`map of ${alias}`) || titleLower.startsWith(`ruins of ${alias}`) || titleLower.startsWith(`battle of ${alias}`) || titleLower.startsWith(`siege of ${alias}`)) return true;
       return false;
     });
 
@@ -3015,10 +3020,16 @@ Reason=${reason}`);
 
     let score = typeScore + entityScore + narrativeScore + geoScore + periodScore;
 
-    // Strong negative preference / penalty against modern civic/streetscape photography on antique expeditions
-    if (isModern && category === 'MODERN_LOCATION' && entityMatch !== 'EXACT_TITLE') {
-      score -= 40;
-      score = Math.min(score, 30);
+    // For modern photography / modern locations, require EXACT_TITLE and penalize missing/weak geographic alignment
+    if (isModern || category === 'MODERN_LOCATION') {
+      if (entityMatch !== 'EXACT_TITLE') {
+        score -= 40;
+        score = Math.min(score, 30);
+      }
+      if (geographicMatch === 'NONE' || geographicMatch === 'COUNTRY_MATCH') {
+        score -= 30;
+        score = Math.min(score, 35);
+      }
     }
 
     // Require both adequate total score AND confirmed entity match level for acceptance
@@ -4195,8 +4206,8 @@ async function _fetchAndValidateImagesInternal(
       console.warn(`[IMAGE SEARCH] Failed query "${query}":`, e);
     }
 
-    // If Wikipedia pageimages did not yield enough validated candidates, query Wikimedia Commons
-    if (validatedCandidates.length < maxPhotos) {
+    // If Wikipedia pageimages did not yield any validated candidates, query Wikimedia Commons
+    if (validatedCandidates.length === 0) {
       try {
         const commonsEndpoint = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrnamespace=6&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=800&format=json&origin=*`;
         const cRes = await fetch(commonsEndpoint);

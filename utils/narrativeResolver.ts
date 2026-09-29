@@ -70,43 +70,21 @@ export function resolveCanonicalNarrative(
   const extractText = (val: any): string => {
     if (!val) return '';
     if (typeof val === 'string') return normalizeDisplayText(val);
+    if (Array.isArray(val)) return '';
     if (typeof val === 'object') {
       let text = '';
-      const h = val.heading || val.heading1 || val.title;
-      const t = val.text || val.text1 || val.description || val.summary || val.value || val.body;
+      const h = typeof val.heading === 'string' ? val.heading : (typeof val.heading1 === 'string' ? val.heading1 : (typeof val.title === 'string' ? val.title : undefined));
+      const t = typeof val.text === 'string' ? val.text : (typeof val.text1 === 'string' ? val.text1 : (typeof val.description === 'string' ? val.description : (typeof val.summary === 'string' ? val.summary : (typeof val.value === 'string' ? val.value : (typeof val.body === 'string' ? val.body : undefined)))));
 
       if (h) {
         text += `${normalizeDisplayText(h)}\n\n`;
       }
       if (t) {
         text += normalizeDisplayText(t);
-      } else {
-        const excludedKeys = [
-          'notable',
-          'notableFacts',
-          'notable_facts',
-          'climate',
-          'population',
-          'news',
-          'contextNotes',
-          'entities',
-          'historicalPeriod'
-        ];
-        const vals = Object.entries(val)
-          .filter(
-            ([k, v]) =>
-              typeof v === 'string' &&
-              !excludedKeys.includes(k) &&
-              !k.toLowerCase().includes('notable')
-          )
-          .map(([, v]) => normalizeDisplayText(v));
-        if (vals.length > 0 && !h) {
-          text += vals.join('\n\n');
-        }
       }
       return text.trim();
     }
-    return normalizeDisplayText(String(val));
+    return '';
   };
 
   const geographicDesc = extractText(info.description) || null;

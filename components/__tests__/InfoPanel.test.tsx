@@ -3263,7 +3263,83 @@ describe('Lightbox Metadata Integration', () => {
       expect(html).not.toContain('Coordinates unavailable');
     });
   });
+
+  describe('InfoPanel Scroll Anchoring & Follow-Up Isolation Suite', () => {
+    it('renders scrollable container with top-anchoring scrollable classes and data attribute', () => {
+      const savedRouteWp = {
+        name: 'Plymouth, England',
+        description: 'Departure port for the expedition.',
+        entityType: 'city',
+        coordinates: { lat: 50.37, lng: -4.14 },
+        routeTitle: "Ernest Shackleton's Endurance Expedition",
+        followUps: [
+          { id: 'fu-1', question: 'What ship was used?', answer: 'The Endurance.' }
+        ]
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={savedRouteWp as any}
+          onClose={() => {}}
+          isLoading={false}
+          isNewsFetching={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('data-infopanel="true"');
+      expect(html).toContain('info-panel-scrollable');
+      expect(html).toContain('Plymouth, England');
+      expect(html).toContain('Explore');
+      expect(html).toContain('What ship was used?');
+    });
+  });
+
+  describe('Progressive Notable Facts Presentation & Redundancy Filtering in InfoPanel', () => {
+    it('renders only novel additive facts and hides redundant restatements of Description', () => {
+      const locationInfo = {
+        name: 'Historic Citadel',
+        locationString: 'Valletta, Malta',
+        entityType: 'historical_site',
+        coordinates: { lat: 35.8989, lng: 14.5146 },
+        description: 'The fortress was founded in 1566 by Grand Master Jean de Valette following the Great Siege of Malta.',
+        notable: [
+          // Redundant: repeats description
+          {
+            title: 'Founding of Fortress',
+            description: 'Grand Master Jean de Valette founded the fortress in 1566 after the Great Siege.'
+          },
+          // Additive: engineering detail
+          {
+            title: 'Military Architecture',
+            description: 'Designed by Italian military engineer Francesco Laparelli with massive bastions and a grid street plan.'
+          }
+        ]
+      };
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={locationInfo as any}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('Notable Facts');
+      expect(html).toContain('Military Architecture');
+      expect(html).toContain('Francesco Laparelli');
+      expect(html).not.toContain('Founding of Fortress');
+    });
+  });
 });
+
 
 
 

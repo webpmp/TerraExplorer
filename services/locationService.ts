@@ -4,8 +4,9 @@ import { fetchLiveNews } from './newsService';
 import { logWaypointSnapshot } from '../utils/pipelineDebug';
 import { isClimateConflicting } from './geographic/climateEstimator';
 import { isPlaceholderString } from '../components/InfoPanel';
-import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
+import { deduplicateNotableFacts, filterAdditiveNotableFacts } from '../utils/notableFactsUtils';
 import { evaluateDescriptionReadiness } from '../utils/descriptionReadiness';
+import { isGenericPlaceholderDescription } from './entityValidation';
 
 export const mergeLocationInfo = (prev: any, next: any): any => {
     if (!next || typeof next !== 'object') return prev;
@@ -114,9 +115,9 @@ export const mergeLocationInfo = (prev: any, next: any): any => {
             merged[field] = nextText;
         } else if (prevReadiness.isReady) {
             merged[field] = prevText;
-        } else if (nextText && !isInvalidImage(nextText) && !isPlaceholderString(nextText)) {
+        } else if (nextText && !isInvalidImage(nextText) && !isPlaceholderString(nextText) && nextReadiness.quality !== 'placeholder' && !isGenericPlaceholderDescription(nextText)) {
             merged[field] = nextText;
-        } else if (prevText && !isInvalidImage(prevText) && !isPlaceholderString(prevText)) {
+        } else if (prevText && !isInvalidImage(prevText) && !isPlaceholderString(prevText) && prevReadiness.quality !== 'placeholder' && !isGenericPlaceholderDescription(prevText)) {
             merged[field] = prevText;
         }
     }

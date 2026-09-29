@@ -13,8 +13,12 @@ export class WikipediaProvider implements DiscoveryProvider {
     const url = `https://en.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${lat}|${lng}&gsradius=${radiusMeters}&gslimit=100&format=json&origin=*`;
 
     const startTime = Date.now();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 1500);
+
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
       if (!response.ok) {
         this.lastStatus = response.status === 429 ? 'RATE_LIMITED' : 'FAILED';
         this.lastStatusMessage = `HTTP ${response.status}`;

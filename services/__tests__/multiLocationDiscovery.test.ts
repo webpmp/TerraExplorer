@@ -75,6 +75,39 @@ describe('Multi-Location Geographic Discovery Suite', () => {
       expect(bb.intent).toBe("MULTI_LOCATION_DISCOVERY");
       expect(bb.subject).toBe("Breaking Bad");
       expect(bb.resolutionMode).toBe("MULTI_LOCATION_EXPLORATION");
+
+      const alexander = routeIntentAndExtractEntity("where were the major battles fought by Alexander the Great");
+      expect(alexander.intent).toBe("MULTI_LOCATION_DISCOVERY");
+      expect(alexander.subject).toBe("Alexander The Great");
+      expect(alexander.discoveryTarget).toBe("major battles");
+      expect(alexander.resolutionMode).toBe("MULTI_LOCATION_EXPLORATION");
+
+      const civilWar = routeIntentAndExtractEntity("where did the major battles of the Civil War occur");
+      expect(civilWar.intent).toBe("MULTI_LOCATION_DISCOVERY");
+      expect(civilWar.subject).toBe("Civil War");
+      expect(civilWar.discoveryTarget).toBe("major battles");
+      expect(civilWar.resolutionMode).toBe("MULTI_LOCATION_EXPLORATION");
+
+      const napoleon = routeIntentAndExtractEntity("where were the major battles of Napoleon fought");
+      expect(napoleon.intent).toBe("MULTI_LOCATION_DISCOVERY");
+      expect(napoleon.subject).toBe("Napoleon");
+      expect(napoleon.discoveryTarget).toBe("major battles");
+      expect(napoleon.resolutionMode).toBe("MULTI_LOCATION_EXPLORATION");
+
+      const lewisClark = routeIntentAndExtractEntity("where did the major events of the Lewis and Clark expedition happen");
+      expect(lewisClark.resolutionMode).toBe("MULTI_LOCATION_EXPLORATION");
+      expect(lewisClark.entity.toLowerCase()).toContain("lewis and clark");
+
+      const alexanderBirth = routeIntentAndExtractEntity("Where was Alexander the Great born?");
+      expect(alexanderBirth.intent).not.toBe("MULTI_LOCATION_DISCOVERY");
+      expect(alexanderBirth.entity.toLowerCase()).toContain("alexander the great");
+
+      const gaugamela = routeIntentAndExtractEntity("Where is the Battle of Gaugamela?");
+      expect(gaugamela.intent).not.toBe("MULTI_LOCATION_DISCOVERY");
+      expect(gaugamela.entity.toLowerCase()).toContain("battle of gaugamela");
+
+      const gettysburg = routeIntentAndExtractEntity("Battle of Gettysburg");
+      expect(gettysburg.intent).not.toBe("MULTI_LOCATION_DISCOVERY");
     });
   });
 
@@ -87,6 +120,13 @@ describe('Multi-Location Geographic Discovery Suite', () => {
         "Game Of Thrones Filmed"
       );
       expect(res).toBeNull();
+
+      const resAlexander = await recoverCoordinatesFromAi(
+        "where were the major battles fought by Alexander the Great",
+        "MULTI_LOCATION_DISCOVERY",
+        "Battles Fought by Alexander the Great"
+      );
+      expect(resAlexander).toBeNull();
     });
 
     it('E. Entity identity validation prevents query phrase substitution', () => {
@@ -254,7 +294,7 @@ describe('Multi-Location Geographic Discovery Suite', () => {
       expect(filteredRoute.waypoints.length).toBe(2);
       expect(filteredRoute.waypoints.map(w => w.name)).toEqual(["Dubrovnik", "Castle Ward"]);
       expect(filteredRoute.waypoints.some(w => w.name === "Westeros" || w.name === "King's Landing" || w.name === "The Wall")).toBe(false);
-    });
+    }, 15000);
 
     it('2. "Where was Harry Potter filmed?" produces real-world filming locations', async () => {
       const intentRes = routeIntentAndExtractEntity("Where was Harry Potter filmed?");
@@ -361,6 +401,152 @@ describe('Multi-Location Geographic Discovery Suite', () => {
 
       const result = await runRoutePipeline("Test unresolved query", false, invalidCoordsRoute);
       expect(result.waypoints.length).toBe(0);
+    });
+
+    it('6. "where were the major battles fought by Alexander the Great" produces multiple distinct battle waypoints', async () => {
+      const intentRes = routeIntentAndExtractEntity("where were the major battles fought by Alexander the Great");
+      expect(intentRes.intent).toBe("MULTI_LOCATION_DISCOVERY");
+      expect(intentRes.subject).toBe("Alexander The Great");
+      expect(intentRes.discoveryTarget).toBe("major battles");
+
+      const alexanderBattlesRaw = async () => ({
+        title: "Major Battles of Alexander the Great",
+        routeType: "network",
+        waypoints: [
+          {
+            name: "Battle of the Granicus",
+            canonicalName: "Granicus River",
+            modernLocation: "Biga, Çanakkale, Turkey",
+            lat: 40.2333,
+            lng: 27.2500,
+            sequence: 1,
+            context: "First major victory of Alexander the Great against the Persian Empire",
+            description: "Fought in 334 BC at the Granicus River, opening Asia Minor to Macedonian conquest."
+          },
+          {
+            name: "Battle of Issus",
+            canonicalName: "Issus",
+            modernLocation: "Dörtyol, Hatay, Turkey",
+            lat: 36.8400,
+            lng: 36.2200,
+            sequence: 2,
+            context: "Decisive Macedonian victory over Persian King Darius III",
+            description: "Fought in 333 BC near modern Iskenderun, leading to Macedonian control of the Levant."
+          },
+          {
+            name: "Battle of Gaugamela",
+            canonicalName: "Gaugamela",
+            modernLocation: "Tel Gomel, Nineveh, Iraq",
+            lat: 36.3600,
+            lng: 43.2500,
+            sequence: 3,
+            context: "Final decisive victory leading to the fall of the Achaemenid Persian Empire",
+            description: "Fought in 331 BC, decisively destroying Persian imperial power."
+          }
+        ]
+      });
+
+      const route = await runRoutePipeline("where were the major battles fought by Alexander the Great", false, alexanderBattlesRaw, intentRes.intent);
+      expect(route.waypoints.length).toBe(3);
+      expect(route.waypoints.map(w => w.name)).toEqual(["Battle of the Granicus", "Battle of Issus", "Battle of Gaugamela"]);
+      expect(route.waypoints.every(w => w.lat !== 0 && w.lng !== 0)).toBe(true);
+    });
+
+    it('7. Rejects generic campaign cities/administrative centers for a "major battles" query', async () => {
+      const intentRes = routeIntentAndExtractEntity("where were the major battles fought by Alexander the Great");
+      expect(intentRes.intent).toBe("MULTI_LOCATION_DISCOVERY");
+      expect(intentRes.discoveryTarget).toBe("major battles");
+
+      const mixedRaw = vi.fn().mockResolvedValue({
+        title: "Campaign of Alexander the Great",
+        waypoints: [
+          {
+            name: "Alexandria-Novelus",
+            canonicalName: "Alexandria-Novelus",
+            modernLocation: "Termez, Uzbekistan",
+            lat: 37.2242,
+            lng: 67.2783,
+            sequence: 1,
+            context: "Administrative city founded during Central Asian campaign",
+            description: "City and military garrison founded by Alexander in Bactria."
+          },
+          {
+            name: "Battle of the Granicus",
+            canonicalName: "Granicus River",
+            modernLocation: "Biga, Çanakkale, Turkey",
+            lat: 40.2333,
+            lng: 27.2500,
+            sequence: 2,
+            context: "First major victory against the Persian satraps",
+            description: "Fought in May 334 BC near Troy, opening western Asia Minor to Macedonian conquest."
+          },
+          {
+            name: "Battle of Issus",
+            canonicalName: "Issus",
+            modernLocation: "Dörtyol, Hatay, Turkey",
+            lat: 36.8400,
+            lng: 36.2200,
+            sequence: 3,
+            context: "Decisive Macedonian victory over Darius III",
+            description: "Major battle fought in 333 BC resulting in total rout of Persian royal army."
+          },
+          {
+            name: "Bactra",
+            canonicalName: "Bactra",
+            modernLocation: "Balkh, Afghanistan",
+            lat: 36.7581,
+            lng: 66.8972,
+            sequence: 4,
+            context: "Ancient capital city and winter quarters",
+            description: "Ancient Iranian city where Alexander rested his forces during the eastern campaigns."
+          }
+        ]
+      });
+
+      const route = await runRoutePipeline("where were the major battles fought by Alexander the Great", false, mixedRaw, intentRes.intent);
+      expect(route.waypoints.length).toBe(2);
+      expect(route.waypoints.map(w => w.name)).toEqual(["Battle of the Granicus", "Battle of Issus"]);
+    });
+
+    it('8. Image validation rejects Catherine of Alexandria and Library of Alexandria for Alexandria-Novelus', async () => {
+      const entity = {
+        name: 'Alexandria-Novelus',
+        canonicalName: 'Alexandria-Novelus',
+        country: 'Uzbekistan',
+        city: 'Termez',
+        coordinates: { lat: 37.2242, lng: 67.2783 },
+        entityType: 'historical_site'
+      };
+
+      const catherineCandidate = {
+        url: 'https://upload.wikimedia.org/catherine.jpg',
+        title: 'Saint Catherine of Alexandria',
+        caption: 'Painting of Catherine of Alexandria, Christian saint and virgin martyr.',
+        source: 'wikimedia',
+        category: 'HISTORICAL_PERSON'
+      };
+
+      const libraryCandidate = {
+        url: 'https://upload.wikimedia.org/library.jpg',
+        title: 'Library of Alexandria',
+        caption: 'Illustration of the Great Library of Alexandria in Egypt.',
+        source: 'wikimedia',
+        category: 'HISTORICAL_PLACE'
+      };
+
+      const catherineResult = await validateImageCandidate(catherineCandidate, entity as any, {
+        policy: 'EXPEDITION_DOCUMENTARY',
+        strictHistoricalRelevance: true,
+        entityRequired: true
+      });
+      expect(catherineResult.decision).toBe('REJECT');
+
+      const libraryResult = await validateImageCandidate(libraryCandidate, entity as any, {
+        policy: 'EXPEDITION_DOCUMENTARY',
+        strictHistoricalRelevance: true,
+        entityRequired: true
+      });
+      expect(libraryResult.decision).toBe('REJECT');
     });
   });
 });

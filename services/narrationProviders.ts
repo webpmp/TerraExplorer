@@ -9,8 +9,9 @@ import { NarrationProviderType } from '../types';
 import { logTraceNarration, logProviderStart, logProviderComplete } from './waypointPipelineService';
 import { logTraceTiming } from './traceTimingService';
 import { normalizeNarrationText } from '../utils/narrationTextNormalization';
+import { filterAdditiveNotableFacts } from '../utils/notableFactsUtils';
 
-export { normalizeNarrationText };
+export { normalizeNarrationText, filterAdditiveNotableFacts };
 
 export interface NarrationUnit {
   section: 'SUMMARY' | 'NOTABLE' | 'CLIMATE' | 'EXPLORE' | 'NEWS';
@@ -410,7 +411,9 @@ export function buildFullNarrationUnits(
 
   // 2. Notable Facts (read descriptive content, do NOT narrate "Notable facts:" or subsection titles)
   if (content.notable !== false && Array.isArray(info.notable) && info.notable.length > 0) {
-    for (const item of info.notable) {
+    const rawDesc = info.description || info.context || '';
+    const additiveFacts = filterAdditiveNotableFacts(info.notable, [rawDesc, ...(info.contextNotes || [])]);
+    for (const item of additiveFacts) {
       let itemText = '';
       if (typeof item === 'string' && item.trim()) {
         itemText = cleanNarrationText(item).trim();

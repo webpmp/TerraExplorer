@@ -157,8 +157,68 @@ export function extractMeaningfulWaypointDate(wp: Waypoint): number | null {
     }
   }
 
-  // Note: historicalPeriod (e.g. "Late Medieval Period") is intentionally NOT parsed as an event date.
+  // 3. HistoricalPeriod field when it contains a parseable year (e.g. "334 BC", "334 BCE", "1838-1839")
+  if (wp.historicalPeriod && typeof wp.historicalPeriod === 'string') {
+    const y = parseDomainDateToYear(wp.historicalPeriod);
+    if (y !== null) return y;
+  }
+
+  // 4. Extract explicit date references from description or context (e.g. "Fought in 334 BC near...", "In 333 BCE...")
+  const textSources = [wp.description, wp.context, wp.routeContextText].filter(Boolean) as string[];
+  for (const text of textSources) {
+    const bcMatch = text.match(/\b(\d{1,4})\s*(?:BCE|BC)\b/i);
+    if (bcMatch) {
+      return -parseFloat(bcMatch[1]);
+    }
+    const ceMatch = text.match(/\b(\d{1,4})\s*(?:CE|AD)\b/i);
+    if (ceMatch) {
+      return parseFloat(ceMatch[1]);
+    }
+    const yearMatch = text.match(/\b(?:fought|occurred|took place|happened|signed|built|founded|in|circa|c\.)\s+(?:in\s+)?([12]\d{3})\b/i);
+    if (yearMatch) {
+      return parseFloat(yearMatch[1]);
+    }
+  }
+
   return null;
+}
+
+/**
+ * Sorts waypoints in chronological order if domain dates are present.
+ * Correctly handles BCE dates (e.g. -334 < -333 < -331), CE dates, and date ranges.
+ * If waypoints do not have domain dates, leaves them in their existing order.
+ */
+export function sortWaypointsChronologically(waypoints: Waypoint[]): Waypoint[] {
+  if (!waypoints || waypoints.length <= 1) return waypoints || [];
+
+  const wpWithDates = waypoints.map(wp => ({
+    wp,
+    date: extractMeaningfulWaypointDate(wp)
+  }));
+
+  const allHaveDates = wpWithDates.every(item => item.date !== null && !isNaN(item.date));
+  if (!allHaveDates) {
+    return waypoints;
+  }
+
+  const validDates = wpWithDates.map(item => item.date as number);
+  const minDate = Math.min(...validDates);
+  const maxDate = Math.max(...validDates);
+  if (maxDate === minDate) {
+    return waypoints;
+  }
+
+  const sorted = [...wpWithDates].sort((a, b) => {
+    const diff = (a.date as number) - (b.date as number);
+    if (diff !== 0) return diff;
+    return (a.wp.sequence ?? 0) - (b.wp.sequence ?? 0);
+  });
+
+  return sorted.map((item, idx) => ({
+    ...item.wp,
+    sequence: idx + 1,
+    isSequential: true
+  }));
 }
 
 /**
@@ -198,7 +258,7 @@ export function hasExplicitRelationshipSignal(wp: Waypoint): boolean {
  *    - Requires complete meaningful chronological dates OR explicit temporal relationships.
  * 3. Complete, meaningful chronological dates:
  *    - All waypoints must have valid domain dates.
- *    - Dates must establish chronological progression (monotonically non-decreasing and last > first).
+ *    - Dates must establish chronological progression (monotonically non-decreasing and last > first, or valid time span).
  * 4. Explicit temporal relationships:
  *    - Waypoints contain explicit transition metadata (before, after, next, then, origin, destination).
  * 5. Supported route types (fixed_path, multi_location_campaign, itinerary, route, expedition):
@@ -231,18 +291,11 @@ export function isRouteSequential(
   const allHaveDates = dates.every(d => d !== null && !isNaN(d));
 
   let hasChronologicalProgression = false;
-  if (allHaveDates) {
+  if (allHaveDates && waypoints.length >= 2) {
     const validDates = dates as number[];
-    let isMonotonic = true;
-    for (let i = 0; i < validDates.length - 1; i++) {
-      if (validDates[i + 1] < validDates[i]) {
-        isMonotonic = false;
-        break;
-      }
-    }
-    // Must show progression (not identical static timestamps)
-    const hasProgression = validDates[validDates.length - 1] > validDates[0];
-    if (isMonotonic && hasProgression) {
+    const minDate = Math.min(...validDates);
+    const maxDate = Math.max(...validDates);
+    if (maxDate > minDate) {
       hasChronologicalProgression = true;
     }
   }
@@ -407,17 +460,20 @@ export function groupWaypointsByRoute(
 
     const result: RouteGroup[] = [];
     for (const [gId, gData] of groupsMap.entries()) {
-      const sortedWps = [...gData.wps].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
-      // Determine isSequential for this group:
-      // If waypoints explicitly declare isSequential !== false and show sequential properties
-      const hasConsecutiveSeq = sortedWps.length >= 2 && sortedWps.every((w, idx) => (w.sequence ?? (idx + 1)) === idx + 1);
+      const rawSortedWps = [...gData.wps].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
+      const hasConsecutiveSeq = rawSortedWps.length >= 2 && rawSortedWps.every((w, idx) => (w.sequence ?? (idx + 1)) === idx + 1);
       const isMultiRoute = route?.routeEvidenceMode === 'MULTI_ROUTE_EVENT' || gData.evidenceMode === 'MULTI_ROUTE_EVENT';
+
       const isGroupSeq = gData.wps.some(w => w.isSequential === false)
         ? false
         : ((route?.isSequential === true && route?.routeType !== 'network' && route?.routeType !== 'regional_event') ||
            gData.wps.every(w => w.isSequential === true) ||
            (isMultiRoute && hasConsecutiveSeq) ||
-           isRouteSequential(sortedWps, { ...route, routeType: route?.routeType, isSequential: undefined }));
+           isRouteSequential(gData.wps, { ...route, routeType: route?.routeType, isSequential: undefined }));
+
+      const sortedWps = isGroupSeq
+        ? sortWaypointsChronologically(rawSortedWps)
+        : rawSortedWps;
 
       result.push({
         id: gId,
@@ -432,8 +488,11 @@ export function groupWaypointsByRoute(
   }
 
   // Case 3: Single default route group for single-sequence routes
-  const sortedWps = [...waypoints].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
-  const isSeq = isRouteSequential(sortedWps, route);
+  const isSeq = isRouteSequential(waypoints, route);
+  const rawDefaultSorted = [...waypoints].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
+  const sortedWps = isSeq
+    ? sortWaypointsChronologically(rawDefaultSorted)
+    : rawDefaultSorted;
 
   return [
     {

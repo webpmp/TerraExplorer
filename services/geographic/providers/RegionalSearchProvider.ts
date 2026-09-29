@@ -31,8 +31,12 @@ export class RegionalSearchProvider implements DiscoveryProvider {
 
     const fetchNominatim = async (q: string, fallbackType: string, extraTags?: Partial<Candidate>) => {
       const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=10&extratags=1`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1500);
+
       try {
-        const response = await fetch(url, { headers: { 'User-Agent': 'TerraExplorer/1.0' } });
+        const response = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'TerraExplorer/1.0' } });
+        clearTimeout(timeoutId);
         if (!response.ok) return [];
         const data = await response.json();
         

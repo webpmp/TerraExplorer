@@ -498,6 +498,7 @@ const Controls: React.FC<ControlsProps> = ({
            upper.startsWith("FINALIZING RESULTS") ||
            upper.startsWith("LOCATING ") ||
            upper.startsWith("TRACING ROUTE") ||
+           upper.startsWith("IDENTIFYING WAYPOINTS") ||
            upper.startsWith("FINDING WAYPOINTS") ||
            upper.includes("WAYPOINTS FOUND") ||
            upper.startsWith("PREPARING WAYPOINT") ||

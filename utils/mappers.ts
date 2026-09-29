@@ -1,6 +1,6 @@
 import { ResolvedEntity } from '../domain';
 import { LocationInfo } from '../types';
-import { deduplicateNotableFacts } from './notableFactsUtils';
+import { deduplicateNotableFacts, filterAdditiveNotableFacts } from './notableFactsUtils';
 
 export interface DescriptionSection {
   heading: string;
@@ -16,6 +16,15 @@ export function removeLeadingEntityTitle(text: string, canonicalName?: string): 
     return lines.slice(1).join("\n").trim();
   }
   return text.trim();
+}
+
+export function stripMarkdownFormatting(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .trim();
 }
 
 export function parseDescriptionSections(description: string): DescriptionSection[] {
@@ -220,7 +229,10 @@ export function normalizeInfoPanelData(entity: any, workflow: string = "unknown"
         normalized.contextNotes = contextNotes;
         normalized.entities = entities;
         if (Array.isArray(normalized.notable)) {
-            normalized.notable = deduplicateNotableFacts(normalized.notable);
+            normalized.notable = filterAdditiveNotableFacts(
+              normalized.notable,
+              [normalized.description, ...(normalized.contextNotes || []), normalized.locationString, normalized.entityType].filter(Boolean)
+            );
         }
 
     } else {
@@ -246,7 +258,10 @@ export function normalizeInfoPanelData(entity: any, workflow: string = "unknown"
         }
 
         if (Array.isArray(normalized.notable)) {
-            normalized.notable = deduplicateNotableFacts(normalized.notable);
+            normalized.notable = filterAdditiveNotableFacts(
+              normalized.notable,
+              [normalized.description, ...(normalized.contextNotes || []), normalized.locationString, normalized.type, normalized.category].filter(Boolean)
+            );
         }
     }
 

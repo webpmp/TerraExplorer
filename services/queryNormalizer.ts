@@ -1,5 +1,6 @@
 import { detectImageIntentCategory, ImageIntentCategory } from './imageService';
-
+import { QueryIntent } from '../types';
+import { determineHistoricalEventScope } from './geographic/historicalEventScope';
 import { getAuthoritativeEventModel } from './geographic/historicalRouteRegistry';
 import { toCanonicalTitleCase, getHistoricalEntityKnowledge } from './geographic/historicalCoordinateValidator';
 
@@ -512,5 +513,322 @@ export function normalizeSemanticEntityTitle(context: SemanticTitleContext): str
 
   return 'Location';
 }
+
+export interface ExtractedQuery {
+  intent: QueryIntent;
+  entity: string;
+  queryShape?: 'NATURAL_LANGUAGE_QUESTION' | 'DIRECT' | 'HISTORICAL_ROUTE' | 'MULTI_LOCATION' | 'EXPLORATORY' | 'HISTORICAL_EVENT' | 'DISCOVERY_OBJECT_LOCATION' | string;
+  subject?: string;
+  event?: string;
+  requestedRelationship?: string;
+  discoveryTarget?: string;
+  resolutionMode?: 'SINGLE_POINT' | 'MULTI_LOCATION_EXPLORATION' | 'HISTORICAL_NON_POINT';
+  geographicScope?: string;
+  singleLocation?: boolean;
+}
+
+export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
+  const clean = query.trim();
+
+  // 0. Check for Authoritative Historical Route Registry Events (Precedence over single-location intents)
+  const historicalDetection = detectHistoricalRouteEvent(clean);
+  if (historicalDetection.isHistoricalRouteEvent) {
+    return {
+      intent: 'route' as any,
+      entity: historicalDetection.canonicalEntity,
+      subject: historicalDetection.canonicalEntity,
+      resolutionMode: 'MULTI_LOCATION_EXPLORATION',
+      queryShape: 'HISTORICAL_ROUTE'
+    };
+  }
+
+  // 1. Check for Multi-Location Discovery patterns (Filming, multiple places, general multi-entity questions)
+  const multiLocationPatterns: { regex: RegExp; getDetails: (match: RegExpMatchArray) => { subject: string; target: string } }[] = [
+    // "Where was/were X filmed/shot/produced?" or "Where was the movie/series X filmed?"
+    {
+      regex: /^\s*where\s+(?:was|were)\s+(?:the\s+(?:movie|show|series|film|television\s+show|tv\s+show)\s+)?(.+?)\s+(?:filmed|shot|produced)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "filming locations" })
+    },
+    // "Places where X was filmed/shot"
+    {
+      regex: /^\s*(?:places|locations|sites)\s+where\s+(.+?)\s+(?:was|were)\s+(?:filmed|shot|produced)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "filming locations" })
+    },
+    // "What are the filming/shooting/production locations for/of/in X?"
+    {
+      regex: /^\s*what\s+(?:are|were)\s+(?:the\s+)?(?:filming|shooting|production)\s+locations\s+(?:for|of|in)\s+(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "filming locations" })
+    },
+    // "Filming/shooting/production locations for/of/in X"
+    {
+      regex: /^\s*(?:filming|shooting|production|real-world|real\s+life)\s+locations\s+(?:for|of|in|used\s+in|used\s+for)\s+(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "filming locations" })
+    },
+    // "Real-world locations / real places used to portray / used in X"
+    {
+      regex: /^\s*(?:real-world|real\s+world|real\s+life|real)\s+(?:locations|places)\s+(?:used\s+to\s+portray|used\s+in|used\s+for|in)\s+(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "filming locations" })
+    },
+    // "What places/locations/cities/sites were used for/in X?"
+    {
+      regex: /^\s*what\s+(?:places|locations|cities|sites)\s+(?:were|are)\s+used\s+(?:for|in)\s+(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "locations" })
+    },
+    // "What locations were used in/for X?"
+    {
+      regex: /^\s*what\s+locations\s+were\s+used\s+(?:in|for)\s+(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "locations" })
+    },
+    // "What cities were involved in / important in / part of X?"
+    {
+      regex: /^\s*what\s+cities\s+were\s+(?:involved\s+in|important\s+in|part\s+of)\s+(?:the\s+)?(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "important cities" })
+    },
+    // "What places did X visit / travel to / explore?"
+    {
+      regex: /^\s*what\s+places\s+did\s+(.+?)\s+(?:visit|travel\s+to|explore|touch)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "places visited" })
+    },
+    // "Where are the locations associated with X?"
+    {
+      regex: /^\s*where\s+are\s+the\s+locations\s+associated\s+with\s+(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "associated locations" })
+    },
+    // "Where were/are/did [the] [major/key/famous] battles/sites/events/places/campaigns [fought by / fought in / of / in] X [take place / happen / occur / fought]?"
+    {
+      regex: /^\s*where\s+(?:were|are|did)\s+(?:the\s+)?(?:(?:major|key|famous|important|main)\s+)?(battles|events|sites|places|campaigns|stops|voyages)\s+(?:fought\s+by|fought\s+in|of|in|associated\s+with)\s+(?:the\s+)?(.+?)(?:\s+(?:fought|take\s+place|happen|occur|held))?\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[2], target: `major ${m[1]}` })
+    },
+    // "Where were the battles of X fought?" / "Where were the events/sites of X located?"
+    {
+      regex: /^\s*where\s+(?:were|are)\s+(?:the\s+)?(?:(?:major|key|famous|important|main)\s+)?(battles|events|sites|places|campaigns)\s+(?:of|for)\s+(?:the\s+)?(.+?)\s+(?:fought|located|held|situated|staged)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[2], target: `major ${m[1]}` })
+    },
+    // "What were the major battles / events / sites of/fought by X?"
+    {
+      regex: /^\s*what\s+(?:were|are)\s+(?:the\s+)?(?:(?:major|key|famous|important|main)\s+)?(battles|events|sites|places|campaigns|stops|voyages)\s+(?:fought\s+by|fought\s+in|of|in|associated\s+with)\s+(?:the\s+)?(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[2], target: `major ${m[1]}` })
+    },
+    // "Where did the Apollo missions land?"
+    {
+      regex: /^\s*where\s+did\s+(?:the\s+)?(.+?(?:missions|expeditions|landings|voyages))\s+(?:land|touch\s+down|reach)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "landing sites" })
+    },
+    // "What places were involved in X?"
+    {
+      regex: /^\s*what\s+places\s+were\s+involved\s+in\s+(?:the\s+)?(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: "places involved" })
+    },
+    // "What are the world's most famous waterfalls / landmarks / volcanoes / etc.?"
+    {
+      regex: /^\s*what\s+(?:are|were)\s+(?:the\s+)?(?:(?:world's|earth's|most\s+famous|famous|top|major|greatest|best)\s+)*(waterfalls|volcanoes|mountains|canyons|monuments|landmarks|castles|ruins|deserts|islands|cities|places|sites|wonders)\b.*?\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], target: `famous ${m[1]}` })
+    }
+  ];
+
+  for (const item of multiLocationPatterns) {
+    const match = clean.match(item.regex);
+    if (match) {
+      const { subject, target } = item.getDetails(match);
+      const cleanedSubject = toCanonicalTitleCase(subject.replace(/^(?:the|a|an)\s+/i, '').replace(/[?.,!]+$/, '').trim());
+
+      console.log(`[QUERY INTENT]\nquery="${clean.toLowerCase()}"\nintent=MULTI_LOCATION_DISCOVERY\nsubject="${cleanedSubject}"\ntarget="${target}"`);
+
+      return {
+        intent: 'MULTI_LOCATION_DISCOVERY',
+        subject: cleanedSubject,
+        discoveryTarget: target,
+        entity: cleanedSubject,
+        resolutionMode: 'MULTI_LOCATION_EXPLORATION',
+        queryShape: 'MULTI_LOCATION'
+      };
+    }
+  }
+
+  // 2. Check for Route / Expansion patterns
+  const routePatterns = [
+    /\b(?:follow|trace|journey|path|route|expansion|migration|trade network|voyage|travels?|sail(?:ed|ing)?)\b/i,
+    /\bfrom\b.*?\bto\b/i
+  ];
+  for (const pattern of routePatterns) {
+    if (pattern.test(clean)) {
+      return {
+        intent: 'route' as any,
+        entity: clean,
+        resolutionMode: 'MULTI_LOCATION_EXPLORATION',
+        queryShape: 'HISTORICAL_ROUTE'
+      };
+    }
+  }
+
+  // 3. Check for Discovery / Recovery patterns
+  const discoveryPatterns: { regex: RegExp; getDetails: (match: RegExpMatchArray) => { subject: string; event: string; relationship: string } }[] = [
+    {
+      regex: /^\s*where\s+(?:was|were)\s+(?:the\s+)?(.+?)\s+(found|discovered|recovered|unearthed|excavated|located)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: m[2], relationship: 'discovery_site' })
+    },
+    {
+      regex: /^\s*where\s+did\s+(?:they|researchers|archaeologists)?\s*(find|discover|recover|unearth|excavate)\s+(?:the\s+)?(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[2], event: m[1], relationship: 'discovery_site' })
+    },
+    {
+      regex: /^\s*discovery\s+site\s+of\s+(?:the\s+)?(.+?)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: 'discovery', relationship: 'discovery_site' })
+    },
+    {
+      regex: /^\s*location\s+where\s+(?:the\s+)?(.+?)\s+was\s+(found|discovered|recovered|unearthed)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: m[2], relationship: 'discovery_site' })
+    }
+  ];
+
+  for (const item of discoveryPatterns) {
+    const match = clean.match(item.regex);
+    if (match) {
+      const { subject, event, relationship } = item.getDetails(match);
+      let entityStr = subject.replace(/[?.,!]+$/, "").trim();
+      entityStr = entityStr.replace(/^(?:the\s+)?(?:wreck|wreckage|remains|ruins|site)\s+of\s+(?:the\s+)?/i, "");
+      const cleanedEntity = entityStr.replace(/^the\s+/i, "");
+      const kbEntry = getHistoricalEntityKnowledge(cleanedEntity) || getHistoricalEntityKnowledge(entityStr);
+      const finalSubject = (kbEntry?.entity && kbEntry.entityType === 'shipwreck')
+        ? kbEntry.entity
+        : toCanonicalTitleCase(cleanedEntity || entityStr);
+      return {
+        intent: 'DISCOVERY_OBJECT_LOCATION',
+        entity: finalSubject,
+        subject: finalSubject,
+        event,
+        requestedRelationship: relationship,
+        resolutionMode: 'SINGLE_POINT',
+        queryShape: 'DISCOVERY_OBJECT_LOCATION'
+      };
+    }
+  }
+
+  // 4. Check for Historical Event patterns (Location of Event -> SINGLE_POINT)
+  const historicalPatterns: { regex: RegExp; getDetails: (match: RegExpMatchArray) => { subject: string; event?: string; relationship?: string } }[] = [
+    {
+      regex: /^\s*where\s+did\s+(.+?)\s+take\s+place\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: 'event', relationship: 'event_site' })
+    },
+    {
+      regex: /^\s*where\s+did\s+(.+?)\s+happen\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: 'event', relationship: 'event_site' })
+    },
+    {
+      regex: /^\s*where\s+did\s+(.+?)\s+occur\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: 'event', relationship: 'event_site' })
+    },
+    {
+      regex: /^\s*when\s+and\s+where\s+did\s+(.+?)\s+take\s+place\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: 'event', relationship: 'event_site' })
+    },
+    {
+      regex: /^\s*where\s+was\s+(?:the\s+)?(.+?(?:battle|massacre|signing|treaty|launch|landing|bombing|disaster|explosion|siege|revolution|protest|riot|summit))\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: 'event', relationship: 'event_site' })
+    },
+    {
+      regex: /^\s*where\s+was\s+(?:the\s+)?(.+?)\s+(signed|fought|launched|tested|built|founded|assassinated|executed|shot|murdered)\s*\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: m[2], relationship: `${m[2]}_site` })
+    },
+    {
+      regex: /^\s*where\s+did\s+(?:the\s+)?(.+?)\s+(launch|land|touch\s+down|sink|sank|crash|crashed|disappear|disappeared|surrender|surrendered|sign|fight|battle|die|died|originate|erupt|erupted)\b.*?\??\s*$/i,
+      getDetails: (m) => ({ subject: m[1], event: m[2], relationship: `${m[2]}_site` })
+    },
+  ];
+
+  for (const item of historicalPatterns) {
+    const match = clean.match(item.regex);
+    if (match) {
+      const { subject, event, relationship } = item.getDetails(match);
+      const entityStr = subject.replace(/[?.,!]+$/, "").trim();
+      const cleanedEntity = entityStr.replace(/^the\s+/i, "");
+      const finalSubject = toCanonicalTitleCase(cleanedEntity || entityStr);
+
+      const scopeInfo = determineHistoricalEventScope(finalSubject, clean);
+      const resolutionMode = scopeInfo.singleLocation ? 'SINGLE_POINT' : 'HISTORICAL_NON_POINT';
+
+      console.log(`Intent:\nHISTORICAL_EVENT\nRouting decision:\n${resolutionMode}\nsubject="${finalSubject}"\nevent="${event}"\ngeographicScope="${scopeInfo.scope}"`);
+
+      return {
+        intent: 'HISTORICAL_EVENT',
+        entity: finalSubject,
+        subject: finalSubject,
+        event,
+        requestedRelationship: relationship,
+        resolutionMode: resolutionMode as any,
+        queryShape: 'HISTORICAL_EVENT',
+        geographicScope: scopeInfo.scope as any,
+        singleLocation: scopeInfo.singleLocation
+      };
+    }
+  }
+
+  // 5. Check for Exploratory / mixed knowledge patterns
+  const exploratoryPatterns = [
+    /\bnear\b/i,
+    /\baround\b/i,
+    /\bshipwrecks\b/i,
+    /\bplaces\s+in\b/i,
+    /\bplaces\s+related\s+to\b/i,
+    /\bhistory\s+of\b/i,
+    /\bimportant\s+places\b/i,
+    /\bevents\s+of\b/i,
+    /\bbattles\s+of\b/i,
+  ];
+
+  for (const pattern of exploratoryPatterns) {
+    if (pattern.test(clean)) {
+      return {
+        intent: 'EXPLORATORY',
+        entity: clean,
+        resolutionMode: 'MULTI_LOCATION_EXPLORATION',
+        queryShape: 'EXPLORATORY'
+      };
+    }
+  }
+
+  // 6. Check for Natural language location queries (Single Point)
+  const nlPatterns = [
+    // "where is / are / was / were (located / found / situated) X" or "where is / are / was / were X located / found / situated"
+    /^\s*where\s+(?:is|are|was|were)\s+(?:located\s+|found\s+|situated\s+)?(.+?)(?:\s+located|\s+found|\s+situated)?\s*\??\s*$/i,
+    // "what is / are / was / were X"
+    /^\s*what\s+(?:is|are|was|were)\s+(.+?)\s*\??\s*$/i,
+    // "tell me about / tell me more about X"
+    /^\s*tell\s+me\s+(?:about|more\s+about)\s+(.+?)\s*\??\s*$/i,
+    // "show me / can you show me X"
+    /^\s*(?:can\s+you\s+)?show\s+me\s+(.+?)\s*\??\s*$/i,
+    // "find / can you find X"
+    /^\s*(?:can\s+you\s+)?find\s+(.+?)\s*\??\s*$/i,
+    // "locate / can you locate X"
+    /^\s*(?:can\s+you\s+)?locate\s+(.+?)\s*\??\s*$/i,
+    // "go to / take me to / bring me to / guide me to / navigate to X"
+    /^\s*(?:take\s+me\s+to|bring\s+me\s+to|guide\s+me\s+to|navigate\s+to|go\s+to)\s+(.+?)\s*\??\s*$/i,
+    // "how to get to X"
+    /^\s*how\s+to\s+get\s+to\s+(.+?)\s*\??\s*$/i,
+    // "search for X"
+    /^\s*search\s+for\s+(.+?)\s*\??\s*$/i,
+    // "location of / places of X"
+    /^\s*(?:location\s+of|places?\s+of)\s+(.+?)\s*\??\s*$/i,
+    // "info on / information about / information on / details about / details on X"
+    /^\s*(?:info(?:rmation)?|details)\s+(?:on|about|for|regarding)\s+(.+?)\s*\??\s*$/i,
+  ];
+
+  for (const pattern of nlPatterns) {
+    const match = clean.match(pattern);
+    if (match && match[1]) {
+      let entityStr = match[1].replace(/[?.,!;:]+$/, "").trim();
+      entityStr = entityStr.replace(/\s+(?:located|found|situated)$/i, "").trim();
+      const cleanedEntity = entityStr.replace(/^(?:the|a|an)\s+/i, "").replace(/[?.,!;:]+$/, "").trim();
+      return {
+        intent: 'NATURAL_LOCATION',
+        entity: cleanedEntity || entityStr,
+        queryShape: 'NATURAL_LANGUAGE_QUESTION'
+      };
+    }
+  }
+
+  // 7. Fallback to Direct lookup
+  return { intent: 'DIRECT', entity: clean, queryShape: 'DIRECT' };
+};
 
 

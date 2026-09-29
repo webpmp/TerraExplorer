@@ -178,38 +178,7 @@ export const repairJson = (text: string): { repaired: string, repairs: string[] 
         repairs.push("Fixed single-quoted property names");
     }
     
-    // Unescaped quotes and newlines inside string values (heuristic for object properties)
-    const stringValueRegex = /:\s*"([\s\S]*?)"\s*(?=[,}])/g;
-    repaired = repaired.replace(stringValueRegex, (match, inner) => {
-        let fixed = inner;
-        if (fixed.includes('"')) {
-            fixed = fixed.replace(/\\?"/g, '\\"');
-            repairs.push("Fixed unescaped quotes in string values");
-        }
-        if (fixed.includes('\n')) {
-            fixed = fixed.replace(/\n/g, '\\n');
-            repairs.push("Fixed newlines in string values");
-        }
-        return `: "${fixed}"`;
-    });
-
-    // 3. Repair unquoted keys
-    const unquotedRegex = /([{,]\s*)([a-zA-Z0-9_]+)\s*:/g;
-    const repairedKeys: string[] = [];
-    if (unquotedRegex.test(repaired)) {
-        unquotedRegex.lastIndex = 0;
-        repaired = repaired.replace(unquotedRegex, (match, p1, p2) => {
-            repairedKeys.push(p2);
-            return `${p1}"${p2}":`;
-        });
-        
-        if (repairedKeys.length > 0) {
-            repairs.push(`Fixed unquoted property names: ${repairedKeys.join(', ')}`);
-            console.log(`\n===== JSON KEY REPAIR =====\nUnquoted keys repaired:\n${repairedKeys.join('\n')}\n===========================`);
-        }
-    }
-
-    // 3.5 Fix doubled opening or closing delimiters (e.g., `[{\n  {\n` or `{{\n` or `]\n  ]\n}`)
+    // 2.5 Fix doubled opening or closing delimiters (e.g., `[{\n  {\n` or `{{\n` or `]\n  ]\n}`)
     const doubledOpenBraceRegex = /([\[,]\s*)\{\s*\{/g;
     if (doubledOpenBraceRegex.test(repaired)) {
         repaired = repaired.replace(doubledOpenBraceRegex, '$1{');
@@ -226,6 +195,22 @@ export const repairJson = (text: string): { repaired: string, repairs: string[] 
     if (doubledCloseBracketRegex.test(repaired)) {
         repaired = repaired.replace(doubledCloseBracketRegex, ']');
         repairs.push("Fixed doubled close brackets");
+    }
+
+    // 3. Repair unquoted keys
+    const unquotedRegex = /([{,]\s*)([a-zA-Z0-9_]+)\s*:/g;
+    const repairedKeys: string[] = [];
+    if (unquotedRegex.test(repaired)) {
+        unquotedRegex.lastIndex = 0;
+        repaired = repaired.replace(unquotedRegex, (match, p1, p2) => {
+            repairedKeys.push(p2);
+            return `${p1}"${p2}":`;
+        });
+        
+        if (repairedKeys.length > 0) {
+            repairs.push(`Fixed unquoted property names: ${repairedKeys.join(', ')}`);
+            console.log(`\n===== JSON KEY REPAIR =====\nUnquoted keys repaired:\n${repairedKeys.join('\n')}\n===========================`);
+        }
     }
 
     // 4. Remove trailing commas
@@ -496,42 +481,62 @@ export const parseAndExtract = (text: string): ParseResult => {
             };
         } catch {
             // Strategy 2: Custom syntax and truncation repair
-            textToRepair = repairTruncatedJson(textToRepair);
-            const { repaired, repairs: syntaxRepairs } = repairJson(textToRepair);
-            try {
-                let value = JSON.parse(repaired);
-                ParserMetrics.recovered++;
-                ParserMetrics.success++;
-                console.log(`[JSON Parser Trace] RAW JSON ↓ EXTRACT SUCCESS ↓ PARSE FAILED ↓ REPAIR ATTEMPTED ↓ REPAIR SUCCESS ↓ PARSE SUCCESS`);
+            let repairedResult = repairJson(repairTruncatedJson(textToRepair));
+            let parsedVal: any = null;
+            let finalRepaired = repairedResult.repaired;
+            let finalRepairs = repairedResult.repairs;
 
-                // Unwrap single key container if applicable
-                if (value && typeof value === 'object' && !Array.isArray(value)) {
-                    const k = Object.keys(value);
-                    if (k.length === 1 && typeof value[k[0]] === 'object' && value[k[0]] !== null && !Array.isArray(value[k[0]])) {
-                        const innerScore = scoreMetadataObject(value[k[0]]);
-                        if (innerScore > 0) {
-                            value = value[k[0]];
-                        }
+            try {
+                parsedVal = JSON.parse(finalRepaired);
+            } catch {
+                // If textToRepair failed (e.g. if extract appended extra delimiters), try repairing sanitized text directly
+                try {
+                    const fallbackRepaired = repairJson(sanitized);
+                    parsedVal = JSON.parse(fallbackRepaired.repaired);
+                    finalRepaired = fallbackRepaired.repaired;
+                    finalRepairs = fallbackRepaired.repairs;
+                } catch {
+                    try {
+                        const fallbackRepaired2 = repairJson(repairTruncatedJson(sanitized));
+                        parsedVal = JSON.parse(fallbackRepaired2.repaired);
+                        finalRepaired = fallbackRepaired2.repaired;
+                        finalRepairs = fallbackRepaired2.repairs;
+                    } catch (err: any) {
+                        ParserMetrics.invalid_json++;
+                        console.log(`[JSON Parser Trace] RAW JSON ↓ EXTRACT SUCCESS ↓ PARSE FAILED ↓ REPAIR ATTEMPTED ↓ REPAIR FAILED`);
+                        console.log(`[JSON Parser Trace] RAW JSON ↓ REPAIR FAILED ↓ STRICT RETRY TRIGGERED`);
+                        return {
+                            success: false,
+                            reason: "INVALID_JSON",
+                            extracted: finalRepaired,
+                            error: err?.message || String(err)
+                        };
                     }
                 }
-
-                return {
-                    success: true,
-                    value,
-                    extracted: repaired,
-                    repairs: [...extractRepairs, ...syntaxRepairs, "Repaired JSON parsing error"]
-                };
-            } catch (repairError: any) {
-                ParserMetrics.invalid_json++;
-                console.log(`[JSON Parser Trace] RAW JSON ↓ EXTRACT SUCCESS ↓ PARSE FAILED ↓ REPAIR ATTEMPTED ↓ REPAIR FAILED`);
-                console.log(`[JSON Parser Trace] RAW JSON ↓ REPAIR FAILED ↓ STRICT RETRY TRIGGERED`);
-                return {
-                    success: false,
-                    reason: "INVALID_JSON",
-                    extracted: repaired,
-                    error: repairError?.message || String(repairError)
-                };
             }
+
+            let value = parsedVal;
+            ParserMetrics.recovered++;
+            ParserMetrics.success++;
+            console.log(`[JSON Parser Trace] RAW JSON ↓ EXTRACT SUCCESS ↓ PARSE FAILED ↓ REPAIR ATTEMPTED ↓ REPAIR SUCCESS ↓ PARSE SUCCESS`);
+
+            // Unwrap single key container if applicable
+            if (value && typeof value === 'object' && !Array.isArray(value)) {
+                const k = Object.keys(value);
+                if (k.length === 1 && typeof value[k[0]] === 'object' && value[k[0]] !== null && !Array.isArray(value[k[0]])) {
+                    const innerScore = scoreMetadataObject(value[k[0]]);
+                    if (innerScore > 0) {
+                        value = value[k[0]];
+                    }
+                }
+            }
+
+            return {
+                success: true,
+                value,
+                extracted: finalRepaired,
+                repairs: [...extractRepairs, ...finalRepairs, "Repaired JSON parsing error"]
+            };
         }
     }
 };

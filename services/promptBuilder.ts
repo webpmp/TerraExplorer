@@ -4,7 +4,7 @@ export function getDiscoveryPrompt(entityType?: string, entityName?: string, dis
 
 Before generating content, determine what type of entity the marker represents.
 Supported entity types:
-city, town, village, county, administrative_region, national_park, mountain, volcano, river, lake, waterfall, desert, island, museum, university, castle, historical_site, monument, bridge, airport, infrastructure, natural_feature, landmark.
+city, town, village, county, administrative_region, national_park, mountain, volcano, river, lake, waterfall, desert, island, museum, university, castle, historical_site, monument, bridge, airport, infrastructure, natural_feature, landmark, shipwreck, battle, expedition, person.
 
 The entity type controls what information should be generated. Never treat every marker as a generic "Point of Interest."
 
@@ -23,8 +23,8 @@ The location context belongs in the description only when relevant.
 # 2. OVERVIEW GENERATION RULES & SEMANTIC ANCHOR INVARIANT
 
 The Overview is not a generic location description.
-The Overview must answer: "What is this place and why should someone care?"
-Generate 3-5 sentences.
+The Overview must answer: "What is this place/subject and why should someone care?"
+Establish the subject and primary narrative in 3-5 sentences (1-2 coherent paragraphs).
 
 CRITICAL INVARIANT - SEMANTIC ANCHOR FOR EVENT QUERIES:
 When the query or context relates to a specific historical event (e.g. "Where did the launch of Sputnik take place?"), that specific event MUST remain the semantic anchor of the overview and narrative.
@@ -73,9 +73,21 @@ Prioritize: engineering achievement, historical events, design significance, rec
 
 ---
 
-# 4. NOTABLE FACTS REQUIREMENTS: FACTS MUST EXPLAIN WHY THEY MATTER
+# 4. NOTABLE FACTS REQUIREMENTS: FACTS MUST EXPLAIN WHY THEY MATTER (PROGRESSIVE, ADDITIVE INFORMATION ENRICHMENT)
 
-The Notable Facts section must provide genuine educational value, NOT generic category or topic labels.
+CORE PRINCIPLE: PROGRESSIVE PRESENTATION OF INFORMATION
+Treat the InfoPanel as a progressive presentation of information:
+- Description = Establish the subject and primary narrative (Answers: "What is this and why is it important?").
+- Notable Facts = Deepen understanding with additional dimensions not already communicated (Answers: "What else would help me understand this subject that I have not already been told?").
+- Notable Facts must NEVER function as a summary, restatement, alternate wording, or bulleted rephrasing of the Description or other visible InfoPanel sections (subtitle, category, climate, etc.).
+
+AVOID REPETITION AT THE FACTUAL LEVEL:
+Before generating Notable Facts, identify the substantive facts already presented in the Description.
+A Notable Fact is considered repetitive if it communicates the same underlying information, even if it uses different wording.
+Example of Forbidden Repetition:
+- Description: "The expedition reached the South Pole in January 1912."
+- Forbidden Notable Fact: "The explorers arrived at the South Pole during January 1912." (Semantic duplicate - rejected).
+- Preferred Additive Fact: "Pony and Motor Sledge Logistics: The expedition initially experimented with motor sledges and Manchurian ponies to haul tons of supplies across the Ross Ice Shelf."
 
 DO NOT output empty headings or standalone topic labels like:
 - "Geological Formation"
@@ -87,26 +99,51 @@ DO NOT output empty headings or standalone topic labels like:
 - "Cultural Significance"
 - "Archaeological Significance"
 
+WHAT NOTABLE FACTS SHOULD DO - EXPLORE ADDITIVE DIMENSIONS:
+When generating Notable Facts, introduce additional dimensions of the subject that have NOT yet been presented:
+1. Associated People: When meaningful individuals are associated with the subject, include them. If the Description already introduced the primary figure, look for another meaningful individual (e.g., secondary commander, engineer, navigator, merchant, archaeologist, scientist, or key participant) with specific actions or contributions. Do not repeat the same person.
+2. Discovery, Excavation, & Archaeology: How the site/wreck/artifact was found or excavated, key artifacts recovered, salvage details, or physical remains.
+3. Engineering, Construction, & Scale: Specific dimensions, materials, architectural techniques, numbers, or logistical milestones.
+4. Subsequent Developments & Consequences: Events that occurred before or after the primary event, legal precedents, long-term impact, or changes over time.
+5. Scientific, Cultural, Geographic, or Economic Context: Distinct ecological/geological phenomena, trade networks, indigenous relationships, or cultural legacy.
+6. Records, Firsts, & Unusual Characteristics: Documented milestones, distinctive anomalies, or lesser-known historical details.
+7. Preservation & Heritage: How the subject is documented, conserved, or memorialized today.
+
+SUBJECT-AWARE GENERATION (ADAPT AUTOMATICALLY):
+- Historical Event: People involved, logistical preparation, consequences, subsequent treaties/rulings, connections to other events.
+- Location: Historical occupants, development over time, unusual characteristics, cultural or economic significance.
+- Shipwreck: Associated individuals, discovery/salvage operations, recovered cargo/artifacts, archaeological evidence, legal rulings.
+- Natural Feature: Geological formation details, scientific discoveries, ecological significance, exploration history.
+- Building / Structure: Architect, construction techniques/materials, notable occupants, modifications, preservation.
+- Person: Lesser-known accomplishments, relationships, historical context, enduring influence.
+
+CHOOSE DEPTH OVER REPETITION:
+- A smaller number of genuinely useful facts is preferable to a larger number of repetitive facts.
+- Typically provide 2 to 4 substantive, novel facts. If only 2 meaningful additional facts exist, provide 2.
+- Never invent facts or repeat the Description simply to populate a fixed count.
+
 Every notable fact MUST contain:
-1. "title": A concise, descriptive heading that identifies the specific topic or feature.
-2. "summary": A 1–3 sentence substantive explanation providing concrete facts, context, scale, measurements, events, discoveries, or history, and explicitly explaining WHY this fact is significant, distinctive, or interesting (answers "So what?").
+1. "title": A concise, descriptive heading that identifies the specific topic, person, or feature.
+2. "description": A 1–3 sentence substantive explanation providing concrete facts, context, scale, measurements, events, discoveries, or history, and explicitly explaining WHY this fact is significant, distinctive, or interesting (answers "So what?").
 
 Concrete Examples of Desired Facts:
 - title: "Strategic Maritime Chokepoint"
-  summary: "The Strait of Hormuz is a narrow marine passage between Iran and the Arabian Peninsula connecting the Persian Gulf with the Gulf of Oman. As the only sea passage from the Persian Gulf to the open ocean, roughly one-fifth of global petroleum consumption passes through this constrained waterway, making it a critical global maritime chokepoint."
+  description: "The Strait of Hormuz is a narrow marine passage between Iran and the Arabian Peninsula connecting the Persian Gulf with the Gulf of Oman. As the only sea passage from the Persian Gulf to the open ocean, roughly one-fifth of global petroleum consumption passes through this constrained waterway, making it a critical global maritime chokepoint."
 - title: "Recurring Geopolitical Flashpoint"
-  summary: "Because all maritime traffic entering or leaving the oil-rich Persian Gulf must traverse its narrow shipping lanes, control and security of the strait have been a persistent source of international military and diplomatic tension for decades."
+  description: "Because all maritime traffic entering or leaving the oil-rich Persian Gulf must traverse its narrow shipping lanes, control and security of the strait have been a persistent source of international military and diplomatic tension for decades."
 - title: "Seasonal Wetland Hydrology"
-  summary: "Paynes Prairie is a large freshwater wetland basin whose water levels fluctuate substantially with seasonal rainfall, alternating between dry savannah and a sprawling lake. These changing hydrology conditions support hundreds of bird species, wild horses, bison, and alligators."
+  description: "Paynes Prairie is a large freshwater wetland basin whose water levels fluctuate substantially with seasonal rainfall, alternating between dry savannah and a sprawling lake. These changing hydrology conditions support hundreds of bird species, wild horses, bison, and alligators."
 
-Rules:
-- Heading identifies the topic; body explains it with specific, educational detail.
-- Prefer 3 to 5 genuinely informative, educational facts based on verifiable information.
-- If only 2 or 3 substantive facts can be supported, return fewer facts. Do NOT output generic filler or empty categories just to reach a target count.
-- Do not invent fabricated statistics or unverified claims.
+CONTENT QUALITY TEST (CONCEPTUAL VERIFICATION):
+Before including any Notable Fact, verify:
+1. Has this information already been stated in Description or context? (If yes -> REJECT)
+2. If wording changed, is underlying fact still the same? (If yes -> REJECT)
+3. Does this fact add a new dimension of understanding? (If no -> REJECT)
+4. Is it specifically relevant and factually supportable? (If no -> REJECT)
+5. Would a user learn something new from it? (If no -> REJECT)
 
 Fallback: If no meaningful facts exist, return:
-[{"title": "Documentation", "summary": "No widely documented historical or cultural facts were found."}]
+[{"title": "Documentation", "description": "No widely documented historical or cultural facts were found."}]
 
 ---
 
@@ -144,11 +181,11 @@ ${discoverySignals && discoverySignals.length > 0 ? `Incorporate these discovery
 Required output:
 \`\`\`json
 {
-  "description": "A documentary-style overview.",
+  "description": "A documentary-style overview establishing the primary narrative.",
   "notable": [
     {
-      "title": "",
-      "description": ""
+      "title": "Specific Descriptive Heading",
+      "description": "Additive detail expanding upon the subject without repeating the overview."
     }
   ]
 }

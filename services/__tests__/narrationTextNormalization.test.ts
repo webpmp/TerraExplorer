@@ -31,11 +31,20 @@ describe('Narration Text Normalization Utility', () => {
       expect(normalizeNarrationText(input)).toBe(expected);
     });
 
-    it('leaves unrelated Roman numerals unchanged', () => {
-      expect(normalizeNarrationText('King Henry VIII reigned over England.')).toBe('King Henry VIII reigned over England.');
+    it('normalizes regnal and historical person Roman numerals', () => {
+      expect(normalizeNarrationText('Darius III')).toBe('Darius the Third');
+      expect(normalizeNarrationText('Alexander III')).toBe('Alexander the Third');
+      expect(normalizeNarrationText('King Henry VIII reigned over England.')).toBe('King Henry the Eighth reigned over England.');
+      expect(normalizeNarrationText('Louis XIV built Versailles.')).toBe('Louis the Fourteenth built Versailles.');
+      expect(normalizeNarrationText('Charles V was Holy Roman Emperor.')).toBe('Charles the Fifth was Holy Roman Emperor.');
+      expect(normalizeNarrationText('Pope John Paul II visited in 1979.')).toBe('Pope John Paul the Second visited in nineteen seventy-nine.');
+      expect(normalizeNarrationText("Darius III's army was defeated at Issus.")).toBe("Darius the Third's army was defeated at Issus.");
+    });
+
+    it('leaves unrelated non-person Roman numerals unchanged', () => {
       expect(normalizeNarrationText('Read Chapter I and Section II before continuing.')).toBe('Read Chapter I and Section II before continuing.');
-      expect(normalizeNarrationText('Pope John Paul II visited in 1979.')).toBe('Pope John Paul II visited in nineteen seventy-nine.');
-      expect(normalizeNarrationText('Louis XIV built Versailles.')).toBe('Louis XIV built Versailles.');
+      expect(normalizeNarrationText('Refer to Part III and Volume IV.')).toBe('Refer to Part III and Volume IV.');
+      expect(normalizeNarrationText('Phase I and Stage II of the project.')).toBe('Phase I and Stage II of the project.');
     });
   });
 

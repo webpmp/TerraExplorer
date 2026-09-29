@@ -154,6 +154,86 @@ export function formatYearToSpeech(yearInput: string | number): string {
   return String(year);
 }
 
+const ROMAN_TO_ORDINAL: Record<string, string> = {
+  I: 'the First',
+  II: 'the Second',
+  III: 'the Third',
+  IV: 'the Fourth',
+  V: 'the Fifth',
+  VI: 'the Sixth',
+  VII: 'the Seventh',
+  VIII: 'the Eighth',
+  IX: 'the Ninth',
+  X: 'the Tenth',
+  XI: 'the Eleventh',
+  XII: 'the Twelfth',
+  XIII: 'the Thirteenth',
+  XIV: 'the Fourteenth',
+  XV: 'the Fifteenth',
+  XVI: 'the Sixteenth',
+  XVII: 'the Seventeenth',
+  XVIII: 'the Eighteenth',
+  XIX: 'the Nineteenth',
+  XX: 'the Twentieth',
+  XXI: 'the Twenty-first',
+  XXII: 'the Twenty-second',
+  XXIII: 'the Twenty-third',
+  XXIV: 'the Twenty-fourth',
+  XXV: 'the Twenty-fifth',
+  XXVI: 'the Twenty-sixth',
+  XXVII: 'the Twenty-seventh',
+  XXVIII: 'the Twenty-eighth',
+  XXIX: 'the Twenty-ninth',
+  XXX: 'the Thirtieth'
+};
+
+const NON_REGNAL_PREDECESSORS = new Set([
+  'part', 'chapter', 'section', 'volume', 'vol', 'act', 'scene', 'phase', 'stage',
+  'table', 'appendix', 'grade', 'class', 'category', 'type', 'tier', 'mark', 'group',
+  'route', 'title', 'article', 'item', 'step', 'level', 'division', 'district',
+  'circuit', 'zone', 'terminal', 'gate', 'runway', 'pier', 'track', 'platform',
+  'floor', 'deck', 'building', 'room', 'row', 'column', 'figure', 'fig', 'plate',
+  'model', 'series', 'version', 'generation', 'gen', 'apollo', 'voyager', 'super',
+  'bowl', 'curator', 'exhibit', 'station', 'sector', 'block'
+]);
+
+/**
+ * Normalizes regnal / historical person name Roman numerals:
+ * - "Darius III" -> "Darius the Third"
+ * - "Alexander III" -> "Alexander the Third"
+ * - "Louis XIV" -> "Louis the Fourteenth"
+ * - "Henry VIII" -> "Henry the Eighth"
+ * - "Charles V" -> "Charles the Fifth"
+ * - "Darius III's" -> "Darius the Third's"
+ * 
+ * Context-aware: Leaves non-person Roman numeral structures (e.g. "Chapter I", "Section II") unchanged.
+ */
+export function normalizeRegnalRomanNumerals(text: string): string {
+  if (!text || typeof text !== 'string') return '';
+
+  const regnalPattern = /\b([A-Z][a-zA-Z]*(?:[\s'-]+[A-Z][a-zA-Z]*)*)\s+(I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX|XXI|XXII|XXIII|XXIV|XXV|XXVI|XXVII|XXVIII|XXIX|XXX)\b('s)?/g;
+
+  return text.replace(regnalPattern, (match, predecessor, numeral, possessive) => {
+    const words = predecessor.trim().split(/\s+/);
+    const lastWord = words[words.length - 1].toLowerCase().replace(/[^a-z]/g, '');
+
+    if (NON_REGNAL_PREDECESSORS.has(lastWord)) {
+      return match;
+    }
+
+    const ordinal = ROMAN_TO_ORDINAL[numeral];
+    if (!ordinal) {
+      return match;
+    }
+
+    const isAllUpper = predecessor === predecessor.toUpperCase();
+    const formattedOrdinal = isAllUpper ? ordinal.toUpperCase() : ordinal;
+    const poss = possessive ? "'s" : '';
+
+    return `${predecessor} ${formattedOrdinal}${poss}`;
+  });
+}
+
 /**
  * Normalizes specific historical phrases:
  * - "World War I" -> "World War One"
@@ -313,6 +393,7 @@ export function normalizeNarrationText(text: string): string {
   if (!text || typeof text !== 'string') return '';
 
   let normalized = normalizeWorldWar(text);
+  normalized = normalizeRegnalRomanNumerals(normalized);
   normalized = normalizeDates(normalized);
   normalized = normalizeYearRanges(normalized);
   normalized = normalizeHistoricalYears(normalized);

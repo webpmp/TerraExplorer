@@ -995,7 +995,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
     // 0. Waypoints (High priority)
     if (routeWaypoints && routeWaypoints.length > 0) {
         routeWaypoints.forEach((wp, idx) => {
-             const displayNum = typeof wp.sequence === 'number' ? wp.sequence : idx + 1;
+             const displayNum = idx + 1;
              console.log(`[WAYPOINT DISPLAY IDENTITY]\nid=${wp.id}\nname=${wp.name}\nrouteGroupId=${wp.routeGroupId || 'none'}\nsequence=${wp.sequence}\nglobalSequence=${wp.globalSequence}\narrayIndex=${idx}\ndisplayNumber=${displayNum}`);
 
              const wpThemeColor = getThemeMarkerColors(skin, { isWaypoint: true, routeGroupId: wp.routeGroupId });
@@ -1012,7 +1012,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
                 routeGroupId: wp.routeGroupId,
                 isWaypoint: true,
                 isMultiLocation,
-                index: typeof wp.sequence === 'number' ? wp.sequence - 1 : idx,
+                index: idx,
                 role: wp.role
              });
         });

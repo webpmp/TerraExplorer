@@ -3,14 +3,14 @@ import { generateContentWithRetry, modelName } from './geminiService';
 import { PIPELINE_DEBUG, logWaypointSnapshot, logFieldDiff, logHierarchy, logPipelineSummary, PipelineSummary } from '../utils/pipelineDebug';
 import { parseAndExtract } from '../utils/jsonParser';
 import { validateEarthGeography } from './celestialCapabilities';
-import { isRouteSequential, groupWaypointsByRoute, logHistoricalRouteStructure, validateHistoricalRouteData } from '../utils/routeSequenceUtils';
+import { isRouteSequential, groupWaypointsByRoute, logHistoricalRouteStructure, validateHistoricalRouteData, sortWaypointsChronologically } from '../utils/routeSequenceUtils';
 import { validateEntityAlias } from './geographic/entityIdentityValidator';
 import { getHistoricalEntityKnowledge, validateHistoricalCoordinate } from './geographic/historicalCoordinateValidator';
 import { resolveGeographicEntity } from './geographic/geographicResolver';
 import { calculateDistanceKm } from './geographic/geographicDistance';
 import { validateCandidateAgainstRegistry, validateDocumentedSegment, getAuthoritativeEventModel, resolveCanonicalRouteGroup, buildCanonicalEventTopology, findAuthoritativeAnchorAcrossEvent, isAnchorMatch } from './geographic/historicalRouteRegistry';
 import { validateHistoricalWaypointContent } from './historicalContentValidation';
-import { normalizeSemanticEntityTitle } from './queryNormalizer';
+import { normalizeSemanticEntityTitle, routeIntentAndExtractEntity } from './queryNormalizer';
 import { isItineraryOrActivityPhrase, unwrapPhysicalEntityName } from './entityValidation';
 import { resolveWaterAwareRoute, isMaritimeJourney } from './geographic/waterRoutingService';
 
@@ -170,6 +170,56 @@ export const runRoutePipeline = async (
 
   // Progressive emission tracker across Stage 1 streaming and Stage 3 reconciliation
   const progressivelyEmittedWaypoints = new Map<string, Waypoint>();
+  const queryMeta = typeof routeIntentAndExtractEntity === 'function'
+    ? routeIntentAndExtractEntity(text)
+    : ({ intent: intent || 'UNKNOWN', discoveryTarget: undefined, subject: undefined } as any);
+  const effectiveIntent = intent || queryMeta?.intent || (/\b(battle|siege|war|treaty|assassination|revolution|conflict|expedition|event)\b/i.test(text || '') ? 'HISTORICAL_EVENT' : undefined);
+
+  const validateDiscoveryTargetSemantics = (w: Waypoint): boolean => {
+    if (intent !== 'MULTI_LOCATION_DISCOVERY' && queryMeta?.intent !== 'MULTI_LOCATION_DISCOVERY') {
+      return true;
+    }
+    const discoveryTarget = queryMeta?.discoveryTarget;
+    if (!discoveryTarget) return true;
+    const targetLower = discoveryTarget.toLowerCase();
+
+    // 1. Battles validation
+    if (targetLower.includes('battle')) {
+      const nameLower = `${w.name} ${w.canonicalName || ''} ${(w.alternateNames || []).join(' ')}`.toLowerCase();
+      const textLower = `${w.description || ''} ${w.routeContext || ''} ${w.significance || ''} ${w.context || ''}`.toLowerCase();
+      
+      const hasBattleInName = /\b(battle|siege|assault|clash|engagement|skirmish|combat|field)\b/i.test(nameLower);
+      const histKnowledge = getHistoricalEntityKnowledge(w.canonicalName || w.name);
+      const isKnownBattleSite = histKnowledge?.entityType === 'battle_site' || histKnowledge?.entityType === 'siege_site';
+
+      // Disqualify if the entity is an administrative city, foundation, imperial capital, or region without battle evidence in its name or known battle site status
+      const isCityOrAdministrative = /\b(founded by|founded in|capital of|administrative center|ancient city|imperial capital|residence of|palace at|palace of|provincial capital)\b/i.test(textLower) && !hasBattleInName && !isKnownBattleSite;
+
+      const hasExplicitBattleInDescription = !isCityOrAdministrative && (
+        /\b(battle of|siege of|clash of|fought the battle|major engagement|military siege|decisive battle|historical battle|battle took place)\b/i.test(textLower) ||
+        (/\bfought\b/i.test(textLower) && /\b(victory|defeat|engagement|clash|enemy forces|opposing army)\b/i.test(textLower))
+      );
+
+      const isValidBattle = (hasBattleInName || hasExplicitBattleInDescription || isKnownBattleSite) && !isCityOrAdministrative;
+      if (!isValidBattle) {
+        console.log(`[Semantic Target Validation] REJECT "${w.name}": Fails target constraint "${discoveryTarget}" for subject "${queryMeta.subject || 'unknown'}"`);
+        return false;
+      }
+    }
+
+    // 2. Landing sites validation
+    if (targetLower.includes('landing')) {
+      const nameLower = `${w.name} ${w.canonicalName || ''}`.toLowerCase();
+      const textLower = `${w.description || ''} ${w.routeContext || ''} ${w.significance || ''}`.toLowerCase();
+      const hasLandingKeyword = /\b(landing|touchdown|splashed down|landed|base|site|crater|sea|ocean)\b/i.test(`${nameLower} ${textLower}`);
+      if (!hasLandingKeyword) {
+        console.log(`[Semantic Target Validation] REJECT "${w.name}": Fails target constraint "${discoveryTarget}"`);
+        return false;
+      }
+    }
+
+    return true;
+  };
 
   // Single candidate normalization helper for early streaming candidate validation
   const normalizeSingleCandidate = (item: any, i: number, defaultTitle?: string): Waypoint => {
@@ -297,14 +347,17 @@ export const runRoutePipeline = async (
         }
       }
     } else {
-      const queryName = w.canonicalName || w.name;
-      const resolved = await resolveGeographicEntity(queryName);
-      if (resolved && !('status' in resolved) && resolved.coordinates && isValidCoordinates(resolved.coordinates)) {
-        const distKm = calculateDistanceKm(w.lat, w.lng, resolved.coordinates.lat, resolved.coordinates.lng);
-        const shouldUpdate = isUrl || sourceTxt.length > 200 || distKm > 50 || (w.lat === 0 && w.lng === 0);
-        if (shouldUpdate && (distKm > 0.001 || (w.lat === 0 && w.lng === 0))) {
-          w.lat = resolved.coordinates.lat;
-          w.lng = resolved.coordinates.lng;
+      const isMissingOrZero = (w.lat === 0 && w.lng === 0) || !isValidCoordinates({ lat: w.lat, lng: w.lng });
+      if (isMissingOrZero || isUrl || (sourceTxt && sourceTxt.length > 200)) {
+        const queryName = w.canonicalName || w.name;
+        const resolved = await resolveGeographicEntity(queryName);
+        if (resolved && !('status' in resolved) && resolved.coordinates && isValidCoordinates(resolved.coordinates)) {
+          const distKm = calculateDistanceKm(w.lat, w.lng, resolved.coordinates.lat, resolved.coordinates.lng);
+          const shouldUpdate = isUrl || sourceTxt.length > 200 || distKm > 50 || isMissingOrZero;
+          if (shouldUpdate && (distKm > 0.001 || isMissingOrZero)) {
+            w.lat = resolved.coordinates.lat;
+            w.lng = resolved.coordinates.lng;
+          }
         }
       }
     }
@@ -340,6 +393,10 @@ export const runRoutePipeline = async (
         console.log(`[Progressive Candidate Validation] REJECT "${w.name}": Source evidence not found in pasted text`);
         return null;
       }
+    }
+
+    if (!validateDiscoveryTargetSemantics(w)) {
+      return null;
     }
 
     console.log(`[Progressive Candidate Validation] ACCEPT "${w.name}" (${w.lat.toFixed(4)}, ${w.lng.toFixed(4)})`);
@@ -607,30 +664,33 @@ export const runRoutePipeline = async (
     // General Geographic Entity Resolution & Deterministic Coordinate Repair (for non-historical-knowledge entities)
     let generalGeoResolution: any = null;
     if (!histKnowledge) {
-      const queryName = w.canonicalName || w.name;
-      const resolved = await resolveGeographicEntity(queryName);
-      if (resolved && !('status' in resolved) && resolved.coordinates && isValidCoordinates(resolved.coordinates)) {
-        generalGeoResolution = resolved;
-        const distKm = calculateDistanceKm(w.lat, w.lng, resolved.coordinates.lat, resolved.coordinates.lng);
-        // For pasted articles / source documents, or suspicious duplicate coordinates, or large mismatch (> 50km):
-        // ALWAYS update to trusted resolved coordinates!
-        const shouldUpdateCoordinates = sourceMode === 'pasted_article' || isUrl || isSuspiciousDuplicate || distKm > 50 || (w.lat === 0 && w.lng === 0);
-        if (shouldUpdateCoordinates && (distKm > 0.001 || (w.lat === 0 && w.lng === 0))) {
-          console.log(`[Route Validation] Coordinate updated: ${w.name} (${w.lat}, ${w.lng}) → (${resolved.coordinates.lat}, ${resolved.coordinates.lng}) [${distKm.toFixed(1)}km mismatch corrected via trusted resolver]`);
-          w.lat = resolved.coordinates.lat;
-          w.lng = resolved.coordinates.lng;
-          coordGeographicallyValid = true;
-          w.provenance!.push({
-            stage: 'deterministic_repair',
-            source: 'deterministic',
-            timestamp: new Date().toISOString(),
-            summary: `Repaired coordinates to trusted geographic location for ${resolved.name} (${w.lat.toFixed(4)}, ${w.lng.toFixed(4)})`
-          });
+      const isMissingOrZeroCoord = (w.lat === 0 && w.lng === 0) || !isValidCoordinates({ lat: w.lat, lng: w.lng });
+      if (sourceMode === 'pasted_article' || isUrl || isSuspiciousDuplicate || isMissingOrZeroCoord) {
+        const queryName = w.canonicalName || w.name;
+        const resolved = await resolveGeographicEntity(queryName);
+        if (resolved && !('status' in resolved) && resolved.coordinates && isValidCoordinates(resolved.coordinates)) {
+          generalGeoResolution = resolved;
+          const distKm = calculateDistanceKm(w.lat, w.lng, resolved.coordinates.lat, resolved.coordinates.lng);
+          // For pasted articles / source documents, or suspicious duplicate coordinates, or large mismatch (> 50km):
+          // ALWAYS update to trusted resolved coordinates!
+          const shouldUpdateCoordinates = sourceMode === 'pasted_article' || isUrl || isSuspiciousDuplicate || distKm > 50 || isMissingOrZeroCoord;
+          if (shouldUpdateCoordinates && (distKm > 0.001 || isMissingOrZeroCoord)) {
+            console.log(`[Route Validation] Coordinate updated: ${w.name} (${w.lat}, ${w.lng}) → (${resolved.coordinates.lat}, ${resolved.coordinates.lng}) [${distKm.toFixed(1)}km mismatch corrected via trusted resolver]`);
+            w.lat = resolved.coordinates.lat;
+            w.lng = resolved.coordinates.lng;
+            coordGeographicallyValid = true;
+            w.provenance!.push({
+              stage: 'deterministic_repair',
+              source: 'deterministic',
+              timestamp: new Date().toISOString(),
+              summary: `Repaired coordinates to trusted geographic location for ${resolved.name} (${w.lat.toFixed(4)}, ${w.lng.toFixed(4)})`
+            });
+          }
+        } else if (isSuspiciousDuplicate) {
+          console.warn(`[Route Validation] Physical entity "${w.name}" has suspicious duplicate coordinate (${w.lat}, ${w.lng}) that could not be independently resolved. Rejecting.`);
+          coordGeographicallyValid = false;
+          conflictDetails = `Unresolvable duplicate model coordinate (${w.lat}, ${w.lng})`;
         }
-      } else if (isSuspiciousDuplicate) {
-        console.warn(`[Route Validation] Physical entity "${w.name}" has suspicious duplicate coordinate (${w.lat}, ${w.lng}) that could not be independently resolved. Rejecting.`);
-        coordGeographicallyValid = false;
-        conflictDetails = `Unresolvable duplicate model coordinate (${w.lat}, ${w.lng})`;
       }
     }
 
@@ -693,6 +753,11 @@ Validation Decision: ${isCoordValid && isNameValid && entityIdentityValid && coo
 
     if (!celestialValidation.isValid) {
       console.warn(`[Pipeline ${pipelineId}] Celestial Body Validation failed for ${w.name}: Unsupported celestial body '${celestialValidation.celestialBody}'.`);
+      continue;
+    }
+
+    if (!validateDiscoveryTargetSemantics(w)) {
+      console.warn(`[Pipeline ${pipelineId}] Semantic Target Validation failed for ${w.name}: Does not match discovery target "${queryMeta.discoveryTarget}"`);
       continue;
     }
 
@@ -785,7 +850,7 @@ Validation Decision: ${isCoordValid && isNameValid && entityIdentityValid && coo
     let sourceEvidenceValid = true;
     if (!registryValidation.isRegisteredEvent && !histKnowledge) {
       const hasSourceEvidence = Boolean(w.sourceEvidence && typeof w.sourceEvidence === 'string' && w.sourceEvidence.trim().length > 0);
-      const isHistoricalEventIntent = intent === 'HISTORICAL_EVENT' || intent === 'MULTI_LOCATION_DISCOVERY';
+      const isHistoricalEventIntent = effectiveIntent === 'HISTORICAL_EVENT' || effectiveIntent === 'MULTI_LOCATION_DISCOVERY';
       if (!hasSourceEvidence && !isHistoricalEventIntent) {
         sourceEvidenceValid = false;
       }
@@ -867,7 +932,6 @@ Accepted Waypoints: ${validatedItems.length}
   let effectiveEvidenceMode = rawRouteEvidenceMode;
 
   const normalizedRawType = String(rawRouteType || '').trim().toLowerCase();
-  const effectiveIntent = intent || (/\b(battle|siege|war|treaty|assassination|revolution|conflict|expedition|event)\b/i.test(text || rawTitle || '') ? 'HISTORICAL_EVENT' : undefined);
 
   if (normalizedItems.length === 1) {
     if (
@@ -1289,8 +1353,9 @@ Action: CANNOT_NORMALIZE`);
   // Stage 5: LLM Audit
   console.log(`[Pipeline ${pipelineId}] Stage 5: LLM Audit`);
   const isAuthoritativeEvent = Boolean(getAuthoritativeEventModel(rawTitle || text));
-  if (isAuthoritativeEvent) {
-    console.log(`[Pipeline ${pipelineId}] Skipping LLM audit for authoritative historical event "${rawTitle || text}" to protect canonical registry truth.`);
+  const isMultiLocDiscovery = effectiveEvidenceMode === 'MULTI_LOCATION_DISCOVERY' || (rawRouteEvidenceMode as any) === 'MULTI_LOCATION_DISCOVERY';
+  if (isAuthoritativeEvent || isMultiLocDiscovery) {
+    console.log(`[Pipeline ${pipelineId}] Skipping LLM audit for ${isAuthoritativeEvent ? `authoritative historical event "${rawTitle || text}"` : 'multi-location discovery'} to protect canonical truth and pipeline responsiveness.`);
     issues = [];
   } else {
     try {
@@ -1653,12 +1718,19 @@ Action: CANNOT_NORMALIZE`);
   const flattenedOrderedWaypoints: Waypoint[] = [];
 
   for (const group of orderedGroups) {
-    // Sort within route group by route-local sequence, tie-breaker: waypoint ID
-    const sortedGroupWps = [...(group.waypoints || [])].sort((a, b) => {
-      const seqDiff = (a.sequence ?? 0) - (b.sequence ?? 0);
-      if (seqDiff !== 0) return seqDiff;
-      return (a.id || '').localeCompare(b.id || '');
-    });
+    const groupWps = group.waypoints || [];
+    const isSeq = group.isSequential || isRouteSequential(groupWps);
+    const sortedGroupWps = isSeq
+      ? sortWaypointsChronologically(groupWps)
+      : [...groupWps].sort((a, b) => {
+          const seqDiff = (a.sequence ?? 0) - (b.sequence ?? 0);
+          if (seqDiff !== 0) return seqDiff;
+          return (a.id || '').localeCompare(b.id || '');
+        });
+
+    if (isSeq) {
+      group.isSequential = true;
+    }
 
     // Enforce contiguous route-local sequence 1..N
     sortedGroupWps.forEach((wp, localIdx) => {
