@@ -190,6 +190,37 @@ describe('Narration Text Normalization Utility', () => {
     });
   });
 
+  describe('Cardinal and Comma-Separated Number Normalization', () => {
+    it('normalizes 250,000 and 300,000 in historical context', () => {
+      expect(normalizeNarrationText('250,000')).toBe('two hundred and fifty thousand');
+      expect(normalizeNarrationText('300,000')).toBe('three hundred thousand');
+      
+      const battleText = 'The Battle of the Marne resulted in heavy casualties, with estimates ranging from 250,000 to 300,000.';
+      const expected = 'The Battle of the Marne resulted in heavy casualties, with estimates ranging from two hundred and fifty thousand to three hundred thousand.';
+      expect(normalizeNarrationText(battleText)).toBe(expected);
+    });
+
+    it('normalizes 4-digit, 5-digit, and larger comma-separated numbers', () => {
+      expect(normalizeNarrationText('1,500')).toBe('one thousand five hundred');
+      expect(normalizeNarrationText('12,000')).toBe('twelve thousand');
+      expect(normalizeNarrationText('25,000')).toBe('twenty-five thousand');
+      expect(normalizeNarrationText('1,000,000')).toBe('one million');
+      expect(normalizeNarrationText('2,500,000')).toBe('two million five hundred thousand');
+    });
+
+    it('preserves non-comma numeric measurements and coordinates while normalizing comma numbers in same text', () => {
+      const mixedText = 'Coordinates: 48.76, 3.90 with 1,500 troops stationed 300 meters from mile 1914.';
+      const output = normalizeNarrationText(mixedText);
+      expect(output).toBe('Coordinates: 48.76, 3.90 with one thousand five hundred troops stationed 300 meters from mile 1914.');
+    });
+
+    it('handles comma numbers alongside dates and World War terms seamlessly', () => {
+      const sentence = 'In September 1914 during World War I, over 250,000 soldiers mobilized on September 5, 1914.';
+      const output = normalizeNarrationText(sentence);
+      expect(output).toBe('In September nineteen fourteen during World War One, over two hundred and fifty thousand soldiers mobilized on September fifth, nineteen fourteen.');
+    });
+  });
+
   describe('Combined and Real-World Narration Examples', () => {
     it('normalizes complex historical narrative containing both World War terms and dates', () => {
       const input = 'During World War I, on December 5, 1914, the expedition set sail. Later, in World War II, the port was heavily fortified.';

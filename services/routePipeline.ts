@@ -10,7 +10,7 @@ import { resolveGeographicEntity } from './geographic/geographicResolver';
 import { calculateDistanceKm } from './geographic/geographicDistance';
 import { validateCandidateAgainstRegistry, validateDocumentedSegment, getAuthoritativeEventModel, resolveCanonicalRouteGroup, buildCanonicalEventTopology, findAuthoritativeAnchorAcrossEvent, isAnchorMatch } from './geographic/historicalRouteRegistry';
 import { validateHistoricalWaypointContent } from './historicalContentValidation';
-import { normalizeSemanticEntityTitle, routeIntentAndExtractEntity } from './queryNormalizer';
+import { normalizeSemanticEntityTitle, routeIntentAndExtractEntity, deriveQueryTopicTitle } from './queryNormalizer';
 import { isItineraryOrActivityPhrase, unwrapPhysicalEntityName } from './entityValidation';
 import { resolveWaterAwareRoute, isMaritimeJourney } from './geographic/waterRoutingService';
 
@@ -1910,9 +1910,16 @@ renderable: ${willDraw ? 'YES' : 'NO'}`);
     ? resolveWaterAwareRoute(cleanItems, { title: rawTitle, routeType: effectiveRouteType })
     : cleanItems;
 
+  const effectiveRouteTitle = (rawTitle && !/^(?:route\s*context|default|saved\s*route|unknown|untitled)$/i.test(rawTitle.trim()))
+    ? rawTitle.trim()
+    : deriveQueryTopicTitle(text, queryMeta);
+
   const finalRoute: Route = {
-    waypoints: finalWaypoints,
-    title: rawTitle,
+    waypoints: finalWaypoints.map(w => ({
+      ...w,
+      routeTitle: w.routeTitle || effectiveRouteTitle
+    })),
+    title: effectiveRouteTitle,
     routeConfidence: rawRouteConfidence,
     routeType: effectiveRouteType as any,
     isSequential,

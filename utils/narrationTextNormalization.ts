@@ -89,6 +89,53 @@ export function formatNumber0to99(n: number): string {
   return ones === 0 ? TENS[tens] : `${TENS[tens]}-${ONES[ones]}`;
 }
 
+const SCALES = ['', 'thousand', 'million', 'billion', 'trillion'];
+
+/**
+ * Converts a 3-digit number (0 - 999) into English words.
+ * Includes "and" between hundreds and remainder (e.g. 250 -> "two hundred and fifty").
+ */
+export function format3DigitGroup(n: number): string {
+  if (n <= 0) return '';
+  const hundreds = Math.floor(n / 100);
+  const remainder = n % 100;
+
+  if (hundreds > 0) {
+    const hundredsText = `${ONES[hundreds]} hundred`;
+    if (remainder > 0) {
+      return `${hundredsText} and ${formatNumber0to99(remainder)}`;
+    }
+    return hundredsText;
+  }
+  return formatNumber0to99(remainder);
+}
+
+/**
+ * Converts a cardinal integer into natural spoken English words.
+ */
+export function formatCardinalNumberToWords(num: number): string {
+  if (num === 0) return 'zero';
+  if (num < 0) return `negative ${formatCardinalNumberToWords(-num)}`;
+
+  let current = Math.floor(num);
+  let scaleIndex = 0;
+  const parts: string[] = [];
+
+  while (current > 0 && scaleIndex < SCALES.length) {
+    const chunk = current % 1000;
+    if (chunk > 0) {
+      const chunkWords = format3DigitGroup(chunk);
+      const scale = SCALES[scaleIndex];
+      const chunkWithScale = scale ? `${chunkWords} ${scale}` : chunkWords;
+      parts.unshift(chunkWithScale);
+    }
+    current = Math.floor(current / 1000);
+    scaleIndex++;
+  }
+
+  return parts.join(' ');
+}
+
 /**
  * Converts a calendar year (e.g. 1914, 1865, 2024, 1066) into natural spoken English words.
  */
@@ -367,13 +414,13 @@ function normalizeHistoricalYears(text: string): string {
   });
 
   // 3. Preposition + Year (e.g. "in 1845", "during 1914", "by 1848", "since 1845", "around 1206", "until 1848", "from 1845", "circa 1845")
-  // Negative lookahead ensures we don't match quantities followed by unit words: meters, km, feet, miles, etc.
-  result = result.replace(/\b(in|during|by|since|around|until|from|circa|c\.)\s+([12][0-9]{3}|[1-9][0-9]{2})\b(?!\s*(?:meters?|m\b|kilomet(?:er|re)s?|km\b|miles?|ft\b|feet|inches|in\b|yards?|yd\b|percent|%|hours?|hrs?|minutes?|mins?|seconds?|secs?|days?|weeks?|months?|passengers?|people|men|crew|soldiers?|troops?|ships?|vessels?|guns?|cannons?|rounds?|tonnes?|tons?|pounds?|lbs?|kg\b|kilograms?|dollars?|\$|euros?|pounds?|gbp\b|usd\b))/gi, (_match, prep, yearStr) => {
+  // Negative lookahead ensures we don't match comma-separated numbers or quantities followed by unit words
+  result = result.replace(/\b(in|during|by|since|around|until|from|circa|c\.)\s+([12][0-9]{3}|[1-9][0-9]{2})\b(?!\s*,\s*\d{3})(?!\s*(?:meters?|m\b|kilomet(?:er|re)s?|km\b|miles?|ft\b|feet|inches|in\b|yards?|yd\b|percent|%|hours?|hrs?|minutes?|mins?|seconds?|secs?|days?|weeks?|months?|passengers?|people|men|crew|soldiers?|troops?|ships?|vessels?|guns?|cannons?|rounds?|tonnes?|tons?|pounds?|lbs?|kg\b|kilograms?|dollars?|\$|euros?|pounds?|gbp\b|usd\b))/gi, (_match, prep, yearStr) => {
     return `${prep} ${formatYearToSpeech(yearStr)}`;
   });
 
   // 4. "discovered in / founded in / built in / established in / died in / born in / abandoned in + Year"
-  result = result.replace(/\b(discovered|founded|established|built|constructed|abandoned|sunk|sunken|launched|departed|arrived|died|born|signed|chartered|conquered|annexed)\s+in\s+([12][0-9]{3}|[1-9][0-9]{2})\b/gi, (_match, verb, yearStr) => {
+  result = result.replace(/\b(discovered|founded|established|built|constructed|abandoned|sunk|sunken|launched|departed|arrived|died|born|signed|chartered|conquered|annexed)\s+in\s+([12][0-9]{3}|[1-9][0-9]{2})\b(?!\s*,\s*\d{3})/gi, (_match, verb, yearStr) => {
     return `${verb} in ${formatYearToSpeech(yearStr)}`;
   });
 
@@ -381,8 +428,24 @@ function normalizeHistoricalYears(text: string): string {
 }
 
 /**
+ * Normalizes comma-separated cardinal integers (e.g. "250,000", "300,000", "1,500", "12,000", "25,000")
+ * into spoken English words.
+ */
+export function normalizeCommaSeparatedNumbers(text: string): string {
+  if (!text || typeof text !== 'string') return '';
+
+  return text.replace(/\b\d{1,3}(?:,\d{3})+\b/g, (match) => {
+    const rawNumber = parseInt(match.replace(/,/g, ''), 10);
+    if (isNaN(rawNumber)) {
+      return match;
+    }
+    return formatCardinalNumberToWords(rawNumber);
+  });
+}
+
+/**
  * Normalizes narration text immediately before speech synthesis.
- * Improves spoken pronunciation of historical terms, date ranges, and calendar dates.
+ * Improves spoken pronunciation of historical terms, date ranges, calendar dates, and cardinal numbers.
  * 
  * Requirements:
  * - Deterministic, synchronous, side-effect free
@@ -396,6 +459,7 @@ export function normalizeNarrationText(text: string): string {
   normalized = normalizeRegnalRomanNumerals(normalized);
   normalized = normalizeDates(normalized);
   normalized = normalizeYearRanges(normalized);
+  normalized = normalizeCommaSeparatedNumbers(normalized);
   normalized = normalizeHistoricalYears(normalized);
 
   return normalized;

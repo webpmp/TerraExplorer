@@ -521,6 +521,54 @@ describe('Favorites & Route Renaming Persistence Suite', () => {
         });
       }
     });
+
+    it('8. Saving a newly created multi-waypoint route appends to favorites collection and renders in Explorations', () => {
+      const existingFavorites: FavoriteLocation[] = [sampleShackletonRoute];
+      
+      const newRoute: FavoriteLocation = {
+        id: `route-${Date.now()}`,
+        name: 'Expedition to Mars Hill',
+        lat: 35.1983,
+        lng: -111.6513,
+        type: 'route',
+        waypoints: Array.from({ length: 9 }, (_, i) => ({
+          id: `wp-${i + 1}`,
+          name: `Waypoint ${i + 1}`,
+          lat: 35.1983 + i * 0.1,
+          lng: -111.6513 + i * 0.1,
+          sequence: i + 1
+        }))
+      };
+
+      // Simulate handleUpdateFavorite logic
+      const upsertFavorite = (prev: FavoriteLocation[], syncedFav: FavoriteLocation) => {
+        const exists = prev.some(f => f.id === syncedFav.id);
+        if (exists) {
+          return prev.map(f => f.id === syncedFav.id ? syncedFav : f);
+        }
+        return [...prev, syncedFav];
+      };
+
+      const updatedFavorites = upsertFavorite(existingFavorites, newRoute);
+      expect(updatedFavorites).toHaveLength(2);
+      expect(updatedFavorites.find(f => f.id === newRoute.id)).toBeDefined();
+      expect(updatedFavorites.find(f => f.id === newRoute.id)?.waypoints).toHaveLength(9);
+
+      // Render FavoritesPanel with parchment skin and updated favorites
+      const html = renderToStaticMarkup(
+        <FavoritesPanel
+          {...defaultProps}
+          favorites={updatedFavorites}
+          skin="parchment"
+        />
+      );
+
+      expect(html).toContain('Expedition to Mars Hill');
+      expect(html).toContain('9 waypoints');
+      expect(html).toContain('parchment-scrollbar');
+      expect(html).toContain('flex-1 min-h-0');
+      expect(html).toContain('max-h-full');
+    });
   });
 });
 

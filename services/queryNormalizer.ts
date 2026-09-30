@@ -206,6 +206,71 @@ export function generateDefaultRouteName(context: {
 }
 
 /**
+ * Derives an authoritative, concise query-level topic title for multi-location / grouped discovery queries.
+ * Examples:
+ * - "Where were the major battles of World War I?" -> "Battles of World War I"
+ * - "Where did the major battles of the Civil War occur?" -> "Battles of the Civil War"
+ * - "Where were the major battles of Napoleon fought?" -> "Battles of Napoleon"
+ * - "Where was Game of Thrones filmed?" -> "Game of Thrones Filming Locations"
+ * - "Where did the Apollo missions land?" -> "Apollo Missions Landing Sites"
+ * - "What are the world's most famous waterfalls?" -> "Famous Waterfalls"
+ */
+export function deriveQueryTopicTitle(query: string, queryMeta?: ExtractedQuery): string {
+  if (!query) return 'Collection';
+  const clean = query.trim();
+  const meta = queryMeta || routeIntentAndExtractEntity(clean);
+
+  if (meta.intent === 'MULTI_LOCATION_DISCOVERY') {
+    const rawSubj = meta.subject || meta.entity;
+    const cleanSubj = rawSubj ? formatTitleWithMinorWords(rawSubj) : '';
+    const target = (meta.discoveryTarget || '').toLowerCase();
+
+    if (target.includes('battle')) {
+      const ofThe = clean.toLowerCase().includes(' of the ');
+      return cleanSubj ? formatTitleWithMinorWords(`Battles of ${ofThe ? 'the ' : ''}${cleanSubj.replace(/^the\s+/i, '')}`) : 'Major Battles';
+    }
+    if (target.includes('filming')) {
+      return cleanSubj ? formatTitleWithMinorWords(`${cleanSubj} Filming Locations`) : 'Filming Locations';
+    }
+    if (target.includes('landing')) {
+      return cleanSubj ? formatTitleWithMinorWords(`${cleanSubj} Landing Sites`) : 'Landing Sites';
+    }
+    if (target.includes('waterfall') || target.includes('volcano') || target.includes('mountain') || target.includes('wonder') || target.includes('landmark') || target.includes('canyon')) {
+      const strippedTarget = target.replace(/^(?:famous|top|major|greatest|best)\s+/i, '');
+      return formatTitleWithMinorWords(`Famous ${strippedTarget}`);
+    }
+    if (target.includes('important cities') || target.includes('places visited') || target.includes('associated locations') || target.includes('places involved')) {
+      return cleanSubj ? formatTitleWithMinorWords(`Locations of ${cleanSubj}`) : 'Associated Locations';
+    }
+    if (cleanSubj) {
+      return cleanSubj;
+    }
+  }
+
+  // Check historical route registry
+  const hist = detectHistoricalRouteEvent(clean);
+  if (hist.isHistoricalRouteEvent && hist.canonicalEntity) {
+    return hist.canonicalEntity;
+  }
+
+  // Fallback to normalized query scaffolding
+  const normalized = normalizeQueryScaffolding(clean);
+  if (normalized) {
+    const battleMatch = normalized.match(/^(?:major|key|famous)\s+battles\s+of\s+(.+)$/i);
+    if (battleMatch && battleMatch[1]) {
+      return formatTitleWithMinorWords(`Battles of ${battleMatch[1]}`);
+    }
+    const waterfallMatch = normalized.match(/^(?:major|famous|top|key)\s+waterfalls(?:\s+of\s+(.+))?$/i);
+    if (waterfallMatch) {
+      return formatTitleWithMinorWords(`Famous Waterfalls${waterfallMatch[1] ? ' of ' + waterfallMatch[1] : ''}`);
+    }
+    return formatTitleWithMinorWords(normalized);
+  }
+
+  return formatTitleWithMinorWords(clean);
+}
+
+/**
  * Detects if a title/name string is a raw or formatted coordinate string rather than a meaningful semantic name.
  * Examples recognized:
  * - "Position 51.3762 N, 11.4558 W (modern-day location)"

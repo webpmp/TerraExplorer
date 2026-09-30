@@ -3521,9 +3521,9 @@ export const generateRoute = async (
 };
 
 
-import { ExtractedQuery, routeIntentAndExtractEntity } from './queryNormalizer';
+import { ExtractedQuery, routeIntentAndExtractEntity, deriveQueryTopicTitle } from './queryNormalizer';
 export type { ExtractedQuery };
-export { routeIntentAndExtractEntity };
+export { routeIntentAndExtractEntity, deriveQueryTopicTitle };
 
 export const extractEntityFromQuery = (query: string): string => {
   const extracted = routeIntentAndExtractEntity(query);

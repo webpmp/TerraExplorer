@@ -11,7 +11,7 @@ import MarkerProjectionBeam from './components/MarkerProjectionBeam';
 import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import SettingsPanel from './components/SettingsPanel';
-import { getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, EnrichmentMetrics, cancelFeatureInfoRequests, isLMStudioNoModelError, LM_STUDIO_NO_MODEL_MESSAGE, LM_STUDIO_NO_MODEL_INSTRUCTION, isLMStudioContextOverflowError, LM_STUDIO_CONTEXT_OVERFLOW_MESSAGE, LM_STUDIO_CONTEXT_OVERFLOW_INSTRUCTION, isSourceRetrievalError, recoverLocationMetadata } from './services/geminiService';
+import { getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, deriveQueryTopicTitle, EnrichmentMetrics, cancelFeatureInfoRequests, isLMStudioNoModelError, LM_STUDIO_NO_MODEL_MESSAGE, LM_STUDIO_NO_MODEL_INSTRUCTION, isLMStudioContextOverflowError, LM_STUDIO_CONTEXT_OVERFLOW_MESSAGE, LM_STUDIO_CONTEXT_OVERFLOW_INSTRUCTION, isSourceRetrievalError, recoverLocationMetadata } from './services/geminiService';
 import { fetchAndValidateImages } from './services/imageService';
 import { getEstimatedClimate } from './services/geographic/climateEstimator';
 import { enrichLocationInfo, mergeLocationInfo, fetchAndValidateLocationNews } from './services/locationService';
@@ -4578,7 +4578,12 @@ source=${source}`);
           console.log('[Camera] DESTINATION_COMMITTED ownership transferred');
           setAutoRotate(false);
           setInteractionState('PIN_SELECTED');
-          const waypointsWithSearch = pipelineResult.waypoints.map(w => ({ ...w, searchId }));
+          const routeTitle = (pipelineResult as any).title || (pipelineResult as any).routeTitle || deriveQueryTopicTitle(cleanQuery);
+          const waypointsWithSearch = pipelineResult.waypoints.map(w => ({
+            ...w,
+            searchId,
+            routeTitle: w.routeTitle || routeTitle
+          }));
           setRouteWaypoints(waypointsWithSearch);
           setCurrentWaypointIndex(0);
           setIsDiscoveryLoading(false);
@@ -4887,31 +4892,12 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           signal: abortController.signal,
           onWaypointProgress: (wp: Waypoint, allDiscoveredSoFar: Waypoint[], index: number, total: number) => {
             if (currentSearchId !== activeSearchRequestIdRef.current || abortController.signal.aborted) return;
-            if (!initialWaypointPresented) {
-              setScanningStatusText(`IDENTIFYING WAYPOINTS`);
-            }
+            setScanningStatusText(`IDENTIFYING WAYPOINTS`);
 
             const waypointsWithSearch = allDiscoveredSoFar.map(w => ({ ...w, searchId }));
             const sortedWaypoints = sortWaypointsChronologically(waypointsWithSearch);
             internalRouteWaypointsRef.current = sortedWaypoints;
             setRouteWaypoints(sortedWaypoints);
-
-            if (!initialWaypointPresented && sortedWaypoints.length > 0) {
-              initialWaypointPresented = true;
-              const firstWp = wp;
-              const wpStableId = getWaypointStableId(firstWp);
-              routePriorityWaypointRef.current = wpStableId;
-              logRouteScheduling("WP1 exclusive priority acquired", `id="${firstWp.id}" name="${firstWp.name}"`);
-              const initialIdx = sortedWaypoints.findIndex(w => getWaypointStableId(w) === wpStableId);
-              setCurrentWaypointIndex(initialIdx !== -1 ? initialIdx : 0);
-              console.log('[TRACE ROUTE][Waypoint 1] progressive pipeline start');
-              loadWaypointData(firstWp);
-            } else if (activeSelectionIdRef.current) {
-              const activeIdx = sortedWaypoints.findIndex(w => getWaypointStableId(w) === activeSelectionIdRef.current);
-              if (activeIdx !== -1) {
-                setCurrentWaypointIndex(activeIdx);
-              }
-            }
           }
         });
 
@@ -4919,7 +4905,12 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
         if (route.waypoints && route.waypoints.length > 0) {
             console.log(`[TRACE ROUTE] final route ready: ${route.title} (${route.waypoints.length} waypoints)`);
-            const waypointsWithSearch = route.waypoints.map(w => ({ ...w, searchId }));
+            const effectiveTitle = route.title || deriveQueryTopicTitle(text);
+            const waypointsWithSearch = route.waypoints.map(w => ({
+              ...w,
+              searchId,
+              routeTitle: w.routeTitle || effectiveTitle
+            }));
             const sortedWaypoints = sortWaypointsChronologically(waypointsWithSearch);
             internalRouteWaypointsRef.current = sortedWaypoints;
 
@@ -4932,21 +4923,13 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
             setIsDiscoveryLoading(false);
             setScanningStatusText(null);
             console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
-            if (!initialWaypointPresented) {
-              initialWaypointPresented = true;
-              const firstWp = sortedWaypoints[0];
-              const wpStableId = getWaypointStableId(firstWp);
-              routePriorityWaypointRef.current = wpStableId;
-              logRouteScheduling("WP1 exclusive priority acquired", `id="${firstWp.id}" name="${firstWp.name}"`);
-              setCurrentWaypointIndex(0);
-              console.log('[TRACE ROUTE][Waypoint 1] route generated');
-              loadWaypointData(firstWp);
-            } else if (activeSelectionIdRef.current) {
-              const activeIdx = sortedWaypoints.findIndex(w => getWaypointStableId(w) === activeSelectionIdRef.current);
-              if (activeIdx !== -1) {
-                setCurrentWaypointIndex(activeIdx);
-              }
-            }
+            const firstWp = sortedWaypoints[0];
+            const wpStableId = getWaypointStableId(firstWp);
+            routePriorityWaypointRef.current = wpStableId;
+            logRouteScheduling("WP1 exclusive priority acquired", `id="${firstWp.id}" name="${firstWp.name}"`);
+            setCurrentWaypointIndex(0);
+            console.log('[TRACE ROUTE][Waypoint 1] route generated');
+            loadWaypointData(firstWp);
         } else if (internalRouteWaypointsRef.current.length > 0) {
             // Waypoints were emitted progressively
             setIsDiscoveryLoading(false);
@@ -5437,10 +5420,21 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
             name: trimmedName
           };
 
-      setFavorites(prev => prev.map(f => f.id === syncedFav.id ? syncedFav : f));
+      setFavorites(prev => {
+        const exists = prev.some(f => f.id === syncedFav.id);
+        if (exists) {
+          return prev.map(f => f.id === syncedFav.id ? syncedFav : f);
+        }
+        return [...prev, syncedFav];
+      });
+
+      if (syncedFav.type === 'route') {
+        setActiveRouteId(syncedFav.id);
+        setVisibleFavoriteIds(prev => prev.includes(syncedFav.id) ? prev : [...prev, syncedFav.id]);
+      }
 
       // If this route is currently active, update the map and info panel immediately
-      if (activeRouteId === syncedFav.id && syncedFav.type === 'route' && syncedFav.waypoints) {
+      if ((activeRouteId === syncedFav.id || syncedFav.type === 'route') && syncedFav.type === 'route' && syncedFav.waypoints) {
           const sanitizedWaypoints = resolveWaterAwareRoute(syncedFav.waypoints, { title: syncedFav.name });
           setRouteWaypoints(sanitizedWaypoints);
           if (sanitizedWaypoints.length === 0) {
@@ -5925,7 +5919,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           onOpenSettingsTab={handleOpenSettingsTab}
           onEditRoute={handleEditActiveRoute}
           onDeleteFollowUp={handleDeleteFollowUp}
-          routeNav={((routeWaypoints.length > 1 || isDiscoveryLoading || activeRouteId) && currentWaypointIndex !== -1 && routeWaypoints.length > 0) ? (() => {
+          routeNav={((routeWaypoints.length > 0 || isDiscoveryLoading || activeRouteId) && currentWaypointIndex !== -1 && routeWaypoints.length > 0) ? (() => {
               const currentWp = routeWaypoints[currentWaypointIndex];
               const currentRoute = activeRouteId ? favorites.find(f => f.id === activeRouteId) : undefined;
               const groupWps = currentWp?.routeGroupId

@@ -284,7 +284,7 @@ describe('Orpheus TTS Progressive Streaming & Narration Provider Suite', () => {
       expect(requestOptions.method).toBe('POST');
       expect(requestOptions.headers).toEqual({ 'Content-Type': 'application/json' });
       expect(JSON.parse(requestOptions.body)).toEqual({
-        text: 'Great Barrier Reef. World largest coral reef system composed of over 2,900 individual reefs.',
+        text: 'Great Barrier Reef. World largest coral reef system composed of over two thousand nine hundred individual reefs.',
         voice: 'tara'
       });
 

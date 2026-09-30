@@ -15,7 +15,7 @@ import { validateHistoricalCoordinate, getHistoricalEntityKnowledge, toCanonical
 import { determineHistoricalEventScope, logHistoricalEventScope } from './geographic/historicalEventScope';
 import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
 import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation, isInvalidCanonicalName } from './geographic/entityIdentityValidator';
-import { detectHistoricalRouteEvent, normalizeSemanticEntityTitle, extractMediaIntentAndCleanEntity } from './queryNormalizer';
+import { detectHistoricalRouteEvent, normalizeSemanticEntityTitle, extractMediaIntentAndCleanEntity, deriveQueryTopicTitle } from './queryNormalizer';
 import { getAuthoritativeEventModel } from './geographic/historicalRouteRegistry';
 import { resolveAlias } from './geographic/geographicAliases';
 
@@ -1289,13 +1289,19 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
             waypoints: []
           };
         }
-        const waypoints = route.waypoints;
+        const effectiveTitle = route.title || deriveQueryTopicTitle(request.rawQuery);
+        const waypoints = (route.waypoints || []).map(w => ({
+          ...w,
+          routeTitle: w.routeTitle || effectiveTitle
+        }));
         console.log(`[Pipeline] WAYPOINTS AFTER GENERATEROUTE (Main guard):`);
         waypoints.forEach(wp => console.log(`  - ${wp.name} (ID: ${wp.id}, parentId: ${wp.parentId})`));
         return {
            mode: "route",
            isValid: true,
-           waypoints: waypoints || []
+           waypoints: waypoints,
+           title: effectiveTitle,
+           routeTitle: effectiveTitle
         };
       } catch (error) {
         if (isLMStudioNoModelError(error)) {
@@ -1381,13 +1387,19 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
             waypoints: []
           };
         }
-        const waypoints = route.waypoints;
+        const effectiveTitle = route.title || deriveQueryTopicTitle(request.rawQuery);
+        const waypoints = (route.waypoints || []).map(w => ({
+          ...w,
+          routeTitle: w.routeTitle || effectiveTitle
+        }));
         console.log(`[Pipeline] WAYPOINTS AFTER GENERATEROUTE (Intent fallback):`);
         waypoints.forEach(wp => console.log(`  - ${wp.name} (ID: ${wp.id}, parentId: ${wp.parentId})`));
         return {
            mode: "route",
            isValid: waypoints.length > 0,
-           waypoints
+           waypoints,
+           title: effectiveTitle,
+           routeTitle: effectiveTitle
         };
       } catch (error) {
         if (isLMStudioNoModelError(error)) {

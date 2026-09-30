@@ -310,7 +310,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
   return (
     <>
       <div className="relative w-88 md:w-96 max-h-1/2 flex flex-col shrink min-h-0 animate-in slide-in-from-left-8 fade-in duration-300 transition-opacity duration-300 pointer-events-auto">
-          <div className={`${theme.container} relative flex flex-col shrink min-h-0 ${skin === 'parchment' ? '[isolation:isolate]' : 'overflow-hidden'}`}>
+          <div className={`${theme.container} relative flex flex-col flex-1 max-h-full shrink min-h-0 ${skin === 'parchment' ? '[isolation:isolate]' : 'overflow-hidden'}`}>
               {skin === 'parchment' && (
                 <div className="parchment-background" aria-hidden="true" />
               )}
@@ -322,7 +322,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
                     </button>
                 </div>
 
-                <div className={`p-4 overflow-y-auto ${skin === 'parchment' ? 'parchment-scrollbar' : 'custom-scrollbar'} flex-1`}>
+                <div className={`p-4 overflow-y-auto ${skin === 'parchment' ? 'parchment-scrollbar' : 'custom-scrollbar'} flex-1 min-h-0`}>
                     {favorites.length === 0 ? (
                         <div className={`text-center py-8 ${theme.emptyState}`}>
                             <MapPin size={32} className="mx-auto mb-2 opacity-50" />

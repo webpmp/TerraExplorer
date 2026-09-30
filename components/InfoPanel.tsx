@@ -153,6 +153,7 @@ export const VoyagerCeremonialBanner: React.FC<{
   routeNav?: {
     current: number;
     total: number;
+    isDiscoveryLoading?: boolean;
     routeGroupName?: string;
     routeGroupId?: string;
     routeLocalCurrent?: number;
@@ -160,7 +161,8 @@ export const VoyagerCeremonialBanner: React.FC<{
     onNext: () => void;
     onPrev: () => void;
   };
-}> = ({ isFavorite, onFavoriteClick, favoriteTitle = "Edit Route", routeNav }) => {
+}> = ({ isFavorite, onFavoriteClick, favoriteTitle, routeNav }) => {
+  const effectiveTitle = favoriteTitle || (isFavorite ? "Edit Route" : "Save Route");
   return (
     <div className="relative w-full px-1 py-0 flex items-center justify-center select-none" data-testid="voyager-ceremonial-banner">
       {/* Option 3: THE VOYAGER Horizontal Banner SVG Artwork */}
@@ -264,63 +266,63 @@ export const VoyagerCeremonialBanner: React.FC<{
         type="button"
         onClick={onFavoriteClick}
         className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full flex items-center justify-center cursor-pointer transition-transform hover:scale-110 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] z-20"
-        title={favoriteTitle}
-        aria-label={favoriteTitle}
+        title={effectiveTitle}
+        aria-label={effectiveTitle}
       >
-        <span className="sr-only">{favoriteTitle}</span>
+        <span className="sr-only">{effectiveTitle}</span>
       </button>
 
       {/* Waypoint Navigation Overlay */}
-      {routeNav && (
-        <div className="absolute inset-0 flex items-center px-4 sm:px-6 z-10 pointer-events-none">
-          {/* Left Region: extends from Left Arrow to Center */}
-          <div className="relative flex-1 h-full flex items-center">
-            {/* Previous Waypoint Button */}
-            {!routeNav.isDiscoveryLoading && (
+      {routeNav && (() => {
+        const isMulti = !routeNav.isDiscoveryLoading && ((routeNav.routeLocalTotal ?? routeNav.total) > 1);
+        return (
+          <div className="absolute inset-0 flex items-center z-10 pointer-events-none">
+            {/* Previous Waypoint Button: anchored independently near left interior edge */}
+            {isMulti && (
               <button
                 onClick={routeNav.onPrev}
-                className="pointer-events-auto ml-[10px] p-1 hover:text-white text-[#F3E5AB] opacity-80 hover:opacity-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] rounded z-10"
+                className="pointer-events-auto absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 p-1 hover:text-white text-[#F3E5AB] opacity-80 hover:opacity-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] rounded z-20"
                 aria-label="Previous waypoint"
               >
                 <ChevronLeft size={16} />
               </button>
             )}
 
-            {/* Geometrically centered WAYPOINT text */}
-            <div className={`absolute ${routeNav.isDiscoveryLoading ? 'left-0' : 'left-[34px]'} right-0 inset-y-0 flex items-center justify-center pointer-events-none pr-3`}>
-              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-[#F3E5AB] opacity-90 drop-shadow-sm select-none text-center truncate">
-                WAYPOINT
-              </span>
+            {/* Symmetrical Centered Content Layout */}
+            <div className="w-full h-full flex items-center justify-center px-8 sm:px-10 pointer-events-none">
+              {/* Left Text Region: centered in the available space to the left of the center compass */}
+              <div className="flex-1 flex items-center justify-center min-w-0 px-1">
+                <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-[#F3E5AB] opacity-90 drop-shadow-sm select-none text-center truncate">
+                  {routeNav.isDiscoveryLoading ? 'IDENTIFYING' : 'WAYPOINT'}
+                </span>
+              </div>
+
+              {/* Fixed Center Spacer for Compass (50% center anchor) */}
+              <div className="w-12 sm:w-14 shrink-0 pointer-events-none" aria-hidden="true" />
+
+              {/* Right Text Region: centered in the available space to the right of the center compass */}
+              <div className="flex-1 flex items-center justify-center min-w-0 px-1">
+                <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-[#F3E5AB] opacity-90 drop-shadow-sm select-none text-center truncate">
+                  {routeNav.isDiscoveryLoading
+                    ? 'WAYPOINTS'
+                    : `${routeNav.routeLocalCurrent ?? routeNav.current} OF ${routeNav.routeLocalTotal ?? routeNav.total}`}
+                </span>
+              </div>
             </div>
-          </div>
 
-          {/* Center clearance anchor for emblem */}
-          <div className="w-[50px] shrink-0" />
-
-          {/* Right Region: extends from Center to Right Arrow */}
-          <div className="relative flex-1 h-full flex items-center justify-end">
-            {/* Geometrically centered N OF M text */}
-            <div className={`absolute left-0 ${routeNav.isDiscoveryLoading ? 'right-0' : 'right-[34px]'} inset-y-0 flex items-center justify-center pointer-events-none pl-3`}>
-              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-[#F3E5AB] opacity-90 drop-shadow-sm select-none text-center truncate">
-                {routeNav.isDiscoveryLoading
-                  ? 'IDENTIFYING WAYPOINTS'
-                  : `${routeNav.routeLocalCurrent ?? routeNav.current} OF ${routeNav.routeLocalTotal ?? routeNav.total}`}
-              </span>
-            </div>
-
-            {/* Next Waypoint Button */}
-            {!routeNav.isDiscoveryLoading && (
+            {/* Next Waypoint Button: anchored independently near right interior edge */}
+            {isMulti && (
               <button
                 onClick={routeNav.onNext}
-                className="pointer-events-auto mr-[10px] p-1 hover:text-white text-[#F3E5AB] opacity-80 hover:opacity-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] rounded z-10"
+                className="pointer-events-auto absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 p-1 hover:text-white text-[#F3E5AB] opacity-80 hover:opacity-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] rounded z-20"
                 aria-label="Next waypoint"
               >
                 <ChevronRight size={16} />
               </button>
             )}
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };
@@ -661,7 +663,6 @@ export const isRedundantWithTitle = (
 export interface HeaderGeographicResult {
   displayTitle: string;
   displaySubtitle: string | null;
-  displayAltNames: string | null;
 }
 
 export interface ParsedLocationHierarchy {
@@ -916,7 +917,7 @@ export const normalizeHeaderGeographicHierarchy = (
   isSingleLocation: boolean = true
 ): HeaderGeographicResult => {
   if (!info) {
-    return { displayTitle: '', displaySubtitle: null, displayAltNames: null };
+    return { displayTitle: '', displaySubtitle: null };
   }
 
   const isGenericOrCoordinateTitle = (str?: string): boolean => {
@@ -992,29 +993,11 @@ export const normalizeHeaderGeographicHierarchy = (
     }
   }
 
-  const finalSubtitle = getHeaderLocation(info, finalTitle);
-
-  // Alternate names
-  const altNamesList: string[] = [];
-  const candidateAlt = [info.waypoint?.canonicalName, ...(Array.isArray(info.waypoint?.alternateNames) ? info.waypoint.alternateNames : [])];
-  for (const alt of candidateAlt) {
-    if (alt && typeof alt === 'string') {
-      const trimmed = alt.trim();
-      if (
-        trimmed &&
-        !isRedundantWithTitle(trimmed, finalTitle) &&
-        (!finalSubtitle || !isRedundantWithTitle(trimmed, finalSubtitle)) &&
-        !altNamesList.some(a => normalizeGeoComparisonName(a) === normalizeGeoComparisonName(trimmed))
-      ) {
-        altNamesList.push(trimmed);
-      }
-    }
-  }
+  let finalSubtitle = getHeaderLocation(info, finalTitle);
 
   return {
     displayTitle: finalTitle,
-    displaySubtitle: finalSubtitle,
-    displayAltNames: altNamesList.length > 0 ? `Also known as ${altNamesList.join(', ')}` : null
+    displaySubtitle: finalSubtitle
   };
 };
 
@@ -1724,8 +1707,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     return formatted;
   }, [info, isSingleLocation]);
 
-  const { displayTitle, displaySubtitle, displayAltNames } = useMemo(() => {
-    if (!info) return { displayTitle: '', displaySubtitle: null, displayAltNames: null };
+  const { displayTitle, displaySubtitle } = useMemo(() => {
+    if (!info) return { displayTitle: '', displaySubtitle: null };
     return normalizeHeaderGeographicHierarchy(info, undefined, isSingleLocation);
   }, [info, isSingleLocation]);
 
@@ -2383,7 +2366,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       copyText: () => {
         if (!info) return '';
         let parts: string[] = [];
-        const isDuplicateHeader = Boolean(
+        const isDuplicateHeader = isSingleLocation && Boolean(
           info.routeContext?.title &&
           (displayTitle.trim().toLowerCase() === info.routeContext.title.trim().toLowerCase() ||
            (displaySubtitle && displaySubtitle.trim().toLowerCase() === info.routeContext.title.trim().toLowerCase()))
@@ -2406,7 +2389,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         const descText = info.description?.trim() || "";
         const isDescLoading = isLoading || (rawInfo as any)?.sectionState?.description === 'loading';
         const hasRoute = !isDescLoading && !!info.routeContext && routeText.length > 0 && !isPlaceholderString(routeText);
-        const isDuplicateHeader = Boolean(
+        const isDuplicateHeader = isSingleLocation && Boolean(
           info.routeContext?.title &&
           (displayTitle.trim().toLowerCase() === info.routeContext.title.trim().toLowerCase() ||
            (displaySubtitle && displaySubtitle.trim().toLowerCase() === info.routeContext.title.trim().toLowerCase()))
@@ -3076,7 +3059,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             </button>
 
             {/* 2. Save Location and Copy text buttons */}
-            {!(isParchment && isMultiLocation) && (
+            {!(isParchment && Boolean(routeNav)) && (
               <div className="flex justify-center w-full -mt-[10px] mb-[26px] relative z-10 gap-2">
                 <button
                   onClick={handleFavoriteClick}
@@ -3183,8 +3166,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             </div>
           </div>
 
-          {/* Ceremonial Voyager Banner for multi-waypoint routes in parchment skin */}
-          {isParchment && isMultiLocation && (
+          {/* Ceremonial Voyager Banner for routes in parchment skin */}
+          {isParchment && Boolean(routeNav) && (
             <VoyagerCeremonialBanner
               isFavorite={isFavorite}
               onFavoriteClick={() => {
@@ -3194,37 +3177,40 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                   handleFavoriteClick();
                 }
               }}
-              favoriteTitle="Edit Route"
+              favoriteTitle={isFavorite ? (currentFavoriteName ? `Saved as: ${currentFavoriteName}` : "Edit Route") : "Save Route"}
               routeNav={routeNav}
             />
           )}
 
           {/* Route Navigation for non-Parchment themes */}
-          {isMultiLocation && routeNav && !isParchment && (
-             <div className={`relative z-[1] ${isParchment ? 'px-3 py-1 bg-transparent' : isRetro ? 'px-3 py-1.5 border-b border-current opacity-80' : 'px-3 py-1.5 border-b border-white/10 bg-white/5'} flex items-center justify-between min-w-0`}>
-                {!routeNav.isDiscoveryLoading && (
-                  <button onClick={routeNav.onPrev} className={`p-1.5 rounded-full ${theme.navBtn} pointer-events-auto shrink-0`} aria-label="Previous waypoint">
-                      <ChevronLeft size={16} />
-                  </button>
-                )}
-                <div className={`flex flex-col items-center text-center px-2 min-w-0 ${routeNav.isDiscoveryLoading ? 'w-full justify-center' : ''}`}>
-                    <span className={`${isRetro ? 'text-base' : 'text-xs'} font-bold uppercase tracking-widest ${theme.subtext}`}>
-                        {routeNav.isDiscoveryLoading
-                          ? 'IDENTIFYING WAYPOINTS'
-                          : `Waypoint ${routeNav.routeLocalCurrent ?? routeNav.current} of ${routeNav.routeLocalTotal ?? routeNav.total}`}
-                    </span>
-                </div>
-                {!routeNav.isDiscoveryLoading && (
-                  <button
-                    onClick={routeNav.onNext}
-                    className={`p-1.5 rounded-full ${theme.navBtn} pointer-events-auto shrink-0`}
-                    aria-label="Next waypoint"
-                  >
-                      <ChevronRight size={16} />
-                  </button>
-                )}
-             </div>
-          )}
+          {routeNav && !isParchment && (() => {
+             const isMulti = !routeNav.isDiscoveryLoading && ((routeNav.routeLocalTotal ?? routeNav.total) > 1);
+             return (
+               <div className={`relative z-[1] ${isRetro ? 'px-3 py-1.5 border-b border-current opacity-80' : 'px-3 py-1.5 border-b border-white/10 bg-white/5'} flex items-center justify-between min-w-0`}>
+                  {isMulti && (
+                    <button onClick={routeNav.onPrev} className={`p-1.5 rounded-full ${theme.navBtn} pointer-events-auto shrink-0`} aria-label="Previous waypoint">
+                        <ChevronLeft size={16} />
+                    </button>
+                  )}
+                  <div className={`flex flex-col items-center text-center px-2 min-w-0 ${!isMulti ? 'w-full justify-center' : ''}`}>
+                      <span className={`${isRetro ? 'text-base' : 'text-xs'} font-bold uppercase tracking-widest ${theme.subtext}`}>
+                          {routeNav.isDiscoveryLoading
+                            ? 'IDENTIFYING WAYPOINTS'
+                            : `Waypoint ${routeNav.routeLocalCurrent ?? routeNav.current} of ${routeNav.routeLocalTotal ?? routeNav.total}`}
+                      </span>
+                  </div>
+                  {isMulti && (
+                    <button
+                      onClick={routeNav.onNext}
+                      className={`p-1.5 rounded-full ${theme.navBtn} pointer-events-auto shrink-0`}
+                      aria-label="Next waypoint"
+                    >
+                        <ChevronRight size={16} />
+                    </button>
+                  )}
+               </div>
+             );
+          })()}
 
 
           {/* Scrollable Content */}
