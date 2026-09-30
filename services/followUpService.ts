@@ -515,13 +515,22 @@ export const classifyFollowUpIntent = (
     // (e.g. "Battle of Gettysburg", "World War II", "American Civil War", "Paris", "Mount Fuji", "London")
     const words = cleanCandidate.split(/\s+/);
     const substantiveWords = words.filter(
-      w => !['of', 'and', 'the', 'in', 'at', 'for', 'on', 'de', 'la', 'von', 'during', 'after', 'before'].includes(w.toLowerCase())
+      w => !['of', 'and', 'the', 'in', 'at', 'for', 'on', 'de', 'la', 'von', 'during', 'after', 'before', 'about'].includes(w.toLowerCase())
     );
     if (
       substantiveWords.length > 0 &&
       substantiveWords.every(w => /^(?:[A-Z][a-zA-Z0-9'-]*|[IVXLCDM]+)$/.test(w))
     ) {
       return true;
+    }
+
+    // 3. Check for external entity scoped after a preposition (e.g. "major battles of World War I", "history of Paris", "campaigns of Alexander the Great")
+    const prepMatch = cleanCandidate.match(/\b(?:of|in|at|during|throughout|after|before|about)\s+(.+)$/i);
+    if (prepMatch) {
+      const subEntity = prepMatch[1].trim();
+      if (subEntity && subEntity.toLowerCase() !== candidateLower && isExternalNamedEntity(subEntity)) {
+        return true;
+      }
     }
 
     return false;
@@ -542,7 +551,7 @@ export const classifyFollowUpIntent = (
     }
   }
 
-  // - Explicit "where is / where are / where was / where were [Entity]" (e.g. "Where is Paris?", "Where was the Battle of Gettysburg?", "Where is Mount Fuji?")
+  // - Explicit "where is / where are / where was / where were [Entity]" (e.g. "Where is Paris?", "Where was the Battle of Gettysburg?", "Where is Mount Fuji?", "Where were the major battles of World War I?")
   const whereMatch = clean.match(
     /^\s*where\s+(?:is|are|was|were)\s+(?:located\s+|found\s+|situated\s+)?(.+?)(?:\s+located|\s+found|\s+situated)?\s*\??\s*$/i
   );
@@ -568,9 +577,9 @@ export const classifyFollowUpIntent = (
     }
   }
 
-  // - Scoped queries targeting an external location or event (e.g. "What happened in London?", "What happened during World War II?", "Who was the mayor of Chicago?")
+  // - Scoped queries targeting an external location or event (e.g. "What happened in London?", "What happened during World War II?", "Who was the mayor of Chicago?", "Where were the major battles of World War I?")
   const scopedEntityMatch = clean.match(
-    /\b(?:in|at|during|throughout|after|before)\s+([A-Z][a-zA-Z0-9\s,'-]+)\s*\??\s*$/i
+    /\b(?:in|at|during|throughout|after|before|of|about)\s+([A-Za-z0-9\s,'-]+)\s*\??\s*$/i
   );
   if (scopedEntityMatch) {
     const candidate = scopedEntityMatch[1].trim();

@@ -4388,12 +4388,13 @@ source=${source}`);
       return;
     }
 
-    // Determine active location context
-    const isRouteActive = routeWaypoints.length > 0 && currentWaypointIndex >= 0;
-    const activeLoc = locationInfo || (isRouteActive ? routeWaypoints[currentWaypointIndex] : null);
+    // Determine active location context (only valid when InfoPanel is open / location selected)
+    const isInfoPanelOpen = interactionState === 'PIN_SELECTED' && !!locationInfo;
+    const isRouteActive = isInfoPanelOpen && routeWaypoints.length > 0 && currentWaypointIndex >= 0;
+    const activeLoc = isInfoPanelOpen ? (locationInfo || (isRouteActive ? routeWaypoints[currentWaypointIndex] : null)) : null;
 
     // Contextual Follow-Up Intent Classification
-    if (activeLoc) {
+    if (activeLoc || isExplicitChip) {
       const classification = classifyFollowUpIntent(cleanQuery, activeLoc, isRouteActive, isExplicitChip);
 
       if (classification.intent === 'FOLLOW_UP') {

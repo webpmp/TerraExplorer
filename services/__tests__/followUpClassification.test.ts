@@ -242,4 +242,26 @@ describe('Contextual Follow-Up Classification', () => {
     const res4 = '```json\n{"answer":"Fourth answer with markdown."}\n```';
     expect(extractCleanAnswerText(res4)).toBe('Fourth answer with markdown.');
   });
+
+  it('17. "Where were the major battles of World War I?" classifies as NEW_SEARCH even with active location', () => {
+    expect(classifyFollowUpIntent('Where were the major battles of World War I?', bodieLocation).intent).toBe('NEW_SEARCH');
+    expect(classifyFollowUpIntent('where were the major battles of World War I?', bodieLocation).intent).toBe('NEW_SEARCH');
+    expect(classifyFollowUpIntent('Where were the major battles of the American Civil War?', bodieLocation).intent).toBe('NEW_SEARCH');
+    expect(classifyFollowUpIntent('Tell me about the Battle of Gettysburg', bodieLocation).intent).toBe('NEW_SEARCH');
+  });
+
+  it('18. Null or cleared active location (InfoPanel closed) always classifies queries as NEW_SEARCH', () => {
+    // When InfoPanel is closed, activeLocation is null
+    expect(classifyFollowUpIntent('Where were the major battles of World War I?', null).intent).toBe('NEW_SEARCH');
+    expect(classifyFollowUpIntent('Why was it abandoned?', null).intent).toBe('NEW_SEARCH');
+    expect(classifyFollowUpIntent('where were the major battles?', null).intent).toBe('NEW_SEARCH');
+    expect(classifyFollowUpIntent('Who were the commanders?', null).intent).toBe('NEW_SEARCH');
+  });
+
+  it('19. Explicit follow-up question against active location preserves FOLLOW_UP classification', () => {
+    // Intentional follow-up questions referencing active context
+    expect(classifyFollowUpIntent('Why was it abandoned?', bodieLocation, false, false).intent).toBe('FOLLOW_UP');
+    expect(classifyFollowUpIntent('Who were the key commanders?', bodieLocation, false, false).intent).toBe('FOLLOW_UP');
+    expect(classifyFollowUpIntent('where were the major battles?', bodieLocation, false, false).intent).toBe('FOLLOW_UP');
+  });
 });

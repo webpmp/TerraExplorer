@@ -1187,4 +1187,61 @@ describe('Parchment Contextual Follow-Up Search Interaction Suite', () => {
     expect(greenHtml).toContain('data-testid="contextual-chips-container"');
     expect(greenHtml).toContain('EXPLORE');
   });
+
+  test('5. Closing/clearing InfoPanel resets follow-up state and displays normal new search input with EXPLORE', () => {
+    // When user closes the InfoPanel, activeLocationContext becomes undefined/null
+    const html = renderToStaticMarkup(
+      <Controls {...baseProps} skin="parchment" activeLocationContext={null} />
+    );
+
+    expect(html).toContain('<input');
+    expect(html).toContain('placeholder="Search location..."');
+    expect(html).toContain('EXPLORE');
+    expect(html).not.toContain('CANCEL');
+    expect(html).not.toContain('data-testid="parchment-cancel-manual"');
+    expect(html).not.toContain('data-testid="parchment-followup-suggestion"');
+    expect(html).not.toContain('data-testid="parchment-prev-chip"');
+    expect(html).not.toContain('data-testid="parchment-next-chip"');
+  });
+
+  test('6. Parchment follow-up carousel renders < and > buttons and Ask about <topic>... prompt', () => {
+    const chipSpy = vi.spyOn(followUpService, 'generateContextualChips').mockReturnValueOnce([
+      { id: 'q1', type: 'question', label: 'Why was this important?' },
+      { id: 'q2', type: 'question', label: 'Who were the key commanders?' },
+    ]);
+
+    const html = renderToStaticMarkup(
+      <Controls {...baseProps} skin="parchment" activeLocationContext={pearlHarbor} showNews={false} />
+    );
+
+    expect(html).toContain('data-testid="parchment-prev-chip"');
+    expect(html).toContain('data-testid="parchment-next-chip"');
+    expect(html).toContain('Ask about Pearl Harbor Attack...');
+    expect(html).not.toContain('CANCEL');
+    expect(html).not.toContain('EXPLORE');
+
+    chipSpy.mockRestore();
+  });
+
+  test('7. Active search scanningStatusText renders CANCEL button and hides carousel arrows while scanning', () => {
+    const chipSpy = vi.spyOn(followUpService, 'generateContextualChips').mockReturnValueOnce([
+      { id: 'q1', type: 'question', label: 'Why was this important?' },
+    ]);
+
+    const html = renderToStaticMarkup(
+      <Controls
+        {...baseProps}
+        skin="parchment"
+        activeLocationContext={pearlHarbor}
+        scanningStatusText="RESEARCHING FOLLOW-UP"
+      />
+    );
+
+    expect(html).toContain('CANCEL');
+    expect(html).not.toContain('data-testid="parchment-prev-chip"');
+    expect(html).not.toContain('data-testid="parchment-next-chip"');
+
+    chipSpy.mockRestore();
+  });
 });
+

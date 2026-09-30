@@ -330,12 +330,16 @@ const Controls: React.FC<ControlsProps> = ({
   const handlePrevParchmentChip = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    setQuery("");
+    setIsManualInputMode(false);
     setParchmentItemIndex((prev) => (prev - 1 + parchmentItems.length) % parchmentItems.length);
   };
 
   const handleNextParchmentChip = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    setQuery("");
+    setIsManualInputMode(false);
     setParchmentItemIndex((prev) => (prev + 1) % parchmentItems.length);
   };
 
@@ -1055,7 +1059,7 @@ const Controls: React.FC<ControlsProps> = ({
         {skin === 'parchment' ? (
           <div className="relative w-full [isolation:isolate]">
             {/* Outside Navigation Controls: Previous / Next follow-up question */}
-            {parchmentItems.length > 1 && !isManualInputMode && !query && !scanningStatusText && (
+            {parchmentItems.length > 1 && !scanningStatusText && (
               <button
                 type="button"
                 onClick={handlePrevParchmentChip}
@@ -1068,7 +1072,7 @@ const Controls: React.FC<ControlsProps> = ({
               </button>
             )}
 
-            {parchmentItems.length > 1 && !isManualInputMode && !query && !scanningStatusText && (
+            {parchmentItems.length > 1 && !scanningStatusText && (
               <button
                 type="button"
                 onClick={handleNextParchmentChip}
@@ -1129,10 +1133,28 @@ const Controls: React.FC<ControlsProps> = ({
                       value={query}
                       onChange={(e) => {
                         if (searchError && onClearError) onClearError();
-                        setQuery(e.target.value);
+                        const val = e.target.value;
+                        setQuery(val);
+                        if (!val) {
+                          setIsManualInputMode(false);
+                        }
                       }}
                       onFocus={handleInputFocus}
-                      onBlur={() => setIsFocused(false)}
+                      onBlur={() => {
+                        setIsFocused(false);
+                        if (!query.trim()) {
+                          setIsManualInputMode(false);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setQuery("");
+                          setIsManualInputMode(false);
+                          setParchmentItemIndex(0);
+                          if (searchError && onClearError) onClearError();
+                        }
+                      }}
                       placeholder={hasParchmentFollowUps ? "" : displayPlaceholder}
                       disabled={!!scanningStatusText}
                       autoFocus={isManualInputMode}
@@ -1146,6 +1168,7 @@ const Controls: React.FC<ControlsProps> = ({
                     type="button"
                     onClick={() => {
                       setQuery("");
+                      setIsManualInputMode(false);
                       if (searchError && onClearError) onClearError();
                     }}
                     className={theme.resetBtn}
@@ -1155,26 +1178,7 @@ const Controls: React.FC<ControlsProps> = ({
                   </button>
                 )}
 
-                {isManualInputMode && !scanningStatusText && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setQuery("");
-                      setIsManualInputMode(false);
-                      setParchmentItemIndex(0);
-                      if (searchError && onClearError) onClearError();
-                    }}
-                    className="mr-2 px-2 py-1 text-sm font-sans font-bold uppercase tracking-wider text-[#5c3a21] hover:text-[#3e2723] transition-colors cursor-pointer select-none"
-                    aria-label="Cancel manual question"
-                    data-testid="parchment-cancel-manual"
-                  >
-                    CANCEL
-                  </button>
-                )}
-
-                {(!hasParchmentFollowUps || isManualInputMode || query || scanningStatusText || isSearching) && (
+                {(!hasParchmentFollowUps || query.trim() || scanningStatusText || isSearching) && (
                   <button
                     type={scanningStatusText ? "button" : "submit"}
                     onClick={scanningStatusText ? handleCancelClick : undefined}
