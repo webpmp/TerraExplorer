@@ -14,6 +14,7 @@ import {
   MapPin, Route as RouteIcon
 } from 'lucide-react';
 import StackedImageCarousel from './StackedImageCarousel';
+import { getEntityImagePreferenceId } from '../services/imagePreferenceService';
 import {
   classifyContext,
   isPureGeographicLabel,
@@ -1803,8 +1804,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   }, [updateScrollFade]);
 
   const maskStyle = useMemo(() => {
+    if (skin === 'modern') {
+      return getScrollFadeMaskStyle(false, scrollFade.bottom);
+    }
     return getScrollFadeMaskStyle(scrollFade.top, scrollFade.bottom);
-  }, [scrollFade.top, scrollFade.bottom]);
+  }, [skin, scrollFade.top, scrollFade.bottom]);
 
   const prevFollowUpsLengthRef = useRef(info?.followUps?.length || 0);
   const lastLocationIdentityRef = useRef<string | null>(null);
@@ -2167,8 +2171,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
   const themes = {
     'modern': {
-      container: "bg-black/75 backdrop-blur-md border border-cyan-400/30 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] text-white font-sans",
-      panelBg: "bg-transparent",
+      container: "bg-black/90 backdrop-blur-md border border-cyan-400/30 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] text-white font-sans",
+      panelBg: "bg-black/85",
       header: "bg-gradient-to-r from-blue-900 to-cyan-900",
       headerTitle: "brand-font text-white",
       locationTitle: "brand-font text-white",
@@ -2186,7 +2190,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       notesInput: "bg-black/40 border border-white/20 text-white placeholder-gray-400 focus:border-cyan-400 rounded-lg",
       noteCard: "bg-black/40 border border-white/10 rounded-lg",
       navBtn: "bg-white/10 hover:bg-white/20 text-white border border-white/10",
-      popover: "bg-slate-900 border border-cyan-500/50 rounded-lg shadow-xl"
+      popover: "bg-black/95 border border-cyan-400/30 rounded-lg shadow-xl"
     },
     'retro-green': {
       container: "bg-black/85 backdrop-blur-sm border-2 border-green-400 shadow-[0_0_20px_rgba(74,222,128,0.2)] text-green-300 font-retro tracking-widest",
@@ -2592,6 +2596,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           <StackedImageCarousel
             images={imageCandidates}
             locationName={info.name || 'Location'}
+            waypointId={getEntityImagePreferenceId(info)}
             fallbackCaption={info.imageCaption}
             fallbackAttribution={(info as any).imageAttribution}
             skin={skin}
@@ -3023,7 +3028,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           )}
           {/* Header */}
 
-          <div className={`relative p-5 shrink-0 flex flex-col items-center ${skin === 'modern' ? 'border-b border-white/10' : ''} ${theme.header}`.replace(/\s+/g, ' ').trim()}>
+          <div className={`relative p-5 shrink-0 flex flex-col items-center ${theme.header}`.replace(/\s+/g, ' ').trim()}>
             {/* Subtle contextual background image treatment — modern theme only */}
             {isModern && headerBgImage && !headerImageError && (
               <div
@@ -3051,6 +3056,15 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                   aria-hidden="true"
                 />
               </div>
+            )}
+
+            {/* Modern theme vertical depth gradient transition: top maintains blue/cyan vibrancy, lower portion transitions smoothly to black to blend into waypoint navigation */}
+            {isModern && (
+              <div
+                className="absolute inset-0 pointer-events-none z-0 bg-gradient-to-b from-transparent from-30% via-blue-950/50 via-65% to-black/95"
+                aria-hidden="true"
+                data-testid="modern-header-vertical-gradient"
+              />
             )}
 
             {/* 1. Close X button */}
@@ -3186,7 +3200,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           {routeNav && !isParchment && (() => {
              const isMulti = !routeNav.isDiscoveryLoading && ((routeNav.routeLocalTotal ?? routeNav.total) > 1);
              return (
-               <div className={`relative z-[1] ${isRetro ? 'px-3 py-1.5 border-b border-current opacity-80' : 'px-3 py-1.5 border-b border-white/10 bg-white/5'} flex items-center justify-between min-w-0`}>
+               <div className={`relative z-[1] ${isRetro ? 'px-3 py-1.5 border-b border-current opacity-80' : isModern ? 'px-3 py-1.5 bg-gradient-to-b from-black/95 via-black/85 to-black/75' : `px-3 py-1.5 ${theme.panelBg}`} flex items-center justify-between min-w-0`}>
                   {isMulti && (
                     <button onClick={routeNav.onPrev} className={`p-1.5 rounded-full ${theme.navBtn} pointer-events-auto shrink-0`} aria-label="Previous waypoint">
                         <ChevronLeft size={16} />
@@ -3222,6 +3236,14 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             data-infopanel="true"
             onWheel={(e) => e.stopPropagation()}
           >
+            {/* Top scroll fade overlay for Modern theme to smoothly fade scrolling text into black */}
+            {isModern && scrollFade.top && (
+              <div
+                className="sticky top-0 left-0 right-0 h-6 -mb-6 z-20 pointer-events-none bg-gradient-to-b from-black/90 to-transparent transition-opacity duration-200"
+                aria-hidden="true"
+                data-testid="modern-scroll-top-fade"
+              />
+            )}
             {(isError || isLMStudioNoModel) ? (
                <div className="p-6 flex flex-col items-center justify-center min-h-48 text-center space-y-3">
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center mb-1 ${isRetro ? 'bg-red-900/40 text-red-400' : 'bg-red-500/20 text-red-400'}`}>
@@ -3317,6 +3339,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                                    <StackedImageCarousel
                                      images={fu.images.map((im: any) => typeof im === 'string' ? { url: im } : im)}
                                      locationName={info.name || 'Location'}
+                                     waypointId={fu.id || getEntityImagePreferenceId(info)}
                                      skin={skin}
                                      theme={theme}
                                    />

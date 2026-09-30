@@ -386,7 +386,7 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
     // Waypoint navigator container remains transparent
     expect(parchmentHtml).toContain('bg-transparent');
 
-    // Modern skin retains border-b border-white/10 and bg-white/5
+    // Modern skin header transitions directly without border
     const modernHtml = renderToStaticMarkup(
       <InfoPanel
         info={routeInfo}
@@ -399,7 +399,8 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
         }}
       />
     );
-    expect(modernHtml).toContain('relative p-5 shrink-0 flex flex-col items-center border-b border-white/10 bg-gradient-to-r from-blue-900 to-cyan-900');
+    expect(modernHtml).toContain('relative p-5 shrink-0 flex flex-col items-center bg-gradient-to-r from-blue-900 to-cyan-900');
+    expect(modernHtml).not.toContain('border-b border-slate-800/70');
 
     // Retro-green retains bg-green-900/30
     const greenHtml = renderToStaticMarkup(

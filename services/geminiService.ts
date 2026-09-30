@@ -17,7 +17,7 @@ import { PIPELINE_DEBUG, logWaypointSnapshot, logFieldDiff, logEnrichmentJsonPip
 import { EnrichmentResult, CanonicalGeographicEntity } from '../domain';
 import { parseAndExtract, IncrementalCandidateParser } from '../utils/jsonParser';
 import { enrichLocationInfo, mergeRichestFields } from './locationService';
-import { isGenericPlaceholderDescription, isEnglishText } from './entityValidation';
+import { isGenericPlaceholderDescription, isEnglishText, hasCodeOrUiArtifacts, isUnsupportedMajorEventHostClaim } from './entityValidation';
 import { isPlaceholderString } from '../components/InfoPanel';
 import { validateEarthGeography } from './celestialCapabilities';
 import { deduplicateNotableFacts, filterAdditiveNotableFacts } from '../utils/notableFactsUtils';
@@ -276,9 +276,9 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
 
     if (params.systemInstruction) {
       const sysContent = params.systemInstruction.parts?.[0]?.text || params.systemInstruction;
-      messages.push({ role: 'system', content: sysContent + schemaInstruction });
+      messages.push({ role: 'system', content: sysContent + (isJson ? '\n\nYou must respond with a valid JSON object.' : '') });
     } else if (schemaInstruction) {
-      messages.push({ role: 'system', content: schemaInstruction.trim() });
+      messages.push({ role: 'system', content: 'You are an accurate, educational geographic assistant. You must respond with a valid JSON object.' });
     }
 
     if (params.contents) {
@@ -942,6 +942,11 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
         INSTRUCTIONS BY INTENT:
         1. HISTORICAL_EVENT:
            - Identify the EXACT physical site, facility, launchpad, or battlefield where the specific queried historical event occurred.
+           - Canonical Event Identity:
+             - The requested entity name is authoritative.
+             - For a named historical battle or event, return the canonical historical event or battlefield/site associated with that event.
+             - Do NOT substitute an unrelated farm, building, monument, or tactical sub-location unless the user explicitly requested that specific place.
+             - Preserve the canonical event identity in the returned name.
            - Event Semantic Anchoring: The queried event MUST remain the primary anchor of the location resolution, coordinates, description, and notable facts.
              Examples:
              - "Where did the Lusitania sink?" / "Lusitania sinking" -> Set 'name' to "RMS Lusitania Sinking Site" at ~51.3762° N, 11.4558° W off the Old Head of Kinsale, Ireland. DO NOT name the location "Position 51.3762 N, 11.4558 W" or "Coordinates...".
@@ -1081,10 +1086,9 @@ Return only JSON:
         coordinates: data.coordinates
       });
       data.name = normalizedTitle;
-      data.canonicalName = normalizedTitle;
-
+      let entityCheck: any = null;
       if (data.name) {
-        const entityCheck = validateEntityIdentity(targetSearchTerm, data.name, { rawQuery: rawQuery || query, intent });
+        entityCheck = validateEntityIdentity(targetSearchTerm, data.name, { rawQuery: rawQuery || query, intent });
         const coordsValid = Boolean(data.coordinates && isValidCoordinates(normalizeCoordinates(data.coordinates) || data.coordinates));
         const recoveryAccepted = coordsValid && entityCheck.matches;
 
@@ -3521,9 +3525,9 @@ export const generateRoute = async (
 };
 
 
-import { ExtractedQuery, routeIntentAndExtractEntity, deriveQueryTopicTitle } from './queryNormalizer';
+import { ExtractedQuery, routeIntentAndExtractEntity, deriveQueryTopicTitle, normalizeSemanticEntityTitle } from './queryNormalizer';
 export type { ExtractedQuery };
-export { routeIntentAndExtractEntity, deriveQueryTopicTitle };
+export { routeIntentAndExtractEntity, deriveQueryTopicTitle, normalizeSemanticEntityTitle };
 
 export const extractEntityFromQuery = (query: string): string => {
   const extracted = routeIntentAndExtractEntity(query);
@@ -3556,7 +3560,7 @@ export const recoverCoordinatesFromAi = async (rawQuery: string, intent: string,
   }
 
   // Reject entity strings that are clearly query sentences or plural discovery phrases rather than real location names
-  if (/\b(filmed|shot|locations?|places|where was|where were|what are|what were|take place|battles? of|battles? fought|major battles)\b/i.test(entity)) {
+  if (/\b(filmed|shot|locations?|places|where was|where were|what are|what were|take place|battles of|battles fought|major battles)\b/i.test(entity)) {
     console.warn(`[Coordinate Recovery] Unsafe coordinate recovery blocked for query phrase "${entity}".`);
     return null;
   }
@@ -3743,6 +3747,10 @@ Output ONLY the JSON object.`;
       const authoritativeEntry = DETERMINISTIC_LOCATION_DB[lookupKey] ||
                                  DETERMINISTIC_LOCATION_DB[resolvedEntityName.toLowerCase().trim()];
 
+      const histKnowledge = getHistoricalEntityKnowledge(entity) ||
+                            getHistoricalEntityKnowledge(resolvedEntityName) ||
+                            getHistoricalEntityKnowledge(lookupKey);
+
       const authoritativeContext = authoritativeEntry ? {
         country: authoritativeEntry.context?.country || (authoritativeEntry as any).country,
         state: authoritativeEntry.context?.state || (authoritativeEntry as any).state,
@@ -3751,7 +3759,14 @@ Output ONLY the JSON object.`;
         region: authoritativeEntry.context?.region,
         lat: authoritativeEntry.lat,
         lng: authoritativeEntry.lng
-      } : null;
+      } : (histKnowledge ? {
+        country: histKnowledge.country || (histKnowledge.allowedCountries?.[0]),
+        state: histKnowledge.state,
+        city: histKnowledge.nearbyCity || (histKnowledge as any).city,
+        region: histKnowledge.expectedRegion || histKnowledge.approximateRegion,
+        lat: histKnowledge.approximateCoordinates?.lat,
+        lng: histKnowledge.approximateCoordinates?.lng
+      } : null);
 
       // 2. Reverse geocode the candidate coordinates when required
       let reverseGeoContext: ReverseGeocodeContext | null = null;
@@ -3761,11 +3776,12 @@ Output ONLY the JSON object.`;
         console.warn(`[Coordinate Recovery] Reverse geocoding failed for ${parsedCoords.lat}, ${parsedCoords.lng}:`, err);
       }
 
-      // 3. Compare reverse-geographic context against authoritative context
+      // 3. Compare reverse-geographic context against authoritative context and expectedRegion
       const geoCoordValidation = validateEntityCoordinates({
         requestedEntity: entity,
         recoveredEntity: resolvedEntityName,
         coordinates: parsedCoords,
+        expectedRegion: expectedRegion || histKnowledge?.expectedRegion,
         reverseGeographicContext: reverseGeoContext,
         authoritativeEntityContext: authoritativeContext
       });
@@ -3831,7 +3847,17 @@ Output ONLY the JSON object.`;
 export const recoverLocationMetadata = async (
   entityName: string,
   coordinates?: GeoCoordinates,
-  canonicalIdentity?: Partial<CanonicalGeographicEntity> & { country?: string; state?: string; city?: string; region?: string; county?: string; originalQuery?: string },
+  canonicalIdentity?: Partial<CanonicalGeographicEntity> & {
+    country?: string;
+    state?: string;
+    city?: string;
+    region?: string;
+    county?: string;
+    originalQuery?: string;
+    sourceText?: string;
+    sourceTitle?: string;
+    historicalContext?: string;
+  },
   signal?: AbortSignal
 ): Promise<Partial<EnrichmentResult> | null> => {
   if (signal?.aborted) return null;
@@ -3839,10 +3865,18 @@ export const recoverLocationMetadata = async (
     const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
 
     const entityTitle = canonicalIdentity?.canonicalName || entityName || normalizeLocationEntity(entityName);
+    const histKnowledge = getHistoricalEntityKnowledge(canonicalIdentity?.canonicalName || '') ||
+                          getHistoricalEntityKnowledge(entityTitle) ||
+                          getHistoricalEntityKnowledge(entityName);
+    const baseHistCtx = canonicalIdentity?.historicalContext || histKnowledge?.historicalContext;
+    const histRationale = histKnowledge?.sourceRationale;
+    const historicalContext = baseHistCtx
+      ? (histRationale && !baseHistCtx.includes(histRationale) ? `${baseHistCtx} ${histRationale}` : baseHistCtx)
+      : histRationale;
     const cityName = canonicalIdentity?.city;
     const adminArea = canonicalIdentity?.state || canonicalIdentity?.region || canonicalIdentity?.county || canonicalIdentity?.city || "Unknown area";
-    const countryName = canonicalIdentity?.country || "Unknown country";
-    const entityTypeStr = canonicalIdentity?.entityType || "settlement";
+    const countryName = canonicalIdentity?.country || histKnowledge?.country || "Unknown country";
+    const entityTypeStr = canonicalIdentity?.entityType || histKnowledge?.entityType || "settlement";
     const originalQuery = canonicalIdentity?.originalQuery;
 
     const expectedLocationString = [
@@ -3852,8 +3886,11 @@ export const recoverLocationMetadata = async (
     ].filter(Boolean).join(', ') || `${adminArea}, ${countryName}`;
 
     const hasCoords = coordinates && typeof coordinates.lat === 'number' && typeof coordinates.lng === 'number';
+    const hasSource = Boolean(canonicalIdentity?.sourceText && canonicalIdentity.sourceText.trim().length > 0);
+    const sourceText = hasSource ? canonicalIdentity!.sourceText!.trim() : '';
+    const sourceTitle = canonicalIdentity?.sourceTitle || entityTitle;
 
-    console.log(`[LLM ENRICHMENT INPUT]\ncanonicalName="${entityTitle}"\nentityType="${entityTypeStr}"\nstate="${adminArea}"\ncountry="${countryName}"\ncoordinates=${hasCoords ? `${coordinates.lat.toFixed(4)},${coordinates.lng.toFixed(4)}` : 'none'}\nidentityStatus="${canonicalIdentity?.identityStatus || 'verified'}"`);
+    console.log(`[LLM ENRICHMENT INPUT]\ncanonicalName="${entityTitle}"\nentityType="${entityTypeStr}"\nstate="${adminArea}"\ncountry="${countryName}"\ncoordinates=${hasCoords ? `${coordinates.lat.toFixed(4)},${coordinates.lng.toFixed(4)}` : 'none'}\nidentityStatus="${canonicalIdentity?.identityStatus || 'verified'}"\nsourceGrounded=${hasSource}\nsourceLength=${sourceText.length}${historicalContext ? `\nhistoricalContext="${historicalContext}"` : ''}`);
 
     const contextDetails = [
       `Canonical entity: ${entityTitle}`,
@@ -3863,18 +3900,19 @@ export const recoverLocationMetadata = async (
       `Country: ${countryName}`,
       hasCoords ? `Latitude: ${coordinates.lat}` : null,
       hasCoords ? `Longitude: ${coordinates.lng}` : null,
+      historicalContext ? `Verified Historical Context: ${historicalContext}` : null,
       canonicalIdentity?.osmId ? `OSM ID: ${canonicalIdentity.osmId}` : null,
       canonicalIdentity?.osmType ? `OSM Type: ${canonicalIdentity.osmType}` : null,
       canonicalIdentity?.wikidataId ? `Wikidata ID: ${canonicalIdentity.wikidataId}` : null,
       canonicalIdentity?.wikipedia ? `Wikipedia: ${canonicalIdentity.wikipedia}` : null
     ].filter(Boolean).join('\n');
 
-    const basePrompt = `
-      You are enriching a VERIFIED geographic entity.
+    let basePrompt = '';
+    let retryPrompt = '';
 
-      Do not independently resolve, reinterpret, substitute, or guess the geographic entity based on the original search query.
-
-      The geographic resolver has already identified the exact entity.
+    if (hasSource) {
+      basePrompt = `
+      You are synthesizing educational information for a VERIFIED geographic entity.
 
       Canonical entity:
       ${entityTitle}
@@ -3890,20 +3928,23 @@ export const recoverLocationMetadata = async (
       ${countryName}
 
       ${hasCoords ? `Latitude:\n      ${coordinates.lat}\n\n      Longitude:\n      ${coordinates.lng}\n` : ''}
+      ${historicalContext ? `Verified Historical Context:\n      ${historicalContext}\n` : ''}
       ${originalQuery ? `The original user query "${originalQuery}" is provided only for reference.` : ''}
 
-      You MUST generate information specifically about the verified canonical entity above.
+      AUTHORITATIVE SOURCE TEXT (Wikipedia extract for "${sourceTitle}"):
+      """
+      ${sourceText}
+      """
 
-      Do not use information about similarly named cities, counties, regions, metropolitan areas, people, organizations, historical entities, or places in other states or countries.
-
-      All description, history, climate, context notes, and notable facts must specifically refer to the verified geographic entity.
-
-      CRITICAL INSTRUCTIONS:
-      1. ${hasCoords ? `You MUST describe THIS entity at THESE canonical coordinates (${coordinates.lat}, ${coordinates.lng}).` : `You MUST describe THIS historical/geographic entity (${entityTitle}) in ${expectedLocationString}.`}
-      2. Do not substitute another place with the same or similar name.
-      3. The ${hasCoords ? 'coordinates, ' : ''}country, administrative area, and entity type are authoritative.
-      4. LANGUAGE REQUIREMENT: All text fields ("description", "climate", "contextNotes", "notable") MUST be written strictly in ENGLISH. Never return French, Spanish, German, Italian, or other non-English text.
-      5. POPULATION REQUIREMENT: Do not generate, estimate, or infer population. Always return population as null (demographic data is retrieved separately from authoritative registries). Do not output comma-formatted numbers.
+      CRITICAL SOURCE-GROUNDING AND ACCURACY RULES:
+      1. SOURCE GROUNDING: The provided source text is your PRIMARY and AUTHORITATIVE factual basis. You must synthesize and organize facts ONLY from the provided source text, verified historical context, and deterministic administrative metadata above.
+      2. NO UNGROUNDED INVENTIONS: Do NOT introduce historical dates, founding dates, closure dates, wars, battles, treaties, institutions, facilities, or claims from general training memory that are not explicitly stated in the source text or verified historical context.
+      3. INSTITUTIONAL STATUS & FACT INTEGRITY: Do not infer or invent operational changes or closures (for example, never claim a naval base, military facility, hospital, university, or institution closed unless explicitly stated in the source text).
+      4. ENTITY FOCUS & CONSERVATIVE TONE: Describe the verified entity itself directly, neutrally, and conservatively based on facts. Do NOT inflate significance with generic evaluative claims (e.g., "considered one of the most significant in history", "crucial turning point", "lasting impact") unless explicitly documented in source text. Do NOT output generic name etymology or linguistic translations of the name.
+      5. CONCRETE NOTABLE FACTS: "contextNotes" and "notable" can be empty arrays [] if the source text does not mention enough distinct facts. Each notable fact MUST introduce a concrete, distinct detail (such as a specific historical consequence, structure, artifact, person, date, or aftermath) that is NOT already covered in the description. Do NOT output generic "Historical Significance", symbolism, or evaluative commentary that merely restates the event. Return [] if no distinct concrete fact is available. Never invent facts to fill lists.
+      6. POPULATION REQUIREMENT: Do not generate, estimate, or infer population. Always return population as null (demographic data is retrieved separately from authoritative registries).
+      7. LANGUAGE REQUIREMENT: All text fields ("description", "climate", "contextNotes", "notable") MUST be written strictly in ENGLISH.
+      8. OUTPUT INTEGRITY: The response must contain natural prose only. Strictly prohibit HTML, JSX, JavaScript, TypeScript, CSS class names, icon identifiers (such as FontAwesome or Lucide), React components, services, or internal code tokens.
 
       Current Date: ${currentDate}
 
@@ -3911,22 +3952,18 @@ export const recoverLocationMetadata = async (
       {
         "name": "${entityTitle}",
         "locationString": "${expectedLocationString}",
-        "description": "2-4 substantive educational paragraphs in English explaining what this place is, why it exists, why it is significant, and why someone should care. Write informative narrative without generic template phrases.",
+        "description": "2-3 concise, substantive educational paragraphs in English synthesizing the supplied source text about what this place is, why it exists, and its significance directly and conservatively without inflated evaluative commentary.",
         "population": null,
         "climate": {
           "name": "string (e.g. Subpolar oceanic climate, Oceanic climate, Alpine climate, Humid subtropical climate, etc.)",
           "description": "string (plain language climate summary in English)",
           "koppenCode": "string (e.g. Cfa, Cfb, ET)"
         },
-        "contextNotes": ["substantive fact 1 in English", "substantive fact 2 in English", "substantive fact 3 in English"],
+        "contextNotes": ["substantive fact 1 directly from source in English", "substantive fact 2 directly from source in English"],
         "notable": [
           {
             "title": "Short Fact Title 1",
-            "description": "1-2 sentence substantive explanatory description of this fact in English."
-          },
-          {
-            "title": "Short Fact Title 2",
-            "description": "1-2 sentence substantive explanatory description of this fact in English."
+            "description": "1-2 sentence substantive explanatory description of this distinct concrete fact directly supported by the source in English."
           }
         ]
       }
@@ -3935,45 +3972,125 @@ export const recoverLocationMetadata = async (
       Output ONLY a single valid JSON object.
     `;
 
-    const retryPrompt = `
-      You are enriching a VERIFIED geographic entity:
+      retryPrompt = `
+      You are synthesizing educational information for a VERIFIED geographic entity:
       ${contextDetails}
+
+      AUTHORITATIVE SOURCE TEXT:
+      """
+      ${sourceText}
+      """
 
       CRITICAL RULES:
       1. You MUST output ONLY a single valid JSON object. Do NOT include markdown fences, prose, or instruction headers.
-      2. Describe ONLY ${entityTitle} in ${countryName} (${adminArea})${hasCoords ? ` at coordinates ${coordinates.lat}, ${coordinates.lng}` : ''}.
-      3. Do not confuse with other entities sharing a similar name.
-      4. ALL text must be strictly in ENGLISH. Do NOT use French, Spanish, German, Italian, etc.
-      5. Do NOT output partial JSON or nested climate objects as root.
-      6. You MUST include ALL of the following top-level keys: "name", "locationString", "description", "population", "climate", "contextNotes", "notable".
-      7. POPULATION: Always return "population": null. Do not generate numeric population estimates or comma-separated numbers.
-      8. "description" must be substantive paragraphs in English about the entity, not just climate notes.
-      9. "notable" MUST be an array of structured objects, each with "title" (short topic/feature name) and "description" (1-2 sentence explanation). Never return plain strings for notable.
+      2. Synthesize ONLY from the provided source text, verified historical context, and verified administrative hierarchy. Do NOT invent dates, institutional closures, or historical events from memory.
+      3. Describe ONLY ${entityTitle} in ${countryName} (${adminArea})${hasCoords ? ` at coordinates ${coordinates.lat}, ${coordinates.lng}` : ''}. Focus on the verified entity itself, not generic name etymology. Describe facts conservatively without unsupported significance claims.
+      4. ALL text must be strictly in ENGLISH.
+      5. "notable" and "contextNotes" can be empty arrays [] if no verified facts are in the source. Notable facts must be distinct concrete facts not in description; do not provide generic significance commentary.
+      6. POPULATION REQUIREMENT: Do not generate, estimate, or infer population. Always return population as null.
+      7. NO CODE/UI TOKENS: Natural prose only. No HTML, JSX, CSS, icon names (FontAwesome/Lucide), or code identifiers.
 
       OUTPUT FORMAT (Single JSON object ONLY):
       {
         "name": "${entityTitle}",
         "locationString": "${expectedLocationString}",
-        "description": "2-4 substantive educational paragraphs in English explaining what this place is, why it exists, why it is significant, and why someone should care.",
+        "description": "2-3 concise educational paragraphs in English synthesizing the source text.",
+        "population": null,
+        "climate": {
+          "name": "string (e.g. Subpolar oceanic climate, Oceanic climate, etc.)",
+          "description": "string (plain language climate summary in English)",
+          "koppenCode": "string (e.g. Cfa, Cfb, ET)"
+        },
+        "contextNotes": ["substantive fact 1 in English", "substantive fact 2 in English"],
+        "notable": [
+          {
+            "title": "Short Fact Title 1",
+            "description": "1-2 sentence substantive explanatory description of this distinct concrete fact in English."
+          }
+        ]
+      }
+    `;
+    } else {
+      // Conservative Fallback (No authoritative source text available)
+      basePrompt = `
+      You are enriching a VERIFIED geographic entity.
+
+      Canonical entity:
+      ${entityTitle}
+
+      Entity type:
+      ${entityTypeStr}
+
+      ${cityName ? `City/settlement:\n      ${cityName}\n` : ''}
+      State/region:
+      ${adminArea}
+
+      Country:
+      ${countryName}
+
+      ${hasCoords ? `Latitude:\n      ${coordinates.lat}\n\n      Longitude:\n      ${coordinates.lng}\n` : ''}
+      ${historicalContext ? `Verified Historical Context:\n      ${historicalContext}\n` : ''}
+      ${originalQuery ? `The original user query "${originalQuery}" is provided only for reference.` : ''}
+
+      CRITICAL CONSERVATIVE RULES (NO SOURCE TEXT AVAILABLE):
+      1. No authoritative encyclopedic text is available for this location. Do NOT invent historical dates, battles, treaties, founding/closure dates, or unverified claims from memory.
+      2. Do not use information about similarly named cities, counties, regions, metropolitan areas or landmarks in other states, countries, or regions.
+      3. ENTITY FOCUS & CONSERVATIVE TONE: Describe the verified entity itself directly, neutrally, and conservatively (using the verified historical context above if provided). Do NOT inflate significance with generic evaluative claims (e.g., "considered one of the most significant in history", "crucial moment", "lasting impact"). Do NOT output generic name etymology, linguistic translations of the name, or speculative identity questions.
+      4. Provide a concise, educational 1-2 paragraph description based strictly on the verified geographic entity type, administrative region, verified historical context, and general geographic characteristics.
+      5. CONCRETE NOTABLE FACTS: Return "contextNotes": [] and "notable": [] as empty arrays unless well-established, concrete geographic/historical facts are certain. Each notable fact MUST introduce a concrete, distinct detail (such as a specific historical consequence, structure, artifact, person, date, or aftermath) not already covered in the description. Do NOT generate generic "Historical Significance" commentary or abstract restatements. Prefer empty arrays [] over repetitive or speculative claims.
+      6. Accuracy is more important than completeness. Do not guess or fabricate historical events or institutions.
+      7. POPULATION REQUIREMENT: Do not generate, estimate, or infer population. Always return population as null.
+      8. LANGUAGE REQUIREMENT: All text fields MUST be written strictly in ENGLISH.
+      9. OUTPUT INTEGRITY: Natural prose only. Strictly prohibit HTML, JSX, CSS, icon identifiers (such as FontAwesome or Lucide), React components, services, or internal code tokens.
+
+      Current Date: ${currentDate}
+
+      Require the response to be a SINGLE JSON object with exactly these top-level fields:
+      {
+        "name": "${entityTitle}",
+        "locationString": "${expectedLocationString}",
+        "description": "1-2 concise, educational paragraphs in English describing the verified geographic entity, location, and verified historical context directly and conservatively without speculative trivia, name etymology, or inflated significance claims.",
         "population": null,
         "climate": {
           "name": "string (e.g. Subpolar oceanic climate, Oceanic climate, Alpine climate, Humid subtropical climate, etc.)",
           "description": "string (plain language climate summary in English)",
           "koppenCode": "string (e.g. Cfa, Cfb, ET)"
         },
-        "contextNotes": ["substantive fact 1 in English", "substantive fact 2 in English", "substantive fact 3 in English"],
-        "notable": [
-          {
-            "title": "Short Fact Title 1",
-            "description": "1-2 sentence substantive explanatory description of this fact in English."
-          },
-          {
-            "title": "Short Fact Title 2",
-            "description": "1-2 sentence substantive explanatory description of this fact in English."
-          }
-        ]
+        "contextNotes": [],
+        "notable": []
+      }
+
+      Output ONLY a single valid JSON object.
+    `;
+
+      retryPrompt = `
+      You are enriching a VERIFIED geographic entity with CONSERVATIVE metadata:
+      ${contextDetails}
+
+      CRITICAL RULES:
+      1. You MUST output ONLY a single valid JSON object. Do NOT include markdown fences, prose, or instruction headers.
+      2. No source text is available. Keep description concise (1-2 paragraphs) based on verified geography and verified historical context. Focus on the entity itself, not generic name etymology. Describe facts conservatively without unsupported significance claims. Do NOT invent dates, institutional closures, or historical events from memory.
+      3. Return empty arrays [] for "notable" and "contextNotes" unless concrete non-repetitive facts are certain.
+      4. ALL text must be strictly in ENGLISH.
+      5. POPULATION: Always return "population": null.
+      6. NO CODE/UI TOKENS: Natural prose only. No HTML, JSX, CSS, icon names (FontAwesome/Lucide), or code identifiers.
+
+      OUTPUT FORMAT (Single JSON object ONLY):
+      {
+        "name": "${entityTitle}",
+        "locationString": "${expectedLocationString}",
+        "description": "1-2 concise educational paragraphs in English describing the location and geography.",
+        "population": null,
+        "climate": {
+          "name": "string (e.g. Subpolar oceanic climate, Oceanic climate, etc.)",
+          "description": "string (plain language climate summary in English)",
+          "koppenCode": "string (e.g. Cfa, Cfb, ET)"
+        },
+        "contextNotes": [],
+        "notable": []
       }
     `;
+    }
 
     const fetchAndParse = async (isRetry: boolean) => {
       const prompt = isRetry ? retryPrompt : basePrompt;
@@ -4067,7 +4184,14 @@ export const recoverLocationMetadata = async (
     }
 
     const timestamp = Date.now();
-    const provenance = { provider: "Gemini", timestamp, cache: false };
+    const userSettings = getUserSettings();
+    const providerName = userSettings.aiProvider === 'lmstudio' ? 'LMStudio' : 'Gemini';
+    const provenance = {
+      provider: providerName,
+      source: hasSource ? 'Wikipedia' : 'GeographicResolver',
+      timestamp,
+      cache: false
+    };
     const metadata: Partial<EnrichmentResult> = {};
 
     const validFields: string[] = [];
@@ -4081,11 +4205,22 @@ export const recoverLocationMetadata = async (
         return false;
     };
 
-    if (data && data.description && !isBlank(data.description) && isEnglishText(typeof data.description === 'string' ? data.description : data.description.text)) {
-       metadata.description = typeof data.description === 'string'
-           ? { text: data.description, provenance }
-           : { ...data.description, provenance };
-       validFields.push('description');
+    if (data && data.description && !isBlank(data.description)) {
+       const descText = typeof data.description === 'string' ? data.description : (data.description?.text || '');
+       if (hasCodeOrUiArtifacts(descText)) {
+         console.warn(`[ENRICHMENT QUALITY REJECTION] Description rejected due to code/UI artifacts: "${descText.substring(0, 80)}..."`);
+         rejectedFields.push('description');
+       } else if (isUnsupportedMajorEventHostClaim(descText, entityTitle, countryName)) {
+         console.warn(`[ENRICHMENT QUALITY REJECTION] Description rejected due to unsupported major event claim: "${descText.substring(0, 80)}..."`);
+         rejectedFields.push('description');
+       } else if (isEnglishText(descText)) {
+         metadata.description = typeof data.description === 'string'
+             ? { text: data.description, provenance }
+             : { ...data.description, provenance };
+         validFields.push('description');
+       } else {
+         rejectedFields.push('description');
+       }
     } else {
        rejectedFields.push('description');
     }
@@ -4148,19 +4283,39 @@ export const recoverLocationMetadata = async (
     }
 
     if (data.contextNotes && !isBlank(data.contextNotes)) {
-       const notesArray = Array.isArray(data.contextNotes) ? data.contextNotes : [data.contextNotes];
-       metadata.contextNotes = notesArray.map((note: any) => ({
-          text: typeof note === 'string' ? note : JSON.stringify(note),
-          provenance
-       }));
+       const rawNotes = Array.isArray(data.contextNotes) ? data.contextNotes : [data.contextNotes];
+       const cleanNotes = rawNotes
+         .map((note: any) => typeof note === 'string' ? note.trim() : (note?.text ? String(note.text).trim() : ''))
+         .filter((noteText: string) => {
+           if (!noteText) return false;
+           if (hasCodeOrUiArtifacts(noteText)) {
+             console.warn(`[ENRICHMENT QUALITY REJECTION] Omitted context note containing code/UI artifacts: "${noteText}"`);
+             return false;
+           }
+           if (isUnsupportedMajorEventHostClaim(noteText, entityTitle, countryName)) {
+             console.warn(`[ENRICHMENT QUALITY REJECTION] Omitted context note containing unsupported major event claim: "${noteText}"`);
+             return false;
+           }
+           if (!isEnglishText(noteText)) {
+             return false;
+           }
+           return true;
+         })
+         .map((noteText: string) => ({
+           text: noteText,
+           provenance
+         }));
+
+       metadata.contextNotes = cleanNotes;
        validFields.push('contextNotes');
     } else {
-       rejectedFields.push('contextNotes');
+       metadata.contextNotes = [];
+       validFields.push('contextNotes');
     }
 
     if (data.notable && !isBlank(data.notable)) {
        const notableArray = Array.isArray(data.notable) ? data.notable : [data.notable];
-       metadata.notable = notableArray.map((e: any) => {
+       const parsedNotable = notableArray.map((e: any) => {
            if (typeof e === 'string') {
                const colonIdx = e.indexOf(':');
                if (colonIdx !== -1 && colonIdx < 50) {
@@ -4238,10 +4393,235 @@ export const recoverLocationMetadata = async (
            }
            return null;
        }).filter(Boolean) as any;
-       metadata.notable = deduplicateNotableFacts(metadata.notable);
+
+       const cleanNotable = parsedNotable.filter((item: any) => {
+         const combined = `${item.title || ''} ${item.description || ''}`.trim();
+         if (hasCodeOrUiArtifacts(combined)) {
+           console.warn(`[ENRICHMENT QUALITY REJECTION] Omitted notable item containing code/UI artifacts: "${item.title}"`);
+           return false;
+         }
+         if (isUnsupportedMajorEventHostClaim(combined, entityTitle, countryName)) {
+           console.warn(`[ENRICHMENT QUALITY REJECTION] Omitted notable item containing unsupported major event claim: "${item.title}"`);
+           return false;
+         }
+         return true;
+       });
+
+       const dedupedInitialNotable = deduplicateNotableFacts(cleanNotable);
+
+       // Evaluate whether initial facts are additive against description and context notes
+       const descText = metadata.description
+         ? (typeof metadata.description === 'string' ? metadata.description : (metadata.description.text || ''))
+         : (typeof data?.description === 'string' ? data.description : (data?.description?.text || ''));
+       const contextNoteTexts = Array.isArray(metadata.contextNotes)
+         ? metadata.contextNotes.map((n: any) => (typeof n === 'string' ? n : (n?.text || ''))).filter(Boolean)
+         : [];
+       const baseNarrativeTexts = [descText, ...contextNoteTexts, entityTitle, adminArea, countryName].filter(Boolean);
+
+       const initialAdditiveNotable = filterAdditiveNotableFacts(dedupedInitialNotable, baseNarrativeTexts);
+       const generatedCount = dedupedInitialNotable.length;
+       const acceptedCount = initialAdditiveNotable.length;
+       const filteredAsRedundant = generatedCount - acceptedCount;
+
+       console.log(`[RECOVERY NOTABLE FACTS]\ngenerated=${generatedCount} accepted=${acceptedCount} filteredAsRedundant=${filteredAsRedundant}`);
+
+       if (generatedCount > 0 && acceptedCount === 0 && !signal?.aborted) {
+         console.log(`[RECOVERY NOTABLE FACTS] Replacement attempt triggered for "${entityTitle}" (all initial facts were redundant)`);
+         try {
+            const notableReplacementPrompt = hasSource && sourceText ? `
+You are extracting ADDITIVE notable facts for a VERIFIED geographic entity from authoritative source text.
+
+Canonical entity:
+${entityTitle}
+
+Entity type:
+${entityTypeStr}
+
+Country / Region:
+${[adminArea, countryName].filter(Boolean).join(', ')}
+${historicalContext ? `\nVerified Historical Context:\n${historicalContext}\n` : ''}
+Authoritative Source Title: ${sourceTitle}
+Authoritative Source Text:
+"""
+${sourceText}
+"""
+
+ALREADY COVERED IN NARRATIVE (DO NOT REPEAT OR PARAPHRASE ANY OF THIS):
+Description:
+${descText}
+${contextNoteTexts.length > 0 ? `Context Notes:\n${contextNoteTexts.map((n: string) => `- ${n}`).join('\n')}` : ''}
+
+CRITICAL RULES:
+1. Generate zero or more genuinely ADDITIVE notable facts grounded directly in the authoritative source text or verified context above.
+2. DO NOT repeat or paraphrase information already present in the Description or Context Notes above.
+3. CONCRETE DETAILS ONLY: Each notable fact must provide a concrete distinct detail (e.g., specific structures, artifacts, people, subsequent events, aftermath, or physical site status). Do NOT generate abstract "Historical Significance", symbolism, or evaluative commentary ("crucial moment", "turning point", "lasting impact", "symbolizing...").
+4. Use ONLY information supported by the available verified source text or verified context above.
+5. Do NOT speculate. Do NOT invent dates, events, affiliations, rankings, records, or historical claims.
+6. If no defensible concrete additive fact is available, return an empty array []. Accuracy is more important than completeness. Never manufacture a fact merely to satisfy a quota.
+7. You MUST output ONLY a single valid JSON object without markdown fences, code blocks, prose, or instruction headers.
+
+OUTPUT FORMAT (Single JSON object ONLY):
+{
+  "notable": [
+    {
+      "title": "Short Fact Title",
+      "description": "1-2 sentence substantive explanatory description of this distinct concrete fact in English."
+    }
+  ]
+}
+
+Output ONLY a single valid JSON object.
+` : `
+You are providing ADDITIVE notable facts for a VERIFIED geographic entity.
+
+Canonical entity:
+${entityTitle}
+
+Entity type:
+${entityTypeStr}
+
+Country / Region:
+${[adminArea, countryName].filter(Boolean).join(', ')}
+${historicalContext ? `\nVerified Historical Context:\n${historicalContext}\n` : ''}
+ALREADY COVERED IN NARRATIVE (DO NOT REPEAT OR PARAPHRASE ANY OF THIS):
+Description:
+${descText}
+${contextNoteTexts.length > 0 ? `Context Notes:\n${contextNoteTexts.map((n: string) => `- ${n}`).join('\n')}` : ''}
+
+CRITICAL RULES:
+1. Generate zero or more genuinely ADDITIVE notable facts for this verified location.
+2. DO NOT repeat or paraphrase information already present in the Description or Context Notes above.
+3. CONCRETE DETAILS ONLY: Each notable fact must provide a concrete distinct detail (e.g., specific structures, artifacts, people, subsequent events, aftermath, or physical site status). Do NOT generate abstract "Historical Significance", symbolism, or evaluative commentary ("crucial moment", "turning point", "lasting impact", "symbolizing...").
+4. Use ONLY well-established, verified geographic facts and verified context above.
+5. Do NOT speculate. Do NOT invent dates, events, affiliations, rankings, records, or historical claims from memory.
+6. If no defensible concrete additive fact is available, return an empty array []. Accuracy is more important than completeness. Never manufacture a fact merely to satisfy a quota.
+7. You MUST output ONLY a single valid JSON object without markdown fences, code blocks, prose, or instruction headers.
+
+OUTPUT FORMAT (Single JSON object ONLY):
+{
+  "notable": [
+    {
+      "title": "Short Fact Title",
+      "description": "1-2 sentence substantive explanatory description of this distinct concrete fact in English."
+    }
+  ]
+}
+
+Output ONLY a single valid JSON object.
+`;
+
+           const notableReplacementSchema = {
+             type: Type.OBJECT,
+             properties: {
+               notable: {
+                 type: Type.ARRAY,
+                 items: {
+                   type: Type.OBJECT,
+                   properties: {
+                     title: { type: Type.STRING },
+                     description: { type: Type.STRING }
+                   },
+                   required: ["title", "description"]
+                 }
+               }
+             },
+             required: ["notable"]
+           };
+
+           const repResponse = await generateContentWithRetry({
+             model: modelName,
+             systemInstruction: "You are an accurate, educational geographic assistant. Output ONLY a single valid JSON object without markdown formatting, code blocks, or explanatory commentary.",
+             contents: notableReplacementPrompt,
+             config: {
+               responseMimeType: "application/json",
+               responseSchema: notableReplacementSchema,
+               maxOutputTokens: 1000,
+             }
+           }, 1, signal);
+
+           const repRawText = repResponse.text;
+           const parsedRep = parseAndExtract(repRawText);
+           let repData = parsedRep.success ? (parsedRep.value as any) : null;
+           if (Array.isArray(repData) && repData.length > 0) {
+             repData = repData[0];
+           }
+
+           let rawRepList: any[] = [];
+           if (repData && repData.notable) {
+             rawRepList = Array.isArray(repData.notable) ? repData.notable : [repData.notable];
+           } else if (Array.isArray(repData)) {
+             rawRepList = repData;
+           }
+
+           const parsedRepNotable = rawRepList.map((e: any) => {
+             if (typeof e === 'string') {
+               const colonIdx = e.indexOf(':');
+               if (colonIdx !== -1 && colonIdx < 50) {
+                 return {
+                   title: e.substring(0, colonIdx).trim(),
+                   description: e.substring(colonIdx + 1).trim(),
+                   name: e.substring(0, colonIdx).trim(),
+                   provenance
+                 };
+               }
+               return {
+                 title: "Notable Feature",
+                 description: e.trim(),
+                 name: "Notable Feature",
+                 provenance
+               };
+             }
+             if (typeof e === 'object' && e !== null) {
+               const title = e.title || e.name || "";
+               const description = e.description || e.summary || e.significance || "";
+               return {
+                 ...e,
+                 title: (title || "Notable Feature").trim(),
+                 description: (description || "").trim(),
+                 name: (title || e.name || "Notable Feature").trim(),
+                 provenance
+               };
+             }
+             return null;
+           }).filter(Boolean) as any;
+
+           const cleanRepNotable = parsedRepNotable.filter((item: any) => {
+             const combined = `${item.title || ''} ${item.description || ''}`.trim();
+             if (hasCodeOrUiArtifacts(combined)) {
+               console.warn(`[ENRICHMENT QUALITY REJECTION] Omitted replacement notable item containing code/UI artifacts: "${item.title}"`);
+               return false;
+             }
+             if (isUnsupportedMajorEventHostClaim(combined, entityTitle, countryName)) {
+               console.warn(`[ENRICHMENT QUALITY REJECTION] Omitted replacement notable item containing unsupported major event claim: "${item.title}"`);
+               return false;
+             }
+             return true;
+           });
+
+           const dedupedRepNotable = deduplicateNotableFacts(cleanRepNotable);
+           const repAdditiveNotable = filterAdditiveNotableFacts(dedupedRepNotable, baseNarrativeTexts);
+
+           console.log(`[RECOVERY NOTABLE FACTS REPLACEMENT]\ngenerated=${cleanRepNotable.length} accepted=${repAdditiveNotable.length} filteredAsRedundant=${cleanRepNotable.length - repAdditiveNotable.length}`);
+
+           if (repAdditiveNotable.length > 0) {
+             metadata.notable = repAdditiveNotable;
+           } else {
+             metadata.notable = [];
+           }
+         } catch (err) {
+           console.warn(`[RECOVERY NOTABLE FACTS] Replacement attempt failed or skipped:`, err);
+           metadata.notable = [];
+         }
+       } else if (acceptedCount > 0) {
+         metadata.notable = initialAdditiveNotable;
+       } else {
+         metadata.notable = [];
+       }
        validFields.push('notable');
     } else {
-       rejectedFields.push('notable');
+       console.log(`[RECOVERY NOTABLE FACTS]\ngenerated=0 accepted=0 filteredAsRedundant=0`);
+       metadata.notable = [];
+       validFields.push('notable');
     }
 
     console.log(`[METADATA RECOVERY]\nValid fields: ${validFields.length > 0 ? validFields.join(', ') : 'None'}\nRejected fields: ${rejectedFields.length > 0 ? rejectedFields.join(', ') : 'None'}`);

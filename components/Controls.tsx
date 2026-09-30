@@ -567,29 +567,24 @@ const Controls: React.FC<ControlsProps> = ({
 
   const themes = {
     'modern': {
-      // Base button: neutral hover to avoid clashing with active states (darker hover when OSM is displayed for contrast against light map tiles)
-      btn: isOSM
-        ? "bg-black/60 backdrop-blur-md border border-white/20 text-white modern-osm-hover rounded-full"
-        : "bg-black/60 backdrop-blur-md border border-white/20 text-white hover:bg-white/10 rounded-full",
+      btn: "bg-black/85 backdrop-blur-md border border-white/20 text-white hover:bg-black/60 hover:border-white/40 rounded-full",
       // Zoom Active (Cyan)
       btnActive: "bg-cyan-900/80 border-cyan-400 text-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.5)] hover:bg-cyan-800",
       // Favorite Active (Yellow/Gold for high contrast Star)
-      favActive: "bg-black/60 border-yellow-400 text-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.5)]",
+      favActive: "bg-black/85 border-yellow-400 text-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.5)]",
 
-      inputWrapper: "bg-black/80 backdrop-blur-xl border border-white/20 rounded-full shadow-2xl focus-within:border-cyan-500/70",
+      inputWrapper: "bg-black/90 backdrop-blur-md border border-white/20 rounded-full shadow-2xl focus-within:border-cyan-500/70",
       inputIcon: "text-gray-300",
       inputField: "text-white placeholder-gray-400 font-mono text-sm",
       submitBtn: "bg-white/10 text-cyan-400 hover:bg-white/20 hover:text-cyan-300 rounded-full",
       resetBtn: "text-gray-400 hover:text-white mr-2 p-1 rounded-full hover:bg-white/10 transition-colors",
       glow: "absolute inset-0 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full blur opacity-20 group-hover:opacity-40",
-      statusRow: "bg-black/80 backdrop-blur-md border border-white/15 text-white/90 rounded-full shadow-lg",
+      statusRow: "bg-black/90 backdrop-blur-md border border-white/15 text-white/90 rounded-full shadow-lg",
       statusText: "text-gray-200 font-sans",
       statusDismiss: "text-white/40 hover:text-white transition-colors p-0.5 rounded-full",
       copyright: "text-gray-500 font-sans",
-      modal: "bg-black/80 backdrop-blur-md border border-cyan-400/30 text-white rounded-xl shadow-2xl",
-      chip: isOSM
-        ? "px-3 py-1 bg-black/75 hover:bg-black/90 text-white border border-white/20 rounded-full text-xs font-mono transition-all shadow-md active:scale-95 cursor-pointer backdrop-blur-md"
-        : "px-3 py-1 bg-black/60 hover:bg-white/20 text-white border border-white/20 rounded-full text-xs font-mono transition-all shadow-md active:scale-95 cursor-pointer backdrop-blur-md"
+      modal: "bg-black/90 backdrop-blur-md border border-cyan-400/30 text-white rounded-xl shadow-2xl",
+      chip: "px-3 py-1 bg-black/85 hover:bg-black/60 hover:border-white/40 text-white border border-white/20 rounded-full text-xs font-mono transition-all shadow-md active:scale-95 cursor-pointer backdrop-blur-md"
     },
     'retro-green': {
       btn: "bg-black border border-green-400 text-green-300 hover:bg-green-400 hover:text-black rounded-none font-retro",
@@ -909,7 +904,7 @@ const Controls: React.FC<ControlsProps> = ({
                           placeholder="Paste text here..."
                           className={`w-full h-32 p-3 text-sm transition-colors outline-none resize-none ${
                             skin === 'modern'
-                              ? 'bg-transparent border border-white/20 rounded-lg focus:border-opacity-100'
+                              ? 'bg-transparent border border-white/20 rounded-lg focus:border-cyan-400 text-white'
                               : skin === 'parchment'
                               ? 'bg-[#e6d5b8] text-[#3e2723] border border-[#8b5a2b]/30 rounded-lg placeholder-[#3e2723]/60 focus:border-[#8b5a2b] focus:ring-1 focus:ring-[#8b5a2b]'
                               : 'bg-transparent border border-current rounded-none focus:border-opacity-100'
@@ -964,7 +959,7 @@ const Controls: React.FC<ControlsProps> = ({
             {favoritesButton}
             <div className={`w-px mx-1 self-stretch ${
               skin === 'modern'
-                ? (isOSM ? 'bg-black/60' : 'bg-white/20')
+                ? 'bg-white/20'
                 : 'bg-white/20'
             }`}></div>
             {zoomOutButton}
@@ -974,7 +969,7 @@ const Controls: React.FC<ControlsProps> = ({
               <>
                 <div className={`w-px mx-1 self-stretch ${
                   skin === 'modern'
-                    ? (isOSM ? 'bg-black/60' : 'bg-white/20')
+                    ? 'bg-white/20'
                     : skin === 'retro-green'
                     ? 'bg-green-400/30'
                     : skin === 'retro-amber'
@@ -995,12 +990,12 @@ const Controls: React.FC<ControlsProps> = ({
             <button
               type="button"
               onClick={handleScrollLeft}
-              className={`shrink-0 flex items-center justify-center p-1 mr-1.5 select-none cursor-pointer transition-opacity hover:opacity-80 active:scale-95 touch-manipulation ${
+              className={`shrink-0 flex items-center justify-center p-1 mr-1.5 select-none cursor-pointer transition-all active:scale-95 touch-manipulation ${
                 skin === 'retro-green'
-                  ? 'text-green-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(74,222,128,0.8)]'
+                  ? 'text-green-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(74,222,128,0.8)] hover:opacity-80'
                   : skin === 'retro-amber'
-                  ? 'text-amber-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(251,191,36,0.8)]'
-                  : 'bg-black/60 rounded-full text-cyan-400/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]'
+                  ? 'text-amber-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(251,191,36,0.8)] hover:opacity-80'
+                  : 'bg-black/85 hover:bg-black/60 hover:border-white/40 border border-transparent rounded-full text-cyan-400/90 hover:text-cyan-300 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]'
               }`}
               data-testid="chips-scroll-left-indicator"
               aria-label="Scroll follow-up questions left"
@@ -1036,12 +1031,12 @@ const Controls: React.FC<ControlsProps> = ({
             <button
               type="button"
               onClick={handleScrollRight}
-              className={`shrink-0 flex items-center justify-center p-1 ml-1.5 select-none cursor-pointer transition-opacity hover:opacity-80 active:scale-95 touch-manipulation ${
+              className={`shrink-0 flex items-center justify-center p-1 ml-1.5 select-none cursor-pointer transition-all active:scale-95 touch-manipulation ${
                 skin === 'retro-green'
-                  ? 'text-green-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(74,222,128,0.8)]'
+                  ? 'text-green-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(74,222,128,0.8)] hover:opacity-80'
                   : skin === 'retro-amber'
-                  ? 'text-amber-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(251,191,36,0.8)]'
-                  : 'bg-black/60 rounded-full text-cyan-400/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]'
+                  ? 'text-amber-400 font-retro text-xs font-bold drop-shadow-[0_0_4px_rgba(251,191,36,0.8)] hover:opacity-80'
+                  : 'bg-black/85 hover:bg-black/60 hover:border-white/40 border border-transparent rounded-full text-cyan-400/90 hover:text-cyan-300 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]'
               }`}
               data-testid="chips-scroll-right-indicator"
               aria-label="Scroll follow-up questions right"

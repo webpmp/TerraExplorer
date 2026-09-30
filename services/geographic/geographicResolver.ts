@@ -746,6 +746,67 @@ export function isPopulationBearingEntity(entityType?: string, entityName?: stri
 }
 
 
+export interface WikipediaLeadResult {
+  title: string;
+  extract: string;
+  thumbnailUrl?: string;
+  pageUrl?: string;
+  lang?: string;
+}
+
+/**
+ * Fetches the authoritative lead/intro extract of a Wikipedia article given an article title,
+ * Wikipedia tag (e.g. "en:Plymouth"), or canonical entity name.
+ */
+export async function fetchWikipediaLeadExtract(
+  identifier: string,
+  signal?: AbortSignal
+): Promise<WikipediaLeadResult | null> {
+  if (!identifier || typeof identifier !== 'string') return null;
+  const trimmed = identifier.trim();
+  if (!trimmed) return null;
+
+  let lang = 'en';
+  let articleTitle = trimmed;
+
+  // Handle prefix like "en:Plymouth" or "fr:Paris"
+  const langMatch = trimmed.match(/^([a-z]{2,3}):(.+)$/i);
+  if (langMatch) {
+    lang = langMatch[1].toLowerCase();
+    articleTitle = langMatch[2].trim();
+  }
+
+  const cleanTitle = articleTitle.replace(/_/g, ' ').trim();
+  if (!cleanTitle) return null;
+
+  try {
+    const url = `https://${lang}.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(cleanTitle)}&prop=extracts|pageimages&exintro=1&explaintext=1&pithumbsize=400&format=json&origin=*&redirects=1`;
+    const response = await fetch(url, { signal });
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const pages = data.query?.pages;
+    if (!pages) return null;
+
+    const pageId = Object.keys(pages)[0];
+    if (!pageId || pageId === '-1') return null;
+
+    const page = pages[pageId];
+    const extract = typeof page.extract === 'string' ? page.extract.trim() : '';
+    if (!extract) return null;
+
+    return {
+      title: page.title || cleanTitle,
+      extract,
+      thumbnailUrl: page.thumbnail?.source,
+      pageUrl: `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(page.title || cleanTitle)}`,
+      lang
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
 export async function resolveGeographicMetadata(marker: MapMarker): Promise<MapMarker> {
   const result = { ...marker };
   
@@ -897,21 +958,13 @@ coordinatesPreserved=${result.lat === marker.lat && result.lng === marker.lng}`)
 
   // 5. Wikipedia (Description and Image)
   try {
-     const wikiRes = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(marker.name)}&prop=extracts|pageimages&exintro=1&explaintext=1&pithumbsize=400&format=json&origin=*&redirects=1`);
-     if (wikiRes.ok) {
-         const wikiData = await wikiRes.json();
-         const pages = wikiData.query?.pages;
-         if (pages) {
-             const pageId = Object.keys(pages)[0];
-             if (pageId !== "-1") {
-                 const page = pages[pageId];
-                 if (page.extract) {
-                     (result as any).description = (result as any).description ?? page.extract;
-                 }
-                 if (page.thumbnail?.source) {
-                     (result as any).image = (result as any).image ?? page.thumbnail.source;
-                 }
-             }
+     const wikiResult = await fetchWikipediaLeadExtract(marker.wikipedia || marker.name);
+     if (wikiResult) {
+         if (wikiResult.extract) {
+             (result as any).description = (result as any).description ?? wikiResult.extract;
+         }
+         if (wikiResult.thumbnailUrl) {
+             (result as any).image = (result as any).image ?? wikiResult.thumbnailUrl;
          }
      }
   } catch (e) {

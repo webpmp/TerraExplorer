@@ -4,6 +4,7 @@ import { searchImageRegistry, canonicalizeImageUrl } from './imageDeduplicationS
 import { getHistoricalEntityKnowledge } from './geographic/historicalCoordinateValidator';
 import { stripDiacritics, areEntitiesMatchingWithDiacritics, getUnicodeNormalizedForms } from './geographic/geographicNormalization';
 import { logTraceNarration } from './waypointPipelineService';
+import { getUserImagePreference, getEntityImagePreferenceId } from './imagePreferenceService';
 
 export interface ImageCandidate {
   url: string;
@@ -1220,42 +1221,246 @@ const US_STATES = [
   'alaska', 'vermont', 'wyoming'
 ];
 
-export function detectGeographicMismatch(
+export const VALID_GEOGRAPHIC_MODIFIER_REGEX = /^(?:,\s*(?:[A-Za-z\s.'-]+|\d{4})|\s*\((?:[A-Za-z\s.'-]+|\d{4})\)|\s*[-–—:]\s*[A-Za-z\s.'-]+|\s+(?:harbour|harbor|port|docks?|bay|sound|river|lake|sea|ocean|gulf|strait|channel|mountain|mount|mt|hill|hills|peak|peaks|range|plateau|beach|cove|inlet|island|islands|isle|isles|atoll|reef|shoal|valley|canyon|gorge|waterfront|coast|shore|shoreline|historic\s+district|old\s+town|city\s+centre|city\s+center|centre|center|downtown|skyline|aerial\s+view|view|ruins|castle|cathedral|basilica|church|abbey|monastery|temple|sanctuary|mosque|shrine|fort|fortress|citadel|barracks|rampart|monument|memorial|statue|station|railway\s+station|rail\s+station|metro\s+station|airport|airfield|bridge|park|gardens?|square|plaza|circus|street|road|avenue|lane|way|quay|pier|wharf|jetty|lighthouse|marina|promenade|hoe|barbican|citadel|dockyard|naval\s+base|colony|settlement|parish|borough|county|district|province|state|region|territory|canton|commune|municipality|town|city|village|blitz|siege|battle|treaty|expedition|departure|landing|council|raid|archaeology|archaeological\s+site|excavation|grave|graves|wreck|wreck\s+site|shipwreck|lookout|overlook|tower|wharf|causeway|point|head|headland|peninsula))\b/i;
+
+export function isIncompatibleCandidateEntityType(
   candidate: ImageCandidate,
-  entity: { name: string; city?: string; state?: string; country?: string; coordinates?: { lat: number; lng: number }; entityType?: string }
-): { mismatch: boolean; location?: string; reason?: string } {
-  // 1. Coordinate check
-  if (candidate.coordinates && entity.coordinates && entity.coordinates.lat !== 0 && entity.coordinates.lng !== 0) {
-    const dist = calculateHaversineDistanceKm(
-      entity.coordinates.lat,
-      entity.coordinates.lng,
-      candidate.coordinates.lat,
-      candidate.coordinates.lng
-    );
-    const tolerance = getEntityDistanceToleranceKm(entity.entityType);
-    if (dist > tolerance) {
+  targetEntity: {
+    name?: string;
+    canonicalName?: string;
+    entityType?: string;
+    type?: string;
+    category?: string;
+    waypoint?: any;
+  }
+): { incompatible: boolean; candidateEntityType?: string; reason?: string } {
+  const targetType = (
+    targetEntity.entityType ||
+    targetEntity.type ||
+    targetEntity.category ||
+    targetEntity.waypoint?.entityType ||
+    targetEntity.waypoint?.type ||
+    ''
+  ).toLowerCase().trim();
+
+  const targetName = (targetEntity.canonicalName || targetEntity.name || '').toLowerCase().trim();
+
+  // If target entity is explicitly an automobile, brand, software, album, movie, or fictional character, do not flag as incompatible
+  const isTargetAutomotive = /\b(car|automobile|vehicle|marque|brand)\b/i.test(targetType) || /\b(car|automobile)\b/i.test(targetName);
+  const isTargetCompany = /\b(company|corporation|brand|business|retailer)\b/i.test(targetType);
+  const isTargetSoftware = /\b(software|operating system|app|game)\b/i.test(targetType);
+  const isTargetMedia = /\b(album|song|film|movie|tv show|series|character)\b/i.test(targetType);
+
+  const title = (candidate.title || '').trim();
+  const desc = (candidate.description || candidate.caption || '').trim();
+  const fullText = `${title} ${desc}`.toLowerCase();
+
+  // 1. Incompatible Wikipedia/Wikimedia parenthetical disambiguation suffixes in title
+  const incompatibleParentheticalRegex = /\((?:automobile|car|marque|brand|company|corporation|business|firm|enterprise|retailer|conglomerate|software|operating\s+system|app|application|video\s+game|board\s+game|card\s+game|tabletop\s+game|toy|album|song|single|band|musician|music\s+group|musical\s+group|film|movie|tv\s+series|television\s+series|miniseries|episode|character|fictional\s+character|novel|book|comic|comics|magazine|drug|medication|pharmaceutical|clothing|clothing\s+brand|shoe|typeface|font|aircraft|missile|weapon|locomotive|train\s+model)\)$/i;
+
+  if (incompatibleParentheticalRegex.test(title)) {
+    const parentheticalMatch = title.match(incompatibleParentheticalRegex)?.[0] || '';
+    if (!targetName.includes(parentheticalMatch.toLowerCase())) {
       return {
-        mismatch: true,
-        location: `${candidate.coordinates.lat.toFixed(4)}, ${candidate.coordinates.lng.toFixed(4)}`,
-        reason: 'Geographic mismatch'
+        incompatible: true,
+        candidateEntityType: 'INCOMPATIBLE_DISAMBIGUATION',
+        reason: 'ENTITY_TYPE_CONFLICT'
       };
     }
   }
 
-  // 2. Textual location check
+  // 2. Incompatible automotive marque / car model / brand / vehicle in text/title when target is not automotive
+  if (!isTargetAutomotive) {
+    const automotivePatterns = [
+      /\b(?:automobile\s+marque|brand\s+of\s+automobiles|automobile\s+brand|car\s+brand|car\s+marque|car\s+manufacturer|automobile\s+manufacturer|motor\s+vehicle\s+manufactured|line\s+of\s+automobiles|automotive\s+division|concept\s+car|sedan\s+produced|coupe\s+produced|sports\s+car\s+model|luxury\s+car\s+marque|division\s+of\s+chrysler|division\s+of\s+general\s+motors|division\s+of\s+ford|passenger\s+car\s+model|compact\s+car\s+manufactured|subcompact\s+car|muscle\s+car|station\s+wagon\s+produced)\b/i,
+      /\b(?:manufactured\s+by\s+(?:chrysler|general\s+motors|ford|toyota|nissan|honda|stellantis|daimler|volkswagen))\b/i,
+      /\b(?:plymouth\s+(?:fury|sport\s+fury|barracuda|valiant|road\s+runner|duster|voyager|satellite|belvedere|superbird|savoy|prowler|laser|breeze|acclaim|reliant|sundance|cranbrook|volare|horizon|gtx))\b/i,
+      /\b(?:lincoln\s+(?:continental|navigator|aviator|corsair|nautilus|town\s+car|mark\s+[ivx]+))\b/i,
+      /\b(?:ford\s+(?:capri|granada|cortina|taunus|torino|mustang|focus|fiesta))\b/i,
+      /\b(?:chevrolet\s+(?:malibu|monte\s+carlo|bel\s+air|chevelle|impala|corvette|camaro))\b/i,
+      /\b(?:dodge\s+(?:charger|challenger|dart|coronet|monaco))\b/i,
+      /\b(?:pontiac\s+(?:parisienne|catalina|bonneville|gto|firebird|grand\s+prix))\b/i
+    ];
+
+    const isAutomotiveKeyword = /\b(?:automobile|automobiles|car|cars|sedan|coupe|hardtop|convertible|station\s+wagon|hatchback|muscle\s+car|sports\s+car|motor\s+vehicle|v8\s+engine|v6\s+engine|horsepower|chrysler)\b/i;
+
+    if (automotivePatterns.some(p => p.test(fullText)) || (isAutomotiveKeyword.test(title) && !targetName.includes('car'))) {
+      return {
+        incompatible: true,
+        candidateEntityType: 'AUTOMOBILE',
+        reason: 'ENTITY_TYPE_CONFLICT'
+      };
+    }
+  }
+
+  // 3. Incompatible commercial brand / company / corporation when target is not a company
+  if (!isTargetCompany && !isTargetAutomotive) {
+    const commercialPatterns = [
+      /\b(?:commercial\s+corporation|publicly\s+traded\s+company|retail\s+company|clothing\s+brand|shoe\s+brand|beverage\s+brand|food\s+brand|consumer\s+electronics\s+company|chain\s+of\s+retail\s+stores|fast\s+food\s+restaurant\s+chain)\b/i,
+      /\b(?:victoria'?s\s+secret|amazon\s+(?:web\s+services|aws|kindle|alexa|prime|dot|echo|fire\s+tv|logistics|fulfillment))\b/i
+    ];
+    if (commercialPatterns.some(p => p.test(fullText))) {
+      return {
+        incompatible: true,
+        candidateEntityType: 'COMMERCIAL_BRAND',
+        reason: 'ENTITY_TYPE_CONFLICT'
+      };
+    }
+  }
+
+  // 4. Incompatible software / games when target is not software
+  if (!isTargetSoftware) {
+    const softwareGamePatterns = [
+      /\b(?:video\s+game\s+developed|board\s+game\s+released|tabletop\s+game|mobile\s+app\s+developed|operating\s+system\s+developed)\b/i
+    ];
+    if (softwareGamePatterns.some(p => p.test(fullText))) {
+      return {
+        incompatible: true,
+        candidateEntityType: 'SOFTWARE_OR_GAME',
+        reason: 'ENTITY_TYPE_CONFLICT'
+      };
+    }
+  }
+
+  // 5. Incompatible pop culture entertainment / albums / fictional characters when target is not media
+  if (!isTargetMedia) {
+    const mediaPatterns = [
+      /\b(?:studio\s+album\s+by|song\s+recorded\s+by|single\s+by\s+the|rock\s+band|pop\s+band|feature\s+film\s+directed\s+by|television\s+series\s+created\s+by|fictional\s+character\s+in)\b/i
+    ];
+    if (mediaPatterns.some(p => p.test(fullText))) {
+      return {
+        incompatible: true,
+        candidateEntityType: 'MEDIA_OR_ENTERTAINMENT',
+        reason: 'ENTITY_TYPE_CONFLICT'
+      };
+    }
+  }
+
+  // 6. Incompatible biographical figures when target is a physical location
+  const isTargetLocation = /\b(location|place|city|town|village|port|harbour|harbor|settlement|region|country|waypoint|municipality)\b/i.test(targetType) ||
+    !isTargetCompany && !isTargetMedia && !isTargetSoftware && !isTargetAutomotive;
+  if (isTargetLocation) {
+    const isBiographicalPerson = /\b(?:16th\s+president|president\s+of\s+the\s+united\s+states|prime\s+minister\s+of|american\s+politician|british\s+politician|actor|actress|fashion\s+model|brazilian\s+actor|american\s+actor|british\s+actor|singer|musician|born\s+\d{4}|died\s+\d{4})\b/i.test(fullText);
+    if (isBiographicalPerson && !targetName.includes('president') && !targetName.includes('politician') && !targetName.includes('actor')) {
+      return {
+        incompatible: true,
+        candidateEntityType: 'BIOGRAPHICAL_PERSON',
+        reason: 'ENTITY_TYPE_CONFLICT'
+      };
+    }
+  }
+
+  return { incompatible: false };
+}
+
+export function detectTemporalContradiction(
+  candidate: ImageCandidate,
+  context: {
+    year?: string;
+    period?: string;
+    historicalPeriod?: string;
+    historicalContext?: string;
+    description?: string;
+    context?: string;
+    significance?: string;
+  }
+): { contradiction: boolean; candidateYear?: number; targetYear?: number; reason?: string } {
+  // 1. Extract target historical year(s)
+  let targetYear: number | undefined;
+  if (context.year && /^\d{3,4}$/.test(context.year.trim())) {
+    targetYear = parseInt(context.year.trim(), 10);
+  } else {
+    const allContextText = [
+      context.year,
+      context.period,
+      context.historicalPeriod,
+      context.historicalContext,
+      context.description,
+      context.context,
+      context.significance
+    ].filter(Boolean).join(' ');
+
+    const yearMatch = allContextText.match(/\b(1[0-9]{3}|20[0-2][0-9])\b/);
+    if (yearMatch) {
+      targetYear = parseInt(yearMatch[1], 10);
+    } else {
+      const centuryMatch = allContextText.match(/\b([1-9][0-9]?)(?:st|nd|rd|th)\s+century\b/i);
+      if (centuryMatch) {
+        const centuryNum = parseInt(centuryMatch[1], 10);
+        targetYear = centuryNum * 100;
+      }
+    }
+  }
+
+  if (!targetYear) {
+    return { contradiction: false };
+  }
+
+  // 2. Extract candidate inception / emergence / founding / introduction / production date
+  const text = `${candidate.title || ''} ${candidate.description || ''} ${candidate.caption || ''}`.toLowerCase();
+
+  // Patterns specifically capturing entity inception / manufacturing / model years / introduction
+  const inceptionPatterns = [
+    /\b(?:introduced|founded|established|created|launched|released|formed|incorporated|manufactured|produced|first\s+built|debuted)\s+(?:in|on|around|circa|c\.)?\s*([12][0-9]{3})\b/i,
+    /\b(?:brand|marque|company|corporation|model|line|series)\s+(?:introduced|founded|launched|created|started|from|between)\s+([12][0-9]{3})\b/i,
+    /\b([12][0-9]{3})\s*(?:–|-)\s*(?:[12][0-9]{3}|present)\s+(?:automobile|car|brand|marque|company|corporation|model|series|vehicle|product|software|album|film)\b/i,
+    /\bmodel\s+years?\s+([12][0-9]{3})\b/i,
+    /\b([12][0-9]{3})\s+(?:model|sedan|coupe|hardtop|convertible|edition|release|version|automobile|car|fury|sport\s+fury)\b/i,
+    /^(?:19|20)\d{2}\s+/i
+  ];
+
+  for (const pattern of inceptionPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const yearStr = match[1] || match[0].trim();
+      const candidateYear = parseInt(yearStr, 10);
+      if (!isNaN(candidateYear) && candidateYear > 1000 && candidateYear < 2100) {
+        // If candidate entity inception is significantly after target historical year (> targetYear + 5)
+        if (candidateYear > targetYear + 5) {
+          return {
+            contradiction: true,
+            candidateYear,
+            targetYear,
+            reason: 'TEMPORAL_CONTRADICTION'
+          };
+        }
+      }
+    }
+  }
+
+  return { contradiction: false, targetYear };
+}
+
+export function detectGeographicMismatch(
+  candidate: ImageCandidate,
+  entity: { name: string; city?: string; state?: string; country?: string; coordinates?: { lat: number; lng: number }; entityType?: string }
+): { mismatch: boolean; location?: string; reason?: string; isExplicitTextualMismatch?: boolean } {
+  // 1. Textual location check
   const text = `${candidate.title || ''} ${candidate.caption || ''} ${candidate.description || ''}`.toLowerCase();
   const targetCountry = (entity.country || '').toLowerCase().trim();
   const targetCity = (entity.city || '').toLowerCase().trim();
   const targetState = (entity.state || '').toLowerCase().trim();
 
+  // Helper to test if two country names are equivalent
+  const isEquivalentCountry = (c1: string, c2: string) => {
+    const norm = (c: string) => {
+      const trimmed = c.toLowerCase().trim();
+      if (trimmed === 'usa' || trimmed === 'united states of america' || trimmed === 'us' || trimmed === 'u.s.' || trimmed === 'united states') return 'united states';
+      if (trimmed === 'uk' || trimmed === 'united kingdom' || trimmed === 'great britain' || trimmed === 'england' || trimmed === 'scotland' || trimmed === 'wales' || trimmed === 'northern ireland') return 'united kingdom';
+      return trimmed;
+    };
+    return norm(c1) === norm(c2);
+  };
+
   // If entity is outside the United States and candidate text explicitly mentions a US city or state
-  if (targetCountry && targetCountry !== 'united states' && targetCountry !== 'usa') {
+  if (targetCountry && !isEquivalentCountry(targetCountry, 'united states')) {
     for (const usCity of Object.keys(KNOWN_MAJOR_CITIES)) {
       if (KNOWN_MAJOR_CITIES[usCity] === 'united states') {
         const regex = new RegExp(`\\b${usCity}\\b`, 'i');
         if (regex.test(text)) {
           return {
             mismatch: true,
+            isExplicitTextualMismatch: true,
             location: `${usCity.charAt(0).toUpperCase() + usCity.slice(1)}, United States`,
             reason: `Geographic mismatch: candidate refers to ${usCity}, but entity is in ${entity.country}`
           };
@@ -1268,37 +1473,39 @@ export function detectGeographicMismatch(
       if (regex.test(text) && !entity.name.toLowerCase().includes(usState)) {
         return {
           mismatch: true,
+          isExplicitTextualMismatch: true,
           location: `${usState.charAt(0).toUpperCase() + usState.slice(1)}, United States`,
           reason: `Geographic mismatch: candidate refers to ${usState}, but entity is in ${entity.country}`
         };
       }
     }
+
+    // Check US state postal code abbreviation e.g. ", MA", ", Mass."
+    const usPostalMatch = text.match(/,\s*(?:in\s+)?(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|Mass\.|Mass)\b/i);
+    if (usPostalMatch && !entity.name.toLowerCase().includes(usPostalMatch[1].toLowerCase())) {
+      return {
+        mismatch: true,
+        isExplicitTextualMismatch: true,
+        location: `${usPostalMatch[1].toUpperCase()}, United States`,
+        reason: `Geographic mismatch: candidate refers to US state ${usPostalMatch[1]}, but entity is in ${entity.country}`
+      };
+    }
   }
 
   // If entity is outside Canada and candidate text explicitly mentions a Canadian province
-  if (targetCountry && targetCountry !== 'canada') {
+  if (targetCountry && !isEquivalentCountry(targetCountry, 'canada')) {
     for (const province of CANADIAN_PROVINCES) {
       const regex = new RegExp(`\\b${province}\\b`, 'i');
       if (regex.test(text) && !entity.name.toLowerCase().includes(province)) {
         return {
           mismatch: true,
+          isExplicitTextualMismatch: true,
           location: `${province.charAt(0).toUpperCase() + province.slice(1)}, Canada`,
           reason: `Geographic mismatch: candidate refers to ${province}, but entity is in ${entity.country}`
         };
       }
     }
   }
-
-  // Helper to test if two country names are equivalent
-  const isEquivalentCountry = (c1: string, c2: string) => {
-    const norm = (c: string) => {
-      const trimmed = c.toLowerCase().trim();
-      if (trimmed === 'usa' || trimmed === 'united states of america' || trimmed === 'us' || trimmed === 'u.s.' || trimmed === 'united states') return 'united states';
-      if (trimmed === 'uk' || trimmed === 'united kingdom' || trimmed === 'great britain' || trimmed === 'england' || trimmed === 'scotland' || trimmed === 'wales' || trimmed === 'northern ireland') return 'united kingdom';
-      return trimmed;
-    };
-    return norm(c1) === norm(c2);
-  };
 
   // Check conflicting foreign country mentions when entity country is known
   if (targetCountry) {
@@ -1314,6 +1521,7 @@ export function detectGeographicMismatch(
           }
           return {
             mismatch: true,
+            isExplicitTextualMismatch: true,
             location: c.toUpperCase(),
             reason: `Geographic mismatch: candidate refers to ${c}, but entity is in ${entity.country}`
           };
@@ -1331,6 +1539,7 @@ export function detectGeographicMismatch(
         if (regex.test(text) && !entity.name.toLowerCase().includes(city)) {
           return {
             mismatch: true,
+            isExplicitTextualMismatch: true,
             location: city.charAt(0).toUpperCase() + city.slice(1),
             reason: `Geographic mismatch: candidate refers to ${city}, but landmark is in ${entity.city}`
           };
@@ -1343,7 +1552,7 @@ export function detectGeographicMismatch(
   // e.g. Entity is "Florence, Italy" or "Milan, Italy" or "Venice, Italy" or "Rome, Italy" or "London, England"
   // but candidate is "Milan, Ohio" or "Rome, Georgia" or "Venice, Florida" or "London, Ontario"
   const entityCityOrName = targetCity || entity.name.toLowerCase().split(/[,–-]/)[0].trim();
-  if (targetCountry && targetCountry !== 'united states' && targetCountry !== 'usa' && targetCountry !== 'canada') {
+  if (targetCountry && !isEquivalentCountry(targetCountry, 'united states') && !isEquivalentCountry(targetCountry, 'canada')) {
     const homonymUSMatch = text.match(new RegExp(`\\b${entityCityOrName}\\b[\\s,]+(?:in\\s+)?([a-z\\s]+)`, 'i'));
     if (homonymUSMatch) {
       const rest = homonymUSMatch[1].toLowerCase().trim();
@@ -1351,6 +1560,7 @@ export function detectGeographicMismatch(
       if (stateMatch) {
         return {
           mismatch: true,
+          isExplicitTextualMismatch: true,
           location: `${entityCityOrName.charAt(0).toUpperCase() + entityCityOrName.slice(1)}, ${stateMatch.charAt(0).toUpperCase() + stateMatch.slice(1)}`,
           reason: `Geographic mismatch: candidate refers to ${entityCityOrName} in ${stateMatch}, but entity is in ${entity.country}`
         };
@@ -1359,6 +1569,7 @@ export function detectGeographicMismatch(
       if (provinceMatch) {
         return {
           mismatch: true,
+          isExplicitTextualMismatch: true,
           location: `${entityCityOrName.charAt(0).toUpperCase() + entityCityOrName.slice(1)}, ${provinceMatch.charAt(0).toUpperCase() + provinceMatch.slice(1)}`,
           reason: `Geographic mismatch: candidate refers to ${entityCityOrName} in ${provinceMatch}, but entity is in ${entity.country}`
         };
@@ -1366,7 +1577,26 @@ export function detectGeographicMismatch(
     }
   }
 
-  return { mismatch: false };
+  // 2. Coordinate check
+  if (candidate.coordinates && entity.coordinates && entity.coordinates.lat !== 0 && entity.coordinates.lng !== 0) {
+    const dist = calculateHaversineDistanceKm(
+      entity.coordinates.lat,
+      entity.coordinates.lng,
+      candidate.coordinates.lat,
+      candidate.coordinates.lng
+    );
+    const tolerance = getEntityDistanceToleranceKm(entity.entityType);
+    if (dist > tolerance) {
+      return {
+        mismatch: true,
+        isExplicitTextualMismatch: false,
+        location: `${candidate.coordinates.lat.toFixed(4)}, ${candidate.coordinates.lng.toFixed(4)}`,
+        reason: `Geographic mismatch: coordinate distance (${Math.round(dist)}km) exceeds tolerance (${tolerance}km)`
+      };
+    }
+  }
+
+  return { mismatch: false, isExplicitTextualMismatch: false };
 }
 
 function normalizeDiacritics(str: string): string {
@@ -1494,7 +1724,7 @@ export function isDifferentNamedEntity(
   const allTargetAliases = [targetLower, ...aliases.map(a => a.toLowerCase().trim())].filter(Boolean);
 
   // Non-settlement organization, facility, person, or administrative division check
-  // (e.g. "Dallas Cowboys", "Dallas County", "Dallas Fort Worth International Airport", "Bryce Dallas Howard", "ADX Florence", "Florence Nightingale", "Florence Welch", "Florence (drug)")
+  // (e.g. "Dallas Cowboys", "Dallas County", "Dallas Fort Worth International Airport", "Bryce Dallas Howard", "ADX Florence", "Florence Nightingale", "Florence Welch", "Florence (drug)", "Plymouth (automobile)")
   const nonSettlementPatterns = [
     /\b(?:cowboys|mavericks|stars|rangers|texans|astros|spurs|rockets|fc|united|club|team|franchise)\b/i,
     /\b(?:athletics|sports|basketball|football|baseball|soccer|softball|volleyball|lacrosse|track and field|roster|tournament|championship|division [i|ii|iii]|ncaa|naia|athletic program|athletic team)\b/i,
@@ -1507,7 +1737,9 @@ export function isDifferentNamedEntity(
     /\b(?:adx|admax|usp|penitentiary|correctional\s+(?:institution|facility|center)|federal\s+prison|state\s+prison|detention\s+center|prison)\b/i,
     /\b(?:nightingale|welch|kundera|actor|actress|director|singer|musician|politician|author|player|coach|nurse|novelist|athlete)\b/i,
     /\b(?:saint|st\.|catherine\s+of|patriarch(?:ate)?\s+of|library\s+of|bishop\s+of|archbishop\s+of)\b/i,
-    /\((?:drug|medication|pharmaceutical|album|song|single|band|film|tv\s+series|novel|magazine|comics)\)$/i
+    /\((?:automobile|car|marque|brand|company|corporation|business|firm|enterprise|retailer|conglomerate|software|operating\s+system|app|application|video\s+game|board\s+game|card\s+game|tabletop\s+game|toy|drug|medication|pharmaceutical|album|song|single|band|film|movie|tv\s+series|television\s+series|novel|magazine|comics)\)$/i,
+    /\b(?:automobile\s+marque|brand\s+of\s+automobiles|automobile\s+brand|car\s+brand|car\s+marque|car\s+manufacturer|automobile\s+manufacturer|motor\s+vehicle\s+manufactured|line\s+of\s+automobiles|automotive\s+division)\b/i,
+    /\b(?:commercial\s+corporation|publicly\s+traded\s+company|retail\s+company|clothing\s+brand|shoe\s+brand|beverage\s+brand|food\s+brand)\b/i
   ];
 
   for (const pattern of nonSettlementPatterns) {
@@ -1555,21 +1787,13 @@ export function isDifferentNamedEntity(
     }
   }
 
-  // If candidate title looks like a person, sports team, or facility while target is a settlement/region
-  const isTargetSettlement = /\b(city|town|village|settlement|municipality|capital|metro)\b/i.test(targetLower);
-  // Also check if candidate is a person (e.g. Bryce Dallas Howard, Florence Nightingale)
-  const isPersonCandidate = /\b(?:actress|actor|director|singer|musician|politician|author|novelist|athlete)\b/i.test(description || '');
-  if (isPersonCandidate && (isTargetSettlement || !/\b(?:actress|actor|director|singer|musician|politician|author|novelist|athlete)\b/i.test(targetLower))) {
+  // 1. Check entity type compatibility
+  const typeCheck = isIncompatibleCandidateEntityType(
+    { title: titleClean, description },
+    { name: targetEntityName, canonicalName: targetEntityName }
+  );
+  if (typeCheck.incompatible) {
     return true;
-  }
-
-  // If title or description directly contains target entity name or any alias, check if candidate title is an overt person, prison, or disambiguation before accepting
-  const normFullText = stripDiacritics(fullText).toLowerCase();
-  if (allTargetAliases.some(a => fullText.includes(a) || normFullText.includes(stripDiacritics(a).toLowerCase()))) {
-    const isOvertPersonOrFacility = nonSettlementPatterns.some(pattern => pattern.test(titleClean) && !pattern.test(targetLower));
-    if (!isOvertPersonOrFacility) {
-      return false;
-    }
   }
 
   // Vessel prefixes: SS, USS, HMS, RMS, MV, MS, MT, SV, RV, PS
@@ -1627,18 +1851,6 @@ export function isDifferentNamedEntity(
         (description && trail.regex.test(description));
       if (!isTargetRelatedToTrail) {
         // If image explicitly mentions an unrelated historical trail, reject it
-        return true;
-      }
-    }
-  }
-
-  // If entity has a known city/country, check for conflicting foreign cities/countries
-  if (allTargetAliases.length > 0) {
-    const diffCityMatch = titleClean.match(/\b(melbourne|sydney|brisbane|tokyo|paris|london|new york|beijing|rome|berlin|madrid|moscow|toronto)\b/i);
-    if (diffCityMatch) {
-      const cityMention = diffCityMatch[1].toLowerCase();
-      if (!allTargetAliases.some(a => a.includes(cityMention)) && !targetLower.includes(cityMention)) {
-        // If candidate explicitly names a different major world city not in target aliases
         return true;
       }
     }
@@ -1860,6 +2072,15 @@ export function classifyImageEvidence(
   const normFullText = stripDiacritics(fullText).toLowerCase();
   const titleLower = title.toLowerCase().trim();
   const normTitle = stripDiacritics(titleLower).toLowerCase().trim();
+
+  // Check for incompatible candidate entity types (e.g. automobiles, brands, films vs places)
+  const incompatibleCheck = isIncompatibleCandidateEntityType(candidate, entity as any);
+  if (incompatibleCheck.incompatible) {
+    return {
+      evidenceType: 'UNRELATED',
+      entityMatchLevel: 'NONE'
+    };
+  }
 
   // Clean candidate title by stripping prefix "File:" / "Image:", file extension, and underscores
   const cleanTitle = title
@@ -2142,13 +2363,11 @@ export function isHistoricalWaypointEntity(entity: {
   metadataMode?: string;
   significance?: string;
 }): boolean {
-  if (entity.metadataMode === 'modern_place') return false;
-
   const wp = entity.waypoint || {};
   const name = (entity as any).name || (entity as any).canonicalName || wp.name || wp.canonicalName || '';
   const desc = (entity as any).description || wp.description || '';
-  const title = (entity.routeTitle || (entity as any).routeGroupName || wp.routeTitle || wp.routeGroupName || '').toLowerCase();
-  const context = (entity.historicalContext || entity.significance || (entity as any).context || wp.context || wp.historicalContext || wp.significance || '').toLowerCase();
+  const title = (entity.routeTitle || (entity as any).routeGroupName || wp.routeTitle || wp.routeGroupName || (entity as any).routeContext?.title || '').toLowerCase();
+  const context = (entity.historicalContext || entity.significance || (entity as any).context || wp.context || wp.historicalContext || wp.significance || (entity as any).routeContext?.text || '').toLowerCase();
   const combined = `${name} ${title} ${context} ${desc}`.toLowerCase();
 
   // If this is a filming / media / cinematic discovery, it is NOT an antique historical expedition
@@ -2191,8 +2410,8 @@ export function isHistoricalWaypointEntity(entity: {
     Boolean(wp.routeGroupId) ||
     Boolean(entity.historicalRouteId) ||
     Boolean(wp.historicalRouteId) ||
-    Boolean(entity.historicalPeriod) ||
-    Boolean(wp.historicalPeriod) ||
+    Boolean((entity as any).routeContext) ||
+    Boolean(wp.routeContext) ||
     ((Boolean(entity.routeTitle) || Boolean(wp.routeTitle) || Boolean((entity as any).routeGroupName) || Boolean(wp.routeGroupName)) &&
       !combined.includes('guide') && !combined.includes('hours') && !combined.includes('highlights'));
 
@@ -2209,6 +2428,11 @@ export function isHistoricalWaypointEntity(entity: {
     eType.includes('historic') ||
     /\b(1[0-9]{3}|20[0-2][0-9]|bce?|century|expedition|voyage|shipwreck|wreck|treaty|siege|battle)\b/i.test(combined);
 
+  // If entity is explicitly marked modern_place and has no historical route/waypoint context, it is not a historical waypoint
+  if (entity.metadataMode === 'modern_place' && !hasExplicitHistoricalRouteContext && !hasWaypointContext && !isExplicitHistoricalWaypointType) {
+    return false;
+  }
+
   if (isExplicitHistoricalWaypointType && (hasExplicitHistoricalRouteContext || hasWaypointContext)) {
     return true;
   }
@@ -2217,20 +2441,44 @@ export function isHistoricalWaypointEntity(entity: {
     return true;
   }
 
+  if (hasExplicitHistoricalRouteContext) {
+    return true;
+  }
+
   return false;
 }
 
 export function extractHistoricalImageContext(info: any): HistoricalImageContext {
   const wp = info?.waypoint || {};
-  let exploration = (info?.routeTitle || wp?.routeTitle || info?.routeGroupName || wp?.routeGroupName || info?.routeContext?.title || info?.historicalContext || '').trim();
+  let exploration = (
+    info?.routeTitle ||
+    wp?.routeTitle ||
+    info?.routeGroupName ||
+    wp?.routeGroupName ||
+    info?.routeContext?.title ||
+    info?.historicalContext ||
+    wp?.historicalContext ||
+    info?.context ||
+    wp?.context ||
+    ''
+  ).trim();
   // Filter out UI placeholder labels from leaking into search context
   if (/^(from route|route context|historical significance|notable facts|image|none)$/i.test(exploration)) {
-    exploration = (info?.historicalContext || '').trim();
+    exploration = (info?.historicalContext || wp?.historicalContext || info?.context || wp?.context || '').trim();
     if (/^(from route|route context|historical significance|notable facts|image|none)$/i.test(exploration)) {
       exploration = '';
     }
   }
-  const rawEvent = (info?.significance || wp?.significance || info?.context || wp?.context || '').trim();
+  const rawEvent = (
+    info?.significance ||
+    wp?.significance ||
+    info?.context ||
+    wp?.context ||
+    info?.historicalContext ||
+    wp?.historicalContext ||
+    info?.routeContext?.text ||
+    ''
+  ).trim();
   // Sanitize event: take only short topic/phrase (at most 3-4 words or clean title), not full prose sentences
   let event: string | undefined = undefined;
   if (rawEvent) {
@@ -2251,11 +2499,22 @@ export function extractHistoricalImageContext(info: any): HistoricalImageContext
   
   // Extract 4-digit year or period mention (e.g. "1804", "19th century", "1804-1806")
   let year: string | undefined = undefined;
-  const yearMatch = (period + ' ' + (info?.description || '') + ' ' + (wp?.description || '') + ' ' + (info?.context || '') + ' ' + (wp?.context || '') + ' ' + (info?.historicalContext || '')).match(/\b(1[0-9]{3}|20[0-2][0-9])\b/);
+  const yearMatch = (
+    period + ' ' +
+    (info?.description || '') + ' ' +
+    (wp?.description || '') + ' ' +
+    (info?.context || '') + ' ' +
+    (wp?.context || '') + ' ' +
+    (info?.historicalContext || '') + ' ' +
+    (wp?.historicalContext || '') + ' ' +
+    (info?.significance || '') + ' ' +
+    (wp?.significance || '') + ' ' +
+    (info?.routeContext?.text || '')
+  ).match(/\b(1[0-9]{3}|20[0-2][0-9])\b/);
   if (yearMatch) {
     year = yearMatch[1];
   } else {
-    const centuryMatch = (period + ' ' + (info?.description || '')).match(/\b([1-9][0-9]?(?:st|nd|rd|th)\s+century)\b/i);
+    const centuryMatch = (period + ' ' + (info?.description || '') + ' ' + (wp?.description || '')).match(/\b([1-9][0-9]?(?:st|nd|rd|th)\s+century)\b/i);
     if (centuryMatch) {
       year = centuryMatch[1];
     }
@@ -2296,7 +2555,12 @@ export function extractHistoricalImageContext(info: any): HistoricalImageContext
     info?.significance,
     wp?.significance,
     info?.routeContext?.text,
-    ...(Array.isArray(info?.notable) ? info.notable.map((n: any) => typeof n === 'string' ? n : n?.description || n?.title || '') : [])
+    info?.routeTitle,
+    wp?.routeTitle,
+    info?.routeGroupName,
+    wp?.routeGroupName,
+    ...(Array.isArray(info?.notable) ? info.notable.map((n: any) => typeof n === 'string' ? n : n?.description || n?.title || '') : []),
+    ...(Array.isArray(wp?.notable) ? wp.notable.map((n: any) => typeof n === 'string' ? n : n?.description || n?.title || '') : [])
   ].filter(Boolean).join(' ');
   const fullNarrative = rawNarrativeText.toLowerCase();
 
@@ -2311,7 +2575,50 @@ export function extractHistoricalImageContext(info: any): HistoricalImageContext
     }
   }
 
-  const people = Array.from(new Set(rawEntities.map(e => String(e).trim()).filter(Boolean)));
+  const famousExpeditionShips = [
+    'Endurance', 'James Caird', 'Terra Nova', 'Discovery', 'Fram', 'Gjøa', 'Maud', 'Belgica',
+    'Pourquoi Pas', 'Vostok', 'Mirny', 'Erebus', 'Terror', 'Investigator', 'Resolute', 'Enterprise',
+    'Mayflower', 'Golden Hind', 'Half Moon', 'Santa Maria', 'Pinta', 'Niña', 'Victoria',
+    'San Antonio', 'Concepción', 'Santiago', 'Trinidad', 'Resolution', 'Adventure', 'Bounty',
+    'Beagle', 'Challenger', 'St. Roch', 'Vincennes', 'Astrolabe', 'Zélée', 'Norge', 'Italia'
+  ];
+  for (const ship of famousExpeditionShips) {
+    const regex = new RegExp(`\\b${ship}\\b`, 'i');
+    if (regex.test(rawNarrativeText) && !discoveredVessels.some(v => v.toLowerCase() === ship.toLowerCase())) {
+      discoveredVessels.push(ship);
+    }
+  }
+
+  // Generic extraction of departure harbor / docks / port locations
+  const dockRegex = /\b([A-Z][a-z0-9'-]+(?:\s+[A-Z][a-z0-9'-]+)?\s+(?:Docks?|Harbour|Harbor|Port|Wharf|Pier|Quay|Haven))\b/g;
+  let dockMatch: RegExpExecArray | null;
+  const discoveredDocks: string[] = [];
+  while ((dockMatch = dockRegex.exec(rawNarrativeText)) !== null) {
+    const dName = dockMatch[1].trim();
+    if (dName && !discoveredDocks.some(d => d.toLowerCase() === dName.toLowerCase())) {
+      discoveredDocks.push(dName);
+    }
+  }
+
+  const famousLeaders = [
+    'Shackleton', 'Ernest Shackleton', 'Frank Wild', 'Amundsen', 'Roald Amundsen', 'Robert Falcon Scott',
+    'Franklin', 'John Franklin', 'Cook', 'James Cook', 'Magellan', 'Ferdinand Magellan',
+    'Columbus', 'Christopher Columbus', 'Francis Drake', 'Henry Hudson', 'Fridtjof Nansen',
+    'Marco Polo', 'Ibn Battuta', 'Zheng He', 'David Livingstone', 'Henry Morton Stanley',
+    'Meriwether Lewis', 'William Clark', 'John C. Frémont', 'Francisco Coronado', 'Hernando de Soto',
+    'Hernán Cortés', 'Francisco Pizarro', 'Samuel de Champlain', 'Robert de La Salle', 'John Cabot',
+    'Jacques Cartier', 'Willem Barentsz', 'Adolf Erik Nordenskiöld', 'Robert Peary', 'Matthew Henson',
+    'Douglas Mawson', 'James Clark Ross', 'William Edward Parry', 'Charles Darwin', 'George Vancouver'
+  ];
+  const discoveredPeople: string[] = [...rawEntities.map(e => String(e).trim()).filter(Boolean)];
+  for (const leader of famousLeaders) {
+    const regex = new RegExp(`\\b${leader}\\b`, 'i');
+    if ((regex.test(rawNarrativeText) || regex.test(exploration)) && !discoveredPeople.some(p => p.toLowerCase() === leader.toLowerCase())) {
+      discoveredPeople.push(leader);
+    }
+  }
+
+  const people = Array.from(new Set(discoveredPeople));
   const activityKeywords = [
     'preparation', 'preparations', 'departure', 'departed', 'keelboat', 'pirogue', 'boatmen',
     'encampment', 'camp', 'winter camp', 'fort', 'portage', 'council', 'meeting', 'treaty',
@@ -2323,9 +2630,10 @@ export function extractHistoricalImageContext(info: any): HistoricalImageContext
   const artifactKeywords = [
     'keelboat', 'pirogue', 'canoe', 'journal', 'diary', 'map', 'compass', 'sextant',
     'musket', 'rifle', 'peace medal', 'uniform', 'document', 'specimen', 'wreck', 'shipwreck',
-    ...discoveredVessels
+    ...discoveredVessels,
+    ...discoveredDocks
   ];
-  const artifacts = Array.from(new Set(artifactKeywords.filter(kw => fullNarrative.includes(kw.toLowerCase()) || discoveredVessels.includes(kw))));
+  const artifacts = Array.from(new Set(artifactKeywords.filter(kw => fullNarrative.includes(kw.toLowerCase()) || discoveredVessels.includes(kw) || discoveredDocks.includes(kw))));
 
   const notableFacts: string[] = [];
   if (Array.isArray(info?.notable)) {
@@ -2867,6 +3175,44 @@ Reason=${reason}`);
         break;
     }
 
+    // Check for incompatible candidate entity types (e.g. automobile, commercial brand, software, movie vs geographic place)
+    const entityTypeMismatch = isIncompatibleCandidateEntityType(candidate, {
+      name: entityName,
+      canonicalName: entity.canonicalName || entity.waypoint?.canonicalName,
+      entityType: entity.entityType || entity.type,
+      waypoint: entity.waypoint
+    });
+
+    if (entityTypeMismatch.incompatible) {
+      console.log(`[IMAGE CANDIDATE (HISTORICAL WAYPOINT)] REJECTED due to incompatible entity type: ${entityTypeMismatch.reason}`);
+      return {
+        score: 0,
+        decision: 'REJECT',
+        reason: entityTypeMismatch.reason || 'INCOMPATIBLE_ENTITY_TYPE',
+        candidate
+      };
+    }
+
+    // Check for temporal contradictions (e.g. 1928 automobile brand for a 1914 historical event)
+    const temporalMismatch = detectTemporalContradiction(candidate, {
+      year: histContext.year,
+      period: histContext.period,
+      historicalPeriod: entity.historicalPeriod || entity.waypoint?.historicalPeriod,
+      historicalContext: histContext.exploration || entity.historicalContext || entity.waypoint?.historicalContext,
+      description: histContext.description,
+      context: histContext.significance
+    });
+
+    if (temporalMismatch.contradiction) {
+      console.log(`[IMAGE CANDIDATE (HISTORICAL WAYPOINT)] REJECTED due to temporal contradiction: ${temporalMismatch.reason}`);
+      return {
+        score: 0,
+        decision: 'REJECT',
+        reason: temporalMismatch.reason || 'TEMPORAL_CONTRADICTION',
+        candidate
+      };
+    }
+
     // Check for conflicting historical trail contamination
     const trailConflict = isDifferentNamedEntity(title, desc, entityName, [
       histContext.cleanLocationName || '',
@@ -2936,7 +3282,13 @@ Reason=${reason}`);
     const isExactTitleCandidate = entityAliases.some(alias => {
       if (alias.length < 3) return false;
       if (titleLower === alias) return true;
-      if (titleLower.startsWith(`${alias} (`) || titleLower.startsWith(`${alias},`)) return true;
+      if (titleLower.startsWith(`${alias} (`) || titleLower.startsWith(`${alias},`)) {
+        const entityTypeCheck = isIncompatibleCandidateEntityType(candidate, entity);
+        if (entityTypeCheck.incompatible) {
+          return false;
+        }
+        return true;
+      }
       if (titleLower.startsWith(`${alias} cathedral`) || titleLower.startsWith(`${alias} duomo`) || titleLower.startsWith(`${alias} basilica`) || titleLower.startsWith(`${alias} ruins`) || titleLower.startsWith(`${alias} battlefield`)) return true;
       if (titleLower.startsWith(`historic ${alias}`) || titleLower.startsWith(`view of ${alias}`) || titleLower.startsWith(`aerial view of ${alias}`) || titleLower.startsWith(`map of ${alias}`) || titleLower.startsWith(`ruins of ${alias}`) || titleLower.startsWith(`battle of ${alias}`) || titleLower.startsWith(`siege of ${alias}`)) return true;
       return false;
@@ -3096,8 +3448,15 @@ decision=${decision}`);
   // 4. Different named entity detection
   const derivedAliases = [
     ...(entity.aliases || []),
+    entity.canonicalName,
+    entity.city,
+    entity.state,
+    entity.country,
+    entity.waypoint?.city,
+    entity.waypoint?.state,
+    entity.waypoint?.country,
     entityName.replace(/\s+(?:shipwreck|wreck location|discovery site|wreck site|wreck|ship|archaeological site|movie set|film set|set|site|monument|memorial|historic site|ruins|battlefield)$/i, '').trim()
-  ].filter(Boolean);
+  ].filter(Boolean) as string[];
   const isDifferentEntity = isDifferentNamedEntity(title, desc, entityName, derivedAliases);
 
   // 5. Evidence classification
@@ -3113,7 +3472,10 @@ decision=${decision}`);
 
   // 6. Entity Type Match evaluation
   let entityTypeMatchLevel: 'HIGH' | 'MEDIUM' | 'LOW' | 'INCOMPATIBLE' = 'MEDIUM';
-  if (isHistoricalVessel) {
+  const generalEntityTypeCheck = isIncompatibleCandidateEntityType(candidate, entity as any);
+  if (generalEntityTypeCheck.incompatible) {
+    entityTypeMatchLevel = 'INCOMPATIBLE';
+  } else if (isHistoricalVessel) {
     const hasMaritimeToken = /\b(ship|vessel|caravel|carrack|flagship|fleet|sailing|sail|wreck|shipwreck|maritime|nautical|naval|columbus|1492|expedition|replica|mast|rigging|hull)\b/i.test(fullText);
     const isPerson = /\b(podcaster|journalist|television host|talk show|science communicator|american woman|actress|comedian|politician|writer|author|born \d{4}|biography)\b/i.test(fullText);
     const isChurch = /\b(basilica|cathedral|church|parish|diocese|convent|monastery|sanctuary)\b/i.test(fullText);
@@ -3130,8 +3492,16 @@ decision=${decision}`);
   // 7. Geographic Evidence evaluation
   let geoEvidence: 'MATCHING' | 'CONFLICTING' | 'UNKNOWN' = 'UNKNOWN';
   let geoMismatchReason: string | undefined;
+  let isExplicitGeoMismatch = false;
 
-  if (candidate.coordinates && entity.coordinates && entity.coordinates.lat !== 0 && entity.coordinates.lng !== 0) {
+  const geoCheck = detectGeographicMismatch(candidate, entity);
+  if (geoCheck.mismatch) {
+    geoEvidence = 'CONFLICTING';
+    geoMismatchReason = geoCheck.reason || 'Geographic mismatch';
+    if (geoCheck.isExplicitTextualMismatch) {
+      isExplicitGeoMismatch = true;
+    }
+  } else if (candidate.coordinates && entity.coordinates && entity.coordinates.lat !== 0 && entity.coordinates.lng !== 0) {
     const dist = calculateHaversineDistanceKm(
       entity.coordinates.lat,
       entity.coordinates.lng,
@@ -3141,24 +3511,17 @@ decision=${decision}`);
     const tolerance = getEntityDistanceToleranceKm(entity.entityType);
     if (dist <= tolerance) {
       geoEvidence = 'MATCHING';
-    } else {
-      geoEvidence = 'CONFLICTING';
-      geoMismatchReason = `Geographic mismatch: coordinate distance (${Math.round(dist)}km) exceeds tolerance (${tolerance}km)`;
     }
   }
 
-  if (geoEvidence !== 'CONFLICTING') {
-    const geoCheck = detectGeographicMismatch(candidate, entity);
-    if (geoCheck.mismatch) {
-      geoEvidence = 'CONFLICTING';
-      geoMismatchReason = geoCheck.reason || 'Geographic mismatch';
-    } else if (
+  if (geoEvidence !== 'CONFLICTING' && geoEvidence !== 'MATCHING') {
+    if (
       (entity.city && (fullText.includes(entity.city.toLowerCase()) || normFullText.includes(stripDiacritics(entity.city).toLowerCase()))) ||
       (entity.state && (fullText.includes(entity.state.toLowerCase()) || normFullText.includes(stripDiacritics(entity.state).toLowerCase()))) ||
       (entity.country && (fullText.includes(entity.country.toLowerCase()) || normFullText.includes(stripDiacritics(entity.country).toLowerCase())))
     ) {
       geoEvidence = 'MATCHING';
-    } else if (geoEvidence !== 'MATCHING') {
+    } else {
       geoEvidence = 'UNKNOWN';
     }
   }
@@ -3197,8 +3560,8 @@ decision=${decision}`);
   let tier: ImageRelevanceTier | undefined;
 
   const isGeoConflicting = geoEvidence === 'CONFLICTING';
-  const isTrustedGeoConflict = isGeoConflicting && (coordinateStatus === 'VERIFIED' || coordinateStatus === 'UNVERIFIED');
-  const isProvisionalGeoConflict = isGeoConflicting && coordinateStatus === 'PROVISIONAL';
+  const isTrustedGeoConflict = isGeoConflicting && (isExplicitGeoMismatch || coordinateStatus !== 'PROVISIONAL');
+  const isProvisionalGeoConflict = isGeoConflicting && !isExplicitGeoMismatch && coordinateStatus === 'PROVISIONAL';
   const conflictEvidenceTrusted = isTrustedGeoConflict;
 
   // Media / Intent Compatibility Checks
@@ -3861,6 +4224,8 @@ export interface ImageSearchContext {
   searchId?: string;
   waypointId?: string;
   relatedWaypoints?: LocationInfo[];
+  maxPhotos?: number;
+  skipUrls?: Set<string> | string[];
 }
 
 // Request-level in-flight deduplication cache
@@ -3873,14 +4238,15 @@ export async function fetchAndValidateImages(
   if (!info || !info.name) return [];
 
   const effectiveSearchId = searchContext?.searchId || (info as any).searchId;
-  const effectiveWaypointId = searchContext?.waypointId || (info as any).waypoint?.id || info.id || info.name;
+  const effectiveWaypointId = searchContext?.waypointId || getEntityImagePreferenceId(info);
   const relatedWaypointCount = searchContext?.relatedWaypoints?.length || (info as any).relatedWaypointCount || 1;
 
   // Compute request deduplication key
   const cleanEntityName = (info.canonicalName || info.name || '').toLowerCase().trim();
   const routeGroupId = (info as any).routeGroupId || (info as any).waypoint?.routeGroupId || '';
   const intentStr = (info as any).intent || '';
-  const dedupeKey = `${effectiveSearchId || 'no-search'}::${effectiveWaypointId}::${cleanEntityName}::${routeGroupId}::${intentStr}`;
+  const maxPhotosStr = searchContext?.maxPhotos ? `::max-${searchContext.maxPhotos}` : '';
+  const dedupeKey = `${effectiveSearchId || 'no-search'}::${effectiveWaypointId}::${cleanEntityName}::${routeGroupId}::${intentStr}${maxPhotosStr}`;
 
   if (inFlightImageRequests.has(dedupeKey)) {
     return inFlightImageRequests.get(dedupeKey)!;
@@ -3912,7 +4278,7 @@ async function _fetchAndValidateImagesInternal(
   }
 
   const isRouteWaypoint = Boolean(effectiveSearchId || info.waypoint || (info as any).routeGroupId || (info as any).routeTitle);
-  const maxPhotos = isRouteWaypoint ? 2 : 4;
+  const maxPhotos = searchContext?.maxPhotos || (isRouteWaypoint ? 2 : 4);
   const stableId = (info as any).id || (info as any).osmId || info.name;
 
   const imageIntent = (info as any).imageIntent || resolveImageIntent(info);
@@ -3925,6 +4291,19 @@ async function _fetchAndValidateImagesInternal(
     category?: HistoricalImageCategory;
   }> = [];
   const seenUrls = new Set<string>();
+
+  if (searchContext?.skipUrls) {
+    const skipList = Array.isArray(searchContext.skipUrls) ? searchContext.skipUrls : Array.from(searchContext.skipUrls);
+    for (const u of skipList) {
+      if (u && typeof u === 'string') {
+        const trimmed = u.trim();
+        if (trimmed) {
+          seenUrls.add(trimmed);
+          seenRawUrls.add(trimmed);
+        }
+      }
+    }
+  }
   const isHistorical = isHistoricalWaypointEntity(info) && imageIntent.type === 'ENTITY_SPECIFIC';
   const histContext = isHistorical ? extractHistoricalImageContext(info) : null;
 
@@ -3990,9 +4369,19 @@ async function _fetchAndValidateImagesInternal(
         ? classifyHistoricalImageCategory(candidate, histContext)
         : undefined;
 
+      const userPref = getUserImagePreference(effectiveWaypointId, cleanUrl);
+      if (userPref === 'disliked') {
+        // Avoid selecting previously disliked images in automated discovery
+        return false;
+      }
+      let adjustedScore = validation.score;
+      if (userPref === 'liked') {
+        adjustedScore += 100;
+      }
+
       validatedCandidates.push({
         candidate,
-        score: validation.score,
+        score: adjustedScore,
         tier: validation.tier,
         category
       });
@@ -4109,13 +4498,18 @@ async function _fetchAndValidateImagesInternal(
     imageIntent
   });
 
-  // For route waypoints, keep queries tightly focused (max 4 queries) to prevent API rate limiting
-  if (isRouteWaypoint && queries.length > 4) {
-    queries = queries.slice(0, 4);
-  }
-
   const resolvedHistKnowledge = getHistoricalEntityKnowledge(info.canonicalName || info.name);
-  let effectiveHistContext = (info as any).historicalContext || resolvedHistKnowledge?.historicalContext || '';
+  let effectiveHistContext =
+    (info as any).historicalContext ||
+    (info as any).waypoint?.historicalContext ||
+    (info as any).context ||
+    (info as any).waypoint?.context ||
+    (info as any).routeTitle ||
+    (info as any).waypoint?.routeTitle ||
+    (info as any).routeGroupName ||
+    (info as any).significance ||
+    resolvedHistKnowledge?.historicalContext ||
+    '';
   const rawEntityName = (info.canonicalName || info.name || '').toLowerCase();
   if (effectiveHistContext && !rawEntityName.includes('columbus') && !rawEntityName.includes('santa maria')) {
     if (effectiveHistContext.toLowerCase().includes('columbus') || effectiveHistContext.toLowerCase().includes('santa maría') || effectiveHistContext.toLowerCase().includes('santa maria') || effectiveHistContext.toLowerCase().includes('hispaniola')) {
@@ -4124,6 +4518,44 @@ async function _fetchAndValidateImagesInternal(
     }
   }
   const histContextStr = effectiveHistContext || (histContext?.exploration || 'none');
+
+  // For route waypoints, keep queries tightly focused (max 4 queries) to prevent API rate limiting
+  if (isRouteWaypoint && queries.length > 4) {
+    if (isHistorical && histContext) {
+      const prioritized: string[] = [];
+      const addQ = (q: string | undefined) => {
+        if (q && !prioritized.includes(q) && queries.includes(q)) {
+          prioritized.push(q);
+        }
+      };
+      // 1. Primary entity / canonical query
+      addQ(queries[0]);
+      // 2. Exploration-specific query (e.g. "Plymouth Shackleton's Expedition" or "Beechey Island Franklin Expedition")
+      const routeQuery = queries.find(q => histContext.exploration && q.toLowerCase().includes(histContext.exploration.toLowerCase().replace(/\s+route$/i, '').trim()));
+      addQ(routeQuery);
+      // 3. Artifact / vessel / people query (e.g. "Plymouth Endurance", "Plymouth Shackleton")
+      const artifactOrPersonQuery = queries.find(q =>
+        histContext.artifacts?.some(a => q.toLowerCase().includes(a.toLowerCase())) ||
+        histContext.people?.some(p => q.toLowerCase().includes(p.toLowerCase()))
+      );
+      addQ(artifactOrPersonQuery);
+      // 4. Event / Year / Historic site query
+      const eventOrYearQuery = queries.find(q =>
+        (histContext.event && q.toLowerCase().includes(histContext.event.toLowerCase())) ||
+        (histContext.year && q.includes(histContext.year)) ||
+        q.includes('historic site')
+      );
+      addQ(eventOrYearQuery);
+      // 5. Backfill remaining queries up to 4
+      for (const q of queries) {
+        if (prioritized.length >= 4) break;
+        addQ(q);
+      }
+      queries = prioritized;
+    } else {
+      queries = queries.slice(0, 4);
+    }
+  }
 
   const geoParts = [info.city, info.state, info.country].filter(Boolean);
   let geoContextStr = geoParts.length > 0 ? geoParts.join(' / ') : (resolvedHistKnowledge?.approximateRegion || 'Unknown');
@@ -4471,5 +4903,51 @@ export async function assignUniqueImagesForWaypoints(
   }
 
   return resultMap;
+}
+
+/**
+ * Discovers additional validated images for a waypoint in the background
+ * without blocking initial enrichment, presentation, narration, or camera transitions.
+ */
+export async function discoverAdditionalWaypointImages(
+  info: LocationInfo,
+  existingImages: GalleryImage[] = [],
+  searchContext?: ImageSearchContext
+): Promise<GalleryImage[]> {
+  if (!info || !info.name) return [];
+
+  const effectiveWaypointId = searchContext?.waypointId || getEntityImagePreferenceId(info);
+  const existingUrls = new Set<string>();
+  for (const img of existingImages) {
+    if (typeof img === 'string') {
+      existingUrls.add((img as string).trim());
+    } else if (img?.url) {
+      existingUrls.add(img.url.trim());
+    }
+  }
+
+  // Target up to 4 additional images (bounded sensibly to 6 total)
+  const maxAdditional = searchContext?.maxPhotos || 4;
+  const extendedContext: ImageSearchContext = {
+    ...searchContext,
+    maxPhotos: maxAdditional,
+    skipUrls: existingUrls,
+    waypointId: effectiveWaypointId
+  };
+
+  try {
+    const additional = await _fetchAndValidateImagesInternal(
+      info,
+      extendedContext,
+      extendedContext.searchId,
+      effectiveWaypointId,
+      extendedContext.relatedWaypoints?.length || 1
+    );
+
+    return additional.filter(img => !existingUrls.has(img.url.trim()));
+  } catch (err) {
+    console.warn(`[Progressive Image Discovery] Error discovering additional images for ${info.name}:`, err);
+    return [];
+  }
 }
 

@@ -240,58 +240,16 @@ describe('Controls Modern Theme OSM Button Hover Contrast', () => {
     onToggleSettings: vi.fn(),
   };
 
-  test('modern theme on dark globe (isOSMDisplayed=false) uses hover:bg-white/10 and not modern-osm-hover', () => {
-    const html = renderToStaticMarkup(
+  test('modern theme uses stable dark button styling (bg-black/85 backdrop-blur-md) consistently across Globe and OSM', () => {
+    const htmlGlobe = renderToStaticMarkup(
       <Controls {...baseProps} skin="modern" isOSMDisplayed={false} />
     );
-
-    expect(html).toContain('hover:bg-white/10');
-    expect(html).not.toContain('modern-osm-hover rounded-full');
-    expect(html).toContain('bg-black/60 backdrop-blur-md border border-white/20 text-white hover:bg-white/10 rounded-full');
-  });
-
-  test('modern theme by default (no isOSMDisplayed specified) retains existing light hover', () => {
-    const html = renderToStaticMarkup(
-      <Controls {...baseProps} skin="modern" />
-    );
-
-    expect(html).toContain('hover:bg-white/10');
-    expect(html).not.toContain('modern-osm-hover rounded-full');
-  });
-
-  test('modern theme over OSM layers (isOSMDisplayed=true) uses modern-osm-hover and not hover:bg-white/10 on control buttons', () => {
-    const html = renderToStaticMarkup(
+    const htmlOSM = renderToStaticMarkup(
       <Controls {...baseProps} skin="modern" isOSMDisplayed={true} />
     );
 
-    expect(html).toContain('modern-osm-hover rounded-full');
-    expect(html).toContain('bg-black/60 backdrop-blur-md border border-white/20 text-white modern-osm-hover rounded-full');
-    expect(html).not.toContain('hover:bg-white/10 rounded-full');
-
-    // Verify each of the 7 bottom control buttons receives modern-osm-hover
-    const buttons = [
-      'aria-label="Trace Route"',
-      'aria-label="Toggle Favorites"',
-      'aria-label="Zoom Out"',
-      'aria-label="Zoom In"',
-      'aria-label="Narration On"',
-      'aria-label="Switch Theme"',
-      'aria-label="Settings"',
-    ];
-
-    buttons.forEach((btnAria) => {
-      expect(html).toContain(btnAria);
-    });
-  });
-
-  test('also supports isOSMActive prop for OSM layer detection', () => {
-    const html = renderToStaticMarkup(
-      <Controls {...baseProps} skin="modern" isOSMActive={true} />
-    );
-
-    expect(html).toContain('modern-osm-hover rounded-full');
-    expect(html).toContain('bg-black/60 backdrop-blur-md border border-white/20 text-white modern-osm-hover rounded-full');
-    expect(html).not.toContain('hover:bg-white/10 rounded-full');
+    expect(htmlGlobe).toContain('bg-black/85 backdrop-blur-md border border-white/20 text-white hover:bg-black/60 hover:border-white/40 rounded-full');
+    expect(htmlOSM).toContain('bg-black/85 backdrop-blur-md border border-white/20 text-white hover:bg-black/60 hover:border-white/40 rounded-full');
   });
 
   test('retro themes (retro-green, retro-amber) are completely unaffected by isOSMDisplayed', () => {
@@ -307,7 +265,6 @@ describe('Controls Modern Theme OSM Button Hover Contrast', () => {
 
       // HTML should be identical between globe and OSM for retro skins
       expect(htmlOSM).toBe(htmlGlobe);
-      expect(htmlOSM).not.toContain('modern-osm-hover rounded-full');
 
       if (skin === 'retro-green') {
         expect(htmlOSM).toContain('hover:bg-green-400 hover:text-black');
@@ -315,15 +272,6 @@ describe('Controls Modern Theme OSM Button Hover Contrast', () => {
         expect(htmlOSM).toContain('hover:bg-amber-400 hover:text-black');
       }
     });
-  });
-
-  test('includes modern-osm-hover style rule in CSS definitions', () => {
-    const html = renderToStaticMarkup(
-      <Controls {...baseProps} skin="modern" isOSMDisplayed={true} />
-    );
-
-    expect(html).toContain('.modern-osm-hover:hover');
-    expect(html).toContain('background-color: rgba(0, 0, 0, 0.25)');
   });
 });
 
@@ -469,26 +417,21 @@ describe('Controls Vertical Separator Lines', () => {
     expect(retroGreenHtml).not.toContain('data-testid="parchment-ring-controls"');
   });
 
-  test('Modern theme in Globe view uses existing light separators (bg-white/20)', () => {
-    const html = renderToStaticMarkup(
+  test('Modern theme uses consistent light separators (bg-white/20) across both Globe and OSM views', () => {
+    const htmlGlobe = renderToStaticMarkup(
       <Controls {...baseProps} skin="modern" isOSMDisplayed={false} />
     );
-
-    const separatorMatches = html.match(/class="w-px mx-1 self-stretch bg-white\/20"/g);
-    expect(separatorMatches).not.toBeNull();
-    expect(separatorMatches?.length).toBe(2);
-    expect(html).not.toContain('class="w-px mx-1 self-stretch bg-black/60"');
-  });
-
-  test('Modern theme in OSM view uses matching gray separators (bg-black/60)', () => {
-    const html = renderToStaticMarkup(
+    const htmlOSM = renderToStaticMarkup(
       <Controls {...baseProps} skin="modern" isOSMDisplayed={true} />
     );
 
-    const separatorMatches = html.match(/class="w-px mx-1 self-stretch bg-black\/60"/g);
-    expect(separatorMatches).not.toBeNull();
-    expect(separatorMatches?.length).toBe(2);
-    expect(html).not.toContain('class="w-px mx-1 self-stretch bg-white/20"');
+    const separatorMatchesGlobe = htmlGlobe.match(/class="w-px mx-1 self-stretch bg-white\/20"/g);
+    expect(separatorMatchesGlobe).not.toBeNull();
+    expect(separatorMatchesGlobe?.length).toBe(2);
+
+    const separatorMatchesOSM = htmlOSM.match(/class="w-px mx-1 self-stretch bg-white\/20"/g);
+    expect(separatorMatchesOSM).not.toBeNull();
+    expect(separatorMatchesOSM?.length).toBe(2);
   });
 
   test('Retro Green theme keeps existing separator colors in both Globe and OSM views', () => {
@@ -752,7 +695,7 @@ describe('Controls Contextual Question Chips & Follow-Up Lifecycle', () => {
     expect(htmlOpenModern).toContain('aria-label="Settings"');
     expect(htmlOpenModern).toContain('text-yellow-400');
     expect(htmlOpenModern).toContain('border-yellow-400');
-    expect(htmlOpenModern).toContain('bg-black/60');
+    expect(htmlOpenModern).toContain('bg-black/85');
 
     const htmlOpenParchment = renderToStaticMarkup(
       <Controls {...baseProps} onToggleSettings={vi.fn()} skin="parchment" isSettingsOpen={true} />
@@ -779,7 +722,7 @@ describe('Controls Contextual Question Chips & Follow-Up Lifecycle', () => {
     );
     expect(htmlTraceOpen).toContain('text-yellow-400');
     expect(htmlTraceOpen).toContain('border-yellow-400');
-    expect(htmlTraceOpen).toContain('bg-black/60');
+    expect(htmlTraceOpen).toContain('bg-black/85');
   });
 });
 

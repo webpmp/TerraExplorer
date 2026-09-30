@@ -2096,6 +2096,105 @@ export const HISTORICAL_KNOWLEDGE_BASE: Record<string, HistoricalEntityKnowledge
     },
     boundingBox: { minLat: 39.75, maxLat: 39.88, minLng: -77.30, maxLng: -77.18 }
   },
+  "battle of waterloo": {
+    entity: "Battle of Waterloo",
+    entityType: "historical_event_site",
+    geographicScope: "POINT_EVENT",
+    singleLocation: true,
+    expectedRegion: "Waterloo / Wallonia, Belgium",
+    approximateRegion: "Waterloo, Wallonia, Belgium",
+    country: "Belgium",
+    state: "Wallonia",
+    nearbyCity: "Waterloo",
+    region: "Walloon Brabant",
+    historicalContext: "The Battle of Waterloo was fought on June 18, 1815, near Waterloo in Belgium (then part of the United Kingdom of the Netherlands). Anglo-allied forces under the Duke of Wellington and Prussian forces under Gebhard Leberecht von Blücher defeated the French army commanded by Napoleon Bonaparte.",
+    significance: "Decisively ended Napoleon's rule as Emperor of the French and concluded the Napoleonic Wars.",
+    sourceRationale: "Waterloo Battlefield historical site and Lion's Mound (Butte du Lion) in Braine-l'Alleud / Waterloo, Belgium.",
+    notable: [
+      "Fought on June 18, 1815, near Waterloo in present-day Belgium",
+      "The Duke of Wellington and Prussian Field Marshal Blücher decisively defeated Napoleon Bonaparte",
+      "Marked the end of the Napoleonic Wars and the conclusion of the Hundred Days"
+    ],
+    contextNotes: "Historical battlefield site in Walloon Brabant, Belgium, commemorated by the Lion's Mound memorial.",
+    confidence: "high",
+    allowedCountries: ["Belgium"],
+    forbiddenRegions: ["United States", "Canada", "United Kingdom", "France", "Germany", "Australia", "Iowa"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 50.6800,
+      lng: 4.4116,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 50.60, maxLat: 50.75, minLng: 4.30, maxLng: 4.50 }
+  },
+  "the battle of waterloo": {
+    entity: "Battle of Waterloo",
+    entityType: "historical_event_site",
+    geographicScope: "POINT_EVENT",
+    singleLocation: true,
+    expectedRegion: "Waterloo / Wallonia, Belgium",
+    approximateRegion: "Waterloo, Wallonia, Belgium",
+    country: "Belgium",
+    state: "Wallonia",
+    nearbyCity: "Waterloo",
+    region: "Walloon Brabant",
+    historicalContext: "The Battle of Waterloo was fought on June 18, 1815, near Waterloo in Belgium (then part of the United Kingdom of the Netherlands). Anglo-allied forces under the Duke of Wellington and Prussian forces under Gebhard Leberecht von Blücher defeated the French army commanded by Napoleon Bonaparte.",
+    significance: "Decisively ended Napoleon's rule as Emperor of the French and concluded the Napoleonic Wars.",
+    sourceRationale: "Waterloo Battlefield historical site and Lion's Mound (Butte du Lion) in Braine-l'Alleud / Waterloo, Belgium.",
+    notable: [
+      "Fought on June 18, 1815, near Waterloo in present-day Belgium",
+      "The Duke of Wellington and Prussian Field Marshal Blücher decisively defeated Napoleon Bonaparte",
+      "Marked the end of the Napoleonic Wars and the conclusion of the Hundred Days"
+    ],
+    contextNotes: "Historical battlefield site in Walloon Brabant, Belgium, commemorated by the Lion's Mound memorial.",
+    confidence: "high",
+    allowedCountries: ["Belgium"],
+    forbiddenRegions: ["United States", "Canada", "United Kingdom", "France", "Germany", "Australia", "Iowa"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 50.6800,
+      lng: 4.4116,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 50.60, maxLat: 50.75, minLng: 4.30, maxLng: 4.50 }
+  },
+  "waterloo": {
+    entity: "Battle of Waterloo",
+    entityType: "historical_event_site",
+    geographicScope: "POINT_EVENT",
+    singleLocation: true,
+    expectedRegion: "Waterloo / Wallonia, Belgium",
+    approximateRegion: "Waterloo, Wallonia, Belgium",
+    country: "Belgium",
+    state: "Wallonia",
+    nearbyCity: "Waterloo",
+    region: "Walloon Brabant",
+    historicalContext: "The Battle of Waterloo was fought on June 18, 1815, near Waterloo in Belgium (then part of the United Kingdom of the Netherlands). Anglo-allied forces under the Duke of Wellington and Prussian forces under Gebhard Leberecht von Blücher defeated the French army commanded by Napoleon Bonaparte.",
+    significance: "Decisively ended Napoleon's rule as Emperor of the French and concluded the Napoleonic Wars.",
+    sourceRationale: "Waterloo Battlefield historical site and Lion's Mound (Butte du Lion) in Braine-l'Alleud / Waterloo, Belgium.",
+    notable: [
+      "Fought on June 18, 1815, near Waterloo in present-day Belgium",
+      "The Duke of Wellington and Prussian Field Marshal Blücher decisively defeated Napoleon Bonaparte",
+      "Marked the end of the Napoleonic Wars and the conclusion of the Hundred Days"
+    ],
+    contextNotes: "Historical battlefield site in Walloon Brabant, Belgium, commemorated by the Lion's Mound memorial.",
+    confidence: "high",
+    allowedCountries: ["Belgium"],
+    forbiddenRegions: ["United States", "Canada", "United Kingdom", "France", "Germany", "Australia", "Iowa"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 50.6800,
+      lng: 4.4116,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 50.60, maxLat: 50.75, minLng: 4.30, maxLng: 4.50 }
+  },
   "battle of trafalgar": {
     entity: "Battle of Trafalgar",
     entityType: "historical_event_site",

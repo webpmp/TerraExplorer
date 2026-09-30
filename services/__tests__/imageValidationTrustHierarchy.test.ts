@@ -278,5 +278,167 @@ describe('Image Validation Trust Hierarchy & Diacritics Resolution', () => {
     expect(queries).toContain('Caldeirão Grande São Paulo Brazil');
   });
 
+  test('16. Exact entity match + explicit conflicting geography + provisional canonical coordinates is REJECTED (Santa Maria Ship & Museum in Ohio vs Haiti)', () => {
+    const santaMariaEntity = {
+      name: 'Santa Maria',
+      canonicalName: 'Santa Maria',
+      entityType: 'shipwreck_site',
+      intent: 'DISCOVERY_OBJECT_LOCATION',
+      identityStatus: 'verified',
+      coordinates: { lat: 19.76, lng: -72.2 },
+      coordinateSource: 'historical_approximate',
+      coordinateTrust: 'provisional',
+      city: 'Cap-Haitien',
+      state: 'Département du Nord',
+      country: 'Haiti'
+    };
+
+    const candidate: ImageCandidate = {
+      url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/Santa_Maria_Museum_Ohio.jpg/800px-Santa_Maria_Museum_Ohio.jpg',
+      title: 'Santa Maria Ship & Museum',
+      description: 'The Santa Maria replica and museum docked on the Scioto River in Columbus, Ohio, United States.'
+    };
+
+    const res = validateImageCandidate(candidate, santaMariaEntity);
+
+    expect(res.decision).toBe('REJECT');
+    expect(res.reason).toBe('GEOGRAPHIC_CONFLICT');
+  });
+
+  test('17. Exact entity match + unknown geography + provisional canonical coordinates remains eligible (Santa María ship replica)', () => {
+    const santaMariaEntity = {
+      name: 'Santa Maria',
+      canonicalName: 'Santa Maria',
+      entityType: 'shipwreck_site',
+      intent: 'DISCOVERY_OBJECT_LOCATION',
+      identityStatus: 'verified',
+      coordinates: { lat: 19.76, lng: -72.2 },
+      coordinateSource: 'historical_approximate',
+      coordinateTrust: 'provisional',
+      city: 'Cap-Haitien',
+      state: 'Département du Nord',
+      country: 'Haiti'
+    };
+
+    const candidate: ImageCandidate = {
+      url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/12/Santa_Maria_Ship.jpg/800px-Santa_Maria_Ship.jpg',
+      title: 'Santa María (ship)',
+      description: 'A replica of the Santa María, the flagship of Christopher Columbus on his 1492 voyage.'
+    };
+
+    const res = validateImageCandidate(candidate, santaMariaEntity);
+
+    expect(res.decision).toBe('ACCEPT');
+    expect(res.tier).toBe(1);
+    expect(res.reason).toBe('STRONG_ENTITY_MATCH');
+  });
+
+  test('18. Exact historical entity match with compatible historical geography is ACCEPTED', () => {
+    const santaMariaEntity = {
+      name: 'Santa Maria',
+      canonicalName: 'Santa Maria',
+      entityType: 'shipwreck_site',
+      intent: 'DISCOVERY_OBJECT_LOCATION',
+      identityStatus: 'verified',
+      coordinates: { lat: 19.76, lng: -72.2 },
+      coordinateSource: 'historical_approximate',
+      coordinateTrust: 'provisional',
+      city: 'Cap-Haitien',
+      state: 'Département du Nord',
+      country: 'Haiti'
+    };
+
+    const candidate: ImageCandidate = {
+      url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/34/Cap_Haitien_Coast_Santa_Maria.jpg/800px-Cap_Haitien_Coast_Santa_Maria.jpg',
+      title: 'Santa Maria Shipwreck Site',
+      description: 'Reef off the northern coast of Cap-Haïtien, Haiti, historic site of the Santa Maria grounding.'
+    };
+
+    const res = validateImageCandidate(candidate, santaMariaEntity);
+
+    expect(res.decision).toBe('ACCEPT');
+    expect(res.tier).toBe(1);
+  });
+
+  test('19. Exact entity match + compatible geography with verified coordinates is ACCEPTED', () => {
+    const vasaEntity = {
+      name: 'Vasa',
+      canonicalName: 'Vasa',
+      entityType: 'shipwreck_site',
+      intent: 'DISCOVERY_OBJECT_LOCATION',
+      identityStatus: 'verified',
+      coordinates: { lat: 59.3275, lng: 18.0911 },
+      coordinateSource: 'deterministic',
+      coordinateTrust: 'verified',
+      city: 'Stockholm',
+      country: 'Sweden'
+    };
+
+    const candidate: ImageCandidate = {
+      url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/23/Vasa_Ship_Stockholm.jpg/800px-Vasa_Ship_Stockholm.jpg',
+      title: 'Vasa (ship)',
+      description: 'The 17th-century salvaged warship preserved at the Vasa Museum in Stockholm, Sweden.'
+    };
+
+    const res = validateImageCandidate(candidate, vasaEntity);
+
+    expect(res.decision).toBe('ACCEPT');
+    expect(res.reason).toBe('STRONG_ENTITY_MATCH_GEO_VERIFIED');
+  });
+
+  test('20. No entity match + unknown geography is REJECTED (Niña ship for Santa Maria)', () => {
+    const santaMariaEntity = {
+      name: 'Santa Maria',
+      canonicalName: 'Santa Maria',
+      entityType: 'shipwreck_site',
+      intent: 'DISCOVERY_OBJECT_LOCATION',
+      identityStatus: 'verified',
+      coordinates: { lat: 19.76, lng: -72.2 },
+      coordinateSource: 'historical_approximate',
+      coordinateTrust: 'provisional',
+      city: 'Cap-Haitien',
+      state: 'Département du Nord',
+      country: 'Haiti'
+    };
+
+    const candidate: ImageCandidate = {
+      url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/45/Nina_Ship.jpg/800px-Nina_Ship.jpg',
+      title: 'Niña (ship)',
+      description: 'One of the Spanish caravels used by Christopher Columbus in 1492.'
+    };
+
+    const res = validateImageCandidate(candidate, santaMariaEntity);
+
+    expect(res.decision).toBe('REJECT');
+    expect(res.reason).toBe('NO_ENTITY_SPECIFIC_EVIDENCE');
+  });
+
+  test('21. Generic event topic candidate (Columbus Day) is REJECTED for specific ship entity', () => {
+    const santaMariaEntity = {
+      name: 'Santa Maria',
+      canonicalName: 'Santa Maria',
+      entityType: 'shipwreck_site',
+      intent: 'DISCOVERY_OBJECT_LOCATION',
+      identityStatus: 'verified',
+      coordinates: { lat: 19.76, lng: -72.2 },
+      coordinateSource: 'historical_approximate',
+      coordinateTrust: 'provisional',
+      city: 'Cap-Haitien',
+      state: 'Département du Nord',
+      country: 'Haiti'
+    };
+
+    const candidate: ImageCandidate = {
+      url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Columbus_Day.jpg/800px-Columbus_Day.jpg',
+      title: 'Columbus Day',
+      description: 'Holiday commemorating the arrival of Christopher Columbus in the Americas.'
+    };
+
+    const res = validateImageCandidate(candidate, santaMariaEntity);
+
+    expect(res.decision).toBe('REJECT');
+    expect(res.reason).toBe('NO_ENTITY_SPECIFIC_EVIDENCE');
+  });
+
 });
 

@@ -1,5 +1,6 @@
-import { describe, test, expect } from 'vitest';
-import { routeIntentAndExtractEntity } from '../geminiService';
+import { describe, test, expect, vi } from 'vitest';
+import * as geminiService from '../geminiService';
+import { routeIntentAndExtractEntity, resolveLocationQuery } from '../geminiService';
 import {
   isCoordinateTitle,
   isGenericTitle,
@@ -309,6 +310,66 @@ describe('Location-of-Event Intent Handling & Semantic Title Prioritization Suit
       // But overall entity validation MUST pass because coordinates, identity, and substantive description are valid
       const isValid = validateResolvedEntity(resolvedEntity);
       expect(isValid).toBe(true);
+    });
+
+    test('resolveLocationQuery executes through normalizeSemanticEntityTitle without ReferenceError on AI responses', async () => {
+      const originalLocalStorage = globalThis.localStorage;
+      const storage: Record<string, string> = {
+        terraExplorerSettings: JSON.stringify({
+          aiProvider: 'lmstudio',
+          lmStudioUrl: 'http://localhost:1234/v1',
+          lmStudioModel: 'local-model'
+        })
+      };
+      globalThis.localStorage = {
+        getItem: (k: string) => storage[k] ?? null,
+        setItem: (k: string, v: string) => { storage[k] = v; },
+        removeItem: (k: string) => { delete storage[k]; },
+        clear: () => {}
+      } as any;
+
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: any) => {
+        const urlStr = String(url);
+        if (urlStr.includes('nominatim.openstreetmap.org')) {
+          return {
+            ok: true,
+            json: async () => []
+          } as any;
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    name: 'Battle of Austerlitz',
+                    canonicalName: 'Battle of Austerlitz',
+                    type: 'historical_event_site',
+                    coordinates: { lat: 49.1292, lng: 16.7617 },
+                    description: 'The Battle of Austerlitz was fought on 2 December 1805.',
+                    country: 'Czech Republic'
+                  })
+                }
+              }
+            ]
+          })
+        } as any;
+      });
+
+      try {
+        const routed = routeIntentAndExtractEntity('Where did the Battle of Austerlitz take place?');
+        const result = await resolveLocationQuery(
+          routed.entity,
+          routed.intent,
+          'Where did the Battle of Austerlitz take place?'
+        );
+        expect(result).toBeDefined();
+        expect(result?.locationInfo?.name).toBe('Battle of Austerlitz');
+      } finally {
+        fetchSpy.mockRestore();
+        globalThis.localStorage = originalLocalStorage;
+      }
     });
   });
 });

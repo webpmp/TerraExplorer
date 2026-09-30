@@ -492,7 +492,7 @@ export interface EntityCoordinateValidationResult {
 export function validateEntityCoordinates(
   params: EntityCoordinateValidationOptions
 ): EntityCoordinateValidationResult {
-  const { coordinates, reverseGeographicContext, authoritativeEntityContext, requestedEntity } = params;
+  const { coordinates, reverseGeographicContext, authoritativeEntityContext, requestedEntity, expectedRegion } = params;
 
   if (!coordinates || typeof coordinates.lat !== 'number' || typeof coordinates.lng !== 'number' || isNaN(coordinates.lat) || isNaN(coordinates.lng)) {
     return {
@@ -503,111 +503,133 @@ export function validateEntityCoordinates(
     };
   }
 
-  // If no authoritative context is available to corroborate or contradict
-  if (!authoritativeEntityContext) {
-    return {
-      consistent: true,
-      result: 'UNVERIFIED',
-      coordinateTrust: 'provisional',
-      rejectionReason: undefined
-    };
-  }
-
-  // If reverse geocoding is unavailable
-  if (!reverseGeographicContext) {
-    return {
-      consistent: true,
-      result: 'UNVERIFIED',
-      coordinateTrust: 'provisional',
-      rejectionReason: undefined
-    };
-  }
-
   const clean = (val?: string) => (val || '').trim().toLowerCase();
 
-  const authCountry = clean(authoritativeEntityContext.country);
-  const revCountry = clean(reverseGeographicContext.country);
+  // If reverse geocoding is available, check for explicit contradictions with authoritative context or expectedRegion
+  if (reverseGeographicContext) {
+    const revCountry = clean(reverseGeographicContext.country);
+    const revState = clean(reverseGeographicContext.state || reverseGeographicContext.region);
+    const revCounty = clean(reverseGeographicContext.county);
+    const revCity = clean(reverseGeographicContext.city || reverseGeographicContext.town || reverseGeographicContext.village);
+    const normRevCountry = revCountry === 'usa' ? 'united states' : (revCountry === 'uk' ? 'united kingdom' : revCountry);
 
-  // 1. Country match (strong constraint)
-  if (authCountry && revCountry) {
-    const normAuthCountry = authCountry === 'usa' ? 'united states' : authCountry;
-    const normRevCountry = revCountry === 'usa' ? 'united states' : revCountry;
+    // 1. Authoritative entity context check (when available)
+    if (authoritativeEntityContext) {
+      const authCountry = clean(authoritativeEntityContext.country);
+      if (authCountry && revCountry) {
+        const normAuthCountry = authCountry === 'usa' ? 'united states' : (authCountry === 'uk' ? 'united kingdom' : authCountry);
+        if (normAuthCountry !== normRevCountry && !normAuthCountry.includes(normRevCountry) && !normRevCountry.includes(normAuthCountry)) {
+          return {
+            consistent: false,
+            result: 'ENTITY_COORDINATE_MISMATCH',
+            coordinateTrust: 'unverified',
+            rejectionReason: `Country mismatch: candidate coordinates in "${reverseGeographicContext.country}" conflict with authoritative "${authoritativeEntityContext.country}"`
+          };
+        }
+      }
 
-    if (normAuthCountry !== normRevCountry && !normAuthCountry.includes(normRevCountry) && !normRevCountry.includes(normAuthCountry)) {
+      const authState = clean(authoritativeEntityContext.state);
+      if (authState && revState) {
+        if (authState !== revState && !authState.includes(revState) && !revState.includes(authState)) {
+          return {
+            consistent: false,
+            result: 'ENTITY_COORDINATE_MISMATCH',
+            coordinateTrust: 'unverified',
+            rejectionReason: `State/Region mismatch: candidate coordinates in "${reverseGeographicContext.state || reverseGeographicContext.region}" conflict with authoritative "${authoritativeEntityContext.state}"`
+          };
+        }
+      }
+
+      const authCounty = clean(authoritativeEntityContext.county);
+      if (authCounty && revCounty) {
+        const stripCountyWord = (s: string) => s.replace(/\s+county$/i, '').trim();
+        const cAuth = stripCountyWord(authCounty);
+        const cRev = stripCountyWord(revCounty);
+        if (cAuth && cRev && cAuth !== cRev) {
+          return {
+            consistent: false,
+            result: 'ENTITY_COORDINATE_MISMATCH',
+            coordinateTrust: 'unverified',
+            rejectionReason: `County mismatch: candidate coordinates in "${reverseGeographicContext.county}" conflict with authoritative "${authoritativeEntityContext.county}"`
+          };
+        }
+      }
+
+      if (typeof authoritativeEntityContext.lat === 'number' && typeof authoritativeEntityContext.lng === 'number') {
+        const R = 6371; // km
+        const dLat = (coordinates.lat - authoritativeEntityContext.lat) * Math.PI / 180;
+        const dLon = (coordinates.lng - authoritativeEntityContext.lng) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                  Math.cos(authoritativeEntityContext.lat * Math.PI / 180) * Math.cos(coordinates.lat * Math.PI / 180) *
+                  Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const distKm = R * c;
+
+        if (distKm > 150) {
+          return {
+            consistent: false,
+            result: 'ENTITY_COORDINATE_MISMATCH',
+            coordinateTrust: 'unverified',
+            rejectionReason: `Distance mismatch: candidate coordinates are ${Math.round(distKm)}km away from authoritative location`
+          };
+        }
+      }
+
+      // Corroborated by authoritative context!
       return {
-        consistent: false,
-        result: 'ENTITY_COORDINATE_MISMATCH',
-        coordinateTrust: 'unverified',
-        rejectionReason: `Country mismatch: candidate coordinates in "${reverseGeographicContext.country}" conflict with authoritative "${authoritativeEntityContext.country}"`
+        consistent: true,
+        result: 'MATCH',
+        coordinateTrust: 'verified',
+        rejectionReason: undefined
       };
+    }
+
+    // 2. Expected region check (when authoritative context is not available)
+    if (expectedRegion) {
+      const expLower = clean(expectedRegion);
+      const expParts = expLower.split(',').map(p => p.trim()).filter(Boolean);
+      const expCountry = expParts.length > 1 ? expParts[expParts.length - 1] : '';
+      const normExpCountry = expCountry === 'usa' ? 'united states' : (expCountry === 'uk' ? 'united kingdom' : expCountry);
+
+      // Check country conflict if expectedRegion mentions a country
+      if (normExpCountry && normRevCountry && normExpCountry.length >= 3) {
+        if (normExpCountry !== normRevCountry && !normExpCountry.includes(normRevCountry) && !normRevCountry.includes(normExpCountry)) {
+          return {
+            consistent: false,
+            result: 'ENTITY_COORDINATE_MISMATCH',
+            coordinateTrust: 'unverified',
+            rejectionReason: `Country mismatch: candidate coordinates in "${reverseGeographicContext.country}" conflict with expected region "${expectedRegion}"`
+          };
+        }
+      }
+
+      // Check water location conflict for terrestrial expected entities
+      const isWaterLocation = Boolean(
+        (reverseGeographicContext.displayName && (
+          reverseGeographicContext.displayName.toLowerCase().includes('sea of') ||
+          reverseGeographicContext.displayName.toLowerCase().includes('ocean') ||
+          reverseGeographicContext.displayName.toLowerCase().includes('gulf of')
+        )) ||
+        (reverseGeographicContext.feature && ['water', 'sea', 'ocean', 'bay'].includes(reverseGeographicContext.feature.toLowerCase()))
+      );
+      const isTerrestrialExpected = !expLower.includes('sea') && !expLower.includes('ocean') && !expLower.includes('gulf') && !expLower.includes('bay') && !expLower.includes('wreck') && !expLower.includes('shipwreck') && !expLower.includes('reef');
+
+      if (isWaterLocation && isTerrestrialExpected && !revCity && !revCounty) {
+        return {
+          consistent: false,
+          result: 'ENTITY_COORDINATE_MISMATCH',
+          coordinateTrust: 'unverified',
+          rejectionReason: `Geographic mismatch: candidate coordinates landed in open water (${reverseGeographicContext.displayName || 'water'}), but entity is expected in terrestrial region "${expectedRegion}"`
+        };
+      }
     }
   }
 
-  // 2. State / Province match (strong constraint)
-  const authState = clean(authoritativeEntityContext.state);
-  const revState = clean(reverseGeographicContext.state || reverseGeographicContext.region);
-
-  if (authState && revState) {
-    if (authState !== revState && !authState.includes(revState) && !revState.includes(authState)) {
-      return {
-        consistent: false,
-        result: 'ENTITY_COORDINATE_MISMATCH',
-        coordinateTrust: 'unverified',
-        rejectionReason: `State/Region mismatch: candidate coordinates in "${reverseGeographicContext.state || reverseGeographicContext.region}" conflict with authoritative "${authoritativeEntityContext.state}"`
-      };
-    }
-  }
-
-  // 3. County / Municipality / Known Locality match (contextual constraint)
-  const authCounty = clean(authoritativeEntityContext.county);
-  const revCounty = clean(reverseGeographicContext.county);
-
-  if (authCounty && revCounty) {
-    const stripCountyWord = (s: string) => s.replace(/\s+county$/i, '').trim();
-    const cAuth = stripCountyWord(authCounty);
-    const cRev = stripCountyWord(revCounty);
-
-    if (cAuth && cRev && cAuth !== cRev) {
-      return {
-        consistent: false,
-        result: 'ENTITY_COORDINATE_MISMATCH',
-        coordinateTrust: 'unverified',
-        rejectionReason: `County mismatch: candidate coordinates in "${reverseGeographicContext.county}" conflict with authoritative "${authoritativeEntityContext.county}"`
-      };
-    }
-  }
-
-  // 4. City / Known Locality check if authoritative city exists
-  const authCity = clean(authoritativeEntityContext.city);
-  const revCity = clean(reverseGeographicContext.city || reverseGeographicContext.town || reverseGeographicContext.village);
-
-  // If coordinates also have authoritative coordinates, check distance as a sanity fallback
-  if (typeof authoritativeEntityContext.lat === 'number' && typeof authoritativeEntityContext.lng === 'number') {
-    const R = 6371; // km
-    const dLat = (coordinates.lat - authoritativeEntityContext.lat) * Math.PI / 180;
-    const dLon = (coordinates.lng - authoritativeEntityContext.lng) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos(authoritativeEntityContext.lat * Math.PI / 180) * Math.cos(coordinates.lat * Math.PI / 180) *
-              Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    const distKm = R * c;
-
-    // If more than 150km away from authoritative point in same state, consider mismatch
-    if (distKm > 150) {
-      return {
-        consistent: false,
-        result: 'ENTITY_COORDINATE_MISMATCH',
-        coordinateTrust: 'unverified',
-        rejectionReason: `Distance mismatch: candidate coordinates are ${Math.round(distKm)}km away from authoritative location`
-      };
-    }
-  }
-
-  // Corroborated!
+  // If no reverse geocode or no authoritative context to corroborate, but no contradiction
   return {
     consistent: true,
-    result: 'MATCH',
-    coordinateTrust: 'verified',
+    result: 'UNVERIFIED',
+    coordinateTrust: 'provisional',
     rejectionReason: undefined
   };
 }

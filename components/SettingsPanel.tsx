@@ -449,11 +449,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
 
   const themes = {
     'modern': {
-      container: "bg-black/75 backdrop-blur-md border border-cyan-400/30 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] text-white font-sans",
+      container: "bg-black/90 backdrop-blur-md border border-cyan-400/30 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] text-white font-sans",
       header: "bg-gradient-to-r from-blue-900 to-cyan-900",
       headerTitle: "brand-font text-white",
       closeBtn: "hover:bg-white/20 text-white rounded-full p-1 transition-colors",
-      tabBar: "border-b border-cyan-400/20 bg-black/40",
+      tabBar: "border-b border-cyan-400/20 bg-black/60",
       tabActive: "border-b-2 border-cyan-400 text-cyan-300 bg-cyan-900/20",
       tabInactive: "text-white/60 hover:text-white hover:bg-white/5 border-b-2 border-transparent",
       divider: "border-white/10"
@@ -524,7 +524,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
   const inputClasses = `
     w-full px-3 py-2 rounded-lg text-sm transition-colors
     ${isParchment ? 'bg-[#e6d5b8] border border-[#8b5a2b]/30 text-[#3e2723] focus:border-[#8b5a2b] focus:ring-1 focus:ring-[#8b5a2b]' : ''}
-    ${skin === 'modern' ? 'bg-white/10 border-white/20 text-white focus:bg-white/20 focus:border-white/40' : ''}
+    ${skin === 'modern' ? 'bg-black/60 border border-white/20 text-white focus:bg-black/80 focus:border-cyan-400 outline-none' : ''}
     ${isRetro ? 'bg-transparent border-2 border-green-400 text-green-300 rounded-none focus:outline-none' : ''}
     ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000]' : ''}
   `;

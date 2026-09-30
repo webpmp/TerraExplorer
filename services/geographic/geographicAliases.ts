@@ -83,7 +83,18 @@ const ALIAS_DB: Record<string, string> = {
     "batavia shipwreck": "batavia shipwreck site",
     "the batavia shipwreck": "batavia shipwreck site",
     "batavia shipwreck site": "batavia shipwreck site",
-    "the batavia shipwreck site": "batavia shipwreck site"
+    "the batavia shipwreck site": "batavia shipwreck site",
+
+    // Historical Battles and Events
+    "battle of waterloo": "waterloo",
+    "the battle of waterloo": "waterloo",
+    "waterloo battlefield": "waterloo",
+    "the waterloo battlefield": "waterloo",
+    "battlefield of waterloo": "waterloo",
+    "battle of gettysburg": "gettysburg",
+    "the battle of gettysburg": "gettysburg",
+    "gettysburg battlefield": "gettysburg",
+    "the gettysburg battlefield": "gettysburg"
 };
 
 export function resolveAlias(normalizedQuery: string): AliasResolution {

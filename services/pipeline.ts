@@ -8,7 +8,7 @@ import { mergeCoordinates } from './coordinateAuthority';
 import { CanonicalGeographicEntity } from '../domain';
 import { classifyGeographicEntity } from './classifierService';
 import { getEstimatedClimate, getClimateDescription, isClimateConflicting } from './geographic/climateEstimator';
-import { reverseGeocode, enrichSettlementPopulation, isPopulationBearingEntity } from './geographic/geographicResolver';
+import { reverseGeocode, enrichSettlementPopulation, isPopulationBearingEntity, fetchWikipediaLeadExtract, WikipediaLeadResult } from './geographic/geographicResolver';
 import { isPlaceholderString } from '../components/InfoPanel';
 import { validateEarthGeography } from './celestialCapabilities';
 import { validateHistoricalCoordinate, getHistoricalEntityKnowledge, toCanonicalTitleCase, isMaritimeHistoricalEntity } from './geographic/historicalCoordinateValidator';
@@ -784,7 +784,8 @@ locationLabel="${locationLabel || 'none'}"`);
           osmId: (resolvedData as any).osmId,
           osmType: (resolvedData as any).osmType,
           wikidataId: (resolvedData as any).wikidataId,
-          wikipedia: (resolvedData as any).wikipedia
+          wikipedia: (resolvedData as any).wikipedia,
+          historicalContext: histKnowledge?.historicalContext
       };
 
       console.log(`[RESOLUTION SUMMARY]\nRaw Query: "${entityResult.intentResult.normalized.request.rawQuery}"\nClassified Intent: ${entityResult.intentResult.intent}\nQuery Shape: ${entityResult.intentResult.queryShape || 'DIRECT'}\nExtracted Search Entity: "${entityResult.entity}"\nResolution Input: "${entityResult.entity}"\nCanonical Entity: "${canonicalName}"\nEntity Type: "${entityType}"\nCoordinate Source: "${finalSource}"\nCoordinate Trust: "${finalTrust}"\nIdentity Status: "${finalStatus}"\nCoordinate Trust Gate: ${coordinatesValid ? 'PASS' : 'REJECT'}`);
@@ -835,6 +836,30 @@ locationLabel="${locationLabel || 'none'}"`);
 
   if (coordinatesValid && canonicalEntity && initialCompleteness.recoveryRequired) {
       try {
+        // Step 3a: Grounding - Retrieve authoritative Wikipedia lead/intro extract if available
+        let wikipediaSource: WikipediaLeadResult | null = null;
+        const wikiTarget = canonicalEntity.wikipedia || canonicalEntity.canonicalName;
+        if (wikiTarget) {
+          try {
+            wikipediaSource = await fetchWikipediaLeadExtract(wikiTarget, signal);
+          } catch (err) {
+            console.warn(`[GROUNDING] Wikipedia lead fetch failed for "${wikiTarget}":`, err);
+          }
+        }
+
+        const sourceFound = Boolean(wikipediaSource?.extract && wikipediaSource.extract.length > 0);
+        const sourceText = sourceFound ? wikipediaSource!.extract : undefined;
+        const sourceTitle = sourceFound ? wikipediaSource!.title : undefined;
+        const sourceLength = sourceText ? sourceText.length : 0;
+
+        console.log(`[SOURCE GROUNDING]
+entity: "${canonicalEntity.canonicalName}"
+wikipediaTarget: "${wikiTarget || 'none'}"
+sourceFound: ${sourceFound}
+sourceTitle: "${sourceTitle || 'none'}"
+sourceLength: ${sourceLength} chars
+mode: ${sourceFound ? 'SOURCE_GROUNDED_SYNTHESIS' : 'CONSERVATIVE_FALLBACK'}`);
+
         const metadataRecovery = await recoverLocationMetadata(canonicalEntity.canonicalName, canonicalEntity.coordinates, {
           ...canonicalEntity,
           country: (resolvedData as any).country,
@@ -843,7 +868,10 @@ locationLabel="${locationLabel || 'none'}"`);
           county: (resolvedData as any).county,
           region: (resolvedData as any).region,
           climate: (resolvedData as any).climate,
-          originalQuery: entityResult.intentResult.normalized.request.rawQuery
+          originalQuery: entityResult.intentResult.normalized.request.rawQuery,
+          historicalContext: canonicalEntity.historicalContext,
+          sourceText,
+          sourceTitle
         }, signal);
         if (signal?.aborted) {
           return {

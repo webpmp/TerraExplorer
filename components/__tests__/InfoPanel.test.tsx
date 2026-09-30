@@ -122,6 +122,46 @@ describe('Lightbox Metadata Integration', () => {
     expect(html).not.toContain('undefined');
   });
 
+  it('renders seamless header-to-body transition without border and dark translucent details surface in Modern theme', () => {
+    const html = renderToStaticMarkup(
+      <InfoPanel
+        info={baseInfo}
+        onClose={() => {}}
+        isLoading={false}
+        isNewsFetching={false}
+        skin="modern"
+        isFavorite={false}
+        onSaveFavorite={() => {}}
+        onRemoveFavorite={() => {}}
+        onLoadMoreNews={async () => {}}
+      />
+    );
+    expect(html).toContain('data-testid="modern-header-vertical-gradient"');
+    expect(html).not.toContain('border-b border-slate-800/70');
+    expect(html).not.toContain('border-b border-white/10');
+    expect(html).toContain('flex-1 overflow-y-auto overflow-x-hidden bg-black/85 relative pointer-events-auto info-panel-scrollable');
+  });
+
+  it('preserves transparent details background in non-modern themes (parchment, retro-green, retro-amber)', () => {
+    for (const skin of ['parchment', 'retro-green', 'retro-amber'] as const) {
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={baseInfo}
+          onClose={() => {}}
+          isLoading={false}
+          isNewsFetching={false}
+          skin={skin}
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+          onLoadMoreNews={async () => {}}
+        />
+      );
+      expect(html).toContain('flex-1 overflow-y-auto overflow-x-hidden bg-transparent relative pointer-events-auto info-panel-scrollable');
+      expect(html).not.toContain('bg-black/75');
+    }
+  });
+
   it('renders Parchment badge without border classes while preserving background, text, rounded, font weight, and shadow', () => {
     const html = renderToStaticMarkup(
       <InfoPanel
@@ -2134,6 +2174,32 @@ describe('Lightbox Metadata Integration', () => {
         expect(html).toContain('info-panel-scrollable');
       }
     });
+
+    it('applies solid top in maskStyle for Modern skin and renders seamless black details surface', () => {
+      const testInfo = {
+        name: 'Kyoto',
+        type: 'City' as any,
+        description: 'Kyoto is the cultural capital of Japan with historic temples and gardens.',
+        coordinates: { lat: 35.0116, lng: 135.7681 },
+        news: []
+      };
+
+      const modernHtml = renderToStaticMarkup(
+        <InfoPanel
+          info={testInfo}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(modernHtml).toContain('bg-black/85');
+      expect(modernHtml).not.toContain('border-b border-slate-800/70');
+      expect(modernHtml).not.toContain('border-b border-white/10');
+    });
   });
 
   describe('Accurate Population Labeling, Sourcing, and Modern Label Deprecation', () => {
@@ -2968,6 +3034,11 @@ describe('Lightbox Metadata Integration', () => {
       );
 
       expect(html).toContain('Waypoint 1 of 9');
+      const navHeaderMatch = html.match(/<div class="relative z-\[1\][^"]*">/);
+      expect(navHeaderMatch).not.toBeNull();
+      expect(navHeaderMatch![0]).toContain('px-3 py-1.5 bg-gradient-to-b from-black/95 via-black/85 to-black/75');
+      expect(navHeaderMatch![0]).not.toContain('bg-white/5');
+      expect(navHeaderMatch![0]).not.toContain('border-b border-white/10');
       // The navigation container should contain only the waypoint counter
       const navContainerMatch = html.match(/aria-label="Previous waypoint"[\s\S]*?<\/button>([\s\S]*?)<button[^>]*aria-label="Next waypoint"/);
       expect(navContainerMatch).not.toBeNull();

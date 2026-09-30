@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronLeft, ChevronRight, X, Image as ImageIcon, ZoomIn } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Image as ImageIcon, ZoomIn, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { SkinType } from '../types';
 import { GalleryImage, cleanMetadataString, formatImageAttribution, isPlaceholderString } from './InfoPanel';
 import { getImageFilter } from '../utils/osmPalettes';
+import { getUserImagePreference, toggleUserImagePreference, ImagePreference } from '../services/imagePreferenceService';
 
 export interface StackedImageCarouselProps {
   images: GalleryImage[];
   locationName: string;
+  waypointId?: string;
   fallbackCaption?: string;
   fallbackAttribution?: string;
   skin: SkinType;
@@ -21,6 +23,7 @@ export interface StackedImageCarouselProps {
 export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
   images: rawImages,
   locationName,
+  waypointId,
   fallbackCaption,
   fallbackAttribution,
   skin,
@@ -71,6 +74,24 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
   const imageRef = useRef<HTMLImageElement>(null);
   const lensRef = useRef<HTMLDivElement>(null);
   const magnifiedImgRef = useRef<HTMLImageElement>(null);
+
+  // User Image Feedback State (per-user, client-local, lightbox only)
+  const currentImg = images[currentIndex] || images[0] || { url: '' };
+  const currentImgUrl = currentImg?.url || '';
+  const effectiveWaypointId = waypointId || locationName || 'global';
+  const [currentPreference, setCurrentPreference] = useState<ImagePreference | null>(() => {
+    return getUserImagePreference(effectiveWaypointId, currentImgUrl);
+  });
+
+  useEffect(() => {
+    setCurrentPreference(getUserImagePreference(effectiveWaypointId, currentImgUrl));
+  }, [effectiveWaypointId, currentImgUrl, isLightboxOpen]);
+
+  const handleFeedback = useCallback((type: ImagePreference) => {
+    if (!currentImgUrl) return;
+    const next = toggleUserImagePreference(effectiveWaypointId, currentImgUrl, type);
+    setCurrentPreference(next);
+  }, [effectiveWaypointId, currentImgUrl]);
 
   // Reset magnifier mode on lightbox close or image navigation
   useEffect(() => {
@@ -205,7 +226,6 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
 
   if (totalImages === 0) return null;
 
-  const currentImg = images[currentIndex] || images[0];
   const layer1Img = isMulti ? images[(currentIndex + 1) % totalImages] : null;
   const layer2Img = totalImages >= 3 ? images[(currentIndex + 2) % totalImages] : null;
   const activeCaption = cleanMetadataString(currentImg.caption) || cleanMetadataString(fallbackCaption);
@@ -259,6 +279,8 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
   let lightboxCounterClass = "text-white/50 font-mono";
   let lightboxMagnifierBtnClass = "bg-white/10 hover:bg-white/20 text-white/80 hover:text-white border-white/20 rounded-md";
   let lightboxMagnifierActiveBtnClass = "bg-cyan-500 text-black border-cyan-400 font-bold rounded-md shadow-[0_0_12px_rgba(6,182,212,0.5)]";
+  let lightboxFeedbackBtnClass = "bg-white/10 hover:bg-white/20 text-white/80 hover:text-white border-white/20 rounded-md";
+  let lightboxFeedbackActiveBtnClass = "bg-cyan-500 text-black border-cyan-400 font-bold rounded-md shadow-[0_0_12px_rgba(6,182,212,0.5)]";
   let lightboxLensClass = "border-2 border-black bg-black shadow-[0_0_20px_rgba(0,0,0,0.8),0_0_0_1px_rgba(255,255,255,0.25)]";
 
   // Thumbnail caption styling per skin
@@ -277,6 +299,8 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
     lightboxCounterClass = "text-green-300/90 font-retro text-sm tracking-wider";
     lightboxMagnifierBtnClass = "bg-black text-green-300/80 hover:bg-green-900/30 hover:text-green-300 border-green-400/50 rounded-none font-retro";
     lightboxMagnifierActiveBtnClass = "bg-green-400 text-black border-green-400 font-bold rounded-none shadow-[0_0_10px_rgba(74,222,128,0.5)] font-retro";
+    lightboxFeedbackBtnClass = "bg-black text-green-300/80 hover:bg-green-900/30 hover:text-green-300 border-green-400/50 rounded-none font-retro";
+    lightboxFeedbackActiveBtnClass = "bg-green-400 text-black border-green-400 font-bold rounded-none shadow-[0_0_10px_rgba(74,222,128,0.5)] font-retro";
     lightboxLensClass = "border-2 border-green-400 bg-black shadow-[0_0_15px_rgba(74,222,128,0.5)]";
   } else if (skin === 'retro-amber') {
     captionClass = "text-amber-300 font-retro text-sm md:text-base";
@@ -289,6 +313,8 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
     lightboxCounterClass = "text-amber-300/90 font-retro text-sm tracking-wider";
     lightboxMagnifierBtnClass = "bg-black text-amber-300/80 hover:bg-amber-900/30 hover:text-amber-300 border-amber-400/50 rounded-none font-retro";
     lightboxMagnifierActiveBtnClass = "bg-amber-400 text-black border-amber-400 font-bold rounded-none shadow-[0_0_10px_rgba(251,191,36,0.5)] font-retro";
+    lightboxFeedbackBtnClass = "bg-black text-amber-300/80 hover:bg-amber-900/30 hover:text-amber-300 border-amber-400/50 rounded-none font-retro";
+    lightboxFeedbackActiveBtnClass = "bg-amber-400 text-black border-amber-400 font-bold rounded-none shadow-[0_0_10px_rgba(251,191,36,0.5)] font-retro";
     lightboxLensClass = "border-2 border-amber-400 bg-black shadow-[0_0_15px_rgba(251,191,36,0.5)]";
   } else if (skin === 'parchment') {
     captionClass = "text-amber-100/90 font-garamond font-normal text-sm";
@@ -301,6 +327,8 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
     lightboxCounterClass = "text-[#d2b48c]/80 font-serif";
     lightboxMagnifierBtnClass = "bg-[#2c1d11]/85 text-[#e8d5b5] hover:bg-[#8b5a2b] hover:text-[#f4ead5] border-[#8b5a2b] rounded-sm shadow-md font-serif";
     lightboxMagnifierActiveBtnClass = "bg-[#8b5a2b] text-[#f4ead5] border-[#5c3a21] font-bold rounded-sm shadow-md font-serif";
+    lightboxFeedbackBtnClass = "bg-[#2c1d11]/85 text-[#e8d5b5] hover:bg-[#8b5a2b] hover:text-[#f4ead5] border-[#8b5a2b] rounded-sm shadow-md font-serif";
+    lightboxFeedbackActiveBtnClass = "bg-[#8b5a2b] text-[#f4ead5] border-[#5c3a21] font-bold rounded-sm shadow-md font-serif";
     lightboxLensClass = "border-2 border-[#8b5a2b] bg-[#f4ead5] shadow-[0_4px_15px_rgba(0,0,0,0.5)]";
   }
 
@@ -410,7 +438,7 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
           )}
         </div>
 
-        {/* Row beneath image: Counter on left, Magnifier button on bottom-right */}
+        {/* Row beneath image: Counter on left, Feedback and Magnifier buttons on bottom-right */}
         <div className="mt-2 w-0 min-w-full flex items-center justify-between px-1">
           {isMulti ? (
             <div 
@@ -421,23 +449,61 @@ export const StackedImageCarousel: React.FC<StackedImageCarouselProps> = ({
             </div>
           ) : <div />}
 
-          {/* Magnifier Glass Toggle Button (Icon Only) */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsMagnifierActive(prev => !prev);
-            }}
-            className={`p-1.5 transition-colors shadow-sm pointer-events-auto border flex items-center justify-center ${
-              isMagnifierActive ? lightboxMagnifierActiveBtnClass : lightboxMagnifierBtnClass
-            }`}
-            title={isMagnifierActive ? "Disable magnifier" : "Enable magnifier"}
-            aria-label={isMagnifierActive ? "Disable magnifier" : "Enable magnifier"}
-            aria-pressed={isMagnifierActive}
-            data-testid="lightbox-magnifier-btn"
-          >
-            <ZoomIn size={16} />
-          </button>
+          <div className="flex items-center gap-1.5">
+            {/* Thumbs Up Button */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleFeedback('liked');
+              }}
+              className={`p-1.5 transition-colors shadow-sm pointer-events-auto border flex items-center justify-center ${
+                currentPreference === 'liked' ? lightboxFeedbackActiveBtnClass : lightboxFeedbackBtnClass
+              }`}
+              title="Like image"
+              aria-label="Like image"
+              aria-pressed={currentPreference === 'liked'}
+              data-testid="lightbox-thumbs-up-btn"
+            >
+              <ThumbsUp size={16} />
+            </button>
+
+            {/* Thumbs Down Button */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleFeedback('disliked');
+              }}
+              className={`p-1.5 transition-colors shadow-sm pointer-events-auto border flex items-center justify-center ${
+                currentPreference === 'disliked' ? lightboxFeedbackActiveBtnClass : lightboxFeedbackBtnClass
+              }`}
+              title="Dislike image"
+              aria-label="Dislike image"
+              aria-pressed={currentPreference === 'disliked'}
+              data-testid="lightbox-thumbs-down-btn"
+            >
+              <ThumbsDown size={16} />
+            </button>
+
+            {/* Magnifier Glass Toggle Button (Icon Only) */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsMagnifierActive(prev => !prev);
+              }}
+              className={`p-1.5 transition-colors shadow-sm pointer-events-auto border flex items-center justify-center ${
+                isMagnifierActive ? lightboxMagnifierActiveBtnClass : lightboxMagnifierBtnClass
+              }`}
+              title={isMagnifierActive ? "Disable magnifier" : "Enable magnifier"}
+              aria-label={isMagnifierActive ? "Disable magnifier" : "Enable magnifier"}
+              aria-pressed={isMagnifierActive}
+              data-testid="lightbox-magnifier-btn"
+            >
+              <ZoomIn size={16} />
+            </button>
+          </div>
         </div>
 
         {/* Lightbox Footer with Editorial Caption and Attribution */}

@@ -28,6 +28,7 @@ Establish the subject and primary narrative in 3-5 sentences (1-2 coherent parag
 
 CRITICAL INVARIANT - SEMANTIC ANCHOR FOR EVENT QUERIES:
 When the query or context relates to a specific historical event (e.g. "Where did the launch of Sputnik take place?"), that specific event MUST remain the semantic anchor of the overview and narrative.
+The requested entity name is authoritative: for a named historical battle or event, return the canonical historical event or battlefield/site and do not substitute a minor sub-location, farm, or tactical building unless explicitly requested.
 The narrative must immediately establish the connection:
 [Queried Event] -> [Exact Date / Milestone] -> [Specific Facility / Site Name] -> [Geographic Context / Country].
 Other events associated with the same location (e.g., Yuri Gagarin's 1961 flight at Baikonur) are secondary supporting context and must NEVER replace, overshadow, or be labeled as the primary event over the queried subject.

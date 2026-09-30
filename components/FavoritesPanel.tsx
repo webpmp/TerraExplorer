@@ -44,7 +44,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
 
   const themes = {
     'modern': {
-      container: "bg-black/75 backdrop-blur-md border border-cyan-400/30 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] text-white font-sans",
+      container: "bg-black/90 backdrop-blur-md border border-cyan-400/30 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] text-white font-sans",
       header: "bg-gradient-to-r from-blue-900 to-cyan-900",
       headerTitle: "brand-font text-white",
       item: "bg-white/5 border border-white/10 hover:bg-white/10 rounded-lg transition-colors",
@@ -56,8 +56,8 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
       deleteBtn: "hover:bg-red-900/50 text-gray-400 hover:text-red-400 rounded p-1.5 transition-colors",
       closeBtn: "hover:bg-white/20 text-white rounded-full p-1",
       emptyState: "text-gray-500",
-      modal: "bg-black/75 backdrop-blur-md border border-cyan-400/30 rounded-xl text-white",
-      input: "bg-white/5 border border-white/20 text-white rounded p-2 text-sm focus:border-cyan-400 outline-none"
+      modal: "bg-black/90 backdrop-blur-md border border-cyan-400/30 rounded-xl text-white",
+      input: "bg-black/60 border border-white/20 text-white rounded p-2 text-sm focus:border-cyan-400 outline-none"
     },
     'retro-green': {
       container: "bg-black/85 backdrop-blur-sm border-2 border-green-400 shadow-[0_0_20px_rgba(74,222,128,0.2)] text-green-300 font-retro tracking-widest",
@@ -120,17 +120,94 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
     setEditingRoute(JSON.parse(JSON.stringify(fav)));
   };
 
+  const getWaypointImages = (wp: Waypoint): Array<{ url: string; caption?: string; attribution?: string }> => {
+    if (Array.isArray(wp.images) && wp.images.length > 0) {
+      return wp.images.map(img => typeof img === 'string' ? { url: img } : { ...img, url: img.url || '' });
+    }
+    if (wp.primaryImage) {
+      return [typeof wp.primaryImage === 'string' ? { url: wp.primaryImage } : { ...wp.primaryImage, url: wp.primaryImage.url || '' }];
+    }
+    if (wp.savedSnapshot?.images && Array.isArray(wp.savedSnapshot.images) && wp.savedSnapshot.images.length > 0) {
+      return wp.savedSnapshot.images.map(img => typeof img === 'string' ? { url: img } : { ...img, url: img.url || '' });
+    }
+    return [];
+  };
+
+  const updateWaypointImageUrl = (wpIndex: number, imgIndex: number, url: string) => {
+    if (!editingRoute || !editingRoute.waypoints) return;
+    const newWaypoints = [...editingRoute.waypoints];
+    const wp = newWaypoints[wpIndex];
+    const currentImages = getWaypointImages(wp);
+    const newImages = [...currentImages];
+    if (imgIndex < newImages.length) {
+      newImages[imgIndex] = { ...newImages[imgIndex], url };
+    } else {
+      newImages.push({ url });
+    }
+    newWaypoints[wpIndex] = { ...wp, images: newImages };
+    setEditingRoute({ ...editingRoute, waypoints: newWaypoints });
+  };
+
+  const addWaypointImage = (wpIndex: number) => {
+    if (!editingRoute || !editingRoute.waypoints) return;
+    const newWaypoints = [...editingRoute.waypoints];
+    const wp = newWaypoints[wpIndex];
+    const currentImages = getWaypointImages(wp);
+    const newImages = [...currentImages, { url: '' }];
+    newWaypoints[wpIndex] = { ...wp, images: newImages };
+    setEditingRoute({ ...editingRoute, waypoints: newWaypoints });
+  };
+
+  const removeWaypointImage = (wpIndex: number, imgIndex: number) => {
+    if (!editingRoute || !editingRoute.waypoints) return;
+    const newWaypoints = [...editingRoute.waypoints];
+    const wp = newWaypoints[wpIndex];
+    const currentImages = getWaypointImages(wp);
+    const newImages = currentImages.filter((_, i) => i !== imgIndex);
+    newWaypoints[wpIndex] = { ...wp, images: newImages };
+    setEditingRoute({ ...editingRoute, waypoints: newWaypoints });
+  };
+
   const saveEditedRoute = () => {
     if (editingRoute) {
       const trimmedName = editingRoute.name.trim() || editingRoute.name;
+      const syncedWaypoints = editingRoute.waypoints?.map(wp => {
+        const rawImages = getWaypointImages(wp);
+        const cleanImages = rawImages
+          .map(img => ({ ...img, url: img.url.trim() }))
+          .filter(img => img.url.length > 0);
+
+        const primaryImage = cleanImages.length > 0 ? cleanImages[0].url : undefined;
+
+        const updatedWp: Waypoint = {
+          ...wp,
+          routeGroupName: trimmedName,
+          routeTitle: trimmedName,
+          images: cleanImages,
+          primaryImage: primaryImage
+        };
+
+        if (wp.savedSnapshot) {
+          updatedWp.savedSnapshot = {
+            ...wp.savedSnapshot,
+            name: wp.name,
+            description: wp.description || wp.savedSnapshot.description,
+            images: cleanImages,
+            primaryImage: primaryImage,
+            sectionState: {
+              ...(wp.savedSnapshot.sectionState || { description: 'ready', news: 'idle', nearby: 'ready' }),
+              images: 'ready'
+            }
+          };
+        }
+
+        return updatedWp;
+      });
+
       const syncedRoute: FavoriteLocation = {
         ...editingRoute,
         name: trimmedName,
-        waypoints: editingRoute.waypoints?.map(wp => ({
-          ...wp,
-          routeGroupName: trimmedName,
-          routeTitle: trimmedName
-        }))
+        waypoints: syncedWaypoints
       };
       onUpdate(syncedRoute);
       setEditingRoute(null);
@@ -454,6 +531,61 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
                                                step="0.0001"
                                            />
                                        </div>
+                                   </div>
+
+                                   {/* Images Section */}
+                                   <div className="mt-1 pt-2 border-t border-white/10">
+                                       <div className="flex items-center justify-between mb-2">
+                                           <label className={`block text-[10px] uppercase font-bold opacity-70 ${theme.text}`}>
+                                               Images ({getWaypointImages(wp).length})
+                                           </label>
+                                           <button 
+                                               type="button"
+                                               onClick={() => addWaypointImage(idx)} 
+                                               className={`flex items-center gap-1 text-xs px-2 py-0.5 ${theme.actionBtn} bg-white/5`}
+                                               title="Add image URL"
+                                               aria-label="Add image"
+                                               data-testid={`waypoint-${idx}-add-image-btn`}
+                                           >
+                                               <Plus size={12} /> Add Image
+                                           </button>
+                                       </div>
+
+                                       {getWaypointImages(wp).length === 0 ? (
+                                           <div className="text-xs opacity-50 italic py-1" data-testid={`waypoint-${idx}-no-images`}>
+                                               No custom images for this location. Click &quot;Add Image&quot; to specify image URLs.
+                                           </div>
+                                       ) : (
+                                           <div className="space-y-2">
+                                               {getWaypointImages(wp).map((img, imgIdx) => (
+                                                   <div key={imgIdx} className="flex items-center gap-2">
+                                                       <div className="flex-1 min-w-0">
+                                                           <label className="text-[10px] uppercase opacity-50 block mb-0.5">
+                                                               Image {imgIdx + 1} URL
+                                                           </label>
+                                                           <input 
+                                                               type="text" 
+                                                               value={img.url} 
+                                                               onChange={(e) => updateWaypointImageUrl(idx, imgIdx, e.target.value)}
+                                                               placeholder="https://example.com/image.jpg"
+                                                               className={`w-full ${theme.input}`}
+                                                               data-testid={`waypoint-${idx}-image-${imgIdx}-input`}
+                                                           />
+                                                       </div>
+                                                       <button 
+                                                           type="button"
+                                                           onClick={() => removeWaypointImage(idx, imgIdx)} 
+                                                           className={`self-end mb-1 p-1.5 ${theme.deleteBtn}`}
+                                                           title={`Remove Image ${imgIdx + 1}`}
+                                                           aria-label={`Remove Image ${imgIdx + 1}`}
+                                                           data-testid={`waypoint-${idx}-remove-image-${imgIdx}-btn`}
+                                                       >
+                                                           <Trash2 size={14} />
+                                                       </button>
+                                                   </div>
+                                               ))}
+                                           </div>
+                                       )}
                                    </div>
                                </div>
 

@@ -88,6 +88,24 @@ const COMMON_STOPWORDS = new Set([
   'with', 'within', 'without', 'would', 'you', 'your'
 ]);
 
+export const META_EVALUATIVE_WORDS = new Set([
+  'significance', 'significant', 'significantly', 'crucial', 'moment', 'moments',
+  'symbol', 'symbols', 'symbolize', 'symbolizes', 'symbolized', 'symbolizing', 'symbolic',
+  'turning', 'point', 'points', 'milestone', 'milestones',
+  'impact', 'impacts', 'impacted', 'impacting', 'lasting', 'profound', 'deep',
+  'important', 'importance', 'role', 'roles', 'played',
+  'marked', 'marking', 'marks', 'mark', 'heralded', 'heralding',
+  'beginning', 'start', 'started', 'starting', 'commenced',
+  'colonization', 'colonize', 'colonizing', 'colonized',
+  'commemorated', 'commemorating', 'remembered', 'celebrated',
+  'vital', 'historic', 'historical', 'history', 'legacy', 'legacies',
+  'fame', 'famous', 'renowned', 'reknown', 'notable', 'noted',
+  'considered', 'viewed', 'regarded', 'known',
+  'exploration', 'explorations', 'expansion', 'discovery', 'discoveries',
+  'represented', 'representing', 'represents', 'represent',
+  'european', 'europe', 'american', 'america', 'americas', 'western', 'eastern', 'northern', 'southern', 'global', 'world', 'era', 'age'
+]);
+
 const SEMANTIC_SYNONYM_MAP: Record<string, string> = {
   'reached': 'arrive',
   'arrived': 'arrive',
@@ -114,6 +132,8 @@ const SEMANTIC_SYNONYM_MAP: Record<string, string> = {
   'sinking': 'sink',
   'shipwrecked': 'sink',
   'grounded': 'sink',
+  'grounding': 'sink',
+  'aground': 'sink',
   'wrecked': 'sink',
   'became': 'become',
   'served': 'serve',
@@ -243,7 +263,10 @@ export function isFactSubsumedByText(
     'The', 'This', 'That', 'These', 'Those', 'In', 'On', 'At', 'After', 'Before', 'During',
     'A', 'An', 'It', 'Its', 'They', 'He', 'She', 'His', 'Her', 'Notable', 'Feature',
     'Moon', 'Earth', 'Sun', 'Pacific', 'Atlantic', 'Indian', 'Mediterranean', 'Ocean', 'Sea', 'North', 'South', 'East', 'West',
-    'Ancient', 'Historic', 'Major', 'National', 'International', 'European', 'American', 'Asian', 'African',
+    'Ancient', 'Historic', 'Historical', 'Major', 'National', 'International',
+    'European', 'Europe', 'American', 'America', 'Americas', 'Asian', 'Asia', 'African', 'Africa',
+    'Global', 'World', 'Western', 'Eastern', 'Southern', 'Northern', 'Hemisphere',
+    'Significance', 'Importance', 'Legacy', 'Impact', 'Symbolism', 'History',
     'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'
   ]);
 
@@ -256,7 +279,7 @@ export function isFactSubsumedByText(
       
       const normWord = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
       const synWord = SEMANTIC_SYNONYM_MAP[normWord] || normWord;
-      if (!normBase.includes(normWord) && !normBase.includes(synWord) && !COMMON_STOPWORDS.has(normWord)) {
+      if (!normBase.includes(normWord) && !normBase.includes(synWord) && !COMMON_STOPWORDS.has(normWord) && !META_EVALUATIVE_WORDS.has(normWord)) {
         novelNamedEntities.push(normWord);
       }
     }
@@ -268,7 +291,11 @@ export function isFactSubsumedByText(
       .map(w => SEMANTIC_SYNONYM_MAP[w] || w)
       .filter(w => w.length >= 3 && !COMMON_STOPWORDS.has(w));
     
-    const unMatchedWords = wordsInFact.filter(w => !normBase.includes(w) && !(SEMANTIC_SYNONYM_MAP[w] && normBase.includes(SEMANTIC_SYNONYM_MAP[w])));
+    const unMatchedWords = wordsInFact.filter(w =>
+      !META_EVALUATIVE_WORDS.has(w) &&
+      !normBase.includes(w) &&
+      !(SEMANTIC_SYNONYM_MAP[w] && normBase.includes(SEMANTIC_SYNONYM_MAP[w]))
+    );
     if (unMatchedWords.length >= 2) {
       return false;
     }
@@ -313,9 +340,11 @@ export function isFactSubsumedByText(
     return true;
   });
 
+  const unMatchedConcreteWords = unMatchedWords.filter(w => !META_EVALUATIVE_WORDS.has(w));
+
   // If the fact introduces meaningful new concepts, actions, or engineering details with low overall overlap (< 50%),
   // it is additive and not subsumed.
-  if (matchRatio < 0.50 && unMatchedWords.length >= 3) {
+  if (matchRatio < 0.50 && unMatchedConcreteWords.length >= 3) {
     return false;
   }
 
@@ -325,6 +354,11 @@ export function isFactSubsumedByText(
     if (matchRatio >= 0.40) {
       return true;
     }
+  }
+
+  // If the fact has no novel concrete words beyond meta-evaluative commentary and its concrete nouns/verbs overlap with base text
+  if (novelNamedEntities.length === 0 && novelNumbers.length === 0 && unMatchedConcreteWords.length <= 1) {
+    return true;
   }
 
   if (matchRatio >= 0.65 || (wordsInFact.length <= 6 && matchRatio >= 0.50)) {

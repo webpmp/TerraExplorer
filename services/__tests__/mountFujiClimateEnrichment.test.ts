@@ -74,10 +74,10 @@ describe('Mount Fuji & Deterministic Climate Protection Regression', () => {
         description: 'Humid subtropical climate with warm summers.'
       },
       notable: [
-        { name: 'Highest peak in Japan', type: 'geography' },
+        { name: 'Three Sacred Mountains', type: 'culture' },
         { name: 'UNESCO World Heritage Site', type: 'culture' }
       ],
-      contextNotes: ['Sacred mountain in Shinto tradition', 'Last erupted in 1707']
+      contextNotes: ['Pilgrimage destination in Shinto tradition', 'Last erupted in 1707']
     });
 
     const spyMetadata = vi.spyOn(geminiService.ai.models, 'generateContent').mockResolvedValue({

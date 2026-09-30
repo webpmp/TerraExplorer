@@ -12,7 +12,8 @@ import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import SettingsPanel from './components/SettingsPanel';
 import { getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, deriveQueryTopicTitle, EnrichmentMetrics, cancelFeatureInfoRequests, isLMStudioNoModelError, LM_STUDIO_NO_MODEL_MESSAGE, LM_STUDIO_NO_MODEL_INSTRUCTION, isLMStudioContextOverflowError, LM_STUDIO_CONTEXT_OVERFLOW_MESSAGE, LM_STUDIO_CONTEXT_OVERFLOW_INSTRUCTION, isSourceRetrievalError, recoverLocationMetadata } from './services/geminiService';
-import { fetchAndValidateImages } from './services/imageService';
+import { fetchAndValidateImages, discoverAdditionalWaypointImages } from './services/imageService';
+import { getEntityImagePreferenceId } from './services/imagePreferenceService';
 import { getEstimatedClimate } from './services/geographic/climateEstimator';
 import { enrichLocationInfo, mergeLocationInfo, fetchAndValidateLocationNews } from './services/locationService';
 import { resolveGeographicMetadata } from './services/geographic/geographicResolver';
@@ -1073,6 +1074,18 @@ export function hydrateFavoritesList(parsed: any[]): FavoriteLocation[] {
                 let updatedWaypoints = f.waypoints.map(wp => {
                     const defaultMatch = defaultWaypointMap.get(wp.id);
                     if (defaultMatch) {
+                        const effectiveImages = (Array.isArray(wp.images) && wp.images.length > 0)
+                          ? wp.images
+                          : (wp.savedSnapshot?.images && Array.isArray(wp.savedSnapshot.images) && wp.savedSnapshot.images.length > 0)
+                            ? wp.savedSnapshot.images
+                            : defaultMatch.images;
+                        const effectivePrimaryImage = wp.primaryImage || wp.savedSnapshot?.primaryImage || defaultMatch.primaryImage || (Array.isArray(effectiveImages) && effectiveImages.length > 0 ? (typeof effectiveImages[0] === 'string' ? effectiveImages[0] : (effectiveImages[0] as any)?.url) : undefined);
+                        const effectiveSnapshot = wp.savedSnapshot ? {
+                          ...wp.savedSnapshot,
+                          images: effectiveImages || wp.savedSnapshot.images,
+                          primaryImage: effectivePrimaryImage || wp.savedSnapshot.primaryImage
+                        } : defaultMatch.savedSnapshot;
+
                         return {
                             ...defaultMatch,
                             ...wp,
@@ -1086,14 +1099,32 @@ export function hydrateFavoritesList(parsed: any[]): FavoriteLocation[] {
                             routeTitle: canonicalName || wp.routeTitle || defaultMatch.routeTitle,
                             isSequential: wp.isSequential ?? defaultMatch.isSequential,
                             waypointType: wp.waypointType ?? defaultMatch.waypointType,
-                            segmentEvidence: wp.segmentEvidence ?? defaultMatch.segmentEvidence
+                            segmentEvidence: wp.segmentEvidence ?? defaultMatch.segmentEvidence,
+                            images: effectiveImages,
+                            primaryImage: effectivePrimaryImage,
+                            savedSnapshot: effectiveSnapshot
                         };
                     }
+                    const effectiveImages = (Array.isArray(wp.images) && wp.images.length > 0)
+                      ? wp.images
+                      : (wp.savedSnapshot?.images && Array.isArray(wp.savedSnapshot.images) && wp.savedSnapshot.images.length > 0)
+                        ? wp.savedSnapshot.images
+                        : undefined;
+                    const effectivePrimaryImage = wp.primaryImage || wp.savedSnapshot?.primaryImage || (Array.isArray(effectiveImages) && effectiveImages.length > 0 ? (typeof effectiveImages[0] === 'string' ? effectiveImages[0] : (effectiveImages[0] as any)?.url) : undefined);
+                    const effectiveSnapshot = wp.savedSnapshot ? {
+                      ...wp.savedSnapshot,
+                      images: effectiveImages || wp.savedSnapshot.images,
+                      primaryImage: effectivePrimaryImage || wp.savedSnapshot.primaryImage
+                    } : undefined;
+
                     return {
                         ...wp,
                         isSaved: true,
                         routeGroupName: canonicalName || wp.routeGroupName,
-                        routeTitle: canonicalName || wp.routeTitle
+                        routeTitle: canonicalName || wp.routeTitle,
+                        images: effectiveImages || wp.images,
+                        primaryImage: effectivePrimaryImage || wp.primaryImage,
+                        savedSnapshot: effectiveSnapshot || wp.savedSnapshot
                     };
                 });
 
@@ -2479,7 +2510,9 @@ const App: React.FC = () => {
 
     if (isSavedWp && isSavedContentComplete) {
       const snapshot = wp.savedSnapshot || matchingSavedWpInRoute?.savedSnapshot;
+      const savedCandidateDesc = wp.description || snapshot?.description || wp.narrative || wp.context || "";
       const restoredPayload: LocationInfo = {
+        ...(snapshot || {}),
         id: stableId,
         name: wp.name,
         canonicalName: wp.canonicalName || snapshot?.canonicalName || wp.name,
@@ -2487,7 +2520,7 @@ const App: React.FC = () => {
         waypoint: wp,
         type: (wp.entityType as any) || snapshot?.type || LocationType.POI,
         entityType: wp.entityType || snapshot?.entityType || "landmark",
-        description: wp.description || snapshot?.description || "",
+        description: savedCandidateDesc,
         historicalContext: wp.context || wp.historicalContext || snapshot?.historicalContext || matchingSavedWpInRoute?.context || matchingSavedWpInRoute?.historicalContext,
         routeTitle: wp.routeTitle || wp.routeGroupName || snapshot?.routeTitle || activeSavedRoute?.name,
         routeGroupId: wp.routeGroupId || snapshot?.routeGroupId,
@@ -2503,7 +2536,7 @@ const App: React.FC = () => {
         population: wp.population || snapshot?.population || matchingSavedWpInRoute?.population,
         notable: wp.notable || snapshot?.notable || matchingSavedWpInRoute?.notable || [],
         contextNotes: wp.contextNotes || snapshot?.contextNotes || matchingSavedWpInRoute?.contextNotes || [],
-        images: wp.images || snapshot?.images || matchingSavedWpInRoute?.images || (wp.primaryImage ? [wp.primaryImage] : []),
+        images: (Array.isArray(wp.images) && wp.images.length > 0) ? wp.images : (snapshot?.images || matchingSavedWpInRoute?.images || (wp.primaryImage ? [wp.primaryImage] : [])),
         primaryImage: wp.primaryImage || snapshot?.primaryImage || matchingSavedWpInRoute?.primaryImage,
         imageCaption: wp.imageCaption || snapshot?.imageCaption || matchingSavedWpInRoute?.imageCaption,
         imageAttribution: wp.imageAttribution || snapshot?.imageAttribution || matchingSavedWpInRoute?.imageAttribution,
@@ -2518,8 +2551,7 @@ const App: React.FC = () => {
           news: "idle",
           images: "ready",
           nearby: "ready"
-        },
-        ...(snapshot || {})
+        }
       };
 
       waypointPipelineRegistry.recordTimestamp(stableId, 'topDescriptionReady', Date.now());
@@ -2797,7 +2829,17 @@ const App: React.FC = () => {
             ...finalEnrichedState,
             canonicalName: geoMarker.canonicalName || wp.canonicalName || wp.name,
             description: finalEnrichedState.description || '',
-            notable: finalEnrichedState.notable || []
+            notable: finalEnrichedState.notable || [],
+            routeTitle: (wp as any).routeTitle || (finalEnrichedState as any).routeTitle || (activeRouteRef?.current as any)?.title,
+            routeGroupName: (wp as any).routeGroupName || (finalEnrichedState as any).routeGroupName || (activeRouteRef?.current as any)?.groupName || (activeRouteRef?.current as any)?.title,
+            routeGroupId: (wp as any).routeGroupId || (finalEnrichedState as any).routeGroupId || (activeRouteRef?.current as any)?.id,
+            historicalContext: (wp as any).historicalContext || (finalEnrichedState as any).historicalContext || (wp as any).context,
+            context: (wp as any).context || (finalEnrichedState as any).context,
+            significance: (wp as any).significance || (finalEnrichedState as any).significance,
+            historicalPeriod: (wp as any).historicalPeriod || (finalEnrichedState as any).historicalPeriod,
+            routeContext: (wp as any).routeContext || (finalEnrichedState as any).routeContext,
+            isHistoricalWaypoint: (wp as any).isHistoricalWaypoint !== undefined ? (wp as any).isHistoricalWaypoint : (finalEnrichedState as any).isHistoricalWaypoint,
+            waypoint: wp
           };
           foundImages = await fetchAndValidateImages(imageContextInfo, {
             waypointId: stableId,
@@ -3230,7 +3272,7 @@ source=${source}`);
          population: wp.population || snapshot?.population || matchingSavedWpInRoute?.population,
          notable: wp.notable || snapshot?.notable || matchingSavedWpInRoute?.notable || [],
          contextNotes: wp.contextNotes || snapshot?.contextNotes || matchingSavedWpInRoute?.contextNotes || [],
-         images: wp.images || snapshot?.images || matchingSavedWpInRoute?.images || (wp.primaryImage ? [wp.primaryImage] : []),
+         images: (Array.isArray(wp.images) && wp.images.length > 0) ? wp.images : (snapshot?.images || matchingSavedWpInRoute?.images || (wp.primaryImage ? [wp.primaryImage] : [])),
          primaryImage: wp.primaryImage || snapshot?.primaryImage || matchingSavedWpInRoute?.primaryImage,
          imageCaption: wp.imageCaption || snapshot?.imageCaption || matchingSavedWpInRoute?.imageCaption,
          imageAttribution: wp.imageAttribution || snapshot?.imageAttribution || matchingSavedWpInRoute?.imageAttribution,
@@ -3245,8 +3287,7 @@ source=${source}`);
            news: "idle",
            images: "ready",
            nearby: "ready"
-         },
-         ...(snapshot || {})
+         }
        };
 
        waypointPipelineRegistry.recordTimestamp(stableId, 'topDescriptionReady', Date.now());
@@ -3475,7 +3516,17 @@ source=${source}`);
                       ...data,
                       canonicalName: geoMarker.canonicalName || wp.canonicalName || wp.name,
                       description: finalDesc,
-                      notable: enrichedData?.notable || []
+                      notable: enrichedData?.notable || [],
+                      routeTitle: (wp as any).routeTitle || (data as any).routeTitle || (activeRouteRef?.current as any)?.title,
+                      routeGroupName: (wp as any).routeGroupName || (data as any).routeGroupName || (activeRouteRef?.current as any)?.groupName,
+                      routeGroupId: (wp as any).routeGroupId || (data as any).routeGroupId || (activeRouteRef?.current as any)?.id,
+                      historicalContext: (wp as any).historicalContext || (data as any).historicalContext || (wp as any).context,
+                      context: (wp as any).context || (data as any).context,
+                      significance: (wp as any).significance || (data as any).significance,
+                      historicalPeriod: (wp as any).historicalPeriod || (data as any).historicalPeriod,
+                      routeContext: (wp as any).routeContext || (data as any).routeContext,
+                      isHistoricalWaypoint: (wp as any).isHistoricalWaypoint !== undefined ? (wp as any).isHistoricalWaypoint : (data as any).isHistoricalWaypoint,
+                      waypoint: wp
                     };
                     foundImages = await fetchAndValidateImages(imageContextInfo, {
                       waypointId: stableId,
@@ -3592,6 +3643,59 @@ source=${source}`);
                   // Trigger narration only once when substantive description is ready
                   if (activeSelectionIdRef.current === stableId && isSubstantive) {
                       maybeTriggerNarration(finalEnrichedState);
+                  }
+
+                  // Non-blocking Progressive Background Image Discovery (only for automated enrichment, respecting custom curated images)
+                  const isCustomCuratedImages = Array.isArray(wp.images) && wp.images.length > 0;
+                  if (!isCustomCuratedImages) {
+                    const currentRequestId = enrichmentRequestId;
+                    void (async () => {
+                      try {
+                        const additionalImages = await discoverAdditionalWaypointImages(imageContextInfo, foundImages, {
+                          waypointId: stableId,
+                          relatedWaypoints: routeWaypointsRef.current
+                        });
+                        if (additionalImages && additionalImages.length > 0) {
+                          const mergedImages = [...foundImages, ...additionalImages];
+                          console.log(`[Progressive Discovery] DISCOVERED additional=${additionalImages.length} total=${mergedImages.length} id="${stableId}"`);
+
+                          // 1. Update cache so subsequent navigations to stableId reuse the expanded image list
+                          const cached = waypointEnrichmentCache.get(stableId);
+                          if (cached) {
+                            waypointEnrichmentCache.set(stableId, {
+                              ...cached,
+                              images: mergedImages
+                            });
+                          }
+
+                          // 2. Race condition guard: only update active UI if waypoint is still active and request matches
+                          if (activeSelectionIdRef.current === stableId && activeMarkerRequestRef.current === currentRequestId) {
+                            setLocationInfo(prev => {
+                              if (!prev) return prev;
+                              const prevId = prev.id || (prev.waypoint as any)?.id || prev.name;
+                              if (prevId !== stableId && prev.name !== wp.name) return prev;
+                              return {
+                                ...prev,
+                                images: mergedImages
+                              };
+                            });
+                          }
+
+                          // 3. Update in-memory route waypoints
+                          setRouteWaypoints(prevWps => prevWps.map(w => {
+                            if (w.id === wp.id || (w.lat === wp.lat && w.lng === wp.lng)) {
+                              return {
+                                ...w,
+                                images: mergedImages
+                              };
+                            }
+                            return w;
+                          }));
+                        }
+                      } catch (bgErr) {
+                        console.warn(`[Progressive Discovery] Error for ${wp.name}:`, bgErr);
+                      }
+                    })();
                   }
              } catch (err) {
                  if (enrichmentRequestId === activeMarkerRequestRef.current) {
@@ -4658,7 +4762,7 @@ source=${source}`);
         // Presentation Readiness Gate: 2. Image Fetching & Validation
         const searchContext = {
           searchId: searchId || undefined,
-          waypointId: (finalData as any).id || finalData.name
+          waypointId: getEntityImagePreferenceId(finalData)
         };
 
         let foundImages: any[] = [];
@@ -5438,6 +5542,10 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       if ((activeRouteId === syncedFav.id || syncedFav.type === 'route') && syncedFav.type === 'route' && syncedFav.waypoints) {
           const sanitizedWaypoints = resolveWaterAwareRoute(syncedFav.waypoints, { title: syncedFav.name });
           setRouteWaypoints(sanitizedWaypoints);
+          sanitizedWaypoints.forEach(wp => {
+            const sId = getWaypointStableId(wp);
+            waypointEnrichmentCache.delete(sId);
+          });
           if (sanitizedWaypoints.length === 0) {
              setCurrentWaypointIndex(-1);
              setLocationInfo(null);
@@ -5455,6 +5563,11 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
                    name: currentWp.name,
                    coordinates: { lat: currentWp.lat, lng: currentWp.lng },
                    waypoint: currentWp,
+                   description: currentWp.description || prev.description,
+                   images: currentWp.images || prev.images,
+                   primaryImage: currentWp.primaryImage || prev.primaryImage,
+                   imageCaption: currentWp.imageCaption || prev.imageCaption,
+                   imageAttribution: currentWp.imageAttribution || prev.imageAttribution,
                    routeContext: currentWp.context ? {
                      title: syncedFav.name,
                      text: currentWp.context

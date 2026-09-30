@@ -16,6 +16,120 @@ export interface EnrichmentCompletenessResult {
 }
 
 /**
+ * Normalizes description text from primitive strings, structured { text } objects,
+ * or paragraph arrays into a clean trimmed string.
+ */
+export function extractDescriptionText(description: any): string {
+  if (typeof description === 'string') {
+    return description.trim();
+  }
+  if (description && typeof description === 'object') {
+    if (typeof description.text === 'string') {
+      return description.text.trim();
+    }
+    if (Array.isArray(description.paragraphs)) {
+      return description.paragraphs.filter((p: any) => typeof p === 'string').join(' ').trim();
+    }
+  }
+  return '';
+}
+
+/**
+ * Detects unmistakable programming identifiers, UI component tokens, icon library names,
+ * HTML/JSX markup, and code artifacts that should never appear in natural language prose.
+ */
+export function hasCodeOrUiArtifacts(text?: string | null): boolean {
+  if (!text || typeof text !== 'string') return false;
+
+  // 1. Icon library identifiers (FontAwesome, Lucide, etc.)
+  if (/\b(?:FontAwesome[A-Za-z0-9_]*|fa-[a-z0-9-]+|lucide-[a-z0-9-]+|Lucide[A-Z][a-zA-Z0-9_]*)\b/.test(text)) {
+    return true;
+  }
+
+  // 2. Leaked component, service, or provider code identifiers
+  if (/\b(?:[A-Za-z0-9_]*(?:SolidPlaneService|PlaneService|ComponentService|IconService|UiService|ProviderService)|(?:React\.(?:Component|createElement)|ReactDOM|useState|useEffect|useContext|useMemo|useCallback))\b/.test(text)) {
+    return true;
+  }
+
+  // 3. HTML / JSX tag fragments or property assignments
+  if (/<\/?[a-zA-Z][a-zA-Z0-9]*(?:\s+[^>]*)?>|className=["']|style=\{\{/.test(text)) {
+    return true;
+  }
+
+  // 4. Markdown code blocks or code fences
+  if (/```[\s\S]*?```|`[^`\n]{10,}`/.test(text)) {
+    return true;
+  }
+
+  return false;
+}
+
+const HISTORICAL_OLYMPIC_HOSTS = new Set([
+  'athens', 'paris', 'st. louis', 'saint louis', 'london', 'stockholm', 'antwerp', 'chamonix',
+  'st. moritz', 'saint moritz', 'amsterdam', 'lake placid', 'los angeles', 'garmisch-partenkirchen',
+  'berlin', 'oslo', 'helsinki', 'cortina d\'ampezzo', 'cortina', 'melbourne', 'squaw valley',
+  'rome', 'innsbruck', 'tokyo', 'grenoble', 'mexico city', 'sapporo', 'munich', 'montreal',
+  'moscow', 'sarajevo', 'calgary', 'seoul', 'albertville', 'barcelona', 'lillehammer', 'atlanta',
+  'nagano', 'sydney', 'salt lake city', 'turin', 'torino', 'beijing', 'vancouver', 'sochi',
+  'rio de janeiro', 'pyeongchang', 'milan', 'milano', 'brisbane'
+]);
+
+const HISTORICAL_COMMONWEALTH_HOSTS = new Set([
+  'hamilton', 'london', 'sydney', 'auckland', 'vancouver', 'cardiff', 'perth', 'kingston',
+  'edinburgh', 'christchurch', 'edmonton', 'brisbane', 'victoria', 'kuala lumpur', 'manchester',
+  'melbourne', 'delhi', 'new delhi', 'glasgow', 'gold coast', 'birmingham'
+]);
+
+const HISTORICAL_EXPO_HOSTS = new Set([
+  'london', 'paris', 'vienna', 'wien', 'philadelphia', 'melbourne', 'barcelona', 'chicago',
+  'brussels', 'bruxelles', 'st. louis', 'saint louis', 'san francisco', 'san diego', 'seville',
+  'sevilla', 'rio de janeiro', 'new york', 'stockholm', 'port-au-prince', 'seattle', 'montreal',
+  'san antonio', 'osaka', 'spokane', 'okinawa', 'knoxville', 'new orleans', 'tsukuba', 'vancouver',
+  'brisbane', 'genoa', 'genova', 'daejeon', 'lisbon', 'lisboa', 'hanover', 'hannover', 'aichi',
+  'nagoya', 'shanghai', 'yeosu', 'milan', 'milano', 'astana', 'dubai'
+]);
+
+/**
+ * Evaluates whether a text makes an unverified claim that an entity hosted a major international mega-event
+ * (such as the Olympic Games, Commonwealth Games, or World Expo / World's Fair) where the entity is not a documented host.
+ */
+export function isUnsupportedMajorEventHostClaim(text?: string | null, entityName?: string, countryName?: string): boolean {
+  if (!text || typeof text !== 'string') return false;
+  const lower = text.toLowerCase();
+
+  const isHostingClaim = /\b(?:hosted|hosting|host\s+of|host\s+city|venue\s+for|staged|held\s+the)\b/i.test(lower);
+  if (!isHostingClaim) return false;
+
+  const entityLower = (entityName || '').toLowerCase().replace(/,\s*.*$/, '').trim();
+
+  // 1. Olympic Games
+  if (/\b(?:olympic\s+games|olympics|summer\s+olympics|winter\s+olympics)\b/i.test(lower)) {
+    if (entityLower && Array.from(HISTORICAL_OLYMPIC_HOSTS).some(h => entityLower === h || entityLower.includes(h) || h.includes(entityLower))) {
+      return false; // Supported host
+    }
+    return true; // Unsupported Olympic host claim
+  }
+
+  // 2. Commonwealth Games / British Empire Games
+  if (/\b(?:commonwealth\s+games|british\s+empire\s+games)\b/i.test(lower)) {
+    if (entityLower && Array.from(HISTORICAL_COMMONWEALTH_HOSTS).some(h => entityLower === h || entityLower.includes(h) || h.includes(entityLower))) {
+      return false; // Supported host
+    }
+    return true; // Unsupported Commonwealth Games host claim
+  }
+
+  // 3. World Expo / World's Fair / Universal Exposition
+  if (/\b(?:world'?s\s+fair|world\s+expo|universal\s+exposition|international\s+exposition)\b/i.test(lower)) {
+    if (entityLower && Array.from(HISTORICAL_EXPO_HOSTS).some(h => entityLower === h || entityLower.includes(h) || h.includes(entityLower))) {
+      return false; // Supported host
+    }
+    return true; // Unsupported Expo host claim
+  }
+
+  return false;
+}
+
+/**
  * Evaluates the completeness of location enrichment.
  * Complete landmarks and entities require substantive description, populated notable facts,
  * context notes, and climate information. News is optional.
@@ -54,7 +168,7 @@ export function evaluateEnrichmentCompleteness(
   const missing: string[] = [];
 
   // 1. Description: Substantive and non-placeholder
-  const desc = typeof data.description === 'string' ? data.description.trim() : '';
+  const desc = extractDescriptionText(data.description);
   const isDescMissingOrPlaceholder = !desc || isGenericPlaceholderDescription(desc, canonicalName || data.name);
   if (isDescMissingOrPlaceholder) {
     missing.push('description');
@@ -472,9 +586,7 @@ valid: ${identityValid}`);
 
   // Level 3: Enrichment Identity Validity
   const metadata = entity.metadata as any || {};
-  const descriptionText = typeof metadata.description === 'string' 
-    ? metadata.description 
-    : (metadata.description?.text || (Array.isArray(metadata.description?.paragraphs) ? metadata.description.paragraphs.join(' ') : ''));
+  const descriptionText = extractDescriptionText(metadata.description);
 
   // 3a: Top-level structure check (reject if a sub-object like climate was treated as root metadata)
   if (metadata.koppenCode && !metadata.climate) {
@@ -485,13 +597,19 @@ valid: ${identityValid}`);
       : `${failureReason}, Isolated sub-object`;
   }
   
-  // 3b: Description Quality / Placeholder check
+  // 3b: Description Quality / Placeholder / Code Leakage check
   if (isGenericPlaceholderDescription(descriptionText, canonicalName)) {
     enrichmentValid = false;
     valid = false;
     failureReason = failureReason === 'none' 
       ? "Enrichment failed: generic placeholder description" 
       : `${failureReason}, Generic placeholder description`;
+  } else if (hasCodeOrUiArtifacts(descriptionText)) {
+    enrichmentValid = false;
+    valid = false;
+    failureReason = failureReason === 'none'
+      ? "Enrichment failed: code or UI artifacts detected in description"
+      : `${failureReason}, Code or UI artifacts in description`;
   }
 
   // 3c: Language check (Enforce English)
@@ -555,6 +673,9 @@ valid: ${enrichmentValid}`);
   const hasField = (field: string) => {
     const val = metadata[field];
     if (val === undefined || val === null) return false;
+    if (field === 'description') {
+      return extractDescriptionText(val).length > 0;
+    }
     if (typeof val === 'string' && val.trim() === '') return false;
     if (typeof val === 'number') return true;
     if (Array.isArray(val)) return true; // Empty array means resolved, but 0 items
