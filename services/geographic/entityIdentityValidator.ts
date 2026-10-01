@@ -1,4 +1,4 @@
-import { getHistoricalEntityKnowledge } from './historicalCoordinateValidator';
+import { getHistoricalEntityKnowledge, toCanonicalTitleCase } from './historicalCoordinateValidator';
 import { resolveAlias } from './geographicAliases';
 import { stripDiacritics, areEntitiesMatchingWithDiacritics, getUnicodeNormalizedForms } from './geographicNormalization';
 
@@ -663,4 +663,145 @@ consistent=${params.consistent}
 result=${params.result}
 reason=${params.reason}`);
 }
+
+/**
+ * Known administrative container prefixes and suffixes returned by geocoders / administrative registries.
+ */
+const ADMINISTRATIVE_CONTAINER_PATTERNS = [
+  /^(?:city\s+and\s+county\s+of|city\s+of|town\s+of|village\s+of|borough\s+of|municipality\s+of|comune\s+di|commune\s+de|comuna\s+de|ayuntamiento\s+de)\s+/i,
+  /\s+(?:metropolitan\s+city|metropolitan\s+municipality|metropolitan\s+area|metropolitan\s+district|metropolis|municipality|municipal\s+district|regional\s+council|county|parish|borough|district|department|prefecture|canton|governorate|province|region|state|township|subdivision|special\s+administrative\s+region|federal\s+territory|capital\s+territory|autonomous\s+region|national\s+capital\s+region)$/i
+];
+
+/**
+ * Administrative qualifier words used to detect container expansions.
+ */
+const ADMIN_CONTAINER_WORDS = new Set([
+  'city', 'metropolitan', 'municipality', 'municipal', 'metropolis',
+  'county', 'parish', 'borough', 'district', 'department', 'prefecture',
+  'canton', 'governorate', 'province', 'region', 'state', 'township',
+  'subdivision', 'territory', 'autonomous', 'capital', 'comune', 'commune', 'comuna', 'ayuntamiento',
+  'council', 'regional'
+]);
+
+const ADMIN_CONNECTIVE_WORDS = new Set([
+  'of', 'and', 'the', 'di', 'de', 'la', 'le', 'el', 'da', 'du', 'del', 'della'
+]);
+
+/**
+ * Checks if a candidate name is an administrative container representation of a requested entity.
+ */
+export function isAdministrativeContainer(candidateName: string, requestedEntity?: string): boolean {
+  if (!candidateName || typeof candidateName !== 'string') return false;
+  const candTrimmed = candidateName.trim();
+  const candLower = candTrimmed.toLowerCase();
+  
+  // If requested entity is provided, check if candidate wraps or extends requestedEntity with administrative qualifiers
+  if (requestedEntity && typeof requestedEntity === 'string') {
+    const reqTrimmed = requestedEntity.trim();
+    const reqLower = reqTrimmed.toLowerCase();
+    
+    // If requested entity already has the exact same name, it is an explicit request for that entity
+    if (stripDiacritics(candLower) === stripDiacritics(reqLower)) {
+      return false;
+    }
+    
+    // Check if candidate starts with administrative prefix + requested entity or ends with administrative suffix
+    for (const pattern of ADMINISTRATIVE_CONTAINER_PATTERNS) {
+      if (pattern.test(candTrimmed)) {
+        const strippedPrefix = candTrimmed.replace(/^(?:city\s+and\s+county\s+of|city\s+of|town\s+of|village\s+of|borough\s+of|municipality\s+of|comune\s+di|commune\s+de|comuna\s+de|ayuntamiento\s+de)\s+/i, '').trim();
+        const strippedSuffix = candTrimmed.replace(/\s+(?:metropolitan\s+city|metropolitan\s+municipality|metropolitan\s+area|metropolitan\s+district|metropolis|municipality|municipal\s+district|county|parish|borough|district|department|prefecture|canton|governorate|province|region|state|township|subdivision|special\s+administrative\s+region|federal\s+territory|capital\s+territory|autonomous\s+region|national\s+capital\s+region)$/i, '').trim();
+        
+        if (
+          areEntitiesMatchingWithDiacritics(strippedPrefix, reqTrimmed) ||
+          areEntitiesMatchingWithDiacritics(strippedSuffix, reqTrimmed) ||
+          stripDiacritics(strippedPrefix.toLowerCase()) === stripDiacritics(reqLower) ||
+          stripDiacritics(strippedSuffix.toLowerCase()) === stripDiacritics(reqLower)
+        ) {
+          return true;
+        }
+      }
+    }
+    
+    // Token-level check: candidate contains all distinctive tokens of requested entity,
+    // and all extra tokens in candidate are strictly administrative words or connective words
+    const reqTokens = extractDistinctiveEntityTokens(reqTrimmed);
+    const candTokens = extractDistinctiveEntityTokens(candTrimmed);
+    const reqTokenSet = new Set(reqTokens);
+    
+    if (reqTokens.length > 0 && reqTokens.every(t => candTokens.includes(t))) {
+      const extraTokens = candTokens.filter(t => !reqTokenSet.has(t));
+      if (extraTokens.length > 0 && extraTokens.every(t => ADMIN_CONTAINER_WORDS.has(t) || ADMIN_CONNECTIVE_WORDS.has(t))) {
+        return true;
+      }
+    }
+  }
+  
+  return ADMINISTRATIVE_CONTAINER_PATTERNS.some(p => p.test(candTrimmed));
+}
+
+/**
+ * Determines the canonical display name for an entity, preventing geocoder administrative
+ * container labels (e.g. "Kathmandu Metropolitan City") from overwriting user-requested place names
+ * (e.g. "Kathmandu"), while preserving explicit administrative requests, semantic event titles, and intentional aliases.
+ */
+export function determineCanonicalDisplayName(requestedEntity: string, candidateName: string): string {
+  const reqStr = (requestedEntity || '').trim();
+  const candStr = (candidateName || '').trim();
+
+  // If requested entity is invalid / empty, use candidate if valid
+  if (!reqStr || isInvalidCanonicalName(reqStr)) {
+    return candStr && !isInvalidCanonicalName(candStr) ? candStr : (reqStr || 'Unknown');
+  }
+
+  // If candidate is empty / invalid, use requested
+  if (!candStr || isInvalidCanonicalName(candStr)) {
+    return reqStr;
+  }
+
+  // Format casing with toCanonicalTitleCase (formats city/state e.g. "Dallas Texas" -> "Dallas, Texas")
+  const formattedReq = toCanonicalTitleCase(reqStr) || reqStr;
+
+  // Check alias resolution for requested entity (e.g. "USA" -> "United States")
+  const aliasRes = resolveAlias(reqStr.toLowerCase());
+  const canonicalRequested = aliasRes.aliasApplied
+    ? (toCanonicalTitleCase(aliasRes.canonical) || aliasRes.canonical)
+    : formattedReq;
+
+  const reqNorm = stripDiacritics(canonicalRequested.toLowerCase());
+  const candNorm = stripDiacritics(candStr.toLowerCase());
+
+  // If exact string match (preserving exact user casing if already identical)
+  if (reqStr === candStr) {
+    return reqStr;
+  }
+
+  // If case-insensitive or diacritic match, return canonical title casing
+  if (reqNorm === candNorm || areEntitiesMatchingWithDiacritics(canonicalRequested, candStr)) {
+    return canonicalRequested;
+  }
+
+  // If candidate is an administrative container representation of the requested entity
+  if (isAdministrativeContainer(candStr, canonicalRequested) || isAdministrativeContainer(candStr, reqStr)) {
+    return canonicalRequested;
+  }
+
+  // If candidate has semantic event/discovery qualification (e.g. "SS Republic Shipwreck Site" for "SS Republic")
+  if (/\b(?:shipwreck|sinking|discovery|battlefield|archaeological|ruins|monument|memorial|site)\b/i.test(candStr)) {
+    const idCheck = validateEntityIdentity(canonicalRequested, candStr, { coordinatesValid: true });
+    if (idCheck.matches) {
+      return candStr;
+    }
+  }
+
+  // Check if identity matches (e.g. translation "Rome" vs "Roma", "Mexico City" vs "Ciudad de México")
+  const identityCheck = validateEntityIdentity(canonicalRequested, candStr, { coordinatesValid: true });
+  if (identityCheck.matches) {
+    // The requested entity is authoritative for display identity
+    return canonicalRequested;
+  }
+
+  // Default fallback: preserve canonical requested name
+  return canonicalRequested;
+}
+
 

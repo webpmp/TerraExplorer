@@ -2910,6 +2910,38 @@ describe('Lightbox Metadata Integration', () => {
       };
       expect(getHeaderLocation(franceNoContinent, 'France')).toBeNull();
     });
+
+    it('9. Formats natural geographic feature (Dead Sea) with country "Israel / Jordan" and filters out reverse-geocoded administrative container "Megilot Yam HaMelakh Regional Council"', () => {
+      const deadSea = {
+        name: 'Dead Sea',
+        canonicalName: 'Dead Sea',
+        entityType: 'lake',
+        type: 'Lake' as any,
+        city: 'Megilot Yam HaMelakh Regional Council',
+        country: 'Israel / Jordan',
+        locationString: 'Megilot Yam HaMelakh Regional Council, Israel / Jordan',
+        coordinates: { lat: 31.56, lng: 35.47 },
+        description: 'The Dead Sea is a landlocked salt lake between Israel and Jordan.'
+      };
+
+      expect(getHeaderLocation(deadSea, 'Dead Sea')).toBe('Israel / Jordan');
+
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={deadSea}
+          onClose={() => {}}
+          isLoading={false}
+          skin="modern"
+          isFavorite={false}
+          onSaveFavorite={() => {}}
+          onRemoveFavorite={() => {}}
+        />
+      );
+
+      expect(html).toContain('Dead Sea</h2>');
+      expect(html).toContain('Israel / Jordan</div>');
+      expect(html).not.toContain('Megilot Yam HaMelakh Regional Council');
+    });
   });
 
   describe('InfoPanel Entity Identity vs Route Context Title Mapping Regression Suite', () => {

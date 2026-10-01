@@ -99,10 +99,6 @@ export const mergeLocationInfo = (prev: any, next: any): any => {
         }
     }
 
-    if (merged.notable && Array.isArray(merged.notable)) {
-        merged.notable = deduplicateNotableFacts(merged.notable);
-    }
-
     // 3. Substantive description evaluation for descriptions/context
     const TEXT_FIELDS = ["description", "overview"];
     for (const field of TEXT_FIELDS) {
@@ -120,6 +116,15 @@ export const mergeLocationInfo = (prev: any, next: any): any => {
         } else if (prevText && !isInvalidImage(prevText) && !isPlaceholderString(prevText) && prevReadiness.quality !== 'placeholder' && !isGenericPlaceholderDescription(prevText)) {
             merged[field] = prevText;
         }
+    }
+
+    if (merged.notable && Array.isArray(merged.notable)) {
+        const descText = typeof merged.description === 'string' ? merged.description : (merged.description?.text || '');
+        const contextNotes = Array.isArray(merged.contextNotes) ? merged.contextNotes : [];
+        merged.notable = filterAdditiveNotableFacts(
+            merged.notable,
+            [descText, ...contextNotes, merged.locationString, merged.type, merged.category].filter(Boolean)
+        );
     }
 
     // 4. Error state synchronization

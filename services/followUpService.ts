@@ -44,6 +44,75 @@ export function toSentenceCase(str: string): string {
   return working.slice(0, idx) + working[idx].toUpperCase() + working.slice(idx + 1);
 }
 
+const GENERIC_SECTION_HEADINGS = new Set([
+  'construction and inauguration',
+  'construction',
+  'inauguration',
+  'cultural icon',
+  'cultural hub',
+  'cultural significance',
+  'cultural heritage',
+  'cultural impact',
+  'historical significance',
+  'historical background',
+  'historical context',
+  'historical development',
+  'history',
+  'overview',
+  'background',
+  'highlights',
+  'key highlights',
+  'general facts',
+  'general info',
+  'general information',
+  'economy',
+  'economic impact',
+  'preserved state',
+  'main features',
+  'key features',
+  'significance',
+  'legacy',
+  'architecture',
+  'architecture and design',
+  'architectural style',
+  'design',
+  'design and structure',
+  'restoration',
+  'modern era',
+  'early history',
+  'geography',
+  'geographical features',
+  'climate',
+  'culture',
+  'tourism',
+  'key facts',
+  'notable facts',
+  'introduction',
+  'description',
+  'facts',
+  'summary',
+  'details',
+  'monument facts',
+  'landmark status',
+  'visitor information'
+]);
+
+export function isGenericSectionHeading(title: string): boolean {
+  if (!title || typeof title !== 'string') return true;
+  const clean = title.trim().toLowerCase().replace(/[:\-_]/g, ' ').replace(/\s+/g, ' ');
+  if (GENERIC_SECTION_HEADINGS.has(clean)) return true;
+  const genericWords = new Set([
+    'construction', 'inauguration', 'cultural', 'historical', 'icon', 'hub', 'significance',
+    'heritage', 'overview', 'background', 'highlights', 'general', 'facts', 'info', 'information',
+    'economy', 'architecture', 'design', 'restoration', 'features', 'legacy', 'summary', 'details', 'key'
+  ]);
+  const words = clean.split(' ').filter(Boolean);
+  if (words.length > 0 && words.every(w => genericWords.has(w))) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Evaluates whether a question candidate is broad, generic, or redundant with
  * information already presented in the InfoPanel or previous follow-ups.
@@ -73,6 +142,11 @@ export function isBroadOrRedundantQuestion(
     return true;
   }
 
+  // 2. Reject questions mechanically containing generic section headings as subjects
+  if (/\b(?:how was|what role did|what can visitors discover at|tell me about)\s+(?:construction and inauguration|construction|cultural icon|cultural hub|overview|general facts|background|highlights|economy|preserved state|historical significance|main features)\b/i.test(q)) {
+    return true;
+  }
+
   if (!location) return false;
 
   const locName = (location.name || '').trim().toLowerCase();
@@ -81,18 +155,18 @@ export function isBroadOrRedundantQuestion(
     return true;
   }
 
-  // 2. Section label wrappers without specific entity/action focus
+  // 3. Section label wrappers without specific entity/action focus
   const notable = Array.isArray(location.notable) ? location.notable : [];
   for (const item of notable) {
     const rawTitle = (typeof item === 'string' ? item : (item.title || item.name || '')).trim().toLowerCase();
-    if (['cultural hub', 'overview', 'general facts', 'background', 'history', 'preserved state', 'main features', 'highlights', 'significance', 'economy'].includes(rawTitle)) {
-      if (q === `tell me about ${rawTitle}` || q === `tell me about ${rawTitle}?`) {
+    if (isGenericSectionHeading(rawTitle)) {
+      if (q.includes(rawTitle) || q === `tell me about ${rawTitle}` || q === `tell me about ${rawTitle}?`) {
         return true;
       }
     }
   }
 
-  // 3. Check against previously explored follow-ups in location.followUps
+  // 4. Check against previously explored follow-ups in location.followUps
   if (Array.isArray(location.followUps) && location.followUps.length > 0) {
     const isExplored = location.followUps.some(fu => {
       const existingQ = (fu.question || '').toLowerCase().trim();
@@ -132,7 +206,9 @@ export const generateContextualQuestionChips = (
   }
 
   const rawName = location.name.trim();
-  const shortName = rawName.split(',')[0].trim() || rawName;
+  const nameParts = rawName.split(',').map(p => p.trim()).filter(Boolean);
+  const shortName = nameParts[0] || rawName;
+  const cityName = nameParts.length > 1 ? nameParts[1] : '';
   const rawType = ((location as any).entityType || (location as any).type || '').toLowerCase();
   const rawDesc = ((location as any).description || (location as any).context || '');
   const desc = rawDesc.toLowerCase();
@@ -141,7 +217,13 @@ export const generateContextualQuestionChips = (
     if (typeof n === 'string') return n;
     return `${n.title || n.name || ''} ${n.description || n.summary || ''}`;
   }).join(' ').toLowerCase();
-  const combinedContext = `${desc} ${notableText}`;
+  const combinedContext = `${desc} ${notableText}`.trim();
+
+  // Check if location has meaningful content (avoid generating chips for empty locations)
+  const hasMeaningfulContent = desc.trim().length >= 15 || notableText.trim().length >= 15 || rawType.length > 0 || !!location.climate;
+  if (!hasMeaningfulContent) {
+    return [];
+  }
 
   const candidates: QuestionCandidate[] = [];
 
@@ -155,34 +237,83 @@ export const generateContextualQuestionChips = (
     }
   };
 
-  // 1. Specific Questions derived from Notable Facts (Landmarks, Structures, Key Highlights)
+  // 1. Specific Questions derived from Notable Facts Content (never using section headings as subjects)
   for (const item of notable) {
-    const title = typeof item === 'string' ? item.trim() : (item.title || item.name || '').trim();
-    const itemDesc = typeof item === 'object' && item ? (item.description || item.summary || '').trim() : '';
-    const itemDescLower = itemDesc.toLowerCase();
-    const titleLower = title.toLowerCase();
+    const rawTitle = typeof item === 'string' ? '' : (item.title || item.name || '').trim();
+    const rawItemDesc = typeof item === 'object' && item ? (item.description || item.summary || '').trim() : (typeof item === 'string' ? item.trim() : '');
+    const fullFact = `${rawTitle} ${rawItemDesc}`.trim();
 
-    if (!title || title.length < 2 || title.length > 45) continue;
+    // Skip if there's no substantive fact content
+    if (rawItemDesc.length < 5 && fullFact.length < 10) continue;
 
-    // Skip generic category titles
-    if (['cultural hub', 'overview', 'general facts', 'background', 'history', 'highlights', 'economy'].includes(titleLower)) {
-      continue;
+    const factLower = fullFact.toLowerCase();
+    const descLower = rawItemDesc.toLowerCase();
+    const titleLower = rawTitle.toLowerCase();
+    const isGenericTitle = isGenericSectionHeading(titleLower);
+
+    // A. Designers, Sculptors, Architects, Engineers
+    if (/\b(?:designed\s+by|sculptor|architect|built\s+by|engineered\s+by|created\s+by)\b/i.test(factLower)) {
+      addCandidate(`Who designed ${shortName}?`, 'HISTORICAL_DEVELOPMENT');
     }
 
-    if (titleLower.includes('templo mayor')) {
+    // B. Manufacturing Origin / Shipping / Transport / Assembly
+    if (/\b(?:constructed\s+in\s+france|built\s+in\s+france)\b/i.test(factLower)) {
+      addCandidate("Why was the statue constructed in France?", 'LANDMARK_STRUCTURE');
+    } else if (/\b(?:shipped\s+to|transported|assembled|assembly|prefabricated)\b/i.test(factLower)) {
+      addCandidate(`How was ${shortName} transported and assembled?`, 'LANDMARK_STRUCTURE');
+    }
+
+    // C. Construction / Engineering methods
+    if (/\b(?:constructed|construction|erected|building\s+process|foundation)\b/i.test(descLower) || (!isGenericTitle && (titleLower.includes('bridge') || titleLower.includes('tower')))) {
+      addCandidate(`How was ${shortName} constructed?`, 'LANDMARK_STRUCTURE');
+    }
+
+    // D. Materials (Soapstone, Concrete, Limestone, Granite, Marble, Tiles, etc.)
+    if (/\b(?:soapstone|reinforced\s+concrete|limestone|granite|marble|mosaic\s+tiles)\b/i.test(factLower)) {
+      addCandidate(`What materials were used to construct ${shortName}?`, 'LANDMARK_STRUCTURE');
+    }
+
+    // E. Mining / Stamp Mills / Ore processing
+    if (/\b(?:stamping\s+mill|stamp\s+mill|gold\s+ore|silver\s+ore|ore\s+processing)\b/i.test(factLower) || titleLower.includes('standard mill')) {
+      if (!isGenericTitle && titleLower.length > 2) {
+        addCandidate(`How did the ${rawTitle} process gold ore?`, 'LANDMARK_STRUCTURE');
+      } else {
+        addCandidate(`How was gold ore processed in ${shortName}?`, 'LANDMARK_STRUCTURE');
+      }
+    }
+
+    // F. Preservation / Arrested Decay
+    if (/\b(?:arrested\s+decay)\b/i.test(factLower) || titleLower.includes('preserved state')) {
+      addCandidate(`How is ${shortName} maintained in a state of arrested decay?`, 'LANDMARK_STRUCTURE');
+    } else if (/\b(?:preservation|restoration|restored|conservation)\b/i.test(factLower) && !isGenericTitle) {
+      addCandidate(`How are the historic structures at ${shortName} preserved?`, 'LANDMARK_STRUCTURE');
+    }
+
+    // G. Religious Symbolism / Christianity / Sacred Significance
+    if (/\b(?:symbol\s+of\s+christianity|christianity|religious\s+symbol|sacred\s+site|spiritual\s+center|pilgrimage)\b/i.test(factLower)) {
+      addCandidate(`What is the religious significance of ${shortName}?`, 'CULTURE_DAILY_LIFE');
+    }
+
+    // H. Cultural Symbol / Identity / Tourism Impact
+    if (/\b(?:cultural\s+identity|cultural\s+symbol|cultural\s+icon|iconic\s+landmark|tourism\s+industry|cultural\s+importance)\b/i.test(factLower)) {
+      if (cityName) {
+        addCandidate(`Why is ${shortName} important to ${cityName}?`, 'CULTURE_DAILY_LIFE');
+      }
+      addCandidate(`How did ${shortName} become a cultural symbol?`, 'CULTURE_DAILY_LIFE');
+    }
+
+    // I. Specific Named Archaeological Sites / Features / Murals / Named Structures in Text
+    if (factLower.includes('templo mayor')) {
       addCandidate("What can you see at Templo Mayor today?", 'LANDMARK_STRUCTURE');
-    } else if (titleLower.includes('standard mill') || (itemDescLower.includes('stamping mill') || itemDescLower.includes('gold ore'))) {
-      addCandidate(`How did the ${title} process gold ore?`, 'LANDMARK_STRUCTURE');
-    } else if (titleLower.includes('preserved state') || itemDescLower.includes('arrested decay')) {
-      addCandidate(`How is ${shortName} maintained in a state of arrested decay?`, 'CAUSE_CONSEQUENCE');
-    } else if (titleLower.includes('fushimi inari') || itemDescLower.includes('torii')) {
+    } else if (factLower.includes('fushimi inari') || factLower.includes('torii')) {
       addCandidate("What is the significance of the thousands of vermilion torii gates?", 'LANDMARK_STRUCTURE');
-    } else if (itemDescLower.includes('built') || itemDescLower.includes('constructed') || itemDescLower.includes('designed') || titleLower.includes('bridge') || titleLower.includes('tower')) {
-      addCandidate(`How was ${title} constructed?`, 'LANDMARK_STRUCTURE');
-    } else if (titleLower.includes('palace') || titleLower.includes('museum') || titleLower.includes('temple') || titleLower.includes('monument') || titleLower.includes('cathedral') || titleLower.includes('church') || itemDescLower.includes('famous') || itemDescLower.includes('known for') || itemDescLower.includes('museum') || itemDescLower.includes('palace') || itemDescLower.includes('temple') || itemDescLower.includes('monument')) {
-      addCandidate(`What can visitors discover at ${title} today?`, 'LANDMARK_STRUCTURE');
-    } else {
-      addCandidate(`What role did ${title} play in the history of ${shortName}?`, 'HISTORICAL_DEVELOPMENT');
+    } else if (factLower.includes('diego rivera') || (factLower.includes('murals') && factLower.includes('national palace'))) {
+      addCandidate("What murals are featured at the National Palace?", 'LANDMARK_STRUCTURE');
+    } else if (!isGenericTitle && rawTitle.length >= 3 && rawTitle.length <= 45) {
+      if (/\b(?:palace|museum|temple|monument|cathedral|church|fort|castle|tower|bridge|pyramid|sanctuary|ruins)\b/i.test(titleLower) ||
+          /\b(?:palace|museum|temple|monument|cathedral|church|fort|castle|tower|bridge|pyramid|sanctuary|ruins)\b/i.test(descLower)) {
+        addCandidate(`What can visitors discover at ${rawTitle} today?`, 'LANDMARK_STRUCTURE');
+      }
     }
   }
 

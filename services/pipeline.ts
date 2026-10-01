@@ -14,7 +14,7 @@ import { validateEarthGeography } from './celestialCapabilities';
 import { validateHistoricalCoordinate, getHistoricalEntityKnowledge, toCanonicalTitleCase, isMaritimeHistoricalEntity } from './geographic/historicalCoordinateValidator';
 import { determineHistoricalEventScope, logHistoricalEventScope } from './geographic/historicalEventScope';
 import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
-import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation, isInvalidCanonicalName } from './geographic/entityIdentityValidator';
+import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation, isInvalidCanonicalName, determineCanonicalDisplayName } from './geographic/entityIdentityValidator';
 import { detectHistoricalRouteEvent, normalizeSemanticEntityTitle, extractMediaIntentAndCleanEntity, deriveQueryTopicTitle } from './queryNormalizer';
 import { getAuthoritativeEventModel } from './geographic/historicalRouteRegistry';
 import { resolveAlias } from './geographic/geographicAliases';
@@ -287,7 +287,9 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
     } else {
       (resolvedData as any).identityStatus = computedIdentityStatus;
       if (resolvedData.name && resolvedData.name !== 'Unknown') {
-        resolvedData.canonicalName = resolvedData.canonicalName || resolvedData.name;
+        const canonical = determineCanonicalDisplayName(resolvedEntityName, resolvedData.name);
+        resolvedData.name = canonical;
+        resolvedData.canonicalName = canonical;
       }
     }
   }
@@ -646,7 +648,8 @@ trustGateDecision: ${isUnverifiedAi ? 'REJECT' : 'PASS'}`);
 
       const resolvedCanonical = resolvedData.canonicalName || (resolvedData.name && resolvedData.name !== 'Unknown' ? resolvedData.name : null);
       const queryCanonical = resolvedEntityName && resolvedEntityName !== 'Unknown' ? resolvedEntityName : null;
-      let canonicalName = histKnowledge?.entity || resolvedCanonical || queryCanonical || (resolvedData.name && resolvedData.name !== 'Unknown' ? resolvedData.name : null);
+      let canonicalName = histKnowledge?.entity ||
+        (queryCanonical && resolvedCanonical ? determineCanonicalDisplayName(queryCanonical, resolvedCanonical) : (resolvedCanonical || queryCanonical || (resolvedData.name && resolvedData.name !== 'Unknown' ? resolvedData.name : null)));
 
       canonicalName = normalizeSemanticEntityTitle({
         explicitTitle: canonicalName || undefined,

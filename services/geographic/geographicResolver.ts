@@ -120,7 +120,11 @@ interface NominatimResult {
 export function normalizeNominatimEntityType(osmClass: string, osmType: string): string {
   if (osmClass === 'place') {
     switch (osmType) {
-      case 'city': case 'town': case 'village': case 'hamlet': return 'city';
+      case 'city': case 'town': case 'village': case 'hamlet':
+      case 'municipality': case 'suburb': case 'borough': case 'district':
+      case 'city_district': case 'locality': case 'quarter': case 'subdivision':
+      case 'metropolis': case 'isolated_dwelling':
+        return 'city';
       case 'country': return 'country';
       case 'state': case 'region': case 'province': return 'state';
       case 'continent': case 'island': return 'natural_feature';
@@ -152,7 +156,18 @@ export function normalizeNominatimEntityType(osmClass: string, osmType: string):
     }
   }
   if (osmClass === 'amenity' && osmType === 'museum') return 'museum';
-  if (osmClass === 'boundary') return 'state';
+  if (osmClass === 'boundary') {
+    switch (osmType) {
+      case 'administrative':
+      case 'political':
+        return 'state';
+      case 'national_park':
+      case 'protected_area':
+        return 'natural_feature';
+      default:
+        return 'state';
+    }
+  }
   return 'landmark';
 }
 
@@ -289,7 +304,13 @@ async function queryNominatim(query: string, normalizedQuery: string): Promise<G
   const lng = parseFloat(r.lon);
   if (!isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0)) return null;
 
-  const entityType = normalizeNominatimEntityType(r.class, r.type);
+  let entityType = normalizeNominatimEntityType(r.class, r.type);
+  const settlement = extractSettlementName(r.address);
+  if ((entityType === 'landmark' || entityType === 'state') && settlement) {
+    if (r.type === 'administrative' || r.type === 'municipality' || r.type === 'city' || r.type === 'town' || (r.address_rank && r.address_rank >= 14 && r.address_rank <= 18)) {
+      entityType = 'city';
+    }
+  }
   const suggestedZoom = suggestZoomFromNominatim(r);
 
   const warnings: string[] = [];
@@ -320,7 +341,6 @@ async function queryNominatim(query: string, normalizedQuery: string): Promise<G
     addressRank: r.address_rank
   };
 
-  const settlement = extractSettlementName(r.address);
   const context = {
     country: r.address?.country,
     state: r.address?.state || r.address?.region,

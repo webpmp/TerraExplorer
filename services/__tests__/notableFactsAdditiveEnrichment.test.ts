@@ -267,4 +267,178 @@ describe('Notable Facts Additive Enrichment & Semantic Uniqueness Suite', () => 
       expect(normalized.notable[0].title).toBe('First Ascent of 1865');
     });
   });
+
+  describe('6. Christ the Redeemer & Additive InfoPanel Deduplication Requirements', () => {
+    const christDescription = `Christ the Redeemer is an Art Deco statue of Jesus Christ in Rio de Janeiro, Brazil, created by French sculptor Paul Landowski and built by Brazilian engineer Heitor da Silva Costa between 1922 and 1931. The statue is 30 metres (98 ft) tall, not including its 8-metre (26 ft) pedestal. It is located at the peak of the 700-metre (2,300 ft) Corcovado mountain in the Tijuca National Park. A global symbol of Christianity, the statue attracts nearly two million visitors annually and offers panoramic views of Rio de Janeiro. The monument was constructed using reinforced concrete and soapstone tiles.`;
+
+    it('filters out paraphrased facts already covered in the completed description (e.g. Construction & Inauguration, Cultural Icon)', () => {
+      const candidateFacts = [
+        // Exact / paraphrased construction dates and creators
+        {
+          title: 'Construction and Inauguration',
+          description: 'Constructed from 1922 to 1931 by Heitor da Silva Costa and Paul Landowski using reinforced concrete.'
+        },
+        // Paraphrased symbolism and visitor numbers
+        {
+          title: 'Cultural Icon',
+          description: 'The monument represents Christianity and is a famous symbol of Rio de Janeiro, welcoming millions of visitors each year.'
+        },
+        // Genuinely novel additive fact
+        {
+          title: 'Chapel of Our Lady of Aparecida',
+          description: 'A small consecrated Catholic chapel dedicated to Our Lady of Aparecida is located inside the base of the pedestal.'
+        }
+      ];
+
+      const filtered = filterAdditiveNotableFacts(candidateFacts, [christDescription]);
+      expect(filtered).toHaveLength(1);
+      expect(filtered[0].title).toBe('Chapel of Our Lady of Aparecida');
+    });
+
+    it('detects paraphrased / semantically equivalent facts including built/constructed and symbol/represents', () => {
+      const desc = 'Built between 1922 and 1931, it serves as a global symbol of Christianity.';
+
+      // Paraphrases: "constructed from 1922 to 1931" / "represents Christianity"
+      const paraphrasedFact1 = 'Constructed from 1922 to 1931 by regional builders.';
+      const paraphrasedFact2 = {
+        title: 'Religious Significance',
+        description: 'The monument represents Christianity across the world.'
+      };
+
+      expect(isFactSubsumedByText(paraphrasedFact1, desc)).toBe(true);
+      expect(isFactSubsumedByText(paraphrasedFact2, desc)).toBe(true);
+
+      const filtered = filterAdditiveNotableFacts([paraphrasedFact1, paraphrasedFact2], [desc]);
+      expect(filtered).toEqual([]);
+    });
+
+    it('prunes repeated portions from candidate facts with partial overlap and retains novel information', () => {
+      const candidateFacts = [
+        // Multi-sentence partial overlap: first sentence repeats description, second sentence is novel
+        {
+          title: 'Soapstone Tiles',
+          description: 'Constructed from 1922 to 1931 by Paul Landowski and Heitor da Silva Costa. The outer layer comprises six million triangular soapstone tiles individually glued by volunteer women onto mesh sheets.'
+        },
+        // Compound clause partial overlap: introductory clause repeats description, main clause is novel
+        {
+          title: 'Restoration Program',
+          description: 'Built between 1922 and 1931 atop Corcovado mountain, the monument underwent extensive restoration in 2010 to repair lightning damage.'
+        }
+      ];
+
+      const filtered = filterAdditiveNotableFacts(candidateFacts, [christDescription]);
+      expect(filtered).toHaveLength(2);
+
+      // Verify repeated content was trimmed and novel content preserved
+      expect(filtered[0].description).toBe(
+        'The outer layer comprises six million triangular soapstone tiles individually glued by volunteer women onto mesh sheets.'
+      );
+      expect(filtered[1].description).toBe(
+        'The monument underwent extensive restoration in 2010 to repair lightning damage.'
+      );
+    });
+
+    it('deduplicates duplicate Notable Facts against each other in the candidate list', () => {
+      const candidateFacts = [
+        {
+          title: 'Chapel of Our Lady of Aparecida',
+          description: 'A small consecrated Catholic chapel dedicated to Our Lady of Aparecida is located inside the base of the pedestal.'
+        },
+        // Duplicate of the first notable fact
+        {
+          title: 'Pedestal Chapel',
+          description: 'The chapel of Our Lady of Aparecida is housed inside the pedestal base.'
+        },
+        // Another duplicate with exact string match
+        {
+          title: 'Chapel of Our Lady of Aparecida',
+          description: 'A small consecrated Catholic chapel dedicated to Our Lady of Aparecida is located inside the base of the pedestal.'
+        }
+      ];
+
+      const filtered = filterAdditiveNotableFacts(candidateFacts, [christDescription]);
+      expect(filtered).toHaveLength(1);
+      expect(filtered[0].title).toBe('Chapel of Our Lady of Aparecida');
+    });
+
+    it('returns an empty array when no new additive facts are available without adding generic filler', () => {
+      const repetitiveFacts = [
+        {
+          title: 'Statue Height',
+          description: 'The statue stands 30 metres high on an 8-metre pedestal.'
+        },
+        {
+          title: 'Location on Corcovado',
+          description: 'Located at the 700-metre peak of Corcovado mountain in Tijuca National Park overlooking Rio.'
+        },
+        {
+          title: 'Panoramic Views',
+          description: 'Offers sweeping panoramic vistas across the city of Rio de Janeiro.'
+        }
+      ];
+
+      const filtered = filterAdditiveNotableFacts(repetitiveFacts, [christDescription]);
+      expect(filtered).toEqual([]);
+      expect(filtered).toHaveLength(0);
+    });
+  });
+
+  describe('7. Punctuation, Decimals, Percentages, and Non-Alphanumeric Character Preservation', () => {
+    it('preserves percentages and parentheses in "342 grams per kilogram (34.2%)" without fragmenting or corrupting', () => {
+      const deadSeaDesc = 'The Dead Sea is a hypersaline salt lake located in the Jordan Rift Valley.';
+      const fact = {
+        title: 'Salinity',
+        description: 'With a salinity of 342 grams per kilogram (34.2%), the Dead Sea is nine times saltier than the ocean, creating an environment where plants and animals cannot survive.'
+      };
+
+      const filtered = filterAdditiveNotableFacts([fact], [deadSeaDesc]);
+      expect(filtered).toHaveLength(1);
+      expect(filtered[0].title).toBe('Salinity');
+      expect(filtered[0].description).toBe(
+        'With a salinity of 342 grams per kilogram (34.2%), the Dead Sea is nine times saltier than the ocean, creating an environment where plants and animals cannot survive.'
+      );
+      expect(filtered[0].description).toContain('342 grams per kilogram (34.2%)');
+      expect(filtered[0].description.startsWith('2%),')).toBe(false);
+
+      // Verify narration unit assembly preserves the fact description
+      const locationInfo: LocationInfo = {
+        name: 'Dead Sea',
+        type: LocationType.Lake,
+        coordinates: { lat: 31.56, lng: 35.47 },
+        description: deadSeaDesc,
+        notable: filtered
+      };
+
+      const units = buildFullNarrationUnits(locationInfo);
+      const notableUnit = units.find(u => u.section === 'NOTABLE');
+      expect(notableUnit).toBeDefined();
+      expect(notableUnit!.text).toContain('342 grams per kilogram (34.2%)');
+      expect(notableUnit!.text.startsWith('2%),')).toBe(false);
+    });
+
+    it('preserves decimals, apostrophes, hyphens, en/em dashes, and quotes in notable facts', () => {
+      const baseDesc = 'The mountain region features extreme geography and historical survey markers.';
+      const facts = [
+        {
+          title: 'Elevation Profile',
+          description: 'The summit is situated at an elevation of 439.78 meters (1,442.8 feet) above sea level.'
+        },
+        {
+          title: 'Historical Expedition',
+          description: "Explorer O'Connor's 1888–1889 survey—the first complete geodetic mapping—recorded \"unprecedented\" depth soundings."
+        }
+      ];
+
+      const filtered = filterAdditiveNotableFacts(facts, [baseDesc]);
+      expect(filtered).toHaveLength(2);
+      expect(filtered[0].description).toContain('439.78 meters');
+      expect(filtered[0].description).toContain('(1,442.8 feet)');
+      expect(filtered[1].description).toContain("O'Connor's");
+      expect(filtered[1].description).toContain('1888–1889');
+      expect(filtered[1].description).toContain('survey—the first');
+      expect(filtered[1].description).toContain('"unprecedented"');
+    });
+  });
 });
+
+

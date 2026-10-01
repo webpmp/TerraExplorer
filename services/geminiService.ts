@@ -20,10 +20,10 @@ import { enrichLocationInfo, mergeRichestFields } from './locationService';
 import { isGenericPlaceholderDescription, isEnglishText, hasCodeOrUiArtifacts, isUnsupportedMajorEventHostClaim } from './entityValidation';
 import { isPlaceholderString } from '../components/InfoPanel';
 import { validateEarthGeography } from './celestialCapabilities';
-import { deduplicateNotableFacts, filterAdditiveNotableFacts } from '../utils/notableFactsUtils';
+import { deduplicateNotableFacts, filterAdditiveNotableFacts, filterAdditiveContextNotes } from '../utils/notableFactsUtils';
 import { validateHistoricalCoordinate, getHistoricalEntityKnowledge, toCanonicalTitleCase, isMaritimeHistoricalEntity } from './geographic/historicalCoordinateValidator';
 import { determineHistoricalEventScope, logHistoricalEventScope } from './geographic/historicalEventScope';
-import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation, validateEntityCoordinates, logAiCoordinateTrust, logEntityCoordinateValidation, CoordinateTrustLevel } from './geographic/entityIdentityValidator';
+import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation, validateEntityCoordinates, logAiCoordinateTrust, logEntityCoordinateValidation, CoordinateTrustLevel, determineCanonicalDisplayName, isAdministrativeContainer } from './geographic/entityIdentityValidator';
 import { buildCanonicalEventTopology, getAuthoritativeEventModel } from './geographic/historicalRouteRegistry';
 import { fetchSourceContent, formatSourceBlock, cleanPastedArticleText } from './sourceContentService';
 import { estimateTokens, checkContextBudget, DEFAULT_LM_STUDIO_CONTEXT_LIMIT } from './tokenEstimator';
@@ -879,8 +879,14 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
             if (identityCheck.matches) {
               console.log(`COORDINATE_VERIFICATION_SUCCESS\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}\ncoordinates: ${geoEntity.coordinates.lat}, ${geoEntity.coordinates.lng}`);
 
+              const requestedEntity = normalizedQuery || query;
+              const canonicalName = determineCanonicalDisplayName(requestedEntity, candidateShortName);
+
               resolvedData = {
-                name: candidateShortName,
+                name: canonicalName,
+                canonicalName: canonicalName,
+                requestedName: requestedEntity,
+                geocoderName: candidateShortName,
                 locationString: geoEntity.name,
                 type: geoEntity.entityType === 'city' ? LocationType.CITY : (geoEntity.entityType === 'country' ? LocationType.COUNTRY : LocationType.POI),
                 entityType: geoEntity.entityType,
@@ -893,14 +899,14 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
                 identityStatus: (geoEntity.identityStatus || "verified") as GeographicIdentityStatus,
                 country: geoEntity.context?.country,
                 state: geoEntity.context?.state,
-                city: geoEntity.context?.city,
+                city: geoEntity.context?.city || candidateShortName,
                 county: geoEntity.context?.county,
                 region: geoEntity.context?.region,
                 osmId: geoEntity.osmId,
                 osmType: geoEntity.osmType,
                 wikidataId: geoEntity.wikidataId,
                 wikipedia: geoEntity.wikipedia,
-                description: `Information on ${candidateShortName}.`,
+                description: `Information on ${canonicalName}.`,
                 funFacts: [],
                 notable: []
               };
@@ -1412,6 +1418,9 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
       }).filter(Boolean) as any;
   }
   data.contextNotes = normalizeStringArray(data.contextNotes as any) as any;
+  if (Array.isArray(data.contextNotes)) {
+    data.contextNotes = filterAdditiveContextNotes(data.contextNotes, [data.description, data.locationString, data.type, data.category].filter(Boolean));
+  }
 
   if (data.description) {
     // 1. Remove coordinates patterns like 44.315949, 142.306349
@@ -1431,6 +1440,11 @@ export const sanitizeLocationInfo = <T extends Partial<LocationInfo>>(data: T): 
     cleanDesc = cleanDesc.replace(/__(.*?)__/g, '$1'); // Remove bold __
 
     data.description = cleanDesc.trim();
+  }
+
+  // Re-filter contextNotes if description was cleaned
+  if (Array.isArray(data.contextNotes)) {
+    data.contextNotes = filterAdditiveContextNotes(data.contextNotes, [data.description, data.locationString, data.type, data.category].filter(Boolean));
   }
 
   if (Array.isArray(data.notable)) {
@@ -3941,7 +3955,11 @@ export const recoverLocationMetadata = async (
       2. NO UNGROUNDED INVENTIONS: Do NOT introduce historical dates, founding dates, closure dates, wars, battles, treaties, institutions, facilities, or claims from general training memory that are not explicitly stated in the source text or verified historical context.
       3. INSTITUTIONAL STATUS & FACT INTEGRITY: Do not infer or invent operational changes or closures (for example, never claim a naval base, military facility, hospital, university, or institution closed unless explicitly stated in the source text).
       4. ENTITY FOCUS & CONSERVATIVE TONE: Describe the verified entity itself directly, neutrally, and conservatively based on facts. Do NOT inflate significance with generic evaluative claims (e.g., "considered one of the most significant in history", "crucial turning point", "lasting impact") unless explicitly documented in source text. Do NOT output generic name etymology or linguistic translations of the name.
-      5. CONCRETE NOTABLE FACTS: "contextNotes" and "notable" can be empty arrays [] if the source text does not mention enough distinct facts. Each notable fact MUST introduce a concrete, distinct detail (such as a specific historical consequence, structure, artifact, person, date, or aftermath) that is NOT already covered in the description. Do NOT output generic "Historical Significance", symbolism, or evaluative commentary that merely restates the event. Return [] if no distinct concrete fact is available. Never invent facts to fill lists.
+      5. CONTENT OWNERSHIP & CONCRETE NOTABLE FACTS: Treat metadata as a single unified information set where each field has distinct content ownership:
+         - "description": The primary concise educational overview containing foundational facts.
+         - "contextNotes": Specific historical and contextual details that are genuinely absent from the description. Do NOT repeat or paraphrase facts already stated in the description.
+         - "notable": Concrete distinct facts (such as a specific structure, artifact, person, dimension, date, or aftermath) that are genuinely absent from BOTH "description" and "contextNotes". Do NOT repeat or paraphrase established facts.
+         Return [] for "contextNotes" and "notable" if no distinct additive facts are available. Never invent facts to fill lists.
       6. POPULATION REQUIREMENT: Do not generate, estimate, or infer population. Always return population as null (demographic data is retrieved separately from authoritative registries).
       7. LANGUAGE REQUIREMENT: All text fields ("description", "climate", "contextNotes", "notable") MUST be written strictly in ENGLISH.
       8. OUTPUT INTEGRITY: The response must contain natural prose only. Strictly prohibit HTML, JSX, JavaScript, TypeScript, CSS class names, icon identifiers (such as FontAwesome or Lucide), React components, services, or internal code tokens.
@@ -3959,11 +3977,11 @@ export const recoverLocationMetadata = async (
           "description": "string (plain language climate summary in English)",
           "koppenCode": "string (e.g. Cfa, Cfb, ET)"
         },
-        "contextNotes": ["substantive fact 1 directly from source in English", "substantive fact 2 directly from source in English"],
+        "contextNotes": ["substantive fact 1 directly from source in English (must not repeat description)", "substantive fact 2 directly from source in English (must not repeat description)"],
         "notable": [
           {
             "title": "Short Fact Title 1",
-            "description": "1-2 sentence substantive explanatory description of this distinct concrete fact directly supported by the source in English."
+            "description": "1-2 sentence substantive explanatory description of this distinct concrete fact directly supported by the source in English (must not repeat description or contextNotes)."
           }
         ]
       }
@@ -3986,7 +4004,7 @@ export const recoverLocationMetadata = async (
       2. Synthesize ONLY from the provided source text, verified historical context, and verified administrative hierarchy. Do NOT invent dates, institutional closures, or historical events from memory.
       3. Describe ONLY ${entityTitle} in ${countryName} (${adminArea})${hasCoords ? ` at coordinates ${coordinates.lat}, ${coordinates.lng}` : ''}. Focus on the verified entity itself, not generic name etymology. Describe facts conservatively without unsupported significance claims.
       4. ALL text must be strictly in ENGLISH.
-      5. "notable" and "contextNotes" can be empty arrays [] if no verified facts are in the source. Notable facts must be distinct concrete facts not in description; do not provide generic significance commentary.
+      5. CONTENT OWNERSHIP: "description" contains foundational facts. "contextNotes" contains non-repeating context. "notable" contains distinct concrete facts absent from description and contextNotes. Return empty arrays [] if no verified additive facts are in the source.
       6. POPULATION REQUIREMENT: Do not generate, estimate, or infer population. Always return population as null.
       7. NO CODE/UI TOKENS: Natural prose only. No HTML, JSX, CSS, icon names (FontAwesome/Lucide), or code identifiers.
 
@@ -4037,7 +4055,7 @@ export const recoverLocationMetadata = async (
       2. Do not use information about similarly named cities, counties, regions, metropolitan areas or landmarks in other states, countries, or regions.
       3. ENTITY FOCUS & CONSERVATIVE TONE: Describe the verified entity itself directly, neutrally, and conservatively (using the verified historical context above if provided). Do NOT inflate significance with generic evaluative claims (e.g., "considered one of the most significant in history", "crucial moment", "lasting impact"). Do NOT output generic name etymology, linguistic translations of the name, or speculative identity questions.
       4. Provide a concise, educational 1-2 paragraph description based strictly on the verified geographic entity type, administrative region, verified historical context, and general geographic characteristics.
-      5. CONCRETE NOTABLE FACTS: Return "contextNotes": [] and "notable": [] as empty arrays unless well-established, concrete geographic/historical facts are certain. Each notable fact MUST introduce a concrete, distinct detail (such as a specific historical consequence, structure, artifact, person, date, or aftermath) not already covered in the description. Do NOT generate generic "Historical Significance" commentary or abstract restatements. Prefer empty arrays [] over repetitive or speculative claims.
+      5. CONTENT OWNERSHIP & CONCRETE NOTABLE FACTS: Return "contextNotes": [] and "notable": [] as empty arrays unless well-established, concrete geographic/historical facts are certain. Each notable fact MUST introduce a concrete, distinct detail (such as a specific historical consequence, structure, artifact, person, date, or aftermath) not already covered in the description or contextNotes. Do NOT generate generic "Historical Significance" commentary or abstract restatements. Prefer empty arrays [] over repetitive or speculative claims.
       6. Accuracy is more important than completeness. Do not guess or fabricate historical events or institutions.
       7. POPULATION REQUIREMENT: Do not generate, estimate, or infer population. Always return population as null.
       8. LANGUAGE REQUIREMENT: All text fields MUST be written strictly in ENGLISH.
@@ -4070,7 +4088,7 @@ export const recoverLocationMetadata = async (
       CRITICAL RULES:
       1. You MUST output ONLY a single valid JSON object. Do NOT include markdown fences, prose, or instruction headers.
       2. No source text is available. Keep description concise (1-2 paragraphs) based on verified geography and verified historical context. Focus on the entity itself, not generic name etymology. Describe facts conservatively without unsupported significance claims. Do NOT invent dates, institutional closures, or historical events from memory.
-      3. Return empty arrays [] for "notable" and "contextNotes" unless concrete non-repetitive facts are certain.
+      3. Return empty arrays [] for "notable" and "contextNotes" unless concrete non-repetitive facts absent from description are certain.
       4. ALL text must be strictly in ENGLISH.
       5. POPULATION: Always return "population": null.
       6. NO CODE/UI TOKENS: Natural prose only. No HTML, JSX, CSS, icon names (FontAwesome/Lucide), or code identifiers.
@@ -4284,6 +4302,10 @@ export const recoverLocationMetadata = async (
 
     if (data.contextNotes && !isBlank(data.contextNotes)) {
        const rawNotes = Array.isArray(data.contextNotes) ? data.contextNotes : [data.contextNotes];
+       const descText = metadata.description
+         ? (typeof metadata.description === 'string' ? metadata.description : (metadata.description.text || ''))
+         : (typeof data?.description === 'string' ? data.description : (data?.description?.text || ''));
+
        const cleanNotes = rawNotes
          .map((note: any) => typeof note === 'string' ? note.trim() : (note?.text ? String(note.text).trim() : ''))
          .filter((noteText: string) => {
@@ -4300,13 +4322,12 @@ export const recoverLocationMetadata = async (
              return false;
            }
            return true;
-         })
-         .map((noteText: string) => ({
-           text: noteText,
-           provenance
-         }));
+         });
 
-       metadata.contextNotes = cleanNotes;
+       metadata.contextNotes = cleanNotes.map((noteText: string) => ({
+         text: noteText,
+         provenance
+       }));
        validFields.push('contextNotes');
     } else {
        metadata.contextNotes = [];

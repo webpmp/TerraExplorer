@@ -9,9 +9,9 @@ import { NarrationProviderType } from '../types';
 import { logTraceNarration, logProviderStart, logProviderComplete } from './waypointPipelineService';
 import { logTraceTiming } from './traceTimingService';
 import { normalizeNarrationText } from '../utils/narrationTextNormalization';
-import { filterAdditiveNotableFacts } from '../utils/notableFactsUtils';
+import { filterAdditiveNotableFacts, filterAdditiveContextNotes } from '../utils/notableFactsUtils';
 
-export { normalizeNarrationText, filterAdditiveNotableFacts };
+export { normalizeNarrationText, filterAdditiveNotableFacts, filterAdditiveContextNotes };
 
 export interface NarrationUnit {
   section: 'SUMMARY' | 'NOTABLE' | 'CLIMATE' | 'EXPLORE' | 'NEWS';
@@ -296,9 +296,9 @@ export function splitNarrationIntoSegments(
 
   const normalizedDesc = removeLeadingTitleFromDescription(cleanTitle, cappedDesc);
 
-  // Extract individual sentences with terminal punctuation
+  // Extract individual sentences with terminal punctuation (decimal-safe to avoid splitting on numbers like 34.2% or 439.78)
   const sentenceMatches: string[] = [];
-  const sentenceRegex = /[^.!?]+[.!?]['"”’)}\]]*(?=\s|$)/g;
+  const sentenceRegex = /(?:[^.!?]|(?<=\d)\.(?=\d))+[.!?]['"”’)}\]]*(?=\s|$)/g;
   let match: RegExpExecArray | null;
   let lastEnd = 0;
 
@@ -412,7 +412,11 @@ export function buildFullNarrationUnits(
   // 2. Notable Facts (read descriptive content, do NOT narrate "Notable facts:" or subsection titles)
   if (content.notable !== false && Array.isArray(info.notable) && info.notable.length > 0) {
     const rawDesc = info.description || info.context || '';
-    const additiveFacts = filterAdditiveNotableFacts(info.notable, [rawDesc, ...(info.contextNotes || [])]);
+    const spokenSoFar = units.map((u) => u.text);
+    const contextNoteTexts = Array.isArray(info.contextNotes)
+      ? info.contextNotes.map((n: any) => typeof n === 'string' ? n : (n?.text || '')).filter(Boolean)
+      : [];
+    const additiveFacts = filterAdditiveNotableFacts(info.notable, [rawDesc, ...contextNoteTexts, ...spokenSoFar]);
     for (const item of additiveFacts) {
       let itemText = '';
       if (typeof item === 'string' && item.trim()) {

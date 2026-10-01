@@ -680,25 +680,34 @@ const cleanVal = (v: any): string | undefined => {
 };
 
 /**
+ * Checks if a location token is administrative noise / container naming (e.g. "Regional Council", "County", "District").
+ */
+export const isAdministrativeNoise = (s: string): boolean => {
+  if (!s || typeof s !== 'string') return false;
+  return /\b(\d+(st|nd|rd|th)?\s+district|district of|regional unit of|regional unit|regional council|council of|metropolitan city of|metropolitan city|arrondissement|county|suburb|quarter|borough)\b/i.test(s) ||
+    /\s+(?:regional council|metropolitan city|metropolitan municipality|metropolitan area|metropolitan district|municipality|municipal district)$/i.test(s);
+};
+
+/**
  * Extracts a settlement name preferring city > town > village > hamlet > locality > municipality.
  */
 export const extractHeaderSettlement = (info: any): string | undefined => {
   if (!info) return undefined;
 
   const rawCity = cleanVal(info.city || info.address?.city || info.context?.city || info.waypoint?.city);
-  if (rawCity) return rawCity;
+  if (rawCity && !isAdministrativeNoise(rawCity)) return rawCity;
 
   const rawTown = cleanVal(info.town || info.address?.town || info.context?.town || info.waypoint?.town);
-  if (rawTown) return rawTown;
+  if (rawTown && !isAdministrativeNoise(rawTown)) return rawTown;
 
   const rawVillage = cleanVal(info.village || info.address?.village || info.context?.village || info.waypoint?.village);
-  if (rawVillage) return rawVillage;
+  if (rawVillage && !isAdministrativeNoise(rawVillage)) return rawVillage;
 
   const rawHamlet = cleanVal(info.hamlet || info.address?.hamlet || info.context?.hamlet || info.waypoint?.hamlet);
-  if (rawHamlet) return rawHamlet;
+  if (rawHamlet && !isAdministrativeNoise(rawHamlet)) return rawHamlet;
 
   const rawLocality = cleanVal(info.locality || info.address?.locality || info.context?.locality || info.waypoint?.locality);
-  if (rawLocality) return rawLocality;
+  if (rawLocality && !isAdministrativeNoise(rawLocality)) return rawLocality;
 
   const rawMun = cleanVal(info.municipality || info.address?.municipality || info.context?.municipality || info.waypoint?.municipality);
   if (rawMun) {
@@ -708,7 +717,7 @@ export const extractHeaderSettlement = (info: any): string | undefined => {
       .replace(/^Dimos\s+/i, '')
       .replace(/\s+Dimos$/i, '')
       .trim();
-    if (cleanedMun && !isPlaceholderString(cleanedMun)) return cleanedMun;
+    if (cleanedMun && !isPlaceholderString(cleanedMun) && !isAdministrativeNoise(cleanedMun)) return cleanedMun;
   }
 
   return undefined;
@@ -763,7 +772,6 @@ export const parseLocationHierarchyString = (locStr: string): ParsedLocationHier
 
   const isPostalCode = (s: string) => /^\d{3,6}(-\d{4})?$/i.test(s) || /^\d{2}\s*\d{2,4}$/.test(s) || /^[A-Z]\d[A-Z]\s*\d[A-Z]\d$/i.test(s) || /^[A-Z]{1,2}\d{1,2}[A-Z]?\s*\d[A-Z]{2}$/i.test(s);
   const isStreetOrBuildingNumber = (s: string) => /^\d+\s+[A-Za-z]/i.test(s) || /^\d+[a-z]?$/i.test(s);
-  const isAdministrativeNoise = (s: string) => /\b(\d+(st|nd|rd|th)?\s+district|district of|regional unit of|regional unit|metropolitan city of|metropolitan city|arrondissement|county|suburb|quarter|borough)\b/i.test(s);
 
   let cleanParts: string[] = [];
   let foundCleanMunicipality: string | undefined;
@@ -779,7 +787,7 @@ export const parseLocationHierarchyString = (locStr: string): ParsedLocationHier
         .replace(/^Dimos\s+/i, '')
         .replace(/\s+Dimos$/i, '')
         .trim();
-      if (cleanMun && !isPlaceholderString(cleanMun)) {
+      if (cleanMun && !isPlaceholderString(cleanMun) && !isAdministrativeNoise(cleanMun)) {
         foundCleanMunicipality = cleanMun;
         if (!cleanParts.some(p => p.toLowerCase() === cleanMun.toLowerCase())) {
           cleanParts.push(cleanMun);
@@ -1254,9 +1262,9 @@ export const SectionHeader: React.FC<{
   );
 };
 
-import { parseNotableFactItem, deduplicateNotableFacts, filterAdditiveNotableFacts, normalizeFactComparisonKey } from '../utils/notableFactsUtils';
+import { parseNotableFactItem, deduplicateNotableFacts, filterAdditiveNotableFacts, filterAdditiveContextNotes, normalizeFactComparisonKey } from '../utils/notableFactsUtils';
 import { normalizeDescription } from '../utils/descriptionNormalization';
-export { parseNotableFactItem, deduplicateNotableFacts, filterAdditiveNotableFacts, normalizeFactComparisonKey, normalizeDescription };
+export { parseNotableFactItem, deduplicateNotableFacts, filterAdditiveNotableFacts, filterAdditiveContextNotes, normalizeFactComparisonKey, normalizeDescription };
 
 export const getCleanDescriptionLines = (info: any) => {
     if (!info || !info.description) return [];
@@ -1453,7 +1461,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     const desc = canonicalResult.narrativeText;
 
     // 3. Context Notes
-    const contextNotes: any[] = [];
+    let rawContextNotesList: any[] = [];
     let contextNotesSource = "None";
 
     const normalizeContextNotes = (notes: any) => {
@@ -1465,12 +1473,14 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     };
 
     if (rawInfo.contextNotes) {
-      contextNotes.push(...normalizeContextNotes(rawInfo.contextNotes));
+      rawContextNotesList.push(...normalizeContextNotes(rawInfo.contextNotes));
       contextNotesSource = "rawInfo.contextNotes";
     } else if (wp.contextNotes) {
-      contextNotes.push(...normalizeContextNotes(wp.contextNotes));
+      rawContextNotesList.push(...normalizeContextNotes(wp.contextNotes));
       contextNotesSource = "wp.contextNotes";
     }
+
+    const contextNotes = filterAdditiveContextNotes(rawContextNotesList, [desc, name, rawInfo.locationString].filter(Boolean));
 
     // 3b. Significance
     const significance = rawInfo.significance || wp.significance || null;
@@ -1635,14 +1645,15 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     }));
 
     let notable: any[] = [];
+    const baseNarrativeTexts = [desc, ...contextNotes, name, rawInfo.locationString].filter(Boolean);
     if (Array.isArray(rawInfo.notable)) {
-        notable = deduplicateNotableFacts(rawInfo.notable.map(parseNotableFactItem).filter(Boolean));
+        notable = filterAdditiveNotableFacts(rawInfo.notable.map(parseNotableFactItem).filter(Boolean), baseNarrativeTexts);
     } else if (rawInfo.notable && typeof rawInfo.notable === 'object') {
         const parsed = parseNotableFactItem(rawInfo.notable);
-        if (parsed) notable = [parsed];
+        if (parsed) notable = filterAdditiveNotableFacts([parsed], baseNarrativeTexts);
     } else if (typeof rawInfo.notable === 'string') {
         const parsed = parseNotableFactItem(rawInfo.notable);
-        if (parsed) notable = [parsed];
+        if (parsed) notable = filterAdditiveNotableFacts([parsed], baseNarrativeTexts);
     }
 
     const relatedEntities = (rawInfo.relatedEntities && rawInfo.relatedEntities.length > 0) ? rawInfo.relatedEntities : [];

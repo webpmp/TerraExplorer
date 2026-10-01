@@ -76,7 +76,6 @@ describe('Enriched Historical Waypoint InfoPanel Rendering', () => {
 
     // 3. Notable Facts rendered
     expect(html).toContain('Notable Facts');
-    expect(html).toContain('Sacred Mountain of Genghis Khan');
     expect(html).toContain('UNESCO World Heritage Site');
     expect(html).toContain('Khentii Mountain Range');
 

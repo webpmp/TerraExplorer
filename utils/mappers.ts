@@ -1,6 +1,6 @@
 import { ResolvedEntity } from '../domain';
 import { LocationInfo } from '../types';
-import { deduplicateNotableFacts, filterAdditiveNotableFacts } from './notableFactsUtils';
+import { deduplicateNotableFacts, filterAdditiveNotableFacts, filterAdditiveContextNotes } from './notableFactsUtils';
 
 export interface DescriptionSection {
   heading: string;
@@ -226,7 +226,10 @@ export function normalizeInfoPanelData(entity: any, workflow: string = "unknown"
         normalized.climate = climate;
         normalized.news = news;
         normalized.relatedEntities = relatedEntities;
-        normalized.contextNotes = contextNotes;
+        normalized.contextNotes = filterAdditiveContextNotes(
+          contextNotes,
+          [normalized.description, normalized.locationString, normalized.entityType].filter(Boolean)
+        );
         normalized.entities = entities;
         if (Array.isArray(normalized.notable)) {
             normalized.notable = filterAdditiveNotableFacts(
@@ -254,7 +257,11 @@ export function normalizeInfoPanelData(entity: any, workflow: string = "unknown"
         }
         
         if (Array.isArray(normalized.contextNotes)) {
-            normalized.contextNotes = normalized.contextNotes.map((note: any) => typeof note === "string" ? note : note.text ?? JSON.stringify(note));
+            const rawNotes = normalized.contextNotes.map((note: any) => typeof note === "string" ? note : note.text ?? JSON.stringify(note));
+            normalized.contextNotes = filterAdditiveContextNotes(
+              rawNotes,
+              [normalized.description, normalized.locationString, normalized.type, normalized.category].filter(Boolean)
+            );
         }
 
         if (Array.isArray(normalized.notable)) {

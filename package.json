@@ -19,13 +19,16 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "three": "^0.181.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "vite": "^6.2.0",
+    "@vitejs/plugin-react": "^5.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
-    "@vitejs/plugin-react": "^5.0.0",
+    "autoprefixer": "^10.6.1",
     "dotenv": "^17.4.2",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "postcss": "^8.5.28",
+    "tailwindcss": "^3.4.19",
+    "typescript": "~5.8.2"
   }
 }
