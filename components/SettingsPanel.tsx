@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Settings as SettingsIcon, X, Server, Newspaper, Film, Volume2, KeyRound, ExternalLink, Map as MapIcon, Palette, Sliders, Sparkles } from 'lucide-react';
+import { Settings as SettingsIcon, X, Server, Newspaper, Film, Volume2, KeyRound, ExternalLink, Map as MapIcon, Palette, Sliders, Sparkles, BookOpen } from 'lucide-react';
 import { SkinType, UserSettings, AIProvider, NewsProvider, NarrationProviderType } from '../types';
 import { narrationService, KOKORO_VOICES, ORPHEUS_VOICES } from '../services/narrationService';
 
@@ -695,6 +695,52 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                   className={sliderClasses}
                 />
               </div>
+            </div>
+
+            {/* RESEARCH MODE */}
+            <div className={`pt-4 ${isRetro ? 'border-t border-green-400/40' : skin === 'retro-amber' ? 'border-t border-[#ffb000]/40' : isParchment ? 'border-t border-[#8b5a2b]/20' : 'border-t border-white/10'}`}>
+              <div className={`flex items-center justify-between mb-1 ${isRetro ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-[#ffb000]' : ''}`}>
+                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#3e2723]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${isRetro ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
+                  <BookOpen size={16} />
+                  <span>RESEARCH MODE</span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-label="Toggle Research Mode"
+                  aria-checked={!!settings.researchMode}
+                  onClick={() =>
+                    onUpdateSettings({
+                      ...settings,
+                      researchMode: !settings.researchMode
+                    })
+                  }
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    settings.researchMode
+                      ? isParchment
+                        ? 'bg-[#8b5a2b]'
+                        : isRetro
+                        ? skin === 'retro-amber'
+                          ? 'bg-[#ffb000]'
+                          : 'bg-green-400'
+                        : 'bg-cyan-500'
+                      : isParchment
+                      ? 'bg-[#d2b48c]'
+                      : isRetro
+                      ? 'bg-transparent border-current'
+                      : 'bg-white/20'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                      settings.researchMode ? 'translate-x-5' : 'translate-x-0'
+                    } ${isRetro ? (skin === 'retro-amber' ? 'bg-[#ffb000]' : 'bg-green-400') : ''}`}
+                  />
+                </button>
+              </div>
+              <p className={`text-xs mt-2 mb-4 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
+                Displays the Add Note workspace directly below the Info Panel for note-taking and research.
+              </p>
             </div>
           </div>
         )}

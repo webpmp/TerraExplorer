@@ -134,7 +134,31 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(html).toContain('Automatically guides the camera through a cinematic descent from the globe to the selected location.');
     expect(html).toContain('Camera Transition Duration');
     expect(html).toContain('10.0s');
+    expect(html).toContain('RESEARCH MODE');
+    expect(html).toContain('Displays the Add Note workspace directly below the Info Panel for note-taking and research.');
     expect(html).not.toContain('Narration');
+  });
+
+  test('5b. GENERAL tab renders RESEARCH MODE toggle reflecting ON/OFF state', () => {
+    const offHtml = renderToStaticMarkup(
+      <SettingsPanel
+        {...baseProps}
+        settings={{ ...baseSettings, researchMode: false }}
+        initialTab="general"
+      />
+    );
+    expect(offHtml).toContain('aria-label="Toggle Research Mode"');
+    expect(offHtml).toContain('aria-checked="false"');
+
+    const onHtml = renderToStaticMarkup(
+      <SettingsPanel
+        {...baseProps}
+        settings={{ ...baseSettings, researchMode: true }}
+        initialTab="general"
+      />
+    );
+    expect(onHtml).toContain('aria-label="Toggle Research Mode"');
+    expect(onHtml).toContain('aria-checked="true"');
   });
 
   test('6. APPEARANCE tab contains theme options: Modern, CRT Green, CRT Amber, Parchment', () => {

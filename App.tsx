@@ -1222,6 +1222,7 @@ const App: React.FC = () => {
       try {
         const parsed = JSON.parse(saved);
         parsed.showNews = parsed.showNews !== undefined ? !!parsed.showNews : true;
+        parsed.researchMode = parsed.researchMode !== undefined ? !!parsed.researchMode : false;
         parsed.retroGreenProjection = parsed.retroGreenProjection !== undefined ? !!parsed.retroGreenProjection : true;
         parsed.retroAmberProjection = parsed.retroAmberProjection !== undefined ? !!parsed.retroAmberProjection : true;
         parsed.narrationProvider = (parsed.narrationProvider === 'kokoro' || parsed.narrationProvider === 'orpheus') ? parsed.narrationProvider : 'system';
@@ -1252,6 +1253,7 @@ const App: React.FC = () => {
       nytApiKey: '',
       newsDataApiKey: '',
       showNews: true,
+      researchMode: false,
       documentaryMode: false,
       documentaryDuration: 5.5,
       narrationEnabled: false,
@@ -6022,6 +6024,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           isLoading={isInfoPanelLoading}
           isNewsFetching={isNewsFetching}
           showNews={userSettings.showNews ?? true}
+          researchMode={userSettings.researchMode ?? false}
           onClose={handleClosePanel}
           skin={skin}
           isFavorite={isCurrentLocationFavorite}

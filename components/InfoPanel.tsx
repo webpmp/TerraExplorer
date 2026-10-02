@@ -1065,6 +1065,7 @@ interface InfoPanelProps {
   isLoading: boolean;
   isNewsFetching?: boolean;
   showNews?: boolean;
+  researchMode?: boolean;
   skin: SkinType;
   isFavorite: boolean;
   onSaveFavorite: (name: string) => void;
@@ -1432,6 +1433,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   isLoading,
   isNewsFetching,
   showNews = true,
+  researchMode = false,
   skin,
   isFavorite,
   onSaveFavorite,
@@ -3376,218 +3378,220 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
         </div>
 
         {/* My Notes Section */}
-        {hasNotes ? (
-          <div
-            className={`pointer-events-auto shrink-0 transition-all duration-300 relative ${isParchment ? '[isolation:isolate]' : 'overflow-hidden'} ${theme.container} ${!isNotesExpanded ? 'hover:brightness-110 cursor-pointer' : ''}`}
-            data-infopanel="true"
-            onWheel={(e) => e.stopPropagation()}
-          >
+        {researchMode && (
+          hasNotes ? (
+            <div
+              className={`pointer-events-auto shrink-0 transition-all duration-300 relative ${isParchment ? '[isolation:isolate]' : 'overflow-hidden'} ${theme.container} ${!isNotesExpanded ? 'hover:brightness-110 cursor-pointer' : ''}`}
+              data-infopanel="true"
+              onWheel={(e) => e.stopPropagation()}
+            >
+                 {isParchment && (
+                   <div className="parchment-background" aria-hidden="true" />
+                 )}
+                 <div className="relative z-[1]">
+                   <div
+                     className={`px-5 py-3 flex items-center justify-between cursor-pointer ${
+                       isNotesExpanded
+                         ? skin === 'retro-green'
+                           ? 'border-b border-green-400/50'
+                           : skin === 'retro-amber'
+                           ? 'border-b border-amber-400/50'
+                           : isParchment
+                           ? 'border-b border-[#8b5a2b]/20'
+                           : 'border-b border-white/10'
+                         : ''
+                     }`}
+                     onClick={() => setIsNotesExpanded(!isNotesExpanded)}
+                   >
+                    <div className="flex items-center gap-2">
+                        <StickyNote size={16} className={theme.icon} />
+                        <span className={`font-bold uppercase ${isRetro ? 'text-lg font-retro' : 'text-sm'} ${theme.headerTitle}`}>My Notes</span>
+                        <span
+                          className={`text-xs px-1.5 py-0.5 rounded-full ${
+                            skin === 'retro-green'
+                              ? 'bg-green-400 text-black font-bold'
+                              : skin === 'retro-amber'
+                              ? 'bg-amber-400 text-black font-bold'
+                              : isParchment
+                              ? 'bg-[#d2b48c] text-[#3e2723]'
+                              : 'bg-cyan-900/60 text-cyan-300 border border-cyan-400/40'
+                          }`}
+                        >
+                            {notes.length}
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {isNotesExpanded && !isAddingNote && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleStartAddNote();
+                          }}
+                          className={`p-1 transition-colors ${
+                            isParchment
+                              ? 'text-[#8b5a2b] hover:text-[#3e2723] hover:bg-[#e8d5b5]/50 rounded'
+                              : skin === 'retro-amber'
+                              ? 'text-amber-400 hover:text-amber-200 hover:bg-amber-400/20'
+                              : isRetro
+                              ? 'text-green-400 hover:text-green-200 hover:bg-green-400/20'
+                              : 'text-cyan-400 hover:text-cyan-200 hover:bg-white/10 rounded-full'
+                          }`}
+                          title="Add Note"
+                          aria-label="Add Note"
+                        >
+                          <Plus size={16} />
+                        </button>
+                      )}
+                      {isNotesExpanded ? <ChevronDown size={18} className={theme.subtext} /> : <ChevronUp size={18} className={theme.subtext} />}
+                    </div>
+                 </div>
+
+                 {isNotesExpanded && (
+                     <div className="p-4 bg-opacity-50 animate-in slide-in-from-top-2 duration-300">
+                         {/* Add Note Single Large Textarea */}
+                         {isAddingNote && (
+                           <div className="mb-3">
+                             <textarea
+                               ref={newNoteTextareaRef}
+                               value={newNoteText}
+                               onChange={(e) => setNewNoteText(e.target.value)}
+                               placeholder="Write a note..."
+                               className={`w-full p-2.5 text-sm transition-colors outline-none resize-none ${notesTextareaClass}`}
+                               rows={3}
+                               autoFocus
+                             />
+                             <div className="flex justify-end gap-2 mt-1.5">
+                               <button
+                                 type="button"
+                                 onClick={handleCancelNewNote}
+                                 className={`px-3 py-1 text-sm transition-opacity ${noteCancelBtnThemeClass}`}
+                                 title="Cancel"
+                                 aria-label="Cancel"
+                               >
+                                 CANCEL
+                               </button>
+                               <button
+                                 type="button"
+                                 onClick={handleSaveNewNote}
+                                 disabled={!newNoteText.trim()}
+                                 className={`px-4 py-1 text-sm font-bold uppercase transition-all disabled:opacity-40 disabled:cursor-not-allowed ${noteSaveBtnThemeClass}`}
+                                 title="Save note"
+                                 aria-label="Save note"
+                               >
+                                 SAVE NOTE
+                               </button>
+                             </div>
+                           </div>
+                         )}
+
+                         {/* Notes List */}
+                         <div className="space-y-2">
+                           {notes.map((note) => (
+                               <div
+                                 key={note.id}
+                                 className={`p-2.5 rounded transition-colors group relative ${
+                                   isParchment
+                                     ? 'bg-[#e8d5b5]/40 hover:bg-[#e8d5b5]/60 border border-[#8b5a2b]/20'
+                                     : isRetro
+                                     ? 'bg-black/50 border border-current/20'
+                                     : 'bg-white/5 hover:bg-white/10'
+                                 }`}
+                               >
+                                   {editingNoteId === note.id ? (
+                                       <div>
+                                           <textarea
+                                             ref={editTextareaRef}
+                                             value={editingNoteText}
+                                             onChange={(e) => setEditingNoteText(e.target.value)}
+                                             className={`w-full p-2 text-sm bg-transparent border outline-none resize-none ${theme.notesInput} ${isParchment ? 'border-[#8b5a2b]/30 focus:border-[#8b5a2b]' : ''}`}
+                                             rows={3}
+                                             autoFocus
+                                           />
+                                           <div className="flex justify-end gap-2 mt-1.5">
+                                               <button
+                                                 type="button"
+                                                 onClick={handleCancelEdit}
+                                                 className={`px-3 py-1 text-sm transition-opacity ${noteCancelBtnThemeClass}`}
+                                                 title="Cancel edit"
+                                                 aria-label="Cancel edit"
+                                               >
+                                                   CANCEL
+                                               </button>
+                                               <button
+                                                 type="button"
+                                                 onClick={() => handleSaveEdit(note.id)}
+                                                 disabled={!editingNoteText.trim()}
+                                                 className={`px-4 py-1 text-sm font-bold uppercase transition-all disabled:opacity-40 disabled:cursor-not-allowed ${noteSaveBtnThemeClass}`}
+                                                 title="Save changes"
+                                                 aria-label="Save changes"
+                                               >
+                                                   SAVE NOTE
+                                               </button>
+                                           </div>
+                                       </div>
+                                   ) : (
+                                       <div className="flex justify-between items-start gap-2">
+                                           <p className={`text-sm whitespace-pre-wrap flex-1 ${isParchment ? 'text-[#3e2723]' : theme.text}`}>{note.text}</p>
+                                           <div className="flex gap-1 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
+                                               <button
+                                                 type="button"
+                                                 onClick={() => handleStartEdit(note)}
+                                                 className={`p-1 transition-colors ${noteEditBtnThemeClass}`}
+                                                 title="Edit note"
+                                                 aria-label="Edit note"
+                                               >
+                                                   <Edit2 size={13} />
+                                               </button>
+                                               <button
+                                                 type="button"
+                                                 onClick={() => handleDeleteNote(note.id)}
+                                                 className={`p-1 transition-colors ${noteDeleteBtnThemeClass}`}
+                                                 title="Delete note"
+                                                 aria-label="Delete note"
+                                               >
+                                                   <Trash2 size={13} />
+                                               </button>
+                                           </div>
+                                       </div>
+                                   )}
+                               </div>
+                           ))}
+                         </div>
+
+                         {/* Add Note Button below list if not adding */}
+                         {!isAddingNote && notes.length > 0 && (
+                           <button
+                             type="button"
+                             onClick={handleStartAddNote}
+                             className={`w-full py-2 mt-2 flex items-center justify-center gap-1.5 text-xs font-bold uppercase tracking-wider transition-colors ${theme.actionBtn}`}
+                           >
+                             <Plus size={14} /> Add Note
+                           </button>
+                         )}
+                     </div>
+                 )}
+                 </div>
+            </div>
+          ) : (
+            <div className={`relative p-4 shrink-0 flex justify-center items-center pointer-events-auto transition-all ${isParchment ? '[isolation:isolate]' : 'overflow-hidden'} ${theme.container}`}>
                {isParchment && (
                  <div className="parchment-background" aria-hidden="true" />
                )}
-               <div className="relative z-[1]">
-                 <div
-                   className={`px-5 py-3 flex items-center justify-between cursor-pointer ${
-                     isNotesExpanded
-                       ? skin === 'retro-green'
-                         ? 'border-b border-green-400/50'
-                         : skin === 'retro-amber'
-                         ? 'border-b border-amber-400/50'
-                         : isParchment
-                         ? 'border-b border-[#8b5a2b]/20'
-                         : 'border-b border-white/10'
-                       : ''
-                   }`}
-                   onClick={() => setIsNotesExpanded(!isNotesExpanded)}
-                 >
-                  <div className="flex items-center gap-2">
-                      <StickyNote size={16} className={theme.icon} />
-                      <span className={`font-bold uppercase ${isRetro ? 'text-lg font-retro' : 'text-sm'} ${theme.headerTitle}`}>My Notes</span>
-                      <span
-                        className={`text-xs px-1.5 py-0.5 rounded-full ${
-                          skin === 'retro-green'
-                            ? 'bg-green-400 text-black font-bold'
-                            : skin === 'retro-amber'
-                            ? 'bg-amber-400 text-black font-bold'
-                            : isParchment
-                            ? 'bg-[#d2b48c] text-[#3e2723]'
-                            : 'bg-cyan-900/60 text-cyan-300 border border-cyan-400/40'
-                        }`}
-                      >
-                          {notes.length}
-                      </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {isNotesExpanded && !isAddingNote && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleStartAddNote();
-                        }}
-                        className={`p-1 transition-colors ${
-                          isParchment
-                            ? 'text-[#8b5a2b] hover:text-[#3e2723] hover:bg-[#e8d5b5]/50 rounded'
-                            : skin === 'retro-amber'
-                            ? 'text-amber-400 hover:text-amber-200 hover:bg-amber-400/20'
-                            : isRetro
-                            ? 'text-green-400 hover:text-green-200 hover:bg-green-400/20'
-                            : 'text-cyan-400 hover:text-cyan-200 hover:bg-white/10 rounded-full'
-                        }`}
-                        title="Add Note"
-                        aria-label="Add Note"
-                      >
-                        <Plus size={16} />
-                      </button>
-                    )}
-                    {isNotesExpanded ? <ChevronDown size={18} className={theme.subtext} /> : <ChevronUp size={18} className={theme.subtext} />}
-                  </div>
-               </div>
-
-               {isNotesExpanded && (
-                   <div className="p-4 bg-opacity-50 animate-in slide-in-from-top-2 duration-300">
-                       {/* Add Note Single Large Textarea */}
-                       {isAddingNote && (
-                         <div className="mb-3">
-                           <textarea
-                             ref={newNoteTextareaRef}
-                             value={newNoteText}
-                             onChange={(e) => setNewNoteText(e.target.value)}
-                             placeholder="Write a note..."
-                             className={`w-full p-2.5 text-sm transition-colors outline-none resize-none ${notesTextareaClass}`}
-                             rows={3}
-                             autoFocus
-                           />
-                           <div className="flex justify-end gap-2 mt-1.5">
-                             <button
-                               type="button"
-                               onClick={handleCancelNewNote}
-                               className={`px-3 py-1 text-sm transition-opacity ${noteCancelBtnThemeClass}`}
-                               title="Cancel"
-                               aria-label="Cancel"
-                             >
-                               CANCEL
-                             </button>
-                             <button
-                               type="button"
-                               onClick={handleSaveNewNote}
-                               disabled={!newNoteText.trim()}
-                               className={`px-4 py-1 text-sm font-bold uppercase transition-all disabled:opacity-40 disabled:cursor-not-allowed ${noteSaveBtnThemeClass}`}
-                               title="Save note"
-                               aria-label="Save note"
-                             >
-                               SAVE NOTE
-                             </button>
-                           </div>
-                         </div>
-                       )}
-
-                       {/* Notes List */}
-                       <div className="space-y-2">
-                         {notes.map((note) => (
-                             <div
-                               key={note.id}
-                               className={`p-2.5 rounded transition-colors group relative ${
-                                 isParchment
-                                   ? 'bg-[#e8d5b5]/40 hover:bg-[#e8d5b5]/60 border border-[#8b5a2b]/20'
-                                   : isRetro
-                                   ? 'bg-black/50 border border-current/20'
-                                   : 'bg-white/5 hover:bg-white/10'
-                               }`}
-                             >
-                                 {editingNoteId === note.id ? (
-                                     <div>
-                                         <textarea
-                                           ref={editTextareaRef}
-                                           value={editingNoteText}
-                                           onChange={(e) => setEditingNoteText(e.target.value)}
-                                           className={`w-full p-2 text-sm bg-transparent border outline-none resize-none ${theme.notesInput} ${isParchment ? 'border-[#8b5a2b]/30 focus:border-[#8b5a2b]' : ''}`}
-                                           rows={3}
-                                           autoFocus
-                                         />
-                                         <div className="flex justify-end gap-2 mt-1.5">
-                                             <button
-                                               type="button"
-                                               onClick={handleCancelEdit}
-                                               className={`px-3 py-1 text-sm transition-opacity ${noteCancelBtnThemeClass}`}
-                                               title="Cancel edit"
-                                               aria-label="Cancel edit"
-                                             >
-                                                 CANCEL
-                                             </button>
-                                             <button
-                                               type="button"
-                                               onClick={() => handleSaveEdit(note.id)}
-                                               disabled={!editingNoteText.trim()}
-                                               className={`px-4 py-1 text-sm font-bold uppercase transition-all disabled:opacity-40 disabled:cursor-not-allowed ${noteSaveBtnThemeClass}`}
-                                               title="Save changes"
-                                               aria-label="Save changes"
-                                             >
-                                                 SAVE NOTE
-                                             </button>
-                                         </div>
-                                     </div>
-                                 ) : (
-                                     <div className="flex justify-between items-start gap-2">
-                                         <p className={`text-sm whitespace-pre-wrap flex-1 ${isParchment ? 'text-[#3e2723]' : theme.text}`}>{note.text}</p>
-                                         <div className="flex gap-1 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
-                                             <button
-                                               type="button"
-                                               onClick={() => handleStartEdit(note)}
-                                               className={`p-1 transition-colors ${noteEditBtnThemeClass}`}
-                                               title="Edit note"
-                                               aria-label="Edit note"
-                                             >
-                                                 <Edit2 size={13} />
-                                             </button>
-                                             <button
-                                               type="button"
-                                               onClick={() => handleDeleteNote(note.id)}
-                                               className={`p-1 transition-colors ${noteDeleteBtnThemeClass}`}
-                                               title="Delete note"
-                                               aria-label="Delete note"
-                                             >
-                                                 <Trash2 size={13} />
-                                             </button>
-                                         </div>
-                                     </div>
-                                 )}
-                             </div>
-                         ))}
-                       </div>
-
-                       {/* Add Note Button below list if not adding */}
-                       {!isAddingNote && notes.length > 0 && (
-                         <button
-                           type="button"
-                           onClick={handleStartAddNote}
-                           className={`w-full py-2 mt-2 flex items-center justify-center gap-1.5 text-xs font-bold uppercase tracking-wider transition-colors ${theme.actionBtn}`}
-                         >
-                           <Plus size={14} /> Add Note
-                         </button>
-                       )}
-                   </div>
-               )}
-               </div>
-          </div>
-        ) : (
-          <div className={`relative p-4 shrink-0 flex justify-center items-center pointer-events-auto transition-all ${isParchment ? '[isolation:isolate]' : 'overflow-hidden'} ${theme.container}`}>
-             {isParchment && (
-               <div className="parchment-background" aria-hidden="true" />
-             )}
-             <button
-                type="button"
-                onClick={handleStartAddNote}
-                className={`relative z-[1] flex w-full justify-center items-center ${
-                  isParchment
-                    ? 'bg-transparent hover:bg-transparent text-[#5c3a21] hover:text-[#3e2723] rounded-sm'
-                    : 'gap-2 ' + theme.actionBtn + ' hover:brightness-110'
-                } px-6 py-3 font-bold uppercase tracking-wider text-sm transition-colors`}
-             >
-                {!isParchment && <StickyNote size={16} />}
-                Add Note
-             </button>
-          </div>
+               <button
+                  type="button"
+                  onClick={handleStartAddNote}
+                  className={`relative z-[1] flex w-full justify-center items-center ${
+                    isParchment
+                      ? 'bg-transparent hover:bg-transparent text-[#5c3a21] hover:text-[#3e2723] rounded-sm'
+                      : 'gap-2 ' + theme.actionBtn + ' hover:brightness-110'
+                  } px-6 py-3 font-bold uppercase tracking-wider text-sm transition-colors`}
+               >
+                  {!isParchment && <StickyNote size={16} />}
+                  Add Note
+               </button>
+            </div>
+          )
         )}
     </div>
     </>
