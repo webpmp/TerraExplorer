@@ -235,7 +235,7 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
     };
 
     const parchmentInfo = renderToStaticMarkup(
-      <InfoPanel info={dummyInfo} onClose={vi.fn()} skin="parchment" routeNav={routeNav} />
+      <InfoPanel info={dummyInfo} onClose={vi.fn()} skin="parchment" routeNav={routeNav} researchMode={true} />
     );
     expect(parchmentInfo).toContain('[isolation:isolate]');
     expect(parchmentInfo).toContain('parchment-background');
@@ -556,6 +556,7 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
         info={dummyLocInfo}
         onClose={vi.fn()}
         skin="parchment"
+        researchMode={true}
       />
     );
     // Find the Add Note button in parchment - it should not contain lucide-sticky-note
@@ -568,6 +569,7 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
         info={dummyLocInfo}
         onClose={vi.fn()}
         skin="modern"
+        researchMode={true}
       />
     );
     // Modern theme Add Note button retains the StickyNote icon
@@ -585,7 +587,7 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
 
     // 1. InfoPanel: LOAD NEWS & ADD NOTE
     const parchmentInfo = renderToStaticMarkup(
-      <InfoPanel info={dummyLocInfo} onClose={vi.fn()} skin="parchment" showNews={true} />
+      <InfoPanel info={dummyLocInfo} onClose={vi.fn()} skin="parchment" showNews={true} researchMode={true} />
     );
     expect(parchmentInfo).toContain('bg-transparent hover:bg-transparent text-[#5c3a21]');
     expect(parchmentInfo).toContain('Load News');

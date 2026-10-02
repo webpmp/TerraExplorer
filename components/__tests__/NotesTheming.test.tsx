@@ -22,6 +22,7 @@ describe('My Notes Component Refinements', () => {
           info={dummyInfo}
           onClose={() => {}}
           isLoading={false}
+          researchMode={true}
           skin={skin}
           isFavorite={false}
           onToggleFavorite={() => {}}
@@ -41,6 +42,7 @@ describe('My Notes Component Refinements', () => {
         info={dummyInfo}
         onClose={() => {}}
         isLoading={false}
+        researchMode={true}
         skin="parchment"
         isFavorite={false}
         onToggleFavorite={() => {}}
@@ -57,6 +59,7 @@ describe('My Notes Component Refinements', () => {
         info={dummyInfo}
         onClose={() => {}}
         isLoading={false}
+        researchMode={true}
         skin="retro-green"
         isFavorite={false}
         onToggleFavorite={() => {}}
@@ -73,6 +76,7 @@ describe('My Notes Component Refinements', () => {
         info={dummyInfo}
         onClose={() => {}}
         isLoading={false}
+        researchMode={true}
         skin="retro-amber"
         isFavorite={false}
         onToggleFavorite={() => {}}

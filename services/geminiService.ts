@@ -63,6 +63,9 @@ export const getUserSettings = (): any => {
         if (parsed.showNews === undefined) {
           parsed.showNews = true;
         }
+        if (parsed.researchMode === undefined) {
+          parsed.researchMode = false;
+        }
         return parsed;
       }
     } catch (e) {
@@ -74,7 +77,8 @@ export const getUserSettings = (): any => {
     lmStudioUrl: 'http://localhost:1234/v1',
     lmStudioModel: 'local-model',
     newsProvider: 'gemini',
-    showNews: true
+    showNews: true,
+    researchMode: false
   };
 };
 
