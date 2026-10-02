@@ -11,6 +11,7 @@ import MarkerProjectionBeam from './components/MarkerProjectionBeam';
 import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import SettingsPanel from './components/SettingsPanel';
+import ParchmentResizeGuide from './components/ParchmentResizeGuide';
 import { getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, deriveQueryTopicTitle, EnrichmentMetrics, cancelFeatureInfoRequests, isLMStudioNoModelError, LM_STUDIO_NO_MODEL_MESSAGE, LM_STUDIO_NO_MODEL_INSTRUCTION, isLMStudioContextOverflowError, LM_STUDIO_CONTEXT_OVERFLOW_MESSAGE, LM_STUDIO_CONTEXT_OVERFLOW_INSTRUCTION, isSourceRetrievalError, recoverLocationMetadata } from './services/geminiService';
 import { fetchAndValidateImages, discoverAdditionalWaypointImages } from './services/imageService';
 import { getEntityImagePreferenceId } from './services/imagePreferenceService';
@@ -6131,6 +6132,9 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         isOSMDisplayed={isOSMActive}
         parchmentRingRadius={maskRadius}
       />
+
+      {/* Parchment Native Background Resize Guide */}
+      <ParchmentResizeGuide skin={skin} />
     </div>
   );
 };
