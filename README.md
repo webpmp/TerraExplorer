@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/multi-waypoint-results.png"
+  <img src="assets/multi-waypoint-results-v1.png"
        alt="TerraExplorer Multi-Waypoint Route Results"
        width="900">
 </div>
