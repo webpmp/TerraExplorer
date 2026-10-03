@@ -288,4 +288,388 @@ describe('Contextual InfoPanel Follow-Up Component Tests', () => {
     expect(html).toContain('id="info-panel-follow-up-fu-1"');
     expect(html).toContain('id="info-panel-follow-up-fu-2"');
   });
+
+  it('18. Preserves existing content order: Summary -> Images -> Notable Facts -> Climate -> EXPLORE -> Follow-ups -> Load News', () => {
+    const richLocation: LocationInfo = {
+      id: 'kyoto',
+      name: 'Kyoto',
+      description: 'Kyoto is the cultural capital of Japan with thousands of classical Buddhist temples.',
+      images: [
+        { url: 'https://example.com/kyoto1.jpg', caption: 'Kinkaku-ji' },
+        { url: 'https://example.com/kyoto2.jpg', caption: 'Fushimi Inari' }
+      ],
+      notable: ['Kinkaku-ji Golden Pavilion', 'Fushimi Inari-taisha Shrine'],
+      climate: {
+        name: 'Humid subtropical',
+        description: 'Warm, humid summers and relatively cold winters.'
+      },
+      followUps: [
+        { id: 'fu-1', question: 'When was Kyoto the capital?', answer: 'From 794 until 1868.', createdAt: 1000 },
+        { id: 'fu-2', question: 'What is Gion known for?', answer: 'Gion is famous for geishas and traditional tea houses.', createdAt: 2000 }
+      ]
+    };
+
+    const html = renderToStaticMarkup(
+      <InfoPanel
+        info={richLocation}
+        isLoading={false}
+        isNewsFetching={false}
+        showNews={true}
+        onClose={vi.fn()}
+        skin="modern"
+      />
+    );
+
+    const summaryIdx = html.indexOf('Kyoto is the cultural capital of Japan');
+    const imagesIdx = html.indexOf('data-testid="stacked-image-carousel"');
+    const factsIdx = html.indexOf('Notable Facts');
+    const climateIdx = html.indexOf('Climate');
+    const exploreIdx = html.indexOf('data-testid="explore-sticky-header"');
+    const fu1Idx = html.indexOf('From 794 until 1868.');
+    const fu2Idx = html.indexOf('Gion is famous for geishas and traditional tea houses.');
+    const loadNewsIdx = html.indexOf('Load News');
+
+    expect(summaryIdx).toBeGreaterThan(-1);
+    expect(imagesIdx).toBeGreaterThan(summaryIdx);
+    expect(factsIdx).toBeGreaterThan(imagesIdx);
+    expect(climateIdx).toBeGreaterThan(factsIdx);
+    expect(exploreIdx).toBeGreaterThan(climateIdx);
+    expect(fu1Idx).toBeGreaterThan(exploreIdx);
+    expect(fu2Idx).toBeGreaterThan(fu1Idx);
+    expect(loadNewsIdx).toBeGreaterThan(fu2Idx);
+  });
+
+  it('19. Renders EXPLORE header as sticky (with sticky classes and correct theme styling)', () => {
+    const infoWithFollowUps: LocationInfo = {
+      ...mockLocation,
+      followUps: sampleFollowUps
+    };
+
+    const htmlModern = renderToStaticMarkup(
+      <InfoPanel
+        info={infoWithFollowUps}
+        isLoading={false}
+        isNewsFetching={false}
+        showNews={true}
+        onClose={vi.fn()}
+        skin="modern"
+      />
+    );
+
+    expect(htmlModern).toContain('data-testid="explore-sticky-header"');
+    expect(htmlModern).toContain('sticky top-0 z-10');
+    expect(htmlModern).toContain('bg-black/90 backdrop-blur-md');
+    expect(htmlModern).not.toContain('-mx-5');
+    expect(htmlModern).not.toContain('px-5 py-2');
+
+    // Verify it appears only ONCE
+    const matches = htmlModern.match(/data-testid="explore-sticky-header"/g);
+    expect(matches).toHaveLength(1);
+  });
+
+  it('20. Supports sticky EXPLORE header across all four themes (modern, parchment, retro-green, retro-amber)', () => {
+    const infoWithFollowUps: LocationInfo = {
+      ...mockLocation,
+      followUps: sampleFollowUps
+    };
+
+    const skins: SkinType[] = ['modern', 'parchment', 'retro-green', 'retro-amber'];
+    const expectedBgClasses: Record<SkinType, string> = {
+      modern: 'bg-black/90 backdrop-blur-md',
+      parchment: 'bg-transparent',
+      'retro-green': 'bg-black',
+      'retro-amber': 'bg-black'
+    };
+
+    for (const skin of skins) {
+      const html = renderToStaticMarkup(
+        <InfoPanel
+          info={infoWithFollowUps}
+          isLoading={false}
+          isNewsFetching={false}
+          showNews={true}
+          onClose={vi.fn()}
+          skin={skin}
+        />
+      );
+
+      expect(html).toContain('data-testid="explore-sticky-header"');
+      expect(html).toContain('sticky top-0 z-10');
+      expect(html).toContain(expectedBgClasses[skin]);
+
+      if (skin === 'parchment') {
+        // InfoPanel container renders the single source-of-truth parchment background
+        expect(html).toContain('parchment-background');
+        // Extract explore header slice to ensure NO second parchment-background is rendered inside it
+        const headerStart = html.indexOf('data-testid="explore-sticky-header"');
+        const headerEnd = html.indexOf('</h4>', headerStart);
+        const headerHtml = html.slice(headerStart, headerEnd);
+        expect(headerHtml).not.toContain('class="parchment-background"');
+        expect(headerHtml).not.toContain('parchment-background');
+      }
+    }
+  });
+
+  it('21. Load News appears only once and is positioned at the absolute bottom after follow-ups', () => {
+    const infoWithThreeFollowUps: LocationInfo = {
+      ...mockLocation,
+      followUps: [
+        { id: 'fu-1', question: 'Q1', answer: 'A1', createdAt: 1000 },
+        { id: 'fu-2', question: 'Q2', answer: 'A2', createdAt: 2000 },
+        { id: 'fu-3', question: 'Q3', answer: 'A3', createdAt: 3000 }
+      ]
+    };
+
+    const html = renderToStaticMarkup(
+      <InfoPanel
+        info={infoWithThreeFollowUps}
+        isLoading={false}
+        isNewsFetching={false}
+        showNews={true}
+        onClose={vi.fn()}
+        skin="modern"
+      />
+    );
+
+    // Load News button should appear exactly once
+    const loadNewsMatches = html.match(/Load News/g);
+    expect(loadNewsMatches).toHaveLength(1);
+
+    const fu3Idx = html.indexOf('id="info-panel-follow-up-fu-3"');
+    const loadNewsIdx = html.indexOf('Load News');
+    expect(loadNewsIdx).toBeGreaterThan(fu3Idx);
+  });
+
+  it('22. Appending Question 2 keeps Question 1 and moves Load News farther down without duplicating it', () => {
+    const infoStep1: LocationInfo = {
+      ...mockLocation,
+      followUps: [
+        { id: 'fu-1', question: 'First question', answer: 'First answer', createdAt: 1000 }
+      ]
+    };
+
+    const htmlStep1 = renderToStaticMarkup(
+      <InfoPanel
+        info={infoStep1}
+        isLoading={false}
+        isNewsFetching={false}
+        showNews={true}
+        onClose={vi.fn()}
+        skin="modern"
+      />
+    );
+
+    expect(htmlStep1).toContain('First question');
+    expect(htmlStep1).toContain('First answer');
+    expect(htmlStep1.match(/Load News/g)).toHaveLength(1);
+
+    const infoStep2: LocationInfo = {
+      ...mockLocation,
+      followUps: [
+        { id: 'fu-1', question: 'First question', answer: 'First answer', createdAt: 1000 },
+        { id: 'fu-2', question: 'Second question', answer: 'Second answer', createdAt: 2000 }
+      ]
+    };
+
+    const htmlStep2 = renderToStaticMarkup(
+      <InfoPanel
+        info={infoStep2}
+        isLoading={false}
+        isNewsFetching={false}
+        showNews={true}
+        onClose={vi.fn()}
+        skin="modern"
+      />
+    );
+
+    expect(htmlStep2).toContain('First question');
+    expect(htmlStep2).toContain('First answer');
+    expect(htmlStep2).toContain('Second question');
+    expect(htmlStep2).toContain('Second answer');
+
+    const fu1Idx = htmlStep2.indexOf('First question');
+    const fu2Idx = htmlStep2.indexOf('Second question');
+    const loadNewsIdx = htmlStep2.indexOf('Load News');
+
+    expect(fu2Idx).toBeGreaterThan(fu1Idx);
+    expect(loadNewsIdx).toBeGreaterThan(fu2Idx);
+    expect(htmlStep2.match(/Load News/g)).toHaveLength(1);
+  });
+
+  it('23. Load News respects showNews=false toggle and hides cleanly', () => {
+    const infoWithFollowUps: LocationInfo = {
+      ...mockLocation,
+      followUps: sampleFollowUps
+    };
+
+    const html = renderToStaticMarkup(
+      <InfoPanel
+        info={infoWithFollowUps}
+        isLoading={false}
+        isNewsFetching={false}
+        showNews={false}
+        onClose={vi.fn()}
+        skin="modern"
+      />
+    );
+
+    expect(html).not.toContain('Load News');
+    expect(html).toContain('data-testid="explore-sticky-header"');
+    expect(html).toContain('Why was it abandoned?');
+  });
+
+  it('24. Preserves accumulated images, facts, and snapshots when follow-ups are added', () => {
+    const fullLocation: LocationInfo = {
+      id: 'spithead-full',
+      name: 'Spithead',
+      description: 'Spithead anchorage off Portsmouth.',
+      images: [
+        { url: 'https://example.com/spithead.jpg', caption: 'Fleet review' }
+      ],
+      notable: ['Anchorage for the Royal Navy', 'Site of famous mutiny in 1797'],
+      climate: { name: 'Temperate maritime', description: 'Mild conditions.' },
+      followUps: [
+        { id: 'fu-1', question: 'What was the 1797 mutiny?', answer: 'A peaceful naval strike for better pay.', createdAt: 1000 }
+      ]
+    };
+
+    const html = renderToStaticMarkup(
+      <InfoPanel
+        info={fullLocation}
+        isLoading={false}
+        isNewsFetching={false}
+        showNews={true}
+        onClose={vi.fn()}
+        skin="modern"
+      />
+    );
+
+    expect(html).toContain('Spithead anchorage off Portsmouth.');
+    expect(html).toContain('data-testid="stacked-image-carousel"');
+    expect(html).toContain('Anchorage for the Royal Navy');
+    expect(html).toContain('Temperate maritime');
+    expect(html).toContain('What was the 1797 mutiny?');
+    expect(html).toContain('A peaceful naval strike for better pay.');
+  });
+
+  it('25. Parchment theme maintains exactly ONE parchment-background surface with no seams, flat color blocks, or second textures', () => {
+    const infoWithFollowUps: LocationInfo = {
+      ...mockLocation,
+      followUps: sampleFollowUps
+    };
+
+    const html = renderToStaticMarkup(
+      <InfoPanel
+        info={infoWithFollowUps}
+        isLoading={false}
+        isNewsFetching={false}
+        showNews={true}
+        onClose={vi.fn()}
+        skin="parchment"
+      />
+    );
+
+    // Main Info Box has exactly one .parchment-background (and no duplicate inside the sticky header)
+    const backgroundMatches = html.match(/class="parchment-background"/g);
+    expect(backgroundMatches).toHaveLength(1);
+
+    // EXPLORE sticky header has transparent background to show continuous parent parchment texture
+    const headerStart = html.indexOf('data-testid="explore-sticky-header"');
+    const headerEnd = html.indexOf('</h4>', headerStart);
+    const headerHtml = html.slice(headerStart, headerEnd);
+    expect(headerHtml).toContain('bg-transparent');
+    expect(headerHtml).not.toContain('bg-[#f4ead5]');
+    expect(headerHtml).not.toContain('parchment-background');
+  });
+
+  it('26. EXPLORE sticky header uses compact py-1 vertical padding matching other InfoPanel section headers', () => {
+    const infoWithFollowUps: LocationInfo = {
+      ...mockLocation,
+      followUps: sampleFollowUps
+    };
+
+    const html = renderToStaticMarkup(
+      <InfoPanel
+        info={infoWithFollowUps}
+        isLoading={false}
+        isNewsFetching={false}
+        showNews={true}
+        onClose={vi.fn()}
+        skin="parchment"
+      />
+    );
+
+    const headerStart = html.indexOf('data-testid="explore-sticky-header"');
+    const headerEnd = html.indexOf('</h4>', headerStart);
+    const headerHtml = html.slice(headerStart, headerEnd);
+    expect(headerHtml).toContain('py-1');
+    expect(headerHtml).not.toContain('py-2');
+  });
+
+  it('27. Modern, Retro Amber, and Retro Green themes render theme-specific top and bottom soft edge fades on sticky EXPLORE header', () => {
+    const infoWithFollowUps: LocationInfo = {
+      ...mockLocation,
+      followUps: sampleFollowUps
+    };
+
+    // Modern theme renders its dedicated backdrop blur header and gradient edge overlays
+    const htmlModern = renderToStaticMarkup(
+      <InfoPanel
+        info={infoWithFollowUps}
+        isLoading={false}
+        isNewsFetching={false}
+        showNews={true}
+        onClose={vi.fn()}
+        skin="modern"
+      />
+    );
+    expect(htmlModern).toContain('data-testid="modern-explore-top-fade"');
+    expect(htmlModern).toContain('data-testid="modern-explore-bottom-fade"');
+    expect(htmlModern).toContain('from-black/90 to-transparent');
+    expect(htmlModern).toContain('bg-black/90 backdrop-blur-md');
+
+    // Retro Green theme uses bg-transparent with dynamic follow-up mask occlusion
+    const htmlRetroGreen = renderToStaticMarkup(
+      <InfoPanel
+        info={infoWithFollowUps}
+        isLoading={false}
+        isNewsFetching={false}
+        showNews={true}
+        onClose={vi.fn()}
+        skin="retro-green"
+      />
+    );
+    expect(htmlRetroGreen).toContain('data-testid="explore-sticky-header"');
+    expect(htmlRetroGreen).not.toContain('data-testid="retro-green-explore-top-fade"');
+    expect(htmlRetroGreen).not.toContain('data-testid="retro-green-explore-bottom-fade"');
+
+    // Retro Amber theme uses bg-transparent with dynamic follow-up mask occlusion
+    const htmlRetroAmber = renderToStaticMarkup(
+      <InfoPanel
+        info={infoWithFollowUps}
+        isLoading={false}
+        isNewsFetching={false}
+        showNews={true}
+        onClose={vi.fn()}
+        skin="retro-amber"
+      />
+    );
+    expect(htmlRetroAmber).toContain('data-testid="explore-sticky-header"');
+    expect(htmlRetroAmber).not.toContain('data-testid="retro-amber-explore-top-fade"');
+    expect(htmlRetroAmber).not.toContain('data-testid="retro-amber-explore-bottom-fade"');
+
+    // Parchment theme uses bg-transparent with dynamic follow-up mask occlusion
+    const htmlParchment = renderToStaticMarkup(
+      <InfoPanel
+        info={infoWithFollowUps}
+        isLoading={false}
+        isNewsFetching={false}
+        showNews={true}
+        onClose={vi.fn()}
+        skin="parchment"
+      />
+    );
+    expect(htmlParchment).not.toContain('data-testid="parchment-explore-top-fade"');
+    expect(htmlParchment).not.toContain('data-testid="parchment-explore-bottom-fade"');
+  });
 });

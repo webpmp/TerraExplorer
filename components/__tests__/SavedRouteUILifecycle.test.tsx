@@ -5,7 +5,7 @@ import Controls from '../Controls';
 import InfoPanel from '../InfoPanel';
 import { generateContextualChips } from '../../services/followUpService';
 import { waypointPipelineRegistry } from '../../services/waypointPipelineService';
-import { DEFAULT_FRANKLIN_ROUTE, isSavedWaypointComplete } from '../../App';
+import { DEFAULT_FRANKLIN_ROUTE, DEFAULT_SHACKLETON_ROUTE, DEFAULT_GENGHIS_ROUTE, isSavedWaypointComplete } from '../../App';
 import { LocationInfo, LocationType, SkinType, Waypoint } from '../../types';
 
 describe('Saved Route UI Lifecycle & Presentation State Regression Suite', () => {
@@ -280,5 +280,198 @@ describe('Saved Route UI Lifecycle & Presentation State Regression Suite', () =>
 
     expect(parchmentHtml).not.toContain('PREPARING NARRATION');
     expect(parchmentHtml).toContain('Ask about Greenhithe, England...');
+  });
+
+  it('4. Exact User-Reported Case: Shackleton Expedition -> Plymouth (wp-shackleton-1) restores via saved snapshot and renders follow-up question chips', () => {
+    const wp1 = DEFAULT_SHACKLETON_ROUTE.waypoints![0]; // wp-shackleton-1 Plymouth, England
+    expect(wp1.id).toBe('wp-shackleton-1');
+    expect(wp1.name).toBe('Plymouth, England');
+
+    // Build the restored LocationInfo payload matching App.tsx loadWaypointData snapshot restoration
+    const restoredPayload: LocationInfo = {
+      id: wp1.id,
+      name: wp1.name,
+      canonicalName: wp1.canonicalName || 'Plymouth',
+      coordinates: { lat: wp1.lat, lng: wp1.lng },
+      type: LocationType.POI,
+      entityType: wp1.entityType || 'landmark',
+      description: wp1.description || '',
+      historicalContext: wp1.context || wp1.historicalContext,
+      routeTitle: wp1.routeTitle || wp1.routeGroupName || "Ernest Shackleton's Endurance Expedition",
+      routeGroupId: wp1.routeGroupId || 'shackleton-endurance',
+      routeContext: wp1.context ? {
+        title: wp1.routeGroupName || wp1.routeTitle || "Ernest Shackleton's Endurance Expedition",
+        text: wp1.context
+      } : undefined,
+      climate: {
+        name: 'Temperate Oceanic',
+        description: 'Mild maritime climate with frequent precipitation.'
+      },
+      notable: [
+        { title: 'Expedition Departure', description: 'Endurance departed Plymouth on August 8, 1914.' }
+      ],
+      images: [
+        { url: 'https://example.com/plymouth.jpg', caption: 'Plymouth Sound harbor' }
+      ],
+      primaryImage: 'https://example.com/plymouth.jpg',
+      imageCaption: 'Plymouth Sound harbor',
+      status: 'success',
+      sectionState: { description: 'ready', news: 'idle', images: 'ready', nearby: 'ready' }
+    };
+
+    // A. Generate contextual chips directly from restored payload
+    const generatedChips = generateContextualChips(restoredPayload, true);
+    expect(generatedChips.length).toBeGreaterThan(0);
+    // Ensure no duplicates
+    const labels = generatedChips.map(c => c.label);
+    expect(new Set(labels).size).toBe(labels.length);
+
+    // B. Test Controls rendering in Modern theme
+    const modernHtml = renderToStaticMarkup(
+      <Controls
+        {...baseControlsProps}
+        skin="modern"
+        scanningStatusText={null}
+        activeWaypointTitle={restoredPayload.name}
+        activeLocationContext={restoredPayload}
+      />
+    );
+
+    expect(modernHtml).toContain('data-testid="contextual-chips-container"');
+    expect(modernHtml).toContain('data-testid="contextual-chip-0"');
+    expect(modernHtml).toContain('Plymouth');
+
+    // C. Test Controls rendering in Retro Amber theme
+    const amberHtml = renderToStaticMarkup(
+      <Controls
+        {...baseControlsProps}
+        skin="retro-amber"
+        scanningStatusText={null}
+        activeWaypointTitle={restoredPayload.name}
+        activeLocationContext={restoredPayload}
+      />
+    );
+    expect(amberHtml).toContain('data-testid="contextual-chips-container"');
+    expect(amberHtml).toContain('data-testid="contextual-chip-0"');
+
+    // D. Test Controls rendering in Retro Green theme
+    const greenHtml = renderToStaticMarkup(
+      <Controls
+        {...baseControlsProps}
+        skin="retro-green"
+        scanningStatusText={null}
+        activeWaypointTitle={restoredPayload.name}
+        activeLocationContext={restoredPayload}
+      />
+    );
+    expect(greenHtml).toContain('data-testid="contextual-chips-container"');
+    expect(greenHtml).toContain('data-testid="contextual-chip-0"');
+
+    // E. Test Controls rendering in Parchment theme
+    const parchmentHtml = renderToStaticMarkup(
+      <Controls
+        {...baseControlsProps}
+        skin="parchment"
+        scanningStatusText={null}
+        activeWaypointTitle={restoredPayload.name}
+        activeLocationContext={restoredPayload}
+      />
+    );
+    expect(parchmentHtml).toContain('Ask about Plymouth, England...');
+  });
+
+  it('5. Switching between saved routes immediately updates follow-up chips with no stale context or retention', () => {
+    const shackletonWp = DEFAULT_SHACKLETON_ROUTE.waypoints![0]; // Plymouth
+    const genghisWp = DEFAULT_GENGHIS_ROUTE.waypoints![0]; // Burkhan Khaldun
+
+    const shackletonPayload: LocationInfo = {
+      id: shackletonWp.id,
+      name: shackletonWp.name,
+      coordinates: { lat: shackletonWp.lat, lng: shackletonWp.lng },
+      type: LocationType.POI,
+      entityType: 'landmark',
+      description: shackletonWp.description || '',
+      climate: { name: 'Temperate Oceanic', description: 'Maritime' },
+      status: 'success',
+      sectionState: { description: 'ready', news: 'idle', images: 'ready', nearby: 'ready' }
+    };
+
+    const genghisPayload: LocationInfo = {
+      id: genghisWp.id,
+      name: genghisWp.name,
+      coordinates: { lat: genghisWp.lat, lng: genghisWp.lng },
+      type: LocationType.POI,
+      entityType: 'landmark',
+      description: genghisWp.description || '',
+      climate: { name: 'Subarctic', description: 'Cold continental' },
+      status: 'success',
+      sectionState: { description: 'ready', news: 'idle', images: 'ready', nearby: 'ready' }
+    };
+
+    // Render Shackleton
+    const shackletonChips = generateContextualChips(shackletonPayload, true);
+    expect(shackletonChips.length).toBeGreaterThan(0);
+
+    const shackletonHtml = renderToStaticMarkup(
+      <Controls
+        {...baseControlsProps}
+        skin="modern"
+        scanningStatusText={null}
+        activeWaypointTitle={shackletonPayload.name}
+        activeLocationContext={shackletonPayload}
+      />
+    );
+    expect(shackletonHtml).toContain('Plymouth');
+    expect(shackletonHtml).not.toContain('Burkhan');
+
+    // Render Genghis Khan
+    const genghisChips = generateContextualChips(genghisPayload, true);
+    expect(genghisChips.length).toBeGreaterThan(0);
+
+    const genghisHtml = renderToStaticMarkup(
+      <Controls
+        {...baseControlsProps}
+        skin="modern"
+        scanningStatusText={null}
+        activeWaypointTitle={genghisPayload.name}
+        activeLocationContext={genghisPayload}
+      />
+    );
+    expect(genghisHtml).toContain('Burkhan Khaldun');
+    expect(genghisHtml).not.toContain('Plymouth');
+  });
+
+  it('6. Saved single-location favorites restore completely and render follow-up chips', () => {
+    const favoritePayload: LocationInfo = {
+      id: 'fav-machu-picchu',
+      name: 'Machu Picchu',
+      canonicalName: 'Machu Picchu',
+      coordinates: { lat: -13.1631, lng: -72.5450 },
+      type: LocationType.POI,
+      entityType: 'archaeological_site',
+      description: 'Machu Picchu is a 15th-century Inca citadel located in the Eastern Cordillera of southern Peru on a 2,430-metre mountain ridge.',
+      climate: { name: 'Subtropical Highland', description: 'Highland climate with dry and wet seasons' },
+      notable: [
+        { title: 'Inca Architecture', description: 'Classic Inca style with polished dry-stone walls.' }
+      ],
+      status: 'success',
+      sectionState: { description: 'ready', news: 'idle', images: 'ready', nearby: 'ready' }
+    };
+
+    const chips = generateContextualChips(favoritePayload, true);
+    expect(chips.length).toBeGreaterThan(0);
+    expect(chips.some(c => c.label.includes('Machu Picchu'))).toBe(true);
+
+    const controlsHtml = renderToStaticMarkup(
+      <Controls
+        {...baseControlsProps}
+        skin="modern"
+        scanningStatusText={null}
+        activeWaypointTitle={favoritePayload.name}
+        activeLocationContext={favoritePayload}
+      />
+    );
+    expect(controlsHtml).toContain('data-testid="contextual-chips-container"');
+    expect(controlsHtml).toContain('Machu Picchu');
   });
 });

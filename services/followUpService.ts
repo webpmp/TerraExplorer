@@ -219,31 +219,56 @@ export const generateContextualQuestionChips = (
   }).join(' ').toLowerCase();
   const combinedContext = `${desc} ${notableText}`.trim();
 
+  // Route and expedition context
+  const rawRouteTitle = (location as any).routeTitle ||
+    (location as any).routeGroupName ||
+    (location as any).routeContext?.title ||
+    (location as any).waypoint?.routeTitle ||
+    (location as any).waypoint?.routeGroupName ||
+    '';
+  const cleanRouteTitle = rawRouteTitle ? rawRouteTitle.replace(/\bRoute\b/i, '').trim() : '';
+  const isMaritimeContext = rawType.includes('shipwreck') ||
+    rawType.includes('port') ||
+    rawType.includes('harbor') ||
+    rawType.includes('bay') ||
+    rawType.includes('island') ||
+    combinedContext.includes('port') ||
+    combinedContext.includes('harbor') ||
+    combinedContext.includes('voyage') ||
+    combinedContext.includes('maritime') ||
+    combinedContext.includes('naval') ||
+    combinedContext.includes('expedition') ||
+    combinedContext.includes('ocean') ||
+    combinedContext.includes('sea') ||
+    combinedContext.includes('sail');
+
   // Check if location has meaningful content (avoid generating chips for empty locations)
-  const hasMeaningfulContent = desc.trim().length >= 15 || notableText.trim().length >= 15 || rawType.length > 0 || !!location.climate;
+  const hasMeaningfulContent = desc.trim().length >= 15 || notableText.trim().length >= 15 || rawType.length > 0 || !!location.climate || cleanRouteTitle.length > 0;
   if (!hasMeaningfulContent) {
     return [];
   }
 
   const candidates: QuestionCandidate[] = [];
+  const candidateSet = new Set<string>();
 
-  // Helper to add candidate
+  // Helper to add candidate with formatting and redundancy/explored checks
   const addCandidate = (q: string, dimension: QuestionCandidate['dimension']) => {
     const formatted = toSentenceCase(q.trim());
-    if (formatted && !isBroadOrRedundantQuestion(formatted, location)) {
-      if (!candidates.some(c => c.question.toLowerCase() === formatted.toLowerCase())) {
-        candidates.push({ question: formatted, dimension });
-      }
-    }
+    if (!formatted) return;
+    const lower = formatted.toLowerCase();
+    if (candidateSet.has(lower)) return;
+    if (isBroadOrRedundantQuestion(formatted, location)) return;
+
+    candidateSet.add(lower);
+    candidates.push({ question: formatted, dimension });
   };
 
-  // 1. Specific Questions derived from Notable Facts Content (never using section headings as subjects)
+  // TIER 1: Specific Questions derived from Notable Facts Content (never using section headings as subjects)
   for (const item of notable) {
     const rawTitle = typeof item === 'string' ? '' : (item.title || item.name || '').trim();
     const rawItemDesc = typeof item === 'object' && item ? (item.description || item.summary || '').trim() : (typeof item === 'string' ? item.trim() : '');
     const fullFact = `${rawTitle} ${rawItemDesc}`.trim();
 
-    // Skip if there's no substantive fact content
     if (rawItemDesc.length < 5 && fullFact.length < 10) continue;
 
     const factLower = fullFact.toLowerCase();
@@ -317,8 +342,7 @@ export const generateContextualQuestionChips = (
     }
   }
 
-  // 2. Specific Entity & Environmental Mentions from Description & Context
-  // Waterways & Geological Features (e.g. Lake Texcoco, Tennessee River, Caldera, Glacier)
+  // TIER 1B: Specific Entity & Environmental Mentions from Description & Context
   if (desc.includes('lake texcoco') || combinedContext.includes('lake texcoco')) {
     addCandidate("What happened to Lake Texcoco?", 'GEOGRAPHY_ENVIRONMENT');
   } else if (desc.includes('lake') || desc.includes('river') || desc.includes('bay') || desc.includes('harbor')) {
@@ -331,18 +355,15 @@ export const generateContextualQuestionChips = (
     }
   }
 
-  // Island / Causeway / Ancient City Origins (e.g., Tenochtitlan, Venice)
   if (desc.includes('tenochtitlan') || combinedContext.includes('tenochtitlan')) {
     addCandidate("Why was Tenochtitlan built on an island?", 'CAUSE_CONSEQUENCE');
     addCandidate("How did Aztec traditions influence modern Mexico City?", 'CULTURE_DAILY_LIFE');
   }
 
-  // Conquest / Battles / Treaties / Historical Changes
   if (desc.includes('spanish conquest') || combinedContext.includes('spanish conquest') || desc.includes('conquest')) {
     addCandidate(`How did the Spanish conquest change ${shortName}?`, 'HISTORICAL_DEVELOPMENT');
   }
 
-  // Disasters / Earthquakes / Rebuilding
   if (desc.includes('earthquake') || desc.includes('fire') || desc.includes('eruption') || desc.includes('disaster')) {
     if (desc.includes('earthquake')) {
       addCandidate(`How did ${shortName} rebuild after major earthquakes?`, 'HISTORICAL_DEVELOPMENT');
@@ -353,68 +374,87 @@ export const generateContextualQuestionChips = (
     }
   }
 
-  // Elevation & Geography
   if (desc.includes('elevation') || desc.includes('altitude') || desc.includes('valley of mexico') || desc.includes('meters above sea level') || desc.includes('feet above sea level')) {
     addCandidate(`Why is the elevation of ${shortName} significant?`, 'GEOGRAPHY_ENVIRONMENT');
   }
 
-  // 3. Entity Type Focused Explorations
-  // Shipwrecks / Maritime discovery
+  // TIER 1C: Entity Type Primary Inquiries
   if (rawType.includes('shipwreck') || combinedContext.includes('shipwreck') || combinedContext.includes('sank') || combinedContext.includes('sunk') || combinedContext.includes('wreckage') || combinedContext.includes('wreck site')) {
     addCandidate("When and why did the vessel sink?", 'CAUSE_CONSEQUENCE');
     addCandidate("Who discovered the wreck site?", 'HISTORICAL_DEVELOPMENT');
     addCandidate("What artifacts were recovered from the wreck?", 'CULTURE_DAILY_LIFE');
     addCandidate("What condition is the wreck in today?", 'LANDMARK_STRUCTURE');
-  }
-  // Ghost towns / Abandoned settlements / Mining booms
-  else if (rawType.includes('ghost') || rawType.includes('abandon') || combinedContext.includes('abandon') || combinedContext.includes('ghost town') || combinedContext.includes('deserted') || combinedContext.includes('boom town') || combinedContext.includes('mining town') || rawName.toLowerCase().includes('ghost town')) {
+  } else if (rawType.includes('ghost') || rawType.includes('abandon') || combinedContext.includes('abandon') || combinedContext.includes('ghost town') || combinedContext.includes('deserted') || combinedContext.includes('boom town') || combinedContext.includes('mining town') || rawName.toLowerCase().includes('ghost town')) {
     addCandidate(`Why was ${shortName} abandoned?`, 'CAUSE_CONSEQUENCE');
     addCandidate(`What was daily life like for miners in ${shortName}?`, 'CULTURE_DAILY_LIFE');
     addCandidate(`What structures survive in ${shortName} today?`, 'LANDMARK_STRUCTURE');
     if (combinedContext.includes('mine') || combinedContext.includes('gold') || combinedContext.includes('silver')) {
       addCandidate(`How was gold ore extracted in ${shortName}?`, 'LANDMARK_STRUCTURE');
     }
-  }
-  // Archaeological sites / Ancient ruins / Pyramids / Temples
-  else if (rawType.includes('archaeological') || rawType.includes('ruin') || rawType.includes('ancient') || combinedContext.includes('archaeolog') || combinedContext.includes('ancient') || combinedContext.includes('pyramid') || combinedContext.includes('temple') || rawType.includes('monument')) {
+  } else if (rawType.includes('archaeological') || rawType.includes('ruin') || rawType.includes('ancient') || combinedContext.includes('archaeolog') || combinedContext.includes('ancient') || combinedContext.includes('pyramid') || combinedContext.includes('temple') || rawType.includes('monument')) {
     addCandidate(`What was the original civic or religious purpose of ${shortName}?`, 'CAUSE_CONSEQUENCE');
     addCandidate("What major discoveries were uncovered during excavations?", 'LANDMARK_STRUCTURE');
     addCandidate(`What rituals or ceremonies took place at ${shortName}?`, 'CULTURE_DAILY_LIFE');
     addCandidate(`What can visitors see at the site today?`, 'LANDMARK_STRUCTURE');
-  }
-  // Battles / Historical events / Castles / Forts
-  else if (rawType.includes('battle') || rawType.includes('historical_event') || combinedContext.includes('battle') || combinedContext.includes('siege') || combinedContext.includes('treaty') || combinedContext.includes('war') || rawType.includes('castle') || rawType.includes('fort')) {
+  } else if (rawType.includes('battle') || rawType.includes('historical_event') || combinedContext.includes('battle') || combinedContext.includes('siege') || combinedContext.includes('treaty') || combinedContext.includes('war') || rawType.includes('castle') || rawType.includes('fort')) {
     addCandidate("What strategic factors led to this event?", 'CAUSE_CONSEQUENCE');
     addCandidate("Who were the key military commanders involved?", 'HISTORICAL_DEVELOPMENT');
     addCandidate("What were the long-term historical consequences?", 'HISTORICAL_DEVELOPMENT');
     addCandidate(`What defensive features did the fortifications have?`, 'LANDMARK_STRUCTURE');
-  }
-  // National parks / Natural features / Mountains / Volcanoes / Canyons / Waterfalls
-  else if (rawType.includes('park') || rawType.includes('mountain') || rawType.includes('canyon') || rawType.includes('natural') || rawType.includes('volcano') || rawType.includes('waterfall') || rawType.includes('lake') || rawType.includes('glacier')) {
+  } else if (rawType.includes('park') || rawType.includes('mountain') || rawType.includes('canyon') || rawType.includes('natural') || rawType.includes('volcano') || rawType.includes('waterfall') || rawType.includes('lake') || rawType.includes('glacier')) {
     addCandidate("How was this geological formation created?", 'GEOGRAPHY_ENVIRONMENT');
     addCandidate("What unique wildlife or ecosystems exist here?", 'GEOGRAPHY_ENVIRONMENT');
     addCandidate("What are the most notable geographic features?", 'LANDMARK_STRUCTURE');
     addCandidate("How has the landscape changed over time?", 'HISTORICAL_DEVELOPMENT');
-  }
-  // Populated Places / Cities / Settlements
-  else {
+  } else {
     addCandidate(`How did the founding of ${shortName} influence the surrounding region?`, 'HISTORICAL_DEVELOPMENT');
     addCandidate(`What historical events shaped the layout of ${shortName}?`, 'CAUSE_CONSEQUENCE');
     addCandidate(`What was daily life like for early inhabitants of ${shortName}?`, 'CULTURE_DAILY_LIFE');
     addCandidate(`What major archaeological discoveries were found beneath ${shortName}?`, 'LANDMARK_STRUCTURE');
   }
 
-  // 4. Climate & Environmental Specifics
+  // TIER 1D: Climate & Environmental Specifics
   if (location.climate && (typeof location.climate === 'object' ? location.climate.name : location.climate)) {
     const climateName = typeof location.climate === 'object' ? location.climate.name : location.climate;
     addCandidate(`How does the ${climateName} climate affect daily life here?`, 'GEOGRAPHY_ENVIRONMENT');
   }
 
-  // 5. Select Complementary Questions Across Distinct Dimensions
+  // TIER 2: Route, Expedition & Journey Inquiries (Replenishment Tier)
+  if (cleanRouteTitle) {
+    addCandidate(`What role did ${shortName} play in the ${cleanRouteTitle}?`, 'HISTORICAL_DEVELOPMENT');
+    addCandidate(`What preparations and logistics took place at ${shortName} for the journey?`, 'CAUSE_CONSEQUENCE');
+    addCandidate(`Why was ${shortName} chosen as a critical waypoint on this expedition?`, 'GEOGRAPHY_ENVIRONMENT');
+    addCandidate(`What historical challenges did the expedition encounter at ${shortName}?`, 'CAUSE_CONSEQUENCE');
+  }
+
+  // TIER 3: Maritime, Harbor & Coastal Heritage (Replenishment Tier)
+  if (isMaritimeContext) {
+    addCandidate(`How did ${shortName} develop as an important maritime port?`, 'HISTORICAL_DEVELOPMENT');
+    addCandidate(`What historic voyages and naval expeditions departed from ${shortName}?`, 'HISTORICAL_DEVELOPMENT');
+    addCandidate(`How did harbor fortifications protect ${shortName} throughout history?`, 'LANDMARK_STRUCTURE');
+    addCandidate(`What maritime trade routes connected through ${shortName}?`, 'GEOGRAPHY_ENVIRONMENT');
+  }
+
+  // TIER 4: Deeper Historical Governance, Trade & Settlement Evolution (Replenishment Tier)
+  addCandidate(`How did early trade networks shape the growth of ${shortName}?`, 'HISTORICAL_DEVELOPMENT');
+  addCandidate(`How did political and economic shifts transform ${shortName} over the centuries?`, 'HISTORICAL_DEVELOPMENT');
+  addCandidate(`Who were the prominent historical figures and leaders associated with ${shortName}?`, 'HISTORICAL_DEVELOPMENT');
+  addCandidate(`What defensive fortifications or historic walls protected ${shortName}?`, 'LANDMARK_STRUCTURE');
+  addCandidate(`How did unique architectural traditions develop in ${shortName}?`, 'LANDMARK_STRUCTURE');
+
+  // TIER 5: Culture, Inhabitants, Daily Life & Modern Legacy (Replenishment Tier)
+  addCandidate(`What industries and crafts supported the working population of ${shortName} historically?`, 'CULTURE_DAILY_LIFE');
+  addCandidate(`What cultural traditions and festivals originated in ${shortName}?`, 'CULTURE_DAILY_LIFE');
+  addCandidate(`How does ${shortName} preserve its historic heritage for future generations?`, 'LANDMARK_STRUCTURE');
+  addCandidate(`What commemorated monuments and memorials exist in ${shortName} today?`, 'LANDMARK_STRUCTURE');
+  addCandidate(`How did natural waterways and geography influence the settlement of ${shortName}?`, 'GEOGRAPHY_ENVIRONMENT');
+  addCandidate(`How did the early settlers adapt to the environment in ${shortName}?`, 'GEOGRAPHY_ENVIRONMENT');
+
+  // Selection Strategy: Balance diversity across dimensions first, then fill up to 4
   const selectedQuestions: string[] = [];
   const usedDimensions = new Set<string>();
 
-  // Pass 1: One question per distinct dimension to ensure diversity
+  // Pass 1: One question per distinct dimension to ensure thematic breadth
   for (const cand of candidates) {
     if (!usedDimensions.has(cand.dimension) && !selectedQuestions.includes(cand.question)) {
       selectedQuestions.push(cand.question);
@@ -423,30 +463,13 @@ export const generateContextualQuestionChips = (
     if (selectedQuestions.length >= 4) break;
   }
 
-  // Pass 2: Fill remaining slots up to 4 if needed from remaining valid candidates
-  if (selectedQuestions.length < 3) {
+  // Pass 2: Fill remaining slots up to 4 from remaining valid candidates
+  if (selectedQuestions.length < 4) {
     for (const cand of candidates) {
       if (!selectedQuestions.includes(cand.question)) {
         selectedQuestions.push(cand.question);
       }
       if (selectedQuestions.length >= 4) break;
-    }
-  }
-
-  // Fallback if still under 3 (strictly specific and non-redundant)
-  if (selectedQuestions.length < 3) {
-    const specificFallbacks: QuestionCandidate[] = [
-      { question: `How did the early settlers adapt to the environment in ${shortName}?`, dimension: 'GEOGRAPHY_ENVIRONMENT' },
-      { question: `What major historical developments took place in ${shortName}?`, dimension: 'HISTORICAL_DEVELOPMENT' },
-      { question: `What architectural structures survive in ${shortName} today?`, dimension: 'LANDMARK_STRUCTURE' },
-      { question: `What was daily life like during the founding of ${shortName}?`, dimension: 'CULTURE_DAILY_LIFE' }
-    ];
-
-    for (const fb of specificFallbacks) {
-      if (!isBroadOrRedundantQuestion(fb.question, location) && !selectedQuestions.includes(fb.question)) {
-        selectedQuestions.push(fb.question);
-      }
-      if (selectedQuestions.length >= 3) break;
     }
   }
 

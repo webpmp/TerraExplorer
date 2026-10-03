@@ -1451,6 +1451,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 }: InfoPanelProps) => {
   const isMultiLocation = Boolean((routeNav?.total && routeNav.total > 1) || routeNav?.isDiscoveryLoading);
   const isSingleLocation = !isMultiLocation;
+  const isModern = skin === 'modern';
+  const isRetro = skin === 'retro-green' || skin === 'retro-amber';
+  const isParchment = skin === 'parchment';
 
   const info = React.useMemo(() => {
     if (!rawInfo) return null;
@@ -1775,6 +1778,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const locationInitializedRef = useRef<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const exploreSectionRef = useRef<HTMLDivElement>(null);
+  const exploreHeaderRef = useRef<HTMLDivElement>(null);
+  const followUpsContainerRef = useRef<HTMLDivElement>(null);
   const [scrollFade, setScrollFade] = useState({ top: false, bottom: false });
 
   const updateScrollFade = useCallback(() => {
@@ -1787,6 +1793,40 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     });
   }, []);
 
+  const updateFollowUpOcclusion = useCallback(() => {
+    if (!isParchment && !isRetro) return;
+    const container = scrollRef.current;
+    const header = exploreHeaderRef.current;
+    const followUps = followUpsContainerRef.current;
+
+    if (!container || !header || !followUps) return;
+
+    const headerRect = header.getBoundingClientRect();
+    const followUpsRect = followUps.getBoundingClientRect();
+
+    // The occlusion line is the bottom edge of the sticky Explore header
+    const headerBottom = headerRect.bottom;
+    const clipTop = Math.max(0, headerBottom - followUpsRect.top);
+
+    if (clipTop > 0) {
+      const cTop = Math.ceil(clipTop);
+      const fadeLength = 16;
+      const gradient = `linear-gradient(to bottom, transparent 0px, transparent ${cTop}px, black ${cTop + fadeLength}px, black 100%)`;
+      followUps.style.maskImage = gradient;
+      followUps.style.webkitMaskImage = gradient;
+      followUps.style.clipPath = 'none';
+    } else {
+      followUps.style.maskImage = 'none';
+      followUps.style.webkitMaskImage = 'none';
+      followUps.style.clipPath = 'none';
+    }
+  }, [isParchment, isRetro]);
+
+  const handleScroll = useCallback(() => {
+    updateScrollFade();
+    updateFollowUpOcclusion();
+  }, [updateScrollFade, updateFollowUpOcclusion]);
+
   useEffect(() => {
     if (info?.name) {
       const stableId = (info as any)?.waypoint?.id || (info as any)?.id || info.name;
@@ -1796,17 +1836,20 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
 
   useEffect(() => {
     updateScrollFade();
-  }, [info, newsState, activeTab, isError, isLoading, updateScrollFade]);
+    updateFollowUpOcclusion();
+  }, [info, newsState, activeTab, isError, isLoading, isParchment, isRetro, updateScrollFade, updateFollowUpOcclusion]);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
 
     updateScrollFade();
+    updateFollowUpOcclusion();
 
     if (typeof ResizeObserver !== 'undefined') {
       const ro = new ResizeObserver(() => {
         updateScrollFade();
+        updateFollowUpOcclusion();
       });
       ro.observe(el);
       if (el.firstElementChild) {
@@ -1814,14 +1857,24 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
       }
       return () => ro.disconnect();
     }
-  }, [updateScrollFade]);
+  }, [updateScrollFade, updateFollowUpOcclusion]);
+
+  useEffect(() => {
+    if (!isParchment && !isRetro && followUpsContainerRef.current) {
+      followUpsContainerRef.current.style.maskImage = 'none';
+      followUpsContainerRef.current.style.webkitMaskImage = 'none';
+      followUpsContainerRef.current.style.clipPath = 'none';
+    } else if (isParchment || isRetro) {
+      updateFollowUpOcclusion();
+    }
+  }, [isParchment, isRetro, info?.followUps, updateFollowUpOcclusion]);
 
   const maskStyle = useMemo(() => {
-    if (skin === 'modern') {
+    if (skin === 'modern' || isRetro) {
       return getScrollFadeMaskStyle(false, scrollFade.bottom);
     }
     return getScrollFadeMaskStyle(scrollFade.top, scrollFade.bottom);
-  }, [skin, scrollFade.top, scrollFade.bottom]);
+  }, [skin, isRetro, scrollFade.top, scrollFade.bottom]);
 
   const prevFollowUpsLengthRef = useRef(info?.followUps?.length || 0);
   const lastLocationIdentityRef = useRef<string | null>(null);
@@ -1848,8 +1901,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     }
   }, [currentLocationIdentity, info?.followUps?.length]);
 
-  const exploreSectionRef = useRef<HTMLDivElement>(null);
-
   // 2. Only auto-scroll when a NEW follow-up item is appended dynamically to the current location (user-initiated follow-up)
   useEffect(() => {
     const currentLength = info?.followUps?.length || 0;
@@ -1857,28 +1908,36 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     if (currentLength > prevFollowUpsLengthRef.current && info?.followUps && info.followUps.length > 0) {
       const newItem = info.followUps[currentLength - 1];
       if (newItem) {
-        const scrollToExplore = () => {
-          const exploreEl = exploreSectionRef.current || document.getElementById('info-panel-explore-section');
+        const scrollToFollowUp = () => {
           const container = scrollRef.current;
+          if (!container) return;
 
-          if (exploreEl && container) {
+          const targetEl = newItem.id
+            ? document.getElementById(`info-panel-follow-up-${newItem.id}`)
+            : null;
+          const headerEl = exploreHeaderRef.current || document.getElementById('info-panel-explore-header');
+
+          if (targetEl) {
             const containerRect = container.getBoundingClientRect();
-            const exploreRect = exploreEl.getBoundingClientRect();
+            const targetRect = targetEl.getBoundingClientRect();
+            const headerHeight = headerEl ? headerEl.getBoundingClientRect().height : 36;
+            // Scroll so the beginning of the newest follow-up content is positioned immediately below the sticky EXPLORE header
+            const targetTop = container.scrollTop + (targetRect.top - containerRect.top) - headerHeight;
+            container.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+          } else if (exploreSectionRef.current) {
+            const containerRect = container.getBoundingClientRect();
+            const exploreRect = exploreSectionRef.current.getBoundingClientRect();
             const targetTop = container.scrollTop + (exploreRect.top - containerRect.top);
-            container.scrollTo({ top: targetTop, behavior: 'smooth' });
-          } else if (exploreEl && typeof exploreEl.scrollIntoView === 'function') {
-            exploreEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          } else if (container) {
-            container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+            container.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
           }
         };
 
         if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
           window.requestAnimationFrame(() => {
-            scrollToExplore();
+            scrollToFollowUp();
           });
         } else {
-          scrollToExplore();
+          scrollToFollowUp();
         }
       }
     }
@@ -2274,9 +2333,6 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   };
 
   const theme = themes[skin];
-  const isModern = skin === 'modern';
-  const isRetro = skin === 'retro-green' || skin === 'retro-amber';
-  const isParchment = skin === 'parchment';
 
   const headerBgImage = useMemo(() => {
     if (!isModern || !info) return null;
@@ -3243,7 +3299,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
           {/* Scrollable Content */}
           <div
             ref={scrollRef}
-            onScroll={updateScrollFade}
+            onScroll={handleScroll}
             className={`flex-1 overflow-y-auto overflow-x-hidden ${theme.panelBg} relative pointer-events-auto info-panel-scrollable ${isParchment ? 'parchment-scrollbar' : ''}`}
             style={maskStyle}
             data-infopanel="true"
@@ -3299,9 +3355,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             ) : showContentSkeleton ? (
                <div className="p-6 space-y-6 animate-pulse">
                   <div className="space-y-3">
-                    <div className={`h-3.5 ${isRetro ? 'bg-green-500/20' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded w-3/4`}></div>
-                    <div className={`h-3.5 ${isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
-                    <div className={`h-3.5 w-[90%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
+                     <div className={`h-3.5 ${isRetro ? 'bg-green-500/20' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded w-3/4`}></div>
+                     <div className={`h-3.5 ${isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
+                     <div className={`h-3.5 w-[90%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
                   </div>
                </div>
             ) : info ? (
@@ -3318,13 +3374,41 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                      {/* 2. EXPLORE / Follow-up Section */}
                      {info.followUps && info.followUps.length > 0 && (
                        <div className="space-y-4 pt-3" data-testid="explore-section" id="info-panel-explore-section" ref={exploreSectionRef}>
-                         <SectionHeader
-                           title="Explore"
-                           theme={theme}
-                           isRetro={isRetro}
-                           isParchment={isParchment}
-                         />
-                         <div className="space-y-4">
+                         <div
+                           ref={exploreHeaderRef}
+                           id="info-panel-explore-header"
+                           data-testid="explore-sticky-header"
+                           className={`sticky top-0 z-10 py-1 ${
+                             isModern
+                               ? 'bg-black/90 backdrop-blur-md'
+                               : 'bg-transparent'
+                           }`}
+                         >
+                           {isModern && (
+                             <>
+                               {/* Top soft edge transition */}
+                               <div
+                                 className="absolute -top-2.5 left-0 right-0 h-2.5 pointer-events-none bg-gradient-to-t from-black/90 to-transparent"
+                                 aria-hidden="true"
+                                 data-testid="modern-explore-top-fade"
+                               />
+                               {/* Bottom soft edge transition */}
+                               <div
+                                 className="absolute top-full left-0 right-0 h-3.5 pointer-events-none bg-gradient-to-b from-black/90 to-transparent"
+                                 aria-hidden="true"
+                                 data-testid="modern-explore-bottom-fade"
+                               />
+                             </>
+                           )}
+                           <SectionHeader
+                             title="Explore"
+                             theme={theme}
+                             isRetro={isRetro}
+                             isParchment={isParchment}
+                             className="!mt-0 !mb-0"
+                           />
+                         </div>
+                         <div ref={followUpsContainerRef} className="space-y-4">
                            {info.followUps.map((fu: FollowUpItem, idx: number) => (
                              <div key={fu.id || `fu-${idx}`} id={`info-panel-follow-up-${fu.id}`} className="space-y-1.5 relative group/fu" data-testid={`follow-up-item-${fu.id}`}>
                                <div className="flex items-start justify-between gap-2">

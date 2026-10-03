@@ -250,4 +250,76 @@ describe('AI Coordinate Recovery Geographic Verification & Image Evidence Trust'
     expect(res.reason).toBe('GEOGRAPHIC_CONFLICT');
   });
 
+  it('Test 8: Expected region with subnational hierarchy (City of London, England) matches UK reverse-geocoded coordinates', () => {
+    const result = validateEntityCoordinates({
+      requestedEntity: 'Great Fire Of London',
+      recoveredEntity: 'Great Fire Of London',
+      coordinates: { lat: 51.512398, lng: -0.107604 },
+      reverseGeographicContext: {
+        country: 'United Kingdom',
+        state: 'England',
+        city: 'City of London'
+      },
+      expectedRegion: 'City of London, England'
+    });
+
+    expect(result.consistent).toBe(true);
+    expect(result.result).toBe('MATCH');
+    expect(result.coordinateTrust).toBe('verified');
+  });
+
+  it('Test 9: Expected region with full hierarchy (London, England, United Kingdom) matches UK coordinates', () => {
+    const result = validateEntityCoordinates({
+      requestedEntity: 'Great Fire Of London',
+      recoveredEntity: 'Great Fire Of London',
+      coordinates: { lat: 51.512398, lng: -0.107604 },
+      reverseGeographicContext: {
+        country: 'United Kingdom',
+        state: 'England',
+        city: 'London'
+      },
+      expectedRegion: 'London, England, United Kingdom'
+    });
+
+    expect(result.consistent).toBe(true);
+    expect(result.result).toBe('MATCH');
+    expect(result.coordinateTrust).toBe('verified');
+  });
+
+  it('Test 10: Genuine country mismatch (expected UK, reverse-geocoded France) is rejected with ENTITY_COORDINATE_MISMATCH', () => {
+    const result = validateEntityCoordinates({
+      requestedEntity: 'Great Fire Of London',
+      recoveredEntity: 'Great Fire Of London',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+      reverseGeographicContext: {
+        country: 'France',
+        state: 'Île-de-France',
+        city: 'Paris'
+      },
+      expectedRegion: 'London, England, United Kingdom'
+    });
+
+    expect(result.consistent).toBe(false);
+    expect(result.result).toBe('ENTITY_COORDINATE_MISMATCH');
+    expect(result.rejectionReason).toContain('Country mismatch');
+  });
+
+  it('Test 11: Genuine state/subnational mismatch (expected England, reverse-geocoded Scotland) is rejected with ENTITY_COORDINATE_MISMATCH', () => {
+    const result = validateEntityCoordinates({
+      requestedEntity: 'Great Fire Of London',
+      recoveredEntity: 'Great Fire Of London',
+      coordinates: { lat: 55.9533, lng: -3.1883 },
+      reverseGeographicContext: {
+        country: 'United Kingdom',
+        state: 'Scotland',
+        city: 'Edinburgh'
+      },
+      expectedRegion: 'City of London, England'
+    });
+
+    expect(result.consistent).toBe(false);
+    expect(result.result).toBe('ENTITY_COORDINATE_MISMATCH');
+    expect(result.rejectionReason).toContain('State/Region mismatch');
+  });
+
 });

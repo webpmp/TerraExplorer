@@ -482,6 +482,73 @@ export interface EntityCoordinateValidationResult {
   rejectionReason?: string;
 }
 
+const COUNTRY_SYNONYMS: Record<string, string> = {
+  'usa': 'united states',
+  'us': 'united states',
+  'u.s.': 'united states',
+  'u.s.a.': 'united states',
+  'america': 'united states',
+  'united states of america': 'united states',
+  'uk': 'united kingdom',
+  'u.k.': 'united kingdom',
+  'britain': 'united kingdom',
+  'great britain': 'united kingdom',
+  'uae': 'united arab emirates',
+  'prc': 'china',
+  'peoples republic of china': 'china',
+  'roc': 'taiwan',
+  'russia': 'russia',
+  'russian federation': 'russia',
+  'south korea': 'south korea',
+  'republic of korea': 'south korea',
+  'korea': 'south korea',
+  'the netherlands': 'netherlands',
+  'holland': 'netherlands'
+};
+
+const SUBNATIONAL_TO_COUNTRY: Record<string, string> = {
+  // UK constituent countries
+  'england': 'united kingdom',
+  'scotland': 'united kingdom',
+  'wales': 'united kingdom',
+  'northern ireland': 'united kingdom',
+  'great britain': 'united kingdom',
+  'britain': 'united kingdom',
+
+  // US states & territories
+  'alabama': 'united states', 'alaska': 'united states', 'arizona': 'united states', 'arkansas': 'united states',
+  'california': 'united states', 'colorado': 'united states', 'connecticut': 'united states', 'delaware': 'united states',
+  'florida': 'united states', 'georgia': 'united states', 'hawaii': 'united states', 'idaho': 'united states',
+  'illinois': 'united states', 'indiana': 'united states', 'iowa': 'united states', 'kansas': 'united states',
+  'kentucky': 'united states', 'louisiana': 'united states', 'maine': 'united states', 'maryland': 'united states',
+  'massachusetts': 'united states', 'michigan': 'united states', 'minnesota': 'united states', 'mississippi': 'united states',
+  'missouri': 'united states', 'montana': 'united states', 'nebraska': 'united states', 'nevada': 'united states',
+  'new hampshire': 'united states', 'new jersey': 'united states', 'new mexico': 'united states', 'new york': 'united states',
+  'north carolina': 'united states', 'north dakota': 'united states', 'ohio': 'united states', 'oklahoma': 'united states',
+  'oregon': 'united states', 'pennsylvania': 'united states', 'rhode island': 'united states', 'south carolina': 'united states',
+  'south dakota': 'united states', 'tennessee': 'united states', 'texas': 'united states', 'utah': 'united states',
+  'vermont': 'united states', 'virginia': 'united states', 'washington': 'united states', 'west virginia': 'united states',
+  'wisconsin': 'united states', 'wyoming': 'united states', 'district of columbia': 'united states',
+  'puerto rico': 'united states', 'guam': 'united states',
+
+  // Canadian provinces & territories
+  'ontario': 'canada', 'quebec': 'canada', 'british columbia': 'canada', 'alberta': 'canada',
+  'manitoba': 'canada', 'saskatchewan': 'canada', 'nova scotia': 'canada', 'new brunswick': 'canada',
+  'newfoundland': 'canada', 'newfoundland and labrador': 'canada', 'prince edward island': 'canada',
+  'northwest territories': 'canada', 'nunavut': 'canada', 'yukon': 'canada',
+
+  // Australian states & territories
+  'new south wales': 'australia', 'victoria': 'australia', 'queensland': 'australia',
+  'western australia': 'australia', 'south australia': 'australia', 'tasmania': 'australia',
+  'northern territory': 'australia', 'australian capital territory': 'australia'
+};
+
+const normalizeCountryName = (c?: string): string => {
+  if (!c) return '';
+  const s = c.trim().toLowerCase();
+  return COUNTRY_SYNONYMS[s] || s;
+};
+
 /**
  * Validates candidate coordinates against authoritative regional context and reverse geocoding.
  * 
@@ -511,13 +578,13 @@ export function validateEntityCoordinates(
     const revState = clean(reverseGeographicContext.state || reverseGeographicContext.region);
     const revCounty = clean(reverseGeographicContext.county);
     const revCity = clean(reverseGeographicContext.city || reverseGeographicContext.town || reverseGeographicContext.village);
-    const normRevCountry = revCountry === 'usa' ? 'united states' : (revCountry === 'uk' ? 'united kingdom' : revCountry);
+    const normRevCountry = normalizeCountryName(revCountry);
 
     // 1. Authoritative entity context check (when available)
     if (authoritativeEntityContext) {
       const authCountry = clean(authoritativeEntityContext.country);
       if (authCountry && revCountry) {
-        const normAuthCountry = authCountry === 'usa' ? 'united states' : (authCountry === 'uk' ? 'united kingdom' : authCountry);
+        const normAuthCountry = normalizeCountryName(authCountry);
         if (normAuthCountry !== normRevCountry && !normAuthCountry.includes(normRevCountry) && !normRevCountry.includes(normAuthCountry)) {
           return {
             consistent: false,
@@ -587,19 +654,56 @@ export function validateEntityCoordinates(
     // 2. Expected region check (when authoritative context is not available)
     if (expectedRegion) {
       const expLower = clean(expectedRegion);
-      const expParts = expLower.split(',').map(p => p.trim()).filter(Boolean);
-      const expCountry = expParts.length > 1 ? expParts[expParts.length - 1] : '';
-      const normExpCountry = expCountry === 'usa' ? 'united states' : (expCountry === 'uk' ? 'united kingdom' : expCountry);
+      const expParts = expLower.split(/[,\/]/).map(p => clean(p)).filter(Boolean);
 
-      // Check country conflict if expectedRegion mentions a country
-      if (normExpCountry && normRevCountry && normExpCountry.length >= 3) {
-        if (normExpCountry !== normRevCountry && !normExpCountry.includes(normRevCountry) && !normRevCountry.includes(normExpCountry)) {
+      // Identify explicit and implied country/state components from expectedRegion
+      let explicitExpCountry = '';
+      let impliedExpCountry = '';
+
+      for (let i = expParts.length - 1; i >= 0; i--) {
+        const part = expParts[i];
+        const normPart = normalizeCountryName(part);
+
+        if (COUNTRY_SYNONYMS[part] || (normRevCountry && (normPart === normRevCountry || normPart.includes(normRevCountry) || normRevCountry.includes(normPart)))) {
+          if (!explicitExpCountry) explicitExpCountry = normPart;
+        } else if (SUBNATIONAL_TO_COUNTRY[part]) {
+          if (!impliedExpCountry) impliedExpCountry = SUBNATIONAL_TO_COUNTRY[part];
+        } else if (!explicitExpCountry && ['uk', 'usa', 'us', 'france', 'germany', 'italy', 'spain', 'turkey', 'egypt', 'japan', 'china', 'australia', 'canada', 'belgium', 'netherlands', 'greece', 'ireland', 'russia', 'mexico', 'brazil', 'india', 'sweden', 'norway', 'denmark', 'finland', 'switzerland', 'austria', 'portugal', 'poland', 'south africa', 'new zealand', 'argentina', 'chile', 'peru', 'colombia', 'thailand', 'vietnam', 'indonesia', 'philippines', 'israel', 'saudi arabia', 'iran', 'iraq', 'syria', 'jordan', 'cuba', 'iceland', 'ukraine', 'morocco', 'algeria'].includes(part)) {
+          explicitExpCountry = normPart;
+        }
+      }
+
+      const targetCountry = explicitExpCountry || impliedExpCountry;
+
+      // Check country conflict if expectedRegion mentions or implies a country
+      if (targetCountry && normRevCountry && targetCountry.length >= 3) {
+        if (targetCountry !== normRevCountry && !targetCountry.includes(normRevCountry) && !normRevCountry.includes(targetCountry)) {
           return {
             consistent: false,
             result: 'ENTITY_COORDINATE_MISMATCH',
             coordinateTrust: 'unverified',
             rejectionReason: `Country mismatch: candidate coordinates in "${reverseGeographicContext.country}" conflict with expected region "${expectedRegion}"`
           };
+        }
+      }
+
+      // Check state/region conflict if expectedRegion mentions a specific state/region that contradicts reverse geocode state
+      if (revState) {
+        const normRevState = clean(revState);
+        for (const part of expParts) {
+          if (SUBNATIONAL_TO_COUNTRY[part]) {
+            // Both part and revState are known subnational divisions of the same country
+            if (SUBNATIONAL_TO_COUNTRY[normRevState] && SUBNATIONAL_TO_COUNTRY[part] === SUBNATIONAL_TO_COUNTRY[normRevState]) {
+              if (part !== normRevState && !part.includes(normRevState) && !normRevState.includes(part)) {
+                return {
+                  consistent: false,
+                  result: 'ENTITY_COORDINATE_MISMATCH',
+                  coordinateTrust: 'unverified',
+                  rejectionReason: `State/Region mismatch: candidate coordinates in "${reverseGeographicContext.state || reverseGeographicContext.region}" conflict with expected region "${expectedRegion}"`
+                };
+              }
+            }
+          }
         }
       }
 
@@ -620,6 +724,29 @@ export function validateEntityCoordinates(
           result: 'ENTITY_COORDINATE_MISMATCH',
           coordinateTrust: 'unverified',
           rejectionReason: `Geographic mismatch: candidate coordinates landed in open water (${reverseGeographicContext.displayName || 'water'}), but entity is expected in terrestrial region "${expectedRegion}"`
+        };
+      }
+
+      // Corroboration check: if expectedRegion matches reverseGeocode tokens (city, state, county, or displayName)
+      const revSummaryTokens = [revCity, revState, revCounty, revCountry, reverseGeographicContext.displayName]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .split(/[\s,–/-]+/)
+        .filter(t => t.length >= 3);
+
+      const expTokens = expLower
+        .split(/[\s,–/-]+/)
+        .filter(t => t.length >= 3 && !['the', 'and', 'near', 'off', 'between', 'area', 'region', 'city', 'county', 'state', 'country'].includes(t));
+
+      const hasTokenCorroboration = expTokens.some(t => revSummaryTokens.includes(t));
+
+      if (hasTokenCorroboration) {
+        return {
+          consistent: true,
+          result: 'MATCH',
+          coordinateTrust: 'verified',
+          rejectionReason: undefined
         };
       }
     }

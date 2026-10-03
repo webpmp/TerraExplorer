@@ -3870,27 +3870,28 @@ source=${source}`);
             const snapshot = savedItem.savedSnapshot;
 
             const restoredPayload: LocationInfo = {
+                ...(snapshot || {}),
                 id: stableId,
-                name: savedItem.name,
+                name: savedItem.name || snapshot?.name,
                 canonicalName: savedItem.canonicalName || snapshot?.canonicalName || savedItem.name,
                 type: savedItem.locationType || snapshot?.type || LocationType.POI,
                 entityType: savedItem.entityType || snapshot?.entityType || "generic",
-                coordinates: { lat: savedItem.lat, lng: savedItem.lng },
+                coordinates: { lat: savedItem.lat ?? snapshot?.coordinates?.lat, lng: savedItem.lng ?? snapshot?.coordinates?.lng },
                 description: savedItem.description || snapshot?.description || "",
                 historicalContext: savedItem.historicalContext || snapshot?.historicalContext,
                 climate: savedItem.climate || snapshot?.climate || getEstimatedClimate(savedItem.lat, savedItem.lng, "", "", savedItem.entityType),
                 population: savedItem.population || snapshot?.population,
-                notable: savedItem.notable || snapshot?.notable || [],
-                contextNotes: savedItem.contextNotes || snapshot?.contextNotes || [],
-                images: savedItem.images || snapshot?.images || (savedItem.primaryImage ? [savedItem.primaryImage] : []),
+                notable: (savedItem.notable && savedItem.notable.length > 0) ? savedItem.notable : (snapshot?.notable || []),
+                contextNotes: (savedItem.contextNotes && savedItem.contextNotes.length > 0) ? savedItem.contextNotes : (snapshot?.contextNotes || []),
+                images: (savedItem.images && savedItem.images.length > 0) ? savedItem.images : (snapshot?.images || (savedItem.primaryImage ? [savedItem.primaryImage] : [])),
                 primaryImage: savedItem.primaryImage || snapshot?.primaryImage,
                 imageCaption: savedItem.imageCaption || snapshot?.imageCaption,
                 imageAttribution: savedItem.imageAttribution || snapshot?.imageAttribution,
                 imageCredit: savedItem.imageCredit || snapshot?.imageCredit,
                 imageSource: savedItem.imageSource || snapshot?.imageSource,
-                followUps: savedItem.followUps || snapshot?.followUps || [],
-                relatedEntities: savedItem.relatedEntities || snapshot?.relatedEntities || [],
-                news: savedItem.news || snapshot?.news || [],
+                followUps: (savedItem.followUps && savedItem.followUps.length > 0) ? savedItem.followUps : (snapshot?.followUps || []),
+                relatedEntities: (savedItem.relatedEntities && savedItem.relatedEntities.length > 0) ? savedItem.relatedEntities : (snapshot?.relatedEntities || []),
+                news: (savedItem.news && savedItem.news.length > 0) ? savedItem.news : (snapshot?.news || []),
                 locationString: savedItem.locationString || snapshot?.locationString,
                 routeContext: savedItem.routeContext || snapshot?.routeContext,
                 status: "success",
@@ -3899,8 +3900,7 @@ source=${source}`);
                     news: "idle",
                     images: "ready",
                     nearby: "ready"
-                },
-                ...(snapshot || {})
+                }
             };
 
             setLocationInfo(restoredPayload);
@@ -6101,28 +6101,23 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           return null;
         })()}
         activeLocationContext={(() => {
+          let ctx: any = null;
           if (locationInfo && interactionState === 'PIN_SELECTED') {
-            return {
-              name: locationInfo.name,
-              entityType: locationInfo.entityType,
-              description: locationInfo.description,
-              notable: locationInfo.notable,
-              news: locationInfo.news,
-              followUps: locationInfo.followUps
-            };
-          }
-          if (routeWaypoints.length > 0 && currentWaypointIndex >= 0 && interactionState === 'PIN_SELECTED') {
+            ctx = locationInfo;
+          } else if (routeWaypoints.length > 0 && currentWaypointIndex >= 0 && interactionState === 'PIN_SELECTED') {
             const currentWp = routeWaypoints[currentWaypointIndex];
-            return {
+            ctx = {
+              ...currentWp,
               name: currentWp.name,
               entityType: currentWp.entityType,
               description: currentWp.description,
-              notable: currentWp.highlights,
-              news: (currentWp as any).news,
-              followUps: (currentWp as any).followUps
+              notable: (currentWp as any).notable || currentWp.highlights || (currentWp as any).savedSnapshot?.notable || [],
+              climate: (currentWp as any).climate || (currentWp as any).savedSnapshot?.climate,
+              news: (currentWp as any).news || (currentWp as any).savedSnapshot?.news,
+              followUps: (currentWp as any).followUps || (currentWp as any).savedSnapshot?.followUps
             };
           }
-          return null;
+          return ctx;
         })()}
         onCancelScan={handleCancelScan}
         onCycleSkin={handleCycleSkin}

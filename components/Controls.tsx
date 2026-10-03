@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Search, ZoomIn, ZoomOut, Loader2, Star, X, Palette, Settings, Volume2, VolumeX, ChevronLeft, ChevronRight } from 'lucide-react';
-import { SkinType } from '../types';
+import { SkinType, LocationInfo, Waypoint } from '../types';
 import coinAlphaImage from '../assets/coin-alpha.png';
 import { isCelestialBodySupported, detectCelestialBody } from '../services/celestialCapabilities';
 import { narrationService } from '../services/narrationService';
@@ -31,7 +31,7 @@ interface ControlsProps {
   isScanningArea?: boolean;
   scanningStatusText?: string | null;
   activeWaypointTitle?: string | null;
-  activeLocationContext?: { name: string; entityType?: string; description?: string; notable?: any[]; news?: any[]; followUps?: any[] } | null;
+  activeLocationContext?: LocationInfo | Waypoint | null;
   onCancelScan?: () => void;
   isSettingsOpen?: boolean;
   onToggleSettings?: () => void;
@@ -276,6 +276,8 @@ const Controls: React.FC<ControlsProps> = ({
     }
     narrationService.prime();
     setQuery("");
+    setParchmentItemIndex(0);
+    setIsManualInputMode(false);
     onSearch(chip.query || chip.label, true);
   };
 
@@ -534,6 +536,7 @@ const Controls: React.FC<ControlsProps> = ({
     if (query.trim()) {
       console.log(`[SearchNarration] SEARCH_SUBMITTED query="${query.trim()}"`);
       setIsManualInputMode(false);
+      setParchmentItemIndex(0);
       onSearch(query);
     } else if (skin === 'parchment' && currentParchmentItem) {
       if (currentParchmentItem.type === 'manual') {
