@@ -321,11 +321,12 @@ describe('Controls Vertical Separator Lines', () => {
     expect(html).not.toContain('shadow-[2px_2px_4px_rgba(0,0,0,0.2)]');
     expect(html).not.toContain('hover:bg-[#e8d5b5]');
 
-    // Should have transparent background, dark brown default glyph text color (#4a2a16), warm tan hover (#fff3dc), and contrast outline
+    // Should have transparent background, medium-dark debossed glyph text color (#6b4226), warm tan hover (#fff3dc), and lighter brown parchment stroke
     expect(html).toContain('bg-transparent');
-    expect(html).toContain('text-[#4a2a16]');
+    expect(html).toContain('text-[#6b4226]');
     expect(html).toContain('hover:text-[#fff3dc]');
-    expect(html).toContain('parchment-glyph-contrast');
+    expect(html).toContain('parchment-glyph-stroke');
+    expect(html).not.toMatch(/class="[^"]*parchment-glyph-contrast[^"]*"/);
 
     // Should render curved bottom-ring container with 7 distinct columns in its own independent layer
     expect(html).toContain('data-testid="parchment-ring-controls"');
@@ -977,9 +978,20 @@ describe('Controls Parchment Ring Controls & Layout Separation', () => {
     expect(html).toContain('translate(calc(-50% + 88.67px), calc(-50% + 538.39px))');   // Narration
     expect(html).toContain('translate(calc(-50% + 177.33px), calc(-50% + 516.02px))');  // Theme
     expect(html).toContain('translate(calc(-50% + 266.00px), calc(-50% + 476.41px))');  // Settings
+
+    // Verify 7 decorative coin background images are rendered (one behind each control)
+    const coinMatches = [...html.matchAll(/data-testid="parchment-control-coin"/g)];
+    expect(coinMatches.length).toBe(7);
+    expect(html).toContain('coin-alpha.png');
+    expect(html).toContain('width:50px');
+    expect(html).toContain('height:50px');
+    expect(html).toContain('max-width:50px');
+    expect(html).toContain('max-height:50px');
+    expect(html).toContain('object-fit:contain');
+    expect(html).toContain('pointer-events-none');
   });
 
-  test('non-parchment themes do NOT render ring controls layer and keep horizontal toolbar', () => {
+  test('non-parchment themes do NOT render ring controls or coin backgrounds and keep horizontal toolbar', () => {
     const nonParchmentSkins: SkinType[] = ['modern', 'retro-green', 'retro-amber'];
 
     nonParchmentSkins.forEach((skin) => {
@@ -988,24 +1000,27 @@ describe('Controls Parchment Ring Controls & Layout Separation', () => {
       );
 
       expect(html).not.toContain('data-testid="parchment-ring-controls"');
+      expect(html).not.toContain('data-testid="parchment-control-coin"');
+      expect(html).not.toContain('coin-alpha.png');
       expect(html).toContain('class="absolute bottom-2.5 left-0 right-0 z-20 flex flex-col items-center gap-2 pointer-events-none px-4"');
       expect(html).toContain('class="flex gap-2 pointer-events-auto"');
     });
   });
 
-  test('parchment theme uses cohesive parchment color hierarchy for inactive, active, hover, and stroke outline', () => {
+  test('parchment theme uses cohesive parchment color hierarchy for inactive, active, and hover states', () => {
     // Inactive state test
     const htmlInactive = renderToStaticMarkup(
       <Controls {...baseProps} skin="parchment" isNarrationEnabled={false} showFavorites={false} isSettingsOpen={false} isTraceModalOpen={false} />
     );
 
-    // Inactive controls use dark brown (#4a2a16) with hover (#fff3dc)
-    expect(htmlInactive).toContain('text-[#4a2a16]');
+    // Inactive controls use medium/light dark parchment brown (#6b4226) with lighter brown stroke without light contrast stroke
+    expect(htmlInactive).toContain('text-[#6b4226]');
     expect(htmlInactive).toContain('hover:text-[#fff3dc]');
+    expect(htmlInactive).toContain('parchment-glyph-stroke');
+    expect(htmlInactive).not.toContain('text-[#2f1b0f]');
+    expect(htmlInactive).not.toContain('text-[#4a2a16]');
     expect(htmlInactive).not.toContain('text-[#b8860b]');
-
-    // Crisp outline uses lighter parchment stroke rgba(200, 168, 120, 0.95) (#c8a878)
-    expect(htmlInactive).toContain('drop-shadow(0.75px 0 0 rgba(200, 168, 120, 0.95))');
+    expect(htmlInactive).not.toMatch(/class="[^"]*parchment-glyph-contrast[^"]*"/);
 
     // Active state test: Narration On, Favorites On, Settings Open
     const htmlActive = renderToStaticMarkup(

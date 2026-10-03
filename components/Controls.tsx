@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Search, ZoomIn, ZoomOut, Loader2, Star, X, Palette, Settings, Volume2, VolumeX, ChevronLeft, ChevronRight } from 'lucide-react';
 import { SkinType } from '../types';
+import coinAlphaImage from '../assets/coin-alpha.png';
 import { isCelestialBodySupported, detectCelestialBody } from '../services/celestialCapabilities';
 import { narrationService } from '../services/narrationService';
 import { generateContextualChips, ContextualChip } from '../services/followUpService';
@@ -625,7 +626,7 @@ const Controls: React.FC<ControlsProps> = ({
       chip: "px-3 py-1 bg-black hover:bg-amber-400 hover:text-black text-amber-300 border border-amber-400 rounded-none text-xs font-retro uppercase tracking-wider transition-colors active:scale-95 cursor-pointer"
     },
     'parchment': {
-      btn: "bg-transparent text-[#4a2a16] hover:text-[#fff3dc] hover:scale-110 parchment-glyph-contrast font-sans",
+      btn: "bg-transparent text-[#6b4226] hover:text-[#fff3dc] hover:scale-110 font-sans parchment-glyph-stroke",
       btnActive: "bg-transparent text-[#f4ead5] hover:text-[#fff3dc] parchment-glyph-contrast",
       favActive: "!text-[#f4ead5] hover:text-[#fff3dc]",
 
@@ -855,6 +856,12 @@ const Controls: React.FC<ControlsProps> = ({
                   drop-shadow(0 0.75px 0 rgba(200, 168, 120, 0.95))
                   drop-shadow(0 -0.75px 0 rgba(200, 168, 120, 0.95));
         }
+        .parchment-glyph-stroke {
+          filter: drop-shadow(0.75px 0 0 rgba(138, 96, 64, 0.85))
+                  drop-shadow(-0.75px 0 0 rgba(138, 96, 64, 0.85))
+                  drop-shadow(0 0.75px 0 rgba(138, 96, 64, 0.85))
+                  drop-shadow(0 -0.75px 0 rgba(138, 96, 64, 0.85));
+        }
         .orbiting-dot {
           stroke-dasharray: 20 980;
           animation: search-orbit 3s linear infinite;
@@ -940,13 +947,46 @@ const Controls: React.FC<ControlsProps> = ({
           }}
           data-testid="parchment-ring-controls"
         >
-          <div style={getRingPositionStyle(0)} className="pointer-events-auto">{traceRouteButton}</div>
-          <div style={getRingPositionStyle(1)} className="pointer-events-auto">{favoritesButton}</div>
-          <div style={getRingPositionStyle(2)} className="pointer-events-auto">{zoomOutButton}</div>
-          <div style={getRingPositionStyle(3)} className="pointer-events-auto">{zoomInButton}</div>
-          <div style={getRingPositionStyle(4)} className="pointer-events-auto">{narrationButton}</div>
-          {themeButton && <div style={getRingPositionStyle(5)} className="pointer-events-auto">{themeButton}</div>}
-          {settingsButton && <div style={getRingPositionStyle(6)} className="pointer-events-auto">{settingsButton}</div>}
+          {[
+            { button: traceRouteButton, key: 'traceRoute' },
+            { button: favoritesButton, key: 'favorites' },
+            { button: zoomOutButton, key: 'zoomOut' },
+            { button: zoomInButton, key: 'zoomIn' },
+            { button: narrationButton, key: 'narration' },
+            ...(themeButton ? [{ button: themeButton, key: 'theme' }] : []),
+            ...(settingsButton ? [{ button: settingsButton, key: 'settings' }] : []),
+          ].map((item, idx) => (
+            <div
+              key={item.key}
+              style={getRingPositionStyle(idx)}
+              className="pointer-events-auto relative flex items-center justify-center"
+            >
+              {/* Decorative Coin Background */}
+              <img
+                src={coinAlphaImage}
+                alt=""
+                width={50}
+                height={50}
+                aria-hidden="true"
+                className="absolute pointer-events-none select-none"
+                style={{
+                  width: '50px',
+                  height: '50px',
+                  maxWidth: '50px',
+                  maxHeight: '50px',
+                  objectFit: 'contain',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  zIndex: 0,
+                }}
+                data-testid="parchment-control-coin"
+              />
+              <div className="relative z-[1]">
+                {item.button}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
