@@ -40,7 +40,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
       setEditingRoute(JSON.parse(JSON.stringify(initialEditingRoute)));
     }
   }, [initialEditingRoute]);
-  const isRetro = skin !== 'modern';
+  const isRetro = skin === 'retro-green' || skin === 'retro-amber';
 
   const themes = {
     'modern': {

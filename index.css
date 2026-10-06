@@ -4064,10 +4064,14 @@ video {
     left: 1.5rem !important;
     width: calc(100vw - 3rem) !important;
     max-width: 24rem !important;
+    bottom: auto !important;
+    max-height: calc(100dvh - 380px) !important;
+    max-height: calc(100dvh - 380px - env(safe-area-inset-bottom, 0px)) !important;
   }
   .settings-panel-container {
     width: 100% !important;
-    max-height: calc(100dvh - 190px) !important;
+    max-height: calc(100dvh - 380px) !important;
+    max-height: calc(100dvh - 380px - env(safe-area-inset-bottom, 0px)) !important;
     height: auto !important;
   }
   .favorites-panel-container {
@@ -4115,10 +4119,14 @@ video {
   .left-panel-drawer-container {
     top: 76px !important;
     left: 1.25rem !important;
-    max-height: calc(100dvh - 90px) !important;
+    bottom: auto !important;
+    max-height: calc(100dvh - 180px) !important;
+    max-height: calc(100dvh - 180px - env(safe-area-inset-bottom, 0px)) !important;
   }
   .settings-panel-container {
-    max-height: calc(100dvh - 90px) !important;
+    width: 100% !important;
+    max-height: calc(100dvh - 180px) !important;
+    max-height: calc(100dvh - 180px - env(safe-area-inset-bottom, 0px)) !important;
   }
 
   /* InfoPanel in landscape: anchored near top, never vertically centered, constrained height with internal scrolling */

@@ -2630,7 +2630,7 @@ enrichmentComplete: ${Boolean(info.description && info.description.length > 50)}
                             <h3
                               key={`h-${i}`}
                               className={`font-semibold uppercase tracking-wider ${
-                                isRetro ? 'text-green-300 font-retro' : isParchment ? 'text-[#3e2723] font-serif' : 'text-cyan-300'
+                                isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000] font-retro' : 'text-green-300 font-retro') : isParchment ? 'text-[#3e2723] font-serif' : 'text-cyan-300'
                               } text-xs mt-3 mb-1`}
                             >
                               {cleanedText}
@@ -2659,7 +2659,7 @@ enrichmentComplete: ${Boolean(info.description && info.description.length > 50)}
             ) : isDescLoading ? (
               <div className="space-y-3 animate-pulse pt-2">
                 <div className="space-y-2">
-                  <div className={`h-3.5 ${isRetro ? 'bg-green-500/20' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded w-3/4`}></div>
+                  <div className={`h-3.5 ${isRetro ? (skin === 'retro-amber' ? 'bg-amber-500/20' : 'bg-green-500/20') : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded w-3/4`}></div>
                   <div className={`h-3.5 ${isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
                   <div className={`h-3.5 w-[90%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
                 </div>
@@ -3399,7 +3399,7 @@ enrichmentComplete: ${Boolean(info.description && info.description.length > 50)}
             ) : showContentSkeleton ? (
                <div className="p-6 space-y-6 animate-pulse">
                   <div className="space-y-3">
-                     <div className={`h-3.5 ${isRetro ? 'bg-green-500/20' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded w-3/4`}></div>
+                     <div className={`h-3.5 ${isRetro ? (skin === 'retro-amber' ? 'bg-amber-500/20' : 'bg-green-500/20') : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded w-3/4`}></div>
                      <div className={`h-3.5 ${isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
                      <div className={`h-3.5 w-[90%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
                   </div>

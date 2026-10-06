@@ -625,9 +625,9 @@ describe('Parchment Theme Design Refinements - No Straight Solid Lines', () => {
         initialTab="providers"
       />
     );
-    // TEST CONNECTION buttons have border-[#8b5a2b]/30, hover:bg-[#e6d5b8], text-[#3e2723]
+    // TEST CONNECTION & DETECT buttons have border-[#8b5a2b]/30, hover:bg-[#e6d5b8], text-[#3e2723]
     const testConnButtons = parchmentProvidersSettings.match(/border-\[#8b5a2b\]\/30 hover:bg-\[#e6d5b8\] text-\[#3e2723\]/g);
-    expect(testConnButtons?.length).toBe(3);
+    expect(testConnButtons?.length).toBe(4);
 
     // Audio tab: TEST VOICE button
     const parchmentAudioSettings = renderToStaticMarkup(
