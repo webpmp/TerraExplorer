@@ -12,6 +12,7 @@ import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import SettingsPanel from './components/SettingsPanel';
 import ParchmentResizeGuide from './components/ParchmentResizeGuide';
+import { SearchDebugOverlay } from './components/SearchDebugOverlay';
 import { getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, deriveQueryTopicTitle, EnrichmentMetrics, cancelFeatureInfoRequests, isLMStudioNoModelError, LM_STUDIO_NO_MODEL_MESSAGE, LM_STUDIO_NO_MODEL_INSTRUCTION, isLMStudioContextOverflowError, LM_STUDIO_CONTEXT_OVERFLOW_MESSAGE, LM_STUDIO_CONTEXT_OVERFLOW_INSTRUCTION, isSourceRetrievalError, recoverLocationMetadata } from './services/geminiService';
 import { fetchAndValidateImages, discoverAdditionalWaypointImages } from './services/imageService';
 import { getEntityImagePreferenceId } from './services/imagePreferenceService';
@@ -24,11 +25,13 @@ import { logTraceTiming, initTraceTiming, recordWP1SubstantiveReady } from './se
 import { getWaypointStableId, findNextRouteWaypoint, sortWaypointsChronologically } from './utils/routeSequenceUtils';
 import { resolveCanonicalNarrative } from './utils/narrativeResolver';
 import { evaluateDescriptionReadiness } from './utils/descriptionReadiness';
+import { extractDescriptionText } from './services/entityValidation';
 import { cleanNarrationText, buildFullNarrationScript, buildFullNarrationUnits, chunkContentUnit } from './services/narrationProviders';
 import { classifyFollowUpIntent, researchFollowUp } from './services/followUpService';
 import { logWaypointSnapshot } from './utils/pipelineDebug';
 import { fetchLiveNews } from './services/newsService';
 import { runSearchPipeline } from './services/pipeline';
+import { logTerraSearchDebug, subscribeSearchDebug, SearchDebugEvent } from './services/searchDebugTracer';
 import { ENTITY_SCHEMAS } from './entitySchema';
 import logoImageBlack from './assets/logo-terra-explorer-black.png';
 import logoImageGreen from './assets/logo-terra-explorer-green.png';
@@ -53,8 +56,24 @@ import {
   evaluateCameraTransitionDecision,
   logCameraDecision
 } from './utils/osmViewportUtils';
+import { osmTelemetry } from './services/osmTelemetryService';
 
 // Helper for distance measurement (Haversine formula in km)
+const BUILD_IDENTIFIER = 'v1.0.4-dev-responsive-tablet (Build: 2026-10-05-physical-ipad-diag)';
+console.log(`[BUILD_IDENTIFIER] TerraExplorer ${BUILD_IDENTIFIER}`);
+if (typeof window !== 'undefined') {
+  (window as any).__TERRA_BUILD_INFO__ = {
+    version: '1.0.4-dev-responsive-tablet',
+    buildTimestamp: '2026-10-05T17:45:00Z',
+    branch: 'feat/responsive-tablet-layout',
+    identifier: BUILD_IDENTIFIER
+  };
+}
+
+// Reusable vectors for high-performance zero-allocation camera animation
+const _docLocalVec = new THREE.Vector3();
+const _docWorldPos = new THREE.Vector3();
+
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   const R = 6371; // Radius of the earth in km
   const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -1160,8 +1179,8 @@ export function loadInitialFavorites(): FavoriteLocation[] {
 
 const App: React.FC = () => {
   const [worldDimensions, setWorldDimensions] = useState({
-    width: window.innerWidth,
-    height: window.innerHeight
+    width: typeof window !== 'undefined' ? window.innerWidth : 1920,
+    height: typeof window !== 'undefined' ? window.innerHeight : 1080
   });
 
   const [parchmentZoom, setParchmentZoom] = useState(1.0);
@@ -1186,16 +1205,7 @@ const App: React.FC = () => {
   const processingMarkerRef = useRef<string | null>(null);
   const isManualControlActiveRef = useRef<boolean>(false);
 
-  useEffect(() => {
-    const handleResize = () => {
-      setWorldDimensions({
-        width: window.innerWidth,
-        height: window.innerHeight
-      });
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+
 
 
   const [locationInfo, setLocationInfo] = useState<LocationInfo | null>(null);
@@ -1213,9 +1223,27 @@ const App: React.FC = () => {
   // Settings State
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'providers' | 'appearance' | 'audio'>('general');
+
+  // Search Debug Overlay State
+  const [searchDebugEvents, setSearchDebugEvents] = useState<SearchDebugEvent[]>([]);
+  const [isDebugOverlayOpen, setIsDebugOverlayOpen] = useState(true);
+  const [lastDebugEvent, setLastDebugEvent] = useState<SearchDebugEvent | null>(null);
+
+  useEffect(() => {
+    return subscribeSearchDebug((event, allEvents) => {
+      setSearchDebugEvents([...allEvents]);
+      setLastDebugEvent(event);
+      if (event.status === 'EXCEPTION' || event.status === 'NETWORK_ERROR' || (event.status === 'NO_RESULT' && event.stage === 'runSearchPipeline')) {
+        setIsDebugOverlayOpen(true);
+      }
+    });
+  }, []);
   const handleOpenSettingsTab = useCallback((tab: 'general' | 'providers' | 'appearance' | 'audio' = 'general') => {
     setSettingsInitialTab(tab);
     setIsSettingsOpen(true);
+    if (typeof window !== 'undefined' && window.innerWidth <= 1080) {
+      setIsFavoritesPanelOpen(false);
+    }
   }, []);
   const [userSettings, setUserSettings] = useState<UserSettings>(() => {
     const saved = localStorage.getItem('terraExplorerSettings');
@@ -1226,6 +1254,7 @@ const App: React.FC = () => {
         parsed.researchMode = parsed.researchMode !== undefined ? !!parsed.researchMode : false;
         parsed.retroGreenProjection = parsed.retroGreenProjection !== undefined ? !!parsed.retroGreenProjection : true;
         parsed.retroAmberProjection = parsed.retroAmberProjection !== undefined ? !!parsed.retroAmberProjection : true;
+        parsed.testMode = parsed.testMode !== undefined ? !!parsed.testMode : true;
         parsed.narrationProvider = (parsed.narrationProvider === 'kokoro' || parsed.narrationProvider === 'orpheus') ? parsed.narrationProvider : 'system';
         parsed.kokoroVoice = parsed.kokoroVoice || 'am_michael';
         parsed.orpheusVoice = parsed.orpheusVoice || 'tara';
@@ -1240,6 +1269,15 @@ const App: React.FC = () => {
         } else if (typeof parsed.documentaryDuration !== 'number' || isNaN(parsed.documentaryDuration)) {
           parsed.documentaryDuration = 5.5;
         }
+        logTerraSearchDebug({
+          stage: 'settings.load',
+          status: 'SETTINGS_INITIALIZED',
+          details: {
+            source: 'localStorage',
+            persistedAiProvider: parsed.aiProvider,
+            lmStudioUrl: parsed.lmStudioUrl
+          }
+        });
         return parsed;
       } catch (e) {
         // Ignore
@@ -1266,8 +1304,20 @@ const App: React.FC = () => {
       narrationVolume: 1.0,
       narrationLimit: 600,
       retroGreenProjection: true,
-      retroAmberProjection: true
+      retroAmberProjection: true,
+      testMode: true
     };
+    logTerraSearchDebug({
+      stage: 'settings.load',
+      status: 'SETTINGS_INITIALIZED',
+      details: {
+        source: 'default',
+        persistedAiProvider: 'none',
+        resolvedAiProvider: defaults.aiProvider,
+        lmStudioUrl: defaults.lmStudioUrl
+      }
+    });
+    return defaults;
   });
 
   // Route State
@@ -1289,7 +1339,10 @@ const App: React.FC = () => {
   const [isInteracting, setIsInteracting] = useState(false); // Interaction with Earth mesh
   const [isDragging, setIsDragging] = useState(false); // Interaction with Camera Controls
   const [autoRotate, setAutoRotate] = useState(true);
-  const [skin, setSkin] = useState<SkinType>('modern');
+  const [skin, setSkin] = useState<SkinType>(() => {
+    const isNonDesktop = typeof window !== 'undefined' && window.innerWidth <= 1080;
+    return 'modern';
+  });
   const [isZoomedOut, setIsZoomedOut] = useState(true);
   const [isOSMActive, setIsOSMActive] = useState(false);
   const [isLocationVisible, setIsLocationVisible] = useState(true);
@@ -1423,6 +1476,13 @@ const App: React.FC = () => {
         ? window.innerWidth / window.innerHeight
         : 16 / 9;
       return getParchmentBaseDistance(aspect);
+    }
+    if (typeof window !== 'undefined') {
+      const isNonDesktop = window.innerWidth <= 1080;
+      const isLandscape = window.innerWidth > window.innerHeight;
+      if (isNonDesktop && isLandscape) {
+        return 5.2;
+      }
     }
     return 4.5;
   }, [skin]);
@@ -1715,20 +1775,23 @@ const App: React.FC = () => {
   }, [skin, locationInfo, routeWaypoints.length]);
 
   const handleSkinChange = useCallback((newSkin: SkinType) => {
-     cameraStateRef.current.theme = newSkin;
-     setSkin(newSkin);
+     const isNonDesktop = typeof window !== 'undefined' && window.innerWidth <= 1080;
+     const targetSkin = (isNonDesktop && newSkin === 'parchment') ? 'modern' : newSkin;
+
+     cameraStateRef.current.theme = targetSkin;
+     setSkin(targetSkin);
 
      const activeDist = cameraControlsRef.current?.getDistance() || currentCameraDistanceRef.current || 4.5;
 
      let newDistance = activeDist;
-     if (newSkin === 'parchment') {
+     if (targetSkin === 'parchment') {
         const aspect = window.innerWidth / window.innerHeight;
         const baseDistance = getParchmentBaseDistance(aspect);
         if (activeDist > 1.55) {
            newDistance = baseDistance;
         }
      } else if (skin === 'parchment' && activeDist > 1.55) {
-        newDistance = 4.5;
+        newDistance = (isNonDesktop && window.innerWidth > window.innerHeight) ? 5.2 : 4.5;
      }
 
      currentCameraDistanceRef.current = newDistance;
@@ -1748,7 +1811,7 @@ const App: React.FC = () => {
         cameraControlsRef.current.update();
      }
 
-     if (newSkin === 'parchment') {
+     if (targetSkin === 'parchment') {
         cameraStateRef.current.mode = 'theme';
         const aspect = window.innerWidth / window.innerHeight;
         const baseDistance = getParchmentBaseDistance(aspect);
@@ -1766,9 +1829,28 @@ const App: React.FC = () => {
   }, [skin, reconcileCameraState]);
 
   const handleCycleSkin = useCallback(() => {
-    const skins: SkinType[] = ['modern', 'retro-green', 'retro-amber', 'parchment'];
+    const isNonDesktop = typeof window !== 'undefined' && window.innerWidth <= 1080;
+    const skins: SkinType[] = isNonDesktop
+      ? ['modern', 'retro-green', 'retro-amber']
+      : ['modern', 'retro-green', 'retro-amber', 'parchment'];
     const nextIndex = (skins.indexOf(skin) + 1) % skins.length;
     handleSkinChange(skins[nextIndex]);
+  }, [skin, handleSkinChange]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const newWidth = window.innerWidth;
+      const newHeight = window.innerHeight;
+      setWorldDimensions({
+        width: newWidth,
+        height: newHeight
+      });
+      if (newWidth <= 1080 && skin === 'parchment') {
+        handleSkinChange('modern');
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, [skin, handleSkinChange]);
 
 
@@ -2281,6 +2363,15 @@ const App: React.FC = () => {
     userSettingsRef.current = newSettings;
     setUserSettings(newSettings);
     localStorage.setItem('terraExplorerSettings', JSON.stringify(newSettings));
+    logTerraSearchDebug({
+      stage: 'settings.update',
+      status: 'SETTINGS_PERSISTED',
+      details: {
+        previousAiProvider: prevProvider,
+        newAiProvider: newSettings.aiProvider,
+        lmStudioUrl: newSettings.lmStudioUrl
+      }
+    });
 
     if (prevProvider !== newSettings.aiProvider) {
       if (
@@ -2341,6 +2432,10 @@ const App: React.FC = () => {
   selectedMarkerCoordinatesRef.current = selectedMarkerCoordinates;
 
   const handleDocumentarySetDistance = useCallback((dist: number) => {
+    currentCameraDistanceRef.current = dist;
+    cameraStateRef.current.themeSuggestedDistance = dist;
+    cameraStateRef.current.routeSuggestedDistance = dist;
+
     if (cameraControlsRef.current) {
       const controls = cameraControlsRef.current;
       const cam = controls.object;
@@ -2354,18 +2449,21 @@ const App: React.FC = () => {
         controls.update();
       }
     }
-    updateCameraDistance(dist);
-  }, [updateCameraDistance]);
+  }, []);
 
   const handleDocumentarySetCameraPosition = useCallback((lat: number, lng: number, dist: number) => {
     previousGeoCenterRef.current = { lat, lng };
+    currentCameraDistanceRef.current = dist;
+    cameraStateRef.current.themeSuggestedDistance = dist;
+    cameraStateRef.current.routeSuggestedDistance = dist;
+
     if (cameraControlsRef.current && earthRef.current) {
       earthRef.current.updateMatrixWorld(true);
       const v = latLngToVector3(lat, lng, dist);
-      const worldPos = v.clone();
-      earthRef.current.localToWorld(worldPos);
+      _docWorldPos.copy(v);
+      earthRef.current.localToWorld(_docWorldPos);
       const cam = cameraControlsRef.current.object;
-      cam.position.copy(worldPos);
+      cam.position.copy(_docWorldPos);
       cam.lookAt(0, 0, 0);
       if (cameraControlsRef.current.target) {
         cameraControlsRef.current.target.set(0, 0, 0);
@@ -2380,8 +2478,7 @@ const App: React.FC = () => {
       }
       cameraControlsRef.current.update();
     }
-    updateCameraDistance(dist);
-  }, [updateCameraDistance]);
+  }, []);
 
   const startDocumentaryFlow = useCallback((dest: DocumentaryDestination, fromDest?: DocumentaryDestination) => {
     if (zoomAnimRef.current) {
@@ -2422,9 +2519,31 @@ const App: React.FC = () => {
         setActiveOSMCoordinates({ lat: dest.lat, lng: dest.lng });
       },
       onSettle: () => {
+        const settleDist = DOCUMENTARY_TARGET_DISTANCE;
+        currentCameraDistanceRef.current = settleDist;
+        cameraStateRef.current.themeSuggestedDistance = settleDist;
+        cameraStateRef.current.routeSuggestedDistance = settleDist;
+        setIsOSMActive(true);
         setIsDocumentaryActive(false);
         setActiveOSMCoordinates({ lat: dest.lat, lng: dest.lng });
         setInteractionState('PIN_SELECTED');
+
+        // Authoritative final camera positioning to guarantee exact target centering
+        if (cameraControlsRef.current && earthRef.current) {
+          earthRef.current.updateMatrixWorld(true);
+          const v = latLngToVector3(dest.lat, dest.lng, settleDist);
+          _docWorldPos.copy(v);
+          earthRef.current.localToWorld(_docWorldPos);
+          const cam = cameraControlsRef.current.object;
+          cam.position.copy(_docWorldPos);
+          cam.lookAt(0, 0, 0);
+          if (cameraControlsRef.current.target) {
+            cameraControlsRef.current.target.set(0, 0, 0);
+          }
+          cameraControlsRef.current.update();
+        }
+
+        osmTelemetry.recordCameraNav('END');
         if (locationInfoRef.current && !isInfoPanelLoadingRef.current) {
           maybeTriggerNarration(locationInfoRef.current);
         }
@@ -3985,6 +4104,8 @@ source=${source}`);
               break;
             case 'WAYPOINT_TRANSITION_REQUIRED':
             case 'DOCUMENTARY_FULL_REQUIRED':
+              osmTelemetry.startSession(`SEARCH_${marker.name}`);
+              osmTelemetry.recordCameraNav('START');
               startDocumentaryFlow(
                 { id: stableId, name: marker.name, lat: marker.lat, lng: marker.lng },
                 undefined
@@ -3994,6 +4115,8 @@ source=${source}`);
         } else {
           setIsDocumentaryActive(false);
           if (typeof marker.lat === 'number' && typeof marker.lng === 'number') {
+            osmTelemetry.startSession(`SEARCH_DIRECT_${marker.name}`);
+            osmTelemetry.recordCameraNav('START');
             navigateWaypointCamera({ id: stableId, name: marker.name, lat: marker.lat, lng: marker.lng });
           }
         }
@@ -4480,6 +4603,12 @@ source=${source}`);
     const cleanQuery = query.trim();
     if (!cleanQuery) return;
 
+    logTerraSearchDebug({
+      stage: 'App.handleSearch',
+      query: cleanQuery,
+      status: 'ENTRY'
+    });
+
     const upper = cleanQuery.toUpperCase();
     if (
       upper.startsWith("STARTING SCAN") ||
@@ -4613,6 +4742,10 @@ source=${source}`);
     activeSearchAbortControllerRef.current = abortController;
 
     const currentSearchId = ++activeSearchRequestIdRef.current;
+    const isTouchDevice = typeof window !== 'undefined' && ('ontouchstart' in window || (navigator && (navigator.maxTouchPoints > 0 || (navigator as any).msMaxTouchPoints > 0)));
+    const viewportDim = typeof window !== 'undefined' ? `${window.innerWidth}x${window.innerHeight}` : 'unknown';
+    const userAgentStr = typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown';
+    console.log(`[SEARCH_START] query="${cleanQuery}" searchId=${currentSearchId} userAgent="${userAgentStr}" viewport=${viewportDim} isTouchDevice=${isTouchDevice}`);
     console.log(`[SearchNarration] SEARCH_SUBMITTED query="${cleanQuery}"`);
     console.log('[Camera] SEARCH_STARTED rotation preserved');
 
@@ -4679,6 +4812,34 @@ source=${source}`);
       console.log(`[PRESENTATION] PIPELINE_READY searchId=${searchId} isValid=${pipelineResult.isValid} mode=${pipelineResult.mode}`);
       console.log(`[SearchNarration] PIPELINE_COMPLETED query="${cleanQuery}" isValid=${pipelineResult.isValid} mode=${pipelineResult.mode} hasFinalData=${!!(pipelineResult as any).finalData}`);
 
+      const rawFinalData = (pipelineResult as any).finalData;
+      console.log(`[ENRICHMENT TRACE 7] APP RECEIVED RESULT searchId=${searchId} query="${cleanQuery}" name="${rawFinalData?.name}"`);
+      console.log(`[ENRICHMENT TRACE 7] description = ${JSON.stringify(rawFinalData?.description)}`);
+      console.log(`[ENRICHMENT TRACE 7] notable = ${JSON.stringify(rawFinalData?.notable)}`);
+      console.log(`[ENRICHMENT TRACE 7] climate = ${JSON.stringify(rawFinalData?.climate)}`);
+      console.log(`[ENRICHMENT TRACE 7] contextNotes = ${JSON.stringify(rawFinalData?.contextNotes)}`);
+      console.log(`[ENRICHMENT TRACE 7] population = ${JSON.stringify(rawFinalData?.population)}`);
+      logTerraSearchDebug({
+        stage: 'App.handleSearch.pipelineResultReceived',
+        query: cleanQuery,
+        entity: rawFinalData?.name || (pipelineResult as any).entity?.subject?.identity?.canonicalName,
+        status: pipelineResult.isValid ? 'SUCCESS' : 'NO_RESULT',
+        category: pipelineResult.isValid ? '1_VALID_LOCATION' : '2_NO_LOCATION',
+        coordinates: rawFinalData?.coordinates ? { lat: rawFinalData.coordinates.lat, lng: rawFinalData.coordinates.lng } : undefined,
+        details: {
+          mode: pipelineResult.mode,
+          isValid: pipelineResult.isValid,
+          error: pipelineResult.error,
+          hasFinalData: Boolean(rawFinalData),
+          hasCoords: Boolean(rawFinalData?.coordinates),
+          isNonPoint: rawFinalData?.singleLocation === false,
+          entityType: rawFinalData?.entityType,
+          scope: rawFinalData?.geographicScope,
+          descLength: rawFinalData?.description?.length || 0,
+          descPreview: rawFinalData?.description?.slice(0, 50)
+        }
+      });
+
       if (pipelineResult.mode === 'route') {
         if (pipelineResult.isValid && pipelineResult.waypoints && pipelineResult.waypoints.length > 0) {
           logWaypointSnapshot('App.tsx (Before Set State)', pipelineResult.waypoints[0]);
@@ -4719,10 +4880,52 @@ source=${source}`);
         let finalData = { ...(pipelineResult as any).finalData };
 
         // Presentation Readiness Gate: 1. Enrichment
-        const descReadiness = evaluateDescriptionReadiness(finalData.description, finalData.name);
+        const descReadiness = evaluateDescriptionReadiness(finalData.description, finalData.name, {
+          enrichmentStatus: finalData.enrichmentStatus,
+          provenance: finalData.descriptionProvenance || finalData.enrichmentSource,
+          notableCount: finalData.notable?.length
+        });
+        logTerraSearchDebug({
+          stage: 'App.handleSearch.enrichment',
+          entity: finalData.name,
+          status: 'ENTRY',
+          details: {
+            isReady: descReadiness.isReady,
+            quality: descReadiness.quality,
+            reason: descReadiness.reason,
+            initialDescLength: finalData.description?.length || 0,
+            enrichmentStatus: finalData.enrichmentStatus,
+            enrichmentSource: finalData.enrichmentSource
+          }
+        });
+
         if (!descReadiness.isReady) {
+          logTerraSearchDebug({
+            stage: 'enrichment.required',
+            entity: finalData.name,
+            status: 'ENTRY',
+            details: {
+              reason: descReadiness.reason,
+              provenance: finalData.descriptionProvenance || finalData.enrichmentSource,
+              enrichmentStatus: finalData.enrichmentStatus,
+              initialDescLength: finalData.description?.length || 0
+            }
+          });
+
           console.log(`[PRESENTATION] ENRICHING searchId=${searchId} reason="${descReadiness.reason}"`);
           try {
+            logTerraSearchDebug({
+              stage: 'enrichment.recoveryCall',
+              entity: finalData.name,
+              status: 'ENTRY',
+              details: {
+                canonicalName: finalData.canonicalName || finalData.name,
+                coordinates: finalData.coordinates,
+                aiProvider: userSettings.aiProvider,
+                lmStudioUrl: userSettings.lmStudioUrl
+              }
+            });
+
             const enriched = await recoverLocationMetadata(
               finalData.name,
               finalData.coordinates,
@@ -4739,26 +4942,100 @@ source=${source}`);
               },
               abortController.signal
             );
-            if (enriched && enriched.description) {
+
+            const enrichedDesc = extractDescriptionText(enriched?.description);
+            logTerraSearchDebug({
+              stage: 'enrichment.recoveryReturned',
+              entity: finalData.name,
+              status: (enriched && enrichedDesc) ? 'SUCCESS' : 'NO_RESULT',
+              details: {
+                hasAiDescription: Boolean(enrichedDesc),
+                descLength: enrichedDesc.length,
+                hasNotable: Array.isArray(enriched?.notable) && enriched.notable.length > 0,
+                notableCount: enriched?.notable?.length || 0,
+                hasClimate: Boolean(enriched?.climate),
+                enrichmentStatus: (enriched && enrichedDesc) ? 'completed' : 'fallback',
+                enrichmentSource: (enriched && enrichedDesc) ? (userSettings.aiProvider === 'lmstudio' ? 'lmstudio' : 'gemini') : 'fallback'
+              }
+            });
+
+            if (enriched && enrichedDesc) {
               finalData = {
                 ...finalData,
                 ...enriched,
-                description: enriched.description,
+                description: enrichedDesc,
+                enrichmentStatus: 'completed',
+                enrichmentSource: (userSettings.aiProvider === 'lmstudio' ? 'lmstudio' : 'gemini') as any,
+                descriptionProvenance: userSettings.aiProvider === 'lmstudio' ? 'lmstudio' : 'gemini',
                 historicalContext: enriched.historicalContext || finalData.historicalContext,
                 significance: enriched.significance || finalData.significance,
                 culturalSignificance: enriched.culturalSignificance || finalData.culturalSignificance,
                 curiosities: enriched.curiosities || finalData.curiosities,
                 quickFacts: enriched.quickFacts || finalData.quickFacts,
               };
+
+              logTerraSearchDebug({
+                stage: 'enrichment.completed',
+                entity: finalData.name,
+                status: 'SUCCESS',
+                details: {
+                  finalDescLength: enrichedDesc.length,
+                  hasNotable: Array.isArray(finalData.notable) && finalData.notable.length > 0,
+                  enrichmentStatus: 'completed',
+                  enrichmentSource: finalData.enrichmentSource,
+                  descPreview: enrichedDesc.slice(0, 80)
+                }
+              });
+            } else {
+              logTerraSearchDebug({
+                stage: 'enrichment.fallback',
+                entity: finalData.name,
+                status: 'RETURN',
+                details: {
+                  reason: 'Enrichment returned null or missing description; preserving raw source fallback',
+                  enrichmentStatus: finalData.enrichmentStatus,
+                  enrichmentSource: finalData.enrichmentSource,
+                  descLength: finalData.description?.length || 0
+                }
+              });
             }
-          } catch (enrichErr) {
+          } catch (enrichErr: any) {
             console.warn(`[PRESENTATION] Enrichment fallback warning:`, enrichErr);
+            logTerraSearchDebug({
+              stage: 'App.handleSearch.enrichment',
+              entity: finalData.name,
+              status: 'EXCEPTION',
+              errorMessage: enrichErr?.message || String(enrichErr)
+            });
+            logTerraSearchDebug({
+              stage: 'enrichment.fallback',
+              entity: finalData.name,
+              status: 'EXCEPTION',
+              details: {
+                reason: 'Enrichment exception caught; preserving raw source fallback',
+                enrichmentStatus: finalData.enrichmentStatus,
+                enrichmentSource: finalData.enrichmentSource,
+                descLength: finalData.description?.length || 0
+              }
+            });
           }
         }
 
         if (currentSearchId !== activeSearchRequestIdRef.current || abortController.signal.aborted) {
           return;
         }
+
+        logTerraSearchDebug({
+          stage: 'App.handleSearch.enrichment',
+          entity: finalData.name,
+          status: 'SUCCESS',
+          details: {
+            finalDescLength: finalData.description?.length || 0,
+            hasNotable: Array.isArray(finalData.notable) && finalData.notable.length > 0,
+            enrichmentStatus: finalData.enrichmentStatus,
+            enrichmentSource: finalData.enrichmentSource
+          }
+        });
 
         console.log(`[PRESENTATION] ENRICHMENT_READY searchId=${searchId} descLength=${finalData.description?.length || 0}`);
 
@@ -4768,11 +5045,23 @@ source=${source}`);
           waypointId: getEntityImagePreferenceId(finalData)
         };
 
+        logTerraSearchDebug({
+          stage: 'App.handleSearch.imagesFetch',
+          entity: finalData.name,
+          status: 'ENTRY'
+        });
+
         let foundImages: any[] = [];
         try {
           foundImages = await fetchAndValidateImages(finalData, searchContext);
-        } catch (imgErr) {
+        } catch (imgErr: any) {
           console.warn(`[PRESENTATION] Image fetch warning:`, imgErr);
+          logTerraSearchDebug({
+            stage: 'App.handleSearch.imagesFetch',
+            entity: finalData.name,
+            status: 'EXCEPTION',
+            errorMessage: imgErr?.message || String(imgErr)
+          });
         }
 
         if (currentSearchId !== activeSearchRequestIdRef.current || abortController.signal.aborted) {
@@ -4783,8 +5072,49 @@ source=${source}`);
         if (foundImages && foundImages.length > 0 && foundImages[0]?.url) {
           finalData.primaryImage = foundImages[0];
         }
+
+        logTerraSearchDebug({
+          stage: 'App.handleSearch.imagesFetch',
+          entity: finalData.name,
+          status: 'SUCCESS',
+          details: {
+            imageCount: finalData.images.length,
+            hasPrimaryImage: Boolean(finalData.primaryImage)
+          }
+        });
+
         console.log(`[PRESENTATION] IMAGES_READY searchId=${searchId} count=${finalData.images.length}`);
         console.log(`[PRESENTATION] READY searchId=${searchId}`);
+
+        // Log State Commit
+        logTerraSearchDebug({
+          stage: 'App.handleSearch.stateCommit',
+          entity: finalData.name,
+          status: 'SUCCESS',
+          details: {
+            title: finalData.name,
+            entityType: finalData.entityType,
+            isNonPoint: isValidNonPointResult,
+            hasCoordinates: Boolean(finalData.coordinates),
+            descLength: finalData.description?.length || 0,
+            notableCount: finalData.notable?.length || 0,
+            imagesCount: finalData.images?.length || 0
+          }
+        });
+
+        // Log Camera Navigation Pre-Flight
+        logTerraSearchDebug({
+          stage: 'App.handleSearch.camera',
+          status: 'CAMERA_TARGET_PREPARE',
+          coordinates: finalData.coordinates ? { lat: finalData.coordinates.lat, lng: finalData.coordinates.lng } : undefined,
+          details: {
+            name: finalData.name,
+            entityType: finalData.entityType,
+            isNonPoint: isValidNonPointResult,
+            hasValidCoordinates: Boolean(finalData.coordinates),
+            documentaryMode: userSettings.documentaryMode
+          }
+        });
 
         if (isValidNonPointResult) {
           console.log(`[SearchNarration] NON_POINT_RESULT_DISPLAYED name="${finalData.name}" scope="${finalData.geographicScope}"`);
@@ -4806,6 +5136,15 @@ source=${source}`);
           locationInfoRef.current = finalData;
           setIsDiscoveryLoading(false);
           console.log(`[PRESENTATION] COMMITTED searchId=${searchId}`);
+
+          logTerraSearchDebug({
+            stage: 'App.handleSearch.camera',
+            status: 'CAMERA_NAVIGATION_COMPLETED',
+            details: {
+              action: 'NON_POINT_GLOBAL_OVERVIEW_PRESERVED',
+              reason: 'Non-point historical event spans broad regional/global scope without a single pinpoint coordinate.'
+            }
+          });
 
           if (finalData.description) {
             maybeTriggerNarration(finalData);
@@ -4860,6 +5199,17 @@ source=${source}`);
           console.log(`[PRESENTATION] COMMITTED searchId=${searchId}`);
           console.log('[Scan Lifecycle] DISCOVERY_COMPLETE');
 
+          logTerraSearchDebug({
+            stage: 'App.handleSearch.camera',
+            status: 'CAMERA_NAVIGATION_CALLED',
+            coordinates: { lat, lng },
+            details: {
+              mode: userSettings.documentaryMode ? 'OSM_DOCUMENTARY' : 'GLOBE_ROTATION',
+              targetLat: lat,
+              targetLng: lng
+            }
+          });
+
           if (userSettings.documentaryMode) {
             console.log('[Camera] OSM_TRANSITION_STARTED');
             startDocumentaryFlow({
@@ -4882,6 +5232,12 @@ source=${source}`);
             });
           }
 
+          logTerraSearchDebug({
+            stage: 'App.handleSearch.camera',
+            status: 'CAMERA_NAVIGATION_COMPLETED',
+            coordinates: { lat, lng }
+          });
+
           if (finalData.description) {
             maybeTriggerNarration(finalData);
           }
@@ -4893,32 +5249,57 @@ source=${source}`);
         const errorData = (pipelineResult as any).metadataResult?.enrichedData;
         if (errorData) {
           console.log(`=== INVALID COORDINATE BLOCKED ===
-Query: ${query}
+Query: ${cleanQuery}
 Location: ${errorData.name}
 Coordinates: ${JSON.stringify(errorData.coordinates)}
 Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 ===============================`);
         }
 
-        let userError = "Unable to resolve location.";
         const errorCode = pipelineResult.error;
+        let category: SearchDebugEvent['category'] = '2_NO_LOCATION';
+        let userError = `[DEBUG: 2_NO_LOCATION] Could not resolve: "${cleanQuery}"`;
+
         if (errorCode === "UNSUPPORTED_CELESTIAL_BODY") {
           userError = "TerraExplorer currently supports Earth geography only.";
         } else if (errorCode === "LM_STUDIO_NO_MODEL") {
           userError = `${LM_STUDIO_NO_MODEL_MESSAGE} ${LM_STUDIO_NO_MODEL_INSTRUCTION}`;
         } else if (errorCode === "LOCATION_SYSTEM_UNAVAILABLE") {
-          userError = "Location system unavailable.";
+          category = '2_NO_LOCATION';
+          userError = `[DEBUG: 2_NO_LOCATION] Location system unavailable (No API Key & geocoder missed) for "${cleanQuery}".`;
         } else if (errorCode === "NOT_FOUND") {
-          userError = "Could not find location.";
+          category = '2_NO_LOCATION';
+          userError = `[DEBUG: 2_NO_LOCATION] Location not found: "${cleanQuery}".`;
         } else if (errorCode === "HISTORICAL_LOCATION_UNCONFIRMED") {
           userError = "Exact historical location is unconfirmed.";
         } else if (errorCode === "NO_GEOGRAPHIC_DATA") {
-          userError = "No results found for this query.";
+          category = '2_NO_LOCATION';
+          userError = `[DEBUG: 2_NO_LOCATION / 3_GEOCODER_NO_RESULT] No geographic data found for "${cleanQuery}".`;
         } else if (errorCode === "TEMP_FAILURE") {
-          userError = "Unable to load location data.";
+          category = '4_NETWORK_FAILED';
+          userError = `[DEBUG: 4_NETWORK_FAILED] Network or temporary service failure for "${cleanQuery}".`;
         } else if (errorCode === "AMBIGUOUS") {
-          userError = "Location is too ambiguous to resolve.";
+          userError = `[DEBUG: AMBIGUOUS] Location "${cleanQuery}" is too ambiguous to resolve.`;
+        } else if (!errorCode && !hasValidCoords) {
+          category = '6_UNEXPECTED_SHAPE';
+          userError = `[DEBUG: 6_UNEXPECTED_SHAPE] Result returned without valid coordinates for "${cleanQuery}".`;
         }
+
+        logTerraSearchDebug({
+          stage: 'App.handleSearch.noResult',
+          query: cleanQuery,
+          status: 'NO_RESULT',
+          category,
+          errorMessage: userError,
+          details: {
+            searchId,
+            errorCode: errorCode || 'none',
+            pipelineResultIsValid: pipelineResult.isValid,
+            hasFinalData: !!(pipelineResult as any)?.finalData
+          }
+        });
+
+        console.log(`[SEARCH_ERROR_SET] searchId=${searchId} errorCode="${errorCode || 'none'}" userError="${userError}" pipelineResultIsValid=${pipelineResult.isValid} hasFinalData=${!!(pipelineResult as any)?.finalData}`);
         setSearchError(userError);
         setIsDiscoveryLoading(false);
         console.log('[Scan Lifecycle] DISCOVERY_FAILED');
@@ -4926,13 +5307,31 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
     } catch (err: any) {
       if (currentSearchId !== activeSearchRequestIdRef.current || abortController.signal.aborted || err?.name === 'AbortError') return;
       setScanningStatusText(null);
+      const errName = err?.name || 'Error';
+      const errMsg = err?.message || String(err);
+      const errStack = err?.stack || '';
+
+      logTerraSearchDebug({
+        stage: 'App.handleSearch.catch',
+        query: cleanQuery,
+        status: 'EXCEPTION',
+        category: '5_JS_EXCEPTION',
+        errorMessage: `${errName}: ${errMsg}`,
+        errorStack: errStack,
+        details: {
+          name: errName,
+          constructorName: err?.constructor?.name,
+          searchId: currentSearchId
+        }
+      });
+
       console.error('[Search] PIPELINE_ERROR during search execution:', err);
       console.log('[Camera] SEARCH_ERROR rotation preserved');
       setInteractionState('GLOBE_IDLE');
       if (isLMStudioNoModelError(err)) {
         setSearchError(`${LM_STUDIO_NO_MODEL_MESSAGE} ${LM_STUDIO_NO_MODEL_INSTRUCTION}`);
       } else {
-        setSearchError("Unable to resolve location.");
+        setSearchError(`[DEBUG: 5_JS_EXCEPTION] ${errName}: ${errMsg}`);
       }
       setIsDiscoveryLoading(false);
       console.log('[Scan Lifecycle] DISCOVERY_FAILED');
@@ -5267,6 +5666,18 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
     setIsFocused(false);
     console.log(`[Marker Lifecycle] INFOPANEL_CLOSED markersPreserved=${markers.length} routeWaypointsPreserved=${routeWaypoints.length} selectedMarkerPreserved=${selectedMarkerId}`);
   };
+
+  // 1080px and below (tablet), ensure left drawer (Settings/Favorites) and right InfoPanel do not overlap
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const isTablet = window.innerWidth <= 1080;
+    if (!isTablet) return;
+
+    if (interactionState === 'PIN_SELECTED') {
+      if (isFavoritesPanelOpen) setIsFavoritesPanelOpen(false);
+      if (isSettingsOpen) setIsSettingsOpen(false);
+    }
+  }, [interactionState]);
 
   const getCurrentFavorite = () => {
     // Only return route favorite if we are actually viewing the route (index != -1)
@@ -5763,7 +6174,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
   return (
     <div
-      className={`relative w-full h-screen bg-black overflow-hidden bg-cover bg-center bg-no-repeat`}
+      className={`app-root-container relative w-full h-screen bg-black overflow-hidden bg-cover bg-center bg-no-repeat`}
       style={isParchment ? { backgroundImage: 'url(https://raw.githubusercontent.com/webpmp/webpmp.github.io/master/terra-explorer-noglobe.png)' } : {}}
       onContextMenu={(e) => e.preventDefault()}
     >
@@ -5773,7 +6184,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       )}
 
       {/* 3D Scene */}
-      <div id="canvas-container" style={canvasContainerStyle}>
+      <div id="canvas-container" data-parchment={isParchment ? "true" : undefined} style={canvasContainerStyle}>
         <Canvas camera={{ position: [0, 0, 4.5], fov: 45, near: 0.001, far: 1000 }}>
           <Suspense fallback={null}>
             <ambientLight intensity={skin === 'modern' || skin === 'parchment' ? 0.4 : 1.5} color={skin === 'modern' || skin === 'parchment' ? "#ccccff" : "#ffffff"} />
@@ -5945,7 +6356,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       {(skin === 'retro-green' || skin === 'retro-amber') && <div className="scanlines"></div>}
 
       {/* UI Overlay */}
-      <div className={`absolute top-8 left-8 z-10 pointer-events-none ${skin === 'parchment' ? 'hidden' : ''}`}>
+      <div className={`absolute top-8 left-8 z-10 pointer-events-none brand-logo-container ${skin === 'parchment' ? 'hidden' : ''}`}>
         <img
           src={
             skin === 'retro-green' ? logoImageGreen :
@@ -5953,7 +6364,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
             logoImageBlack
           }
           alt="TerraExplorer Knowledge Engine"
-          className="drop-shadow-lg"
+          className="drop-shadow-lg brand-logo-img"
           style={{
             width: '240px',
             height: '211px',
@@ -5964,7 +6375,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
 
 
-      <div className="absolute top-[281px] left-8 z-20 flex flex-col gap-4 bottom-8 pointer-events-none w-[24rem]">
+      <div className="absolute top-[281px] left-8 z-20 flex flex-col gap-4 bottom-8 pointer-events-none w-[24rem] left-panel-drawer-container">
         {isFavoritesPanelOpen && (
           <FavoritesPanel
               favorites={favorites}
@@ -5992,6 +6403,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
             skin={skin}
             onSkinChange={handleSkinChange}
             initialTab={settingsInitialTab}
+            isDesktop={worldDimensions.width > 1080}
           />
         )}
       </div>
@@ -6073,7 +6485,14 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         onClearError={() => setSearchError(null)}
         skin={skin}
         showFavorites={isFavoritesPanelOpen}
-        onToggleShowFavorites={() => setIsFavoritesPanelOpen(!isFavoritesPanelOpen)}
+        onToggleShowFavorites={() => {
+          const next = !isFavoritesPanelOpen;
+          setIsFavoritesPanelOpen(next);
+          if (next && typeof window !== 'undefined' && window.innerWidth <= 1080) {
+            setIsSettingsOpen(false);
+            handleClosePanel();
+          }
+        }}
         paused={shouldPauseSuggestions}
         isTraceModalOpen={isTraceModalOpen}
         onToggleTraceModal={setIsTraceModalOpen}
@@ -6122,7 +6541,14 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         onCancelScan={handleCancelScan}
         onCycleSkin={handleCycleSkin}
         isSettingsOpen={isSettingsOpen}
-        onToggleSettings={() => setIsSettingsOpen(!isSettingsOpen)}
+        onToggleSettings={() => {
+          const next = !isSettingsOpen;
+          setIsSettingsOpen(next);
+          if (next && typeof window !== 'undefined' && window.innerWidth <= 1080) {
+            setIsFavoritesPanelOpen(false);
+            handleClosePanel();
+          }
+        }}
         onOpenSettingsTab={handleOpenSettingsTab}
         isOSMDisplayed={isOSMActive}
         parchmentRingRadius={maskRadius}
@@ -6130,6 +6556,9 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
       {/* Parchment Native Background Resize Guide */}
       <ParchmentResizeGuide skin={skin} />
+
+      {/* On-screen Search Diagnostic Overlay */}
+      <SearchDebugOverlay testMode={userSettings.testMode !== false} />
     </div>
   );
 };

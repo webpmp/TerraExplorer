@@ -1,9 +1,9 @@
 import { LocationInfo, QueryIntent, isValidCoordinates, Waypoint, CoordinateSource, GeographicIdentityStatus } from '../types';
 import { ResolvedEntity, EnrichmentResult } from '../domain';
-import { routeIntentAndExtractEntity, resolveLocationQuery, sanitizeLocationInfo, recoverCoordinatesFromAi, recoverLocationMetadata, getUserSettings, generateRoute, normalizeCoordinates, isLMStudioNoModelError } from './geminiService';
+import { routeIntentAndExtractEntity, resolveLocationQuery, sanitizeLocationInfo, recoverCoordinatesFromAi, recoverLocationMetadata, getUserSettings, generateRoute, normalizeCoordinates, isLMStudioNoModelError, resolveEffectiveLMStudioUrl } from './geminiService';
 import { enrichLocationInfo } from './locationService';
 import { createIdentity, createResolvedSubject, createResolvedEntity } from './entityFactory';
-import { validateResolvedEntity, isGenericPlaceholderDescription, evaluateEnrichmentCompleteness, logEnrichmentCompleteness } from './entityValidation';
+import { validateResolvedEntity, isGenericPlaceholderDescription, extractDescriptionText, evaluateEnrichmentCompleteness, logEnrichmentCompleteness } from './entityValidation';
 import { mergeCoordinates } from './coordinateAuthority';
 import { CanonicalGeographicEntity } from '../domain';
 import { classifyGeographicEntity } from './classifierService';
@@ -14,10 +14,12 @@ import { validateEarthGeography } from './celestialCapabilities';
 import { validateHistoricalCoordinate, getHistoricalEntityKnowledge, toCanonicalTitleCase, isMaritimeHistoricalEntity } from './geographic/historicalCoordinateValidator';
 import { determineHistoricalEventScope, logHistoricalEventScope } from './geographic/historicalEventScope';
 import { deduplicateNotableFacts } from '../utils/notableFactsUtils';
+import { extractConciseLeadDescription } from '../utils/descriptionNormalization';
 import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation, isInvalidCanonicalName, determineCanonicalDisplayName } from './geographic/entityIdentityValidator';
 import { detectHistoricalRouteEvent, normalizeSemanticEntityTitle, extractMediaIntentAndCleanEntity, deriveQueryTopicTitle } from './queryNormalizer';
 import { getAuthoritativeEventModel } from './geographic/historicalRouteRegistry';
 import { resolveAlias } from './geographic/geographicAliases';
+import { logTerraSearchDebug } from './searchDebugTracer';
 
 // --- PIPELINE TYPES ---
 
@@ -168,6 +170,13 @@ function applyHistoricalKnowledgeRecovery(
 
 export const ResolutionStage = async (entityResult: EntityResolutionResult): Promise<FinalLocationResult> => {
   const signal = entityResult.intentResult.normalized.request.signal;
+  logTerraSearchDebug({
+    stage: 'ResolutionStage',
+    query: entityResult.intentResult.normalized.request.rawQuery,
+    entity: entityResult.entity,
+    intent: entityResult.intentResult.intent,
+    status: 'ENTRY'
+  });
   if (signal?.aborted) {
     return {
       mode: 'location',
@@ -228,6 +237,8 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
   let resolvedData = rawResolverResult.locationInfo;
   const suggestedZoom = rawResolverResult.suggestedZoom;
 
+  console.log(`[ResolutionStage RAW_RESULT] resolvedEntityName="${resolvedEntityName}" error="${error || 'none'}" hasCoordinates=${Boolean(resolvedData?.coordinates)} coords=${JSON.stringify(resolvedData?.coordinates || null)} name="${resolvedData?.name || 'none'}"`);
+
   // Map the media separation intent data into the resolved LocationInfo
   if (resolvedData) {
     resolvedData.originalQuery = entityResult.intentResult.normalized.request.rawQuery;
@@ -259,6 +270,8 @@ export const ResolutionStage = async (entityResult: EntityResolutionResult): Pro
 
     const isIdentityValid = initialIdentityCheck.matches;
     const computedIdentityStatus: GeographicIdentityStatus = isIdentityValid ? 'verified' : 'unverified';
+
+    console.log(`[ResolutionStage IDENTITY_CHECK] requested="${resolvedEntityName}" candidate="${resolvedData.name}" match=${isIdentityValid} rejectionReason="${initialIdentityCheck.rejectionReason || 'none'}"`);
 
     logEntityIdentityValidation({
       requestedEntity: resolvedEntityName,
@@ -837,10 +850,22 @@ locationLabel="${locationLabel || 'none'}"`);
   );
   logEnrichmentCompleteness(initialCompleteness);
 
+  const pipelineSettings = getUserSettings();
+  const pipelineEffectiveLMStudioUrl = resolveEffectiveLMStudioUrl(pipelineSettings.lmStudioUrl);
+
   if (coordinatesValid && canonicalEntity && initialCompleteness.recoveryRequired) {
+      console.log(`[PIPELINE ENRICHMENT] ENRICHMENT CALLED at ${new Date().toISOString()}`);
+      console.log(`[PIPELINE ENRICHMENT] entity="${canonicalEntity.canonicalName}" provider="${pipelineSettings.aiProvider}" configuredUrl="${pipelineSettings.lmStudioUrl}" effectiveUrl="${pipelineEffectiveLMStudioUrl}"`);
+      console.log(`[PIPELINE ENRICHMENT] initialDescriptionLength=${resolvedData?.description?.length || 0} recoveryReason="${initialCompleteness.recoveryReason}" missingFields=${JSON.stringify(initialCompleteness.missingFields)}`);
+      console.log(`[PIPELINE ENRICHMENT] ENRICHMENT REQUEST STARTED`);
+      const enrichStartTime = Date.now();
+      let wikipediaSource: WikipediaLeadResult | null = null;
+      let sourceText: string | undefined = undefined;
+      let sourceTitle: string | undefined = undefined;
+      let metadataRecovery: Partial<EnrichmentResult> | null = null;
+
       try {
         // Step 3a: Grounding - Retrieve authoritative Wikipedia lead/intro extract if available
-        let wikipediaSource: WikipediaLeadResult | null = null;
         const wikiTarget = canonicalEntity.wikipedia || canonicalEntity.canonicalName;
         if (wikiTarget) {
           try {
@@ -851,8 +876,8 @@ locationLabel="${locationLabel || 'none'}"`);
         }
 
         const sourceFound = Boolean(wikipediaSource?.extract && wikipediaSource.extract.length > 0);
-        const sourceText = sourceFound ? wikipediaSource!.extract : undefined;
-        const sourceTitle = sourceFound ? wikipediaSource!.title : undefined;
+        sourceText = sourceFound ? wikipediaSource!.extract : undefined;
+        sourceTitle = sourceFound ? wikipediaSource!.title : undefined;
         const sourceLength = sourceText ? sourceText.length : 0;
 
         console.log(`[SOURCE GROUNDING]
@@ -863,7 +888,21 @@ sourceTitle: "${sourceTitle || 'none'}"
 sourceLength: ${sourceLength} chars
 mode: ${sourceFound ? 'SOURCE_GROUNDED_SYNTHESIS' : 'CONSERVATIVE_FALLBACK'}`);
 
-        const metadataRecovery = await recoverLocationMetadata(canonicalEntity.canonicalName, canonicalEntity.coordinates, {
+        logTerraSearchDebug({
+          stage: 'enrichment.recoveryCall',
+          entity: canonicalEntity.canonicalName,
+          status: 'ENTRY',
+          details: {
+            canonicalName: canonicalEntity.canonicalName,
+            coordinates: canonicalEntity.coordinates,
+            aiProvider: pipelineSettings.aiProvider,
+            lmStudioUrl: pipelineSettings.lmStudioUrl,
+            hasSourceText: sourceFound,
+            sourceLength
+          }
+        });
+
+        metadataRecovery = await recoverLocationMetadata(canonicalEntity.canonicalName, canonicalEntity.coordinates, {
           ...canonicalEntity,
           country: (resolvedData as any).country,
           state: (resolvedData as any).state,
@@ -876,14 +915,41 @@ mode: ${sourceFound ? 'SOURCE_GROUNDED_SYNTHESIS' : 'CONSERVATIVE_FALLBACK'}`);
           sourceText,
           sourceTitle
         }, signal);
+        const enrichDuration = Date.now() - enrichStartTime;
+
+        const recoveredDescText = extractDescriptionText(metadataRecovery?.description);
+        logTerraSearchDebug({
+          stage: 'enrichment.recoveryReturned',
+          entity: canonicalEntity.canonicalName,
+          status: (metadataRecovery && recoveredDescText) ? 'SUCCESS' : 'NO_RESULT',
+          details: {
+            hasAiDescription: Boolean(recoveredDescText),
+            descLength: recoveredDescText.length,
+            hasNotable: Array.isArray(metadataRecovery?.notable) && metadataRecovery.notable.length > 0,
+            notableCount: metadataRecovery?.notable?.length || 0,
+            hasClimate: Boolean(metadataRecovery?.climate),
+            enrichmentStatus: (metadataRecovery && recoveredDescText) ? 'completed' : 'fallback',
+            enrichmentSource: (metadataRecovery && recoveredDescText) ? (pipelineSettings.aiProvider === 'lmstudio' ? 'lmstudio' : 'gemini') : 'fallback'
+          }
+        });
+
+        console.log(`[ENRICHMENT TRACE 4] PIPELINE RECEIVED METADATA entity="${canonicalEntity.canonicalName}"`);
+        console.log(`[ENRICHMENT TRACE 4] description = ${JSON.stringify(metadataRecovery?.description)}`);
+        console.log(`[ENRICHMENT TRACE 4] notable = ${JSON.stringify(metadataRecovery?.notable)}`);
+        console.log(`[ENRICHMENT TRACE 4] climate = ${JSON.stringify(metadataRecovery?.climate)}`);
+        console.log(`[ENRICHMENT TRACE 4] contextNotes = ${JSON.stringify(metadataRecovery?.contextNotes)}`);
+        console.log(`[ENRICHMENT TRACE 4] population = ${JSON.stringify(metadataRecovery?.population)}`);
+
         if (signal?.aborted) {
+          console.log(`[PIPELINE ENRICHMENT] ENRICHMENT ABORTED after ${enrichDuration} ms`);
           return {
             mode: 'location',
             isValid: false,
             error: 'ABORTED'
           };
         }
-        if (metadataRecovery) {
+        if (metadataRecovery && recoveredDescText) {
+           console.log(`[PIPELINE ENRICHMENT] ENRICHMENT REQUEST SUCCEEDED after ${enrichDuration} ms`);
            console.log(`=== RECOVERY ENRICHMENT TRACE ===`);
            console.log(`Metadata Present: true`);
            console.log(`Enrichment Executed: true`);
@@ -894,9 +960,6 @@ mode: ${sourceFound ? 'SOURCE_GROUNDED_SYNTHESIS' : 'CONSERVATIVE_FALLBACK'}`);
 
            if (rejectedFields.includes('climate')) {
              delete (resolvedData as any).climate;
-           }
-           if (rejectedFields.includes('population')) {
-             delete (resolvedData as any).population;
            }
            
            if (authoritativeHierarchy && metadataRecovery.locationString && metadataRecovery.locationString !== authoritativeHierarchy) {
@@ -917,19 +980,126 @@ mode: ${sourceFound ? 'SOURCE_GROUNDED_SYNTHESIS' : 'CONSERVATIVE_FALLBACK'}`);
            if (metadataRecovery.contextNotes && Array.isArray(metadataRecovery.contextNotes) && metadataRecovery.contextNotes.length > 0) {
              (resolvedData as any).contextNotes = metadataRecovery.contextNotes;
            }
-           if (metadataRecovery.description && isPlaceholder) {
-             resolvedData.description = metadataRecovery.description;
-           }
+           resolvedData.description = recoveredDescText;
+           (resolvedData as any).enrichmentStatus = 'completed';
+           (resolvedData as any).enrichmentSource = pipelineSettings.aiProvider === 'lmstudio' ? 'lmstudio' : 'gemini';
+           (resolvedData as any).descriptionProvenance = (resolvedData as any).enrichmentSource;
+
+           logTerraSearchDebug({
+             stage: 'enrichment.completed',
+             entity: canonicalEntity.canonicalName,
+             status: 'SUCCESS',
+             details: {
+               finalDescLength: recoveredDescText.length,
+               hasNotable: Array.isArray((resolvedData as any).notable) && (resolvedData as any).notable.length > 0,
+               enrichmentStatus: 'completed',
+               enrichmentSource: (resolvedData as any).enrichmentSource,
+               descPreview: recoveredDescText.slice(0, 80)
+             }
+           });
+
+           console.log(`[ENRICHMENT TRACE 5] AFTER MERGE entity="${canonicalEntity.canonicalName}" isPlaceholder=${isPlaceholder}`);
+           console.log(`[ENRICHMENT TRACE 5] description = ${JSON.stringify(resolvedData.description)}`);
+           console.log(`[ENRICHMENT TRACE 5] notable = ${JSON.stringify(resolvedData.notable)}`);
+           console.log(`[ENRICHMENT TRACE 5] climate = ${JSON.stringify((resolvedData as any).climate)}`);
+           console.log(`[ENRICHMENT TRACE 5] contextNotes = ${JSON.stringify((resolvedData as any).contextNotes)}`);
+           console.log(`[ENRICHMENT TRACE 5] population = ${JSON.stringify((resolvedData as any).population)}`);
         } else {
+           console.log(`[PIPELINE ENRICHMENT] ENRICHMENT RETURNED NULL after ${enrichDuration} ms`);
+           console.log(`[PIPELINE ENRICHMENT] FALLBACK USED (Metadata recovery returned null/empty)`);
            console.warn(`=== RECOVER METADATA WARN ===\nMetadata recovery returned empty.`);
+           (resolvedData as any).enrichmentStatus = 'fallback';
+           (resolvedData as any).enrichmentSource = sourceText ? 'wikipedia' : 'fallback';
+           (resolvedData as any).descriptionProvenance = (resolvedData as any).enrichmentSource;
            const histKnowledge = getHistoricalEntityKnowledge(canonicalEntity.canonicalName);
            if (histKnowledge && histKnowledge.historicalContext) {
+             console.log(`[ENRICHMENT TRACE OVERWRITE] field=description reason=histKnowledge.historicalContext previous=${JSON.stringify(resolvedData.description)} new=${JSON.stringify(histKnowledge.historicalContext)}`);
              resolvedData.description = histKnowledge.historicalContext;
+           } else if (sourceText && sourceText.length > 20) {
+             const concise = extractConciseLeadDescription(sourceText, { coordinates: canonicalEntity.coordinates });
+             console.log(`[ENRICHMENT TRACE OVERWRITE] field=description reason=extractConciseLeadDescription previous=${JSON.stringify(resolvedData.description)} new=${JSON.stringify(concise)}`);
+             resolvedData.description = concise;
            }
+
+           logTerraSearchDebug({
+             stage: 'enrichment.fallback',
+             entity: canonicalEntity.canonicalName,
+             status: 'RETURN',
+             details: {
+               reason: 'Enrichment returned null or missing description in pipeline; preserving source fallback',
+               enrichmentStatus: (resolvedData as any).enrichmentStatus,
+               enrichmentSource: (resolvedData as any).enrichmentSource,
+               descLength: resolvedData.description?.length || 0
+             }
+           });
         }
       } catch (err) {
+        const enrichDuration = Date.now() - enrichStartTime;
+        console.error(`[PIPELINE ENRICHMENT] ENRICHMENT REQUEST FAILED after ${enrichDuration} ms:`, err);
+        console.log(`[PIPELINE ENRICHMENT] FALLBACK USED (Enrichment exception caught)`);
         console.error("Failed to generate metadata for recovered coordinates:", err);
+        (resolvedData as any).enrichmentStatus = 'fallback';
+        (resolvedData as any).enrichmentSource = sourceText ? 'wikipedia' : 'fallback';
+        (resolvedData as any).descriptionProvenance = (resolvedData as any).enrichmentSource;
+
+        logTerraSearchDebug({
+          stage: 'enrichment.fallback',
+          entity: canonicalEntity.canonicalName,
+          status: 'EXCEPTION',
+          details: {
+            reason: 'Enrichment exception caught; preserving source fallback',
+            enrichmentStatus: (resolvedData as any).enrichmentStatus,
+            enrichmentSource: (resolvedData as any).enrichmentSource,
+            descLength: resolvedData.description?.length || 0
+          }
+        });
       }
+
+      const isStillPlaceholder = !resolvedData.description || isGenericPlaceholderDescription(resolvedData.description, canonicalEntity.canonicalName);
+      if (isStillPlaceholder) {
+        const histKnowledge = getHistoricalEntityKnowledge(canonicalEntity.canonicalName);
+        if (histKnowledge && histKnowledge.historicalContext) {
+          console.log(`[ENRICHMENT TRACE OVERWRITE] field=description reason=isStillPlaceholder_histKnowledge previous=${JSON.stringify(resolvedData.description)} new=${JSON.stringify(histKnowledge.historicalContext)}`);
+          resolvedData.description = histKnowledge.historicalContext;
+        } else if (sourceText && sourceText.length > 20) {
+          const concise = extractConciseLeadDescription(sourceText, { coordinates: canonicalEntity.coordinates });
+          console.log(`[ENRICHMENT TRACE OVERWRITE] field=description reason=isStillPlaceholder_extractConciseLeadDescription previous=${JSON.stringify(resolvedData.description)} new=${JSON.stringify(concise)}`);
+          resolvedData.description = concise;
+        } else {
+          const hierarchyStr = authoritativeHierarchy || [(resolvedData as any).city, (resolvedData as any).state, (resolvedData as any).country].filter(Boolean).join(', ');
+          const typeStr = (canonicalEntity.entityType || 'location').replace(/_/g, ' ');
+          const coordStr = `${canonicalEntity.coordinates.lat.toFixed(4)}°, ${canonicalEntity.coordinates.lng.toFixed(4)}°`;
+          const generated = hierarchyStr
+            ? `${canonicalEntity.canonicalName} is a ${typeStr} located in ${hierarchyStr}. Situated at coordinates ${coordStr}, it is an established geographic entity in TerraExplorer.`
+            : `${canonicalEntity.canonicalName} is a ${typeStr} situated at coordinates ${coordStr} on Earth.`;
+          console.log(`[ENRICHMENT TRACE OVERWRITE] field=description reason=isStillPlaceholder_genericFallback previous=${JSON.stringify(resolvedData.description)} new=${JSON.stringify(generated)}`);
+          resolvedData.description = generated;
+        }
+      }
+
+      if (wikipediaSource?.pageUrl && !canonicalEntity.wikipedia) {
+        canonicalEntity.wikipedia = wikipediaSource.pageUrl;
+        (resolvedData as any).wikipedia = wikipediaSource.pageUrl;
+      }
+
+      if (!metadataRecovery) {
+        if (!resolvedData.notable || !Array.isArray(resolvedData.notable)) {
+          resolvedData.notable = [];
+        } else {
+          // Do not artificially inject duplicate coordinates/population/geographic region as notable facts
+          resolvedData.notable = [];
+        }
+
+        if (!resolvedData.contextNotes || !Array.isArray(resolvedData.contextNotes) || resolvedData.contextNotes.length === 0) {
+          resolvedData.contextNotes = [
+            `Coordinate Source: ${finalSource}`
+          ];
+        }
+      }
+  } else {
+      console.log(`[PIPELINE ENRICHMENT] ENRICHMENT NOT CALLED at ${new Date().toISOString()}`);
+      console.log(`[PIPELINE ENRICHMENT] reason: coordinatesValid=${coordinatesValid}, hasCanonicalEntity=${Boolean(canonicalEntity)}, recoveryRequired=${initialCompleteness.recoveryRequired}, missingFields=${JSON.stringify(initialCompleteness.missingFields)}`);
+      console.log(`[PIPELINE ENRICHMENT] FALLBACK USED (Enrichment gate not satisfied)`);
   }
 
   // Construct the ResolvedEntity Domain Object
@@ -1032,9 +1202,13 @@ mode: ${sourceFound ? 'SOURCE_GROUNDED_SYNTHESIS' : 'CONSERVATIVE_FALLBACK'}`);
        delete sanitizedRecovered._rejectedFields;
        delete sanitizedRecovered.climate;
        delete sanitizedRecovered.population;
+       delete sanitizedRecovered.notable;
+       delete sanitizedRecovered.contextNotes;
 
        const finalMetadata: any = {
-           description: (isPlaceholder && recoveredMetadata?.description) ? recoveredMetadata.description : (resolvedData.description || recoveredMetadata?.description),
+           description: (recoveredMetadata?.description && !isGenericPlaceholderDescription(extractDescriptionText(recoveredMetadata.description), canonicalEntity.canonicalName))
+               ? recoveredMetadata.description
+               : (resolvedData.description || recoveredMetadata?.description),
            climate: finalClimate,
            population: authoritativePopulation,
            notable: mergedNotable,
@@ -1042,19 +1216,30 @@ mode: ${sourceFound ? 'SOURCE_GROUNDED_SYNTHESIS' : 'CONSERVATIVE_FALLBACK'}`);
            contextNotes: mergedContextNotes,
            historicalContext: histContext,
            intent: entityResult.intentResult.intent,
+           enrichmentStatus: (resolvedData as any).enrichmentStatus || (recoveredMetadata ? 'completed' : 'fallback'),
+           enrichmentSource: (resolvedData as any).enrichmentSource || (recoveredMetadata ? (pipelineSettings.aiProvider === 'lmstudio' ? 'lmstudio' : 'gemini') : 'fallback'),
+           descriptionProvenance: (resolvedData as any).descriptionProvenance || (resolvedData as any).enrichmentSource,
            ...sanitizedRecovered
        };
 
        // Ensure authoritative climate, population, notable facts, context notes, and historical context are preserved
        finalMetadata.climate = finalClimate;
        finalMetadata.population = authoritativePopulation;
-       finalMetadata.notable = mergedNotable;
-       finalMetadata.contextNotes = mergedContextNotes;
+       finalMetadata.notable = mergedNotable?.length ? mergedNotable : resolvedData.notable;
+       finalMetadata.contextNotes = mergedContextNotes?.length ? mergedContextNotes : resolvedData.contextNotes;
        if (histContext) finalMetadata.historicalContext = histContext;
        finalMetadata.intent = entityResult.intentResult.intent;
 
-       if (isPlaceholder && recoveredMetadata?.description) {
-           finalMetadata.description = recoveredMetadata.description;
+       if (recoveredMetadata?.description) {
+           const recDescText = extractDescriptionText(recoveredMetadata.description);
+           if (!isGenericPlaceholderDescription(recDescText, canonicalEntity.canonicalName)) {
+               finalMetadata.description = recoveredMetadata.description;
+           }
+       } else if (resolvedData.description) {
+           const resDescText = extractDescriptionText(resolvedData.description);
+           if (!isGenericPlaceholderDescription(resDescText, canonicalEntity.canonicalName)) {
+               finalMetadata.description = resolvedData.description;
+           }
        }
 
      // Validate population for settlements vs non-settlements
@@ -1134,7 +1319,20 @@ mode: ${sourceFound ? 'SOURCE_GROUNDED_SYNTHESIS' : 'CONSERVATIVE_FALLBACK'}`);
      error = undefined;
   }
 
+  console.log(`[ResolutionStage FINAL] isValid=${isValid} error="${error || 'none'}" hasCoordinates=${Boolean(entity?.subject?.primaryLocation?.location?.coordinates)} coords=${JSON.stringify(entity?.subject?.primaryLocation?.location?.coordinates || null)} name="${entity?.subject?.identity?.canonicalName || 'none'}"`);
   console.log(`[FINAL GEOGRAPHIC VALIDATION]\nCoordinates valid: ${coordinatesValid}\nEntity identity valid: ${!!(entity?.subject?.identity?.canonicalName && entity?.subject?.identity?.entityType)}\nMetadata available: ${!!(entity?.metadata && Object.keys(entity.metadata).length > 0)}\nFinal valid: ${isValid}\nFinal Error: ${error || 'none'}`);
+
+  const finalCoords = entity?.subject?.primaryLocation?.location?.coordinates;
+  logTerraSearchDebug({
+    stage: 'ResolutionStage',
+    query: entityResult.intentResult.normalized.request.rawQuery,
+    entity: entity?.subject?.identity?.canonicalName || entityResult.entity,
+    intent: entityResult.intentResult.intent,
+    status: isValid ? 'SUCCESS' : 'NO_RESULT',
+    category: isValid ? '1_VALID_LOCATION' : (error === 'NO_GEOGRAPHIC_DATA' ? '2_NO_LOCATION' : '6_UNEXPECTED_SHAPE'),
+    coordinates: finalCoords ? { lat: finalCoords.lat, lng: finalCoords.lng, source: (finalCoords as any).source } : undefined,
+    errorMessage: isValid ? undefined : (error || 'Validation failed')
+  });
 
   return {
     mode: "location",
@@ -1145,6 +1343,12 @@ mode: ${sourceFound ? 'SOURCE_GROUNDED_SYNTHESIS' : 'CONSERVATIVE_FALLBACK'}`);
 };
 
 export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLocationResult> => {
+  logTerraSearchDebug({
+    stage: 'runSearchPipeline',
+    query: request.rawQuery,
+    intent: request.intent,
+    status: 'ENTRY'
+  });
   if (request.signal?.aborted) {
     return {
       mode: "location",
@@ -1186,6 +1390,21 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
     : (isNonPointHistorical ? 'HISTORICAL_NON_POINT' : 'SINGLE_LOCATION');
 
   console.log(`[PIPELINE ROUTING]\nentity: "${entityResult.entity}"\nhistoricalRegistryMatch: ${isHistoricalMatch}\nselectedPipeline: ${selectedPipeline}`);
+
+  logTerraSearchDebug({
+    stage: 'runSearchPipeline.routing',
+    query: request.rawQuery,
+    entity: entityResult.entity,
+    intent: entityResult.intentResult.intent,
+    status: 'SUCCESS',
+    details: {
+      selectedPipeline,
+      isHistoricalMatch,
+      isNonPointHistorical,
+      scope: histScope?.scope,
+      singleLocation: histScope?.singleLocation
+    }
+  });
 
   if (histScope) {
     logHistoricalEventScope({
@@ -1296,6 +1515,26 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
       error: isValid ? undefined : 'NO_GEOGRAPHIC_DATA'
     };
     (result as any).finalData = finalData;
+
+    logTerraSearchDebug({
+      stage: 'runSearchPipeline.historicalNonPoint',
+      query: request.rawQuery,
+      entity: canonicalName,
+      intent: entityResult.intentResult.intent,
+      status: isValid ? 'SUCCESS' : 'NO_RESULT',
+      category: isValid ? '1_VALID_LOCATION' : '2_NO_LOCATION',
+      details: {
+        canonicalName,
+        entityType: 'historical_event',
+        scope: histScope.scope,
+        singleLocation: false,
+        hasCoordinates: false,
+        hasFinalData: true,
+        descLength: desc?.length || 0,
+        hasNotable: notable.length > 0,
+        isValid
+      }
+    });
 
     console.log(`[NATURAL LOCATION RESULT]\nname: ${finalData.name}\ncoordinates: none\nentityType: ${finalData.entityType}\nmetadataAvailable: true\nvalid: ${isValid}`);
 
@@ -1486,7 +1725,7 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
           category: e.subject.identity.category || "place",
           intent: entityResult.intentResult.intent,
           identityStatus: (e.subject.identity as any).identityStatus || 'verified',
-          coordinateTrust: (e as any).coordinateTrust || (resolvedData as any).coordinateTrust || (finalSource === 'deterministic' || finalSource === 'geocoder' ? 'verified' : ((e as any).coordinateSource === 'ai_recovery' ? 'provisional' : 'unverified')),
+          coordinateTrust: (e as any).coordinateTrust || (e.subject.primaryLocation as any)?.coordinateTrust || ((e as any).coordinateSource === 'deterministic' || (e as any).coordinateSource === 'geocoder' ? 'verified' : ((e as any).coordinateSource === 'ai_recovery' ? 'provisional' : 'unverified')),
           aliases: (e.subject.identity as any).aliases || (e as any).aliases,
           historicalContext: (e.metadata as any)?.historicalContext || (e as any).historicalContext,
           coordinates: e.subject.primaryLocation.location.coordinates,
@@ -1495,6 +1734,9 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
           exactLocationKnown: (e as any).exactLocationKnown ?? (e.subject.primaryLocation as any).exactLocationKnown,
           confirmedWreckLocation: (e as any).confirmedWreckLocation ?? (e.subject.primaryLocation as any).confirmedWreckLocation,
           description: descString,
+          enrichmentStatus: (e.metadata as any)?.enrichmentStatus || 'not-required',
+          enrichmentSource: (e.metadata as any)?.enrichmentSource || 'deterministic',
+          descriptionProvenance: (e.metadata as any)?.descriptionProvenance || (e.metadata as any)?.enrichmentSource || 'deterministic',
           climate: e.metadata.climate,
           population: e.metadata.population,
           notable: e.metadata.notable,
@@ -1518,6 +1760,32 @@ export const runSearchPipeline = async (request: SearchRequest): Promise<FinalLo
   }
 
   console.log(`[NATURAL LOCATION RESULT]\nname: ${(locationResult as any).finalData?.name || 'none'}\ncoordinates: ${JSON.stringify((locationResult as any).finalData?.coordinates || 'none')}\nentityType: ${(locationResult as any).finalData?.entityType || 'none'}\nmetadataAvailable: ${!!locationResult.entity?.metadata}\nvalid: ${locationResult.isValid}`);
+
+  const retCoords = (locationResult as any).finalData?.coordinates;
+  logTerraSearchDebug({
+    stage: 'runSearchPipeline',
+    query: request.rawQuery,
+    entity: (locationResult as any).finalData?.name || entityResult.entity,
+    intent: entityResult.intentResult.intent,
+    status: locationResult.isValid ? 'SUCCESS' : 'NO_RESULT',
+    category: locationResult.isValid ? '1_VALID_LOCATION' : (locationResult.error === 'NO_GEOGRAPHIC_DATA' ? '2_NO_LOCATION' : '6_UNEXPECTED_SHAPE'),
+    coordinates: retCoords ? { lat: retCoords.lat, lng: retCoords.lng, source: (retCoords as any).source } : undefined,
+    errorMessage: locationResult.isValid ? undefined : (locationResult.error || 'Pipeline returned invalid location'),
+    details: {
+      mode: locationResult.mode,
+      isValid: locationResult.isValid,
+      error: locationResult.error,
+      hasFinalData: !!(locationResult as any).finalData
+    }
+  });
+
+  const finalOut = (locationResult as any).finalData;
+  console.log(`[ENRICHMENT TRACE 6] PIPELINE FINAL RESULT query="${request.rawQuery}" name="${finalOut?.name}"`);
+  console.log(`[ENRICHMENT TRACE 6] description = ${JSON.stringify(finalOut?.description)}`);
+  console.log(`[ENRICHMENT TRACE 6] notable = ${JSON.stringify(finalOut?.notable)}`);
+  console.log(`[ENRICHMENT TRACE 6] climate = ${JSON.stringify(finalOut?.climate)}`);
+  console.log(`[ENRICHMENT TRACE 6] contextNotes = ${JSON.stringify(finalOut?.contextNotes)}`);
+  console.log(`[ENRICHMENT TRACE 6] population = ${JSON.stringify(finalOut?.population)}`);
 
   return locationResult;
 };

@@ -66,6 +66,12 @@ function isTautologicalOrTrivial(text: string, entityName?: string): boolean {
   return false;
 }
 
+export interface DescriptionReadinessOptions {
+  enrichmentStatus?: string;
+  provenance?: string;
+  notableCount?: number;
+}
+
 /**
  * Evaluates whether a location description possesses substantive documentary depth.
  *
@@ -74,6 +80,7 @@ function isTautologicalOrTrivial(text: string, entityName?: string): boolean {
  * 2. It is a known placeholder (e.g., "Researching this location...", "Information on X").
  * 3. It is a single generic sentence, brief label, or tautology (e.g., "A villa on a lake promontory in Lenno known for its topiary gardens.").
  * 4. It lacks substantive documentary/contextual content (must have multiple meaningful sentences with documentary context).
+ * 5. It has raw source provenance (e.g. Wikipedia lead / deterministic fallback) and requires AI synthesis.
  *
  * A description IS ready (substantive) if:
  * 1. It contains multiple meaningful sentences (at least 2 sentences and >= 100 chars).
@@ -82,8 +89,19 @@ function isTautologicalOrTrivial(text: string, entityName?: string): boolean {
  */
 export function evaluateDescriptionReadiness(
   description?: string | null,
-  entityName?: string
+  entityName?: string,
+  options?: DescriptionReadinessOptions
 ): DescriptionReadiness {
+  if (options?.enrichmentStatus === 'required' || options?.provenance === 'wikipedia' || options?.provenance === 'deterministic') {
+    return {
+      isReady: false,
+      quality: 'insufficient',
+      reason: `Raw source/deterministic description (provenance="${options?.provenance || 'raw'}") requires AI synthesis.`,
+      sentenceCount: 0,
+      charCount: description?.length || 0
+    };
+  }
+
   if (!description || typeof description !== 'string') {
     return {
       isReady: false,
@@ -129,6 +147,16 @@ export function evaluateDescriptionReadiness(
 
   const sentences = extractSentences(cleanText);
   const sentenceCount = sentences.length;
+
+  if (options?.enrichmentStatus === 'completed' || options?.provenance === 'lmstudio' || options?.provenance === 'gemini') {
+    return {
+      isReady: true,
+      quality: 'substantive',
+      reason: `Synthesized AI description completed (${sentenceCount} sentences, ${charCount} chars).`,
+      sentenceCount,
+      charCount
+    };
+  }
 
   // Substantive criteria:
   // Must contain multiple meaningful sentences with adequate documentary length (>= 2 sentences and >= 100 chars)

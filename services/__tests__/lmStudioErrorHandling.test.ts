@@ -10,13 +10,17 @@ import {
   LMStudioNoModelError,
   isLMStudioNoModelError,
   LM_STUDIO_NO_MODEL_MESSAGE,
-  LM_STUDIO_NO_MODEL_INSTRUCTION
+  LM_STUDIO_NO_MODEL_INSTRUCTION,
+  resolveEffectiveLMStudioUrl
 } from '../geminiService';
 import { runSearchPipeline } from '../pipeline';
 import { mergeLocationInfo } from '../locationService';
 import InfoPanel from '../../components/InfoPanel';
 import Controls from '../../components/Controls';
 import { LocationInfo, LocationType, MapMarker, SkinType } from '../../types';
+import { evaluateEnrichmentCompleteness } from '../entityValidation';
+import { evaluateDescriptionReadiness } from '../../utils/descriptionReadiness';
+import { detectLMStudioModels } from '../../components/SettingsPanel';
 
 describe('LM Studio Missing Model Error Handling & Gemini Fallback', () => {
   const originalFetch = global.fetch;
@@ -444,5 +448,421 @@ describe('LM Studio Missing Model Error Handling & Gemini Fallback', () => {
     expect(capturedBody.model).toBe('local-model');
     // Crucial check: response_format must be omitted to prevent LM Studio 400 Bad Request
     expect(capturedBody.response_format).toBeUndefined();
+  });
+
+  it('Routes localhost:1234 to same-origin /api/lmstudio proxy in browser environment', () => {
+    // In browser environment (e.g. window exists)
+    const originalWindow = global.window;
+    try {
+      (global as any).window = {
+        location: {
+          hostname: '192.168.1.50',
+          origin: 'http://192.168.1.50:3000'
+        }
+      };
+      // Standard localhost:1234/v1 maps to /api/lmstudio/v1
+      expect(resolveEffectiveLMStudioUrl('http://localhost:1234/v1')).toBe('/api/lmstudio/v1');
+      expect(resolveEffectiveLMStudioUrl('http://127.0.0.1:1234/v1')).toBe('/api/lmstudio/v1');
+      expect(resolveEffectiveLMStudioUrl('http://localhost:1234')).toBe('/api/lmstudio');
+      expect(resolveEffectiveLMStudioUrl('/api/lmstudio/v1')).toBe('/api/lmstudio/v1');
+      // Custom external server is preserved
+      expect(resolveEffectiveLMStudioUrl('http://custom-host:8080/v1')).toBe('http://custom-host:8080/v1');
+    } finally {
+      (global as any).window = originalWindow;
+    }
+  });
+
+  it('Dispatches LM Studio enrichment request through same-origin /api/lmstudio proxy in browser', async () => {
+    let capturedUrl: string = '';
+    const originalWindow = global.window;
+    (global as any).window = {
+      location: {
+        hostname: '192.168.1.105',
+        origin: 'http://192.168.1.105:3000'
+      }
+    };
+
+    try {
+      global.fetch = vi.fn().mockImplementation(async (url: string) => {
+        capturedUrl = url;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    name: 'Chicago',
+                    description: 'Enriched description from local LM Studio via Vite proxy.',
+                    notable: [{ title: 'Chicago School Architecture', description: 'Innovative architecture.' }]
+                  })
+                }
+              }
+            ]
+          })
+        } as unknown as Response;
+      });
+
+      await generateContentWithRetry({
+        contents: 'Enrich Chicago',
+        config: { responseMimeType: 'application/json' }
+      });
+
+      // Verifies browser uses same-origin proxy endpoint rather than direct port 1234
+      expect(capturedUrl).toBe('/api/lmstudio/v1/chat/completions');
+    } finally {
+      (global as any).window = originalWindow;
+    }
+  });
+
+  it('Requires AI enrichment for raw source / deterministic descriptions, and marks complete once enriched', () => {
+    // 1. Raw deterministic / Wikipedia lead data requires enrichment
+    const rawWikipediaData = {
+      name: 'Chicago',
+      entityType: 'city',
+      description: 'Chicago is the most populous city in the U.S. state of Illinois and in the Midwestern United States. Located on the western shore of Lake Michigan, it is the third-most populous city.',
+      descriptionProvenance: 'wikipedia',
+      enrichmentStatus: 'required' as const,
+      notable: [],
+      climate: undefined
+    };
+
+    const completeness = evaluateEnrichmentCompleteness(rawWikipediaData, 'Chicago', 'city');
+    expect(completeness.recoveryRequired).toBe(true);
+    expect(completeness.status).not.toBe('COMPLETE');
+
+    // evaluateDescriptionReadiness marks raw Wikipedia provenance as not ready
+    const readiness = evaluateDescriptionReadiness(rawWikipediaData.description, 'Chicago', {
+      enrichmentStatus: 'required',
+      provenance: 'wikipedia'
+    });
+    expect(readiness.isReady).toBe(false);
+
+    // 2. Once enriched by LM Studio, completeness is COMPLETE and description is ready
+    const enrichedData = {
+      name: 'Chicago',
+      entityType: 'city',
+      description: 'Chicago is the most populous city in Illinois and one of the largest metropolitan areas in the United States. Incorporated as a city in 1837 near a portage between the Great Lakes and the Mississippi River watershed, Chicago grew rapidly.',
+      descriptionProvenance: 'lmstudio',
+      enrichmentStatus: 'completed' as const,
+      enrichmentSource: 'lmstudio' as const,
+      notable: [{ title: 'Architectural Innovation', description: 'Home of the first skyscraper.' }],
+      contextNotes: ['Historical Context: Midwest hub'],
+      climate: { name: 'Humid continental', description: 'Four distinct seasons', koppenCode: 'Dfa' }
+    };
+
+    const enrichedCompleteness = evaluateEnrichmentCompleteness(enrichedData, 'Chicago', 'city');
+    expect(enrichedCompleteness.recoveryRequired).toBe(false);
+    expect(enrichedCompleteness.status).toBe('COMPLETE');
+
+    const enrichedReadiness = evaluateDescriptionReadiness(enrichedData.description, 'Chicago', {
+      enrichmentStatus: 'completed',
+      provenance: 'lmstudio'
+    });
+    expect(enrichedReadiness.isReady).toBe(true);
+  });
+
+  it('Pipeline merges LM Studio description, notable facts, and climate while preserving authoritative population', async () => {
+    // Mock LM Studio returning synthesized Chicago response
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('wikipedia.org')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            query: {
+              pages: {
+                "123": {
+                  title: "Chicago",
+                  extract: "Chicago is the most populous city in the U.S. state of Illinois and in the Midwestern United States. Located on the western shore of Lake Michigan, it is the third-most populous city in the United States."
+                }
+              }
+            }
+          })
+        } as unknown as Response;
+      }
+
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  name: 'Chicago',
+                  locationString: 'Chicago, Illinois, United States',
+                  description: 'Chicago is the most populous city in Illinois and one of the largest metropolitan areas in the United States. Incorporated as a city in 1837 near a portage between the Great Lakes and the Mississippi River watershed, Chicago grew rapidly.',
+                  population: null,
+                  climate: {
+                    name: 'Humid continental climate',
+                    description: 'Four distinct seasons with hot summers and cold winters',
+                    koppenCode: 'Dfa'
+                  },
+                  notable: [
+                    {
+                      title: 'Chicago School Architecture',
+                      description: 'Pioneered skyscraper development in the late 19th century.'
+                    }
+                  ]
+                })
+              }
+            }
+          ]
+        })
+      } as unknown as Response;
+    });
+
+    const result = await runSearchPipeline({
+      rawQuery: 'Chicago'
+    });
+
+    expect(result.isValid).toBe(true);
+    const finalData = (result as any).finalData;
+    expect(finalData).toBeDefined();
+
+    // 1. AI description replaces raw Wikipedia lead
+    expect(finalData.description).toContain('Chicago is the most populous city in Illinois');
+    expect(finalData.description).not.toContain('third-most populous city in the United States');
+
+    // 2. Status & provenance marked as completed/lmstudio
+    expect(finalData.enrichmentStatus).toBe('completed');
+    expect(finalData.enrichmentSource).toBe('lmstudio');
+
+    // 3. Notable facts & climate retained
+    expect(finalData.notable?.length).toBeGreaterThan(0);
+    expect(finalData.notable[0].title).toBe('Chicago School Architecture');
+    expect(finalData.climate?.name).toBe('Humid continental climate');
+
+    // 4. Authoritative deterministic population preserved (2746388)
+    expect(finalData.population?.value).toBe(2746388);
+  });
+
+  it('Pipeline retains raw Wikipedia description as fallback when LM Studio recovery fails', async () => {
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('wikipedia.org')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            query: {
+              pages: {
+                "123": {
+                  title: "Chicago",
+                  extract: "Chicago is the most populous city in the U.S. state of Illinois and in the Midwestern United States. Located on the western shore of Lake Michigan, it is the third-most populous city in the United States."
+                }
+              }
+            }
+          })
+        } as unknown as Response;
+      }
+
+      // LM Studio returns failure/empty
+      return {
+        ok: false,
+        status: 500,
+        text: async () => 'Internal Server Error'
+      } as unknown as Response;
+    });
+
+    const result = await runSearchPipeline({
+      rawQuery: 'Chicago'
+    });
+
+    expect(result.isValid).toBe(true);
+    const finalData = (result as any).finalData;
+    expect(finalData).toBeDefined();
+
+    // Fallback retains Wikipedia text
+    expect(finalData.description).toContain('Chicago is the most populous city in the U.S. state of Illinois');
+    expect(finalData.enrichmentStatus).toBe('fallback');
+    expect(finalData.enrichmentSource).toBe('wikipedia');
+
+    // Authoritative population still preserved
+    expect(finalData.population?.value).toBe(2746388);
+  });
+
+  it('Does not re-enrich an already completed AI result', () => {
+    const enrichedData = {
+      name: 'Chicago',
+      entityType: 'city',
+      description: 'Chicago is the most populous city in Illinois and one of the largest metropolitan areas in the United States.',
+      descriptionProvenance: 'lmstudio',
+      enrichmentStatus: 'completed' as const,
+      enrichmentSource: 'lmstudio' as const,
+      notable: [{ title: 'Chicago School Architecture', description: 'Skyscrapers' }],
+      climate: { name: 'Humid continental' }
+    };
+
+    const completeness = evaluateEnrichmentCompleteness(enrichedData, 'Chicago', 'city');
+    expect(completeness.recoveryRequired).toBe(false);
+
+    const readiness = evaluateDescriptionReadiness(enrichedData.description, 'Chicago', {
+      enrichmentStatus: 'completed',
+      provenance: 'lmstudio'
+    });
+    expect(readiness.isReady).toBe(true);
+  });
+
+  describe('LM Studio DETECT Models & Dynamic Model Selection', () => {
+    it('1. Successfully detects model from OpenAI-compatible { data: [{ id: "qwen2.5-7b-instruct-1m" }] } response', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: [
+            {
+              id: 'qwen2.5-7b-instruct-1m',
+              object: 'model',
+              owned_by: 'organization_owner'
+            }
+          ],
+          object: 'list'
+        })
+      });
+
+      const result = await detectLMStudioModels('http://192.168.1.85:1234', mockFetch as any);
+      expect(result.outcome).toBe('SUCCESS');
+      expect(result.models).toEqual(['qwen2.5-7b-instruct-1m']);
+      expect(result.selectedModel).toBe('qwen2.5-7b-instruct-1m');
+      expect(result.message).toContain('Detected 1 model: qwen2.5-7b-instruct-1m');
+      expect(mockFetch).toHaveBeenCalledWith('http://192.168.1.85:1234/v1/models');
+    });
+
+    it('2. Supports direct array format [{ id: "custom-model" }]', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => [
+          { id: 'llama-3.1-8b' },
+          { id: 'mistral-7b-instruct' }
+        ]
+      });
+
+      const result = await detectLMStudioModels('http://localhost:1234/v1', mockFetch as any);
+      expect(result.outcome).toBe('SUCCESS');
+      expect(result.models).toEqual(['llama-3.1-8b', 'mistral-7b-instruct']);
+      expect(result.selectedModel).toBe('llama-3.1-8b');
+      expect(result.message).toContain('Detected 2 models: llama-3.1-8b');
+    });
+
+    it('3. Handles empty data list appropriately as NO_MODELS', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [], object: 'list' })
+      });
+
+      const result = await detectLMStudioModels('http://192.168.1.85:1234', mockFetch as any);
+      expect(result.outcome).toBe('NO_MODELS');
+      expect(result.models).toEqual([]);
+      expect(result.message).toContain('No models found at endpoint');
+    });
+
+    it('4. Handles "No models loaded" HTTP 400 error cleanly', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        text: async () => 'No models loaded. Please load a model in LM Studio.'
+      });
+
+      const result = await detectLMStudioModels('http://localhost:1234/v1', mockFetch as any);
+      expect(result.outcome).toBe('NO_MODELS');
+      expect(result.models).toEqual([]);
+      expect(result.message).toBe('No model loaded. Please load a model in LM Studio.');
+    });
+
+    it('5. Handles HTTP 500 or network failure gracefully', async () => {
+      const mockFetch = vi.fn().mockRejectedValue(new Error('Failed to fetch'));
+
+      const result = await detectLMStudioModels('http://192.168.1.85:1234', mockFetch as any);
+      expect(result.outcome).toBe('ERROR');
+      expect(result.models).toEqual([]);
+      expect(result.message).toBe('Failed to fetch');
+    });
+
+    it('6. Desktop client preserves direct localhost endpoint and successfully detects model', async () => {
+      const originalWindow = global.window;
+      try {
+        (global as any).window = {
+          location: {
+            hostname: 'localhost',
+            origin: 'http://localhost:3000'
+          }
+        };
+
+        const mockFetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: [
+              {
+                id: 'qwen2.5-7b-instruct-1m',
+                object: 'model',
+                owned_by: 'organization_owner'
+              }
+            ],
+            object: 'list'
+          })
+        });
+
+        const result = await detectLMStudioModels('http://localhost:1234/v1', mockFetch as any);
+        expect(result.outcome).toBe('SUCCESS');
+        expect(result.models).toEqual(['qwen2.5-7b-instruct-1m']);
+        expect(result.selectedModel).toBe('qwen2.5-7b-instruct-1m');
+        expect(mockFetch).toHaveBeenCalledWith('http://localhost:1234/v1/models');
+      } finally {
+        (global as any).window = originalWindow;
+      }
+    });
+
+    it('7. Falls back to direct LM Studio endpoint if proxied request returns 500 Internal Server Error', async () => {
+      const originalWindow = global.window;
+      try {
+        (global as any).window = {
+          location: {
+            hostname: '192.168.1.50',
+            origin: 'http://192.168.1.50:3000'
+          }
+        };
+
+        // First call to /api/lmstudio/v1/models returns 500 Internal Server Error (Vite proxy error)
+        // Second call to http://localhost:1234/v1/models succeeds with 200 OK
+        const mockFetch = vi.fn().mockImplementation((url: string) => {
+          if (url.startsWith('/api/lmstudio')) {
+            return Promise.resolve({
+              ok: false,
+              status: 500,
+              statusText: 'Internal Server Error',
+              text: async () => 'Internal Server Error'
+            });
+          }
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 'qwen2.5-7b-instruct-1m',
+                  object: 'model',
+                  owned_by: 'organization_owner'
+                }
+              ],
+              object: 'list'
+            })
+          });
+        });
+
+        const result = await detectLMStudioModels('http://localhost:1234/v1', mockFetch as any);
+        expect(result.outcome).toBe('SUCCESS');
+        expect(result.models).toEqual(['qwen2.5-7b-instruct-1m']);
+        expect(result.selectedModel).toBe('qwen2.5-7b-instruct-1m');
+        expect(result.message).toContain('Detected 1 model: qwen2.5-7b-instruct-1m');
+      } finally {
+        (global as any).window = originalWindow;
+      }
+    });
   });
 });

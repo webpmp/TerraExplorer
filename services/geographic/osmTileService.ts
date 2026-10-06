@@ -309,6 +309,7 @@ export class OSMTileService {
 
   /**
    * Returns list of tile URLs for a given geographic center, zoom, and screen dimensions.
+   * Tight bounds with 1-tile buffer to eliminate unnecessary tile downloads.
    */
   public getTileUrlsForViewport(
     lat: number,
@@ -324,17 +325,24 @@ export class OSMTileService {
     const exactY = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n;
 
     const TILE_PX = 256;
-    const tilesX = Math.ceil(viewportWidth / (2 * TILE_PX)) + 2;
-    const tilesY = Math.ceil(viewportHeight / (2 * TILE_PX)) + 2;
+    const halfWidthTiles = (viewportWidth / 2) / TILE_PX;
+    const halfHeightTiles = (viewportHeight / 2) / TILE_PX;
+
+    const minTileX = Math.floor(exactX - halfWidthTiles) - 1;
+    const maxTileX = Math.floor(exactX + halfWidthTiles) + 1;
+    const minTileY = Math.max(0, Math.floor(exactY - halfHeightTiles) - 1);
+    const maxTileY = Math.min(n - 1, Math.floor(exactY + halfHeightTiles) + 1);
 
     const urls: string[] = [];
-    for (let dx = -tilesX; dx <= tilesX; dx++) {
-      for (let dy = -tilesY; dy <= tilesY; dy++) {
-        const x = Math.floor(exactX) + dx;
-        const y = Math.floor(exactY) + dy;
-        if (y < 0 || y >= n) continue;
+    const seen = new Set<string>();
+    for (let x = minTileX; x <= maxTileX; x++) {
+      for (let y = minTileY; y <= maxTileY; y++) {
         const wrappedX = ((x % n) + n) % n;
-        urls.push(this.getTileUrl(zoom, wrappedX, y, skin));
+        const key = `${zoom}:${wrappedX}:${y}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          urls.push(this.getTileUrl(zoom, wrappedX, y, skin));
+        }
       }
     }
     return urls;
@@ -342,7 +350,7 @@ export class OSMTileService {
 
   /**
    * Prefetch and warm the browser image cache for a destination viewport's tile set.
-   * Runs non-blocking in the background so tiles are cached before the camera arrives.
+   * Runs non-blocking in the background with concurrency control.
    */
   public prefetchViewportTiles(
     lat: number,
@@ -356,20 +364,30 @@ export class OSMTileService {
       return Promise.resolve();
     }
     const urls = this.getTileUrlsForViewport(lat, lng, zoom, skin, viewportWidth, viewportHeight);
-    return Promise.all(
-      urls.map((url) => {
-        return new Promise<void>((resolve) => {
-          const img = new Image();
-          img.onload = () => resolve();
-          img.onerror = () => resolve();
-          img.src = url;
-        });
-      })
-    ).then(() => undefined);
+
+    // Chunk requests to prevent saturating HTTP connections
+    const CONCURRENCY = 4;
+    let index = 0;
+
+    const loadNext = (): Promise<void> => {
+      if (index >= urls.length) return Promise.resolve();
+      const url = urls[index++];
+      return new Promise<void>((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve();
+        img.onerror = () => resolve();
+        img.src = url;
+      }).then(() => loadNext());
+    };
+
+    const workers = Array.from({ length: Math.min(CONCURRENCY, urls.length) }, () => loadNext());
+    return Promise.all(workers).then(() => undefined);
   }
 
+  private inFlightPromises = new Map<string, Promise<THREE.Texture | null>>();
+
   /**
-   * Fetch and create Three.js Texture with LRU caching and concurrency limiter
+   * Fetch and create Three.js Texture with LRU caching, in-flight deduplication, and concurrency limiter
    */
   public async fetchTileTexture(
     z: number,
@@ -387,80 +405,92 @@ export class OSMTileService {
 
     if (signal?.aborted) return null;
 
-    const url = this.getTileUrl(z, x, y, skin);
+    // Deduplicate in-flight requests: attach to existing in-progress Promise
+    const pending = this.inFlightPromises.get(key);
+    if (pending) {
+      return pending;
+    }
 
-    if (this.activeRequestCount >= MAX_CONCURRENT_REQUESTS) {
-      await new Promise<void>((resolve, reject) => {
-        const interval = setInterval(() => {
-          if (signal?.aborted) {
-            clearInterval(interval);
+    const fetchPromise = (async () => {
+      const url = this.getTileUrl(z, x, y, skin);
+
+      if (this.activeRequestCount >= MAX_CONCURRENT_REQUESTS) {
+        await new Promise<void>((resolve, reject) => {
+          const interval = setInterval(() => {
+            if (signal?.aborted) {
+              clearInterval(interval);
+              reject(new DOMException('Aborted', 'AbortError'));
+            } else if (this.activeRequestCount < MAX_CONCURRENT_REQUESTS) {
+              clearInterval(interval);
+              resolve();
+            }
+          }, 20);
+        }).catch(() => null);
+      }
+
+      if (signal?.aborted) return null;
+
+      this.activeRequestCount++;
+      const abortCtrl = new AbortController();
+      this.inFlightRequests.set(key, abortCtrl);
+
+      try {
+        const texture = await new Promise<THREE.Texture>((resolve, reject) => {
+          const onAbort = () => {
             reject(new DOMException('Aborted', 'AbortError'));
-          } else if (this.activeRequestCount < MAX_CONCURRENT_REQUESTS) {
-            clearInterval(interval);
-            resolve();
+          };
+          signal?.addEventListener('abort', onAbort);
+
+          this.textureLoader.load(
+            url,
+            (tex) => {
+              signal?.removeEventListener('abort', onAbort);
+              tex.colorSpace = THREE.SRGBColorSpace;
+              tex.minFilter = THREE.LinearFilter;
+              tex.magFilter = THREE.LinearFilter;
+              tex.generateMipmaps = false;
+              resolve(tex);
+            },
+            undefined,
+            (err) => {
+              signal?.removeEventListener('abort', onAbort);
+              reject(err);
+            }
+          );
+        });
+
+        if (this.cache.size >= MAX_CACHE_ENTRIES) {
+          let oldestKey: string | null = null;
+          let oldestTime = Infinity;
+          for (const [k, v] of this.cache.entries()) {
+            if (v.timestamp < oldestTime) {
+              oldestTime = v.timestamp;
+              oldestKey = k;
+            }
           }
-        }, 20);
-      }).catch(() => null);
-    }
-
-    if (signal?.aborted) return null;
-
-    this.activeRequestCount++;
-    const abortCtrl = new AbortController();
-    this.inFlightRequests.set(key, abortCtrl);
-
-    try {
-      const texture = await new Promise<THREE.Texture>((resolve, reject) => {
-        const onAbort = () => {
-          reject(new DOMException('Aborted', 'AbortError'));
-        };
-        signal?.addEventListener('abort', onAbort);
-
-        this.textureLoader.load(
-          url,
-          (tex) => {
-            signal?.removeEventListener('abort', onAbort);
-            tex.colorSpace = THREE.SRGBColorSpace;
-            tex.minFilter = THREE.LinearFilter;
-            tex.magFilter = THREE.LinearFilter;
-            tex.generateMipmaps = false;
-            resolve(tex);
-          },
-          undefined,
-          (err) => {
-            signal?.removeEventListener('abort', onAbort);
-            reject(err);
-          }
-        );
-      });
-
-      if (this.cache.size >= MAX_CACHE_ENTRIES) {
-        let oldestKey: string | null = null;
-        let oldestTime = Infinity;
-        for (const [k, v] of this.cache.entries()) {
-          if (v.timestamp < oldestTime) {
-            oldestTime = v.timestamp;
-            oldestKey = k;
+          if (oldestKey) {
+            const oldEntry = this.cache.get(oldestKey);
+            oldEntry?.texture.dispose();
+            this.cache.delete(oldestKey);
           }
         }
-        if (oldestKey) {
-          const oldEntry = this.cache.get(oldestKey);
-          oldEntry?.texture.dispose();
-          this.cache.delete(oldestKey);
-        }
-      }
 
-      this.cache.set(key, { texture, timestamp: Date.now() });
-      return texture;
-    } catch (e: any) {
-      if (e?.name !== 'AbortError') {
-        console.warn(`[OSM Tile] Failed to load tile ${key}:`, e);
+        this.cache.set(key, { texture, timestamp: Date.now() });
+        return texture;
+      } catch (e: any) {
+        if (e?.name !== 'AbortError') {
+          console.warn(`[OSM Tile] Failed to load tile ${key}:`, e);
+        }
+        return null;
+      } finally {
+        this.activeRequestCount = Math.max(0, this.activeRequestCount - 1);
+        this.inFlightRequests.delete(key);
+        this.inFlightPromises.delete(key);
       }
-      return null;
-    } finally {
-      this.activeRequestCount = Math.max(0, this.activeRequestCount - 1);
-      this.inFlightRequests.delete(key);
-    }
+    })();
+
+    this.inFlightPromises.set(key, fetchPromise);
+    return fetchPromise;
   }
 
   public cancelAll(): void {
@@ -468,6 +498,7 @@ export class OSMTileService {
       ctrl.abort();
     }
     this.inFlightRequests.clear();
+    this.inFlightPromises.clear();
     this.activeRequestCount = 0;
   }
 
@@ -476,6 +507,7 @@ export class OSMTileService {
       item.texture.dispose();
     }
     this.cache.clear();
+    this.inFlightPromises.clear();
   }
 }
 

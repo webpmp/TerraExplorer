@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { runSearchPipeline } from '../pipeline';
 import { routeIntentAndExtractEntity } from '../geminiService';
 import { validateHistoricalCoordinate } from '../geographic/historicalCoordinateValidator';
+import * as geoResolver from '../geographic/geographicResolver';
 
 describe('Strict Runtime Verification of 5 Target Queries', () => {
   it('Query 1: "Where was the Santa Maria found?"', async () => {
@@ -342,5 +343,93 @@ describe('Strict Runtime Verification of 5 Target Queries', () => {
     const lines5 = getCleanDescriptionLines(infoEverest);
     expect(lines5.length).toBe(1);
     expect(lines5[0]).toBe('Mount Everest is Earth\'s highest mountain above sea level, located in the Mahalangur Himal sub-range of the Himalayas.');
+  });
+
+  it('Target Queries: Times Square, Dallas, Cairo, Budapest, HMS Victor', async () => {
+    // 1. Times Square
+    const rawTimesSquare = 'Show me Times Square';
+    const routedTimesSquare = routeIntentAndExtractEntity(rawTimesSquare);
+    expect(routedTimesSquare.entity).toBe('Times Square');
+    const resTimesSquare = await runSearchPipeline({ rawQuery: rawTimesSquare, intent: routedTimesSquare.intent, entity: routedTimesSquare.entity });
+    expect(resTimesSquare.isValid).toBe(true);
+    expect(resTimesSquare.entity?.subject?.primaryLocation?.location?.coordinates?.lat).toBeCloseTo(40.758, 2);
+    expect(resTimesSquare.entity?.subject?.primaryLocation?.location?.coordinates?.lng).toBeCloseTo(-73.9855, 2);
+
+    // 1b. Times Square with animated suggestion dots
+    const rawTimesSquareDots = 'Show me Times Square . . .';
+    const routedTimesSquareDots = routeIntentAndExtractEntity(rawTimesSquareDots);
+    expect(routedTimesSquareDots.entity).toBe('Times Square');
+    const resTimesSquareDots = await runSearchPipeline({ rawQuery: rawTimesSquareDots, intent: routedTimesSquareDots.intent, entity: routedTimesSquareDots.entity });
+    expect(resTimesSquareDots.isValid).toBe(true);
+    expect(resTimesSquareDots.entity?.subject?.primaryLocation?.location?.coordinates?.lat).toBeCloseTo(40.758, 2);
+
+    // 2. Dallas
+    const rawDallas = 'Dallas';
+    const routedDallas = routeIntentAndExtractEntity(rawDallas);
+    expect(routedDallas.entity).toBe('Dallas');
+    const resDallas = await runSearchPipeline({ rawQuery: rawDallas, intent: routedDallas.intent, entity: routedDallas.entity });
+    expect(resDallas.isValid).toBe(true);
+    expect(resDallas.entity?.subject?.primaryLocation?.location?.coordinates?.lat).toBeCloseTo(32.7767, 2);
+    expect(resDallas.entity?.subject?.primaryLocation?.location?.coordinates?.lng).toBeCloseTo(-96.7970, 2);
+
+    // 3. Cairo / Find Cairo...
+    const rawCairo = 'Find Cairo...';
+    const routedCairo = routeIntentAndExtractEntity(rawCairo);
+    expect(routedCairo.entity).toBe('Cairo');
+    const resCairo = await runSearchPipeline({ rawQuery: rawCairo, intent: routedCairo.intent, entity: routedCairo.entity });
+    expect(resCairo.isValid).toBe(true);
+    expect(resCairo.entity?.subject?.primaryLocation?.location?.coordinates?.lat).toBeCloseTo(30.0444, 2);
+    expect(resCairo.entity?.subject?.primaryLocation?.location?.coordinates?.lng).toBeCloseTo(31.2357, 2);
+
+    // 4. Budapest / Find Budapest...
+    const rawBudapest = 'Find Budapest...';
+    const routedBudapest = routeIntentAndExtractEntity(rawBudapest);
+    expect(routedBudapest.entity).toBe('Budapest');
+    const resBudapest = await runSearchPipeline({ rawQuery: rawBudapest, intent: routedBudapest.intent, entity: routedBudapest.entity });
+    expect(resBudapest.isValid).toBe(true);
+    expect(resBudapest.entity?.subject?.primaryLocation?.location?.coordinates?.lat).toBeCloseTo(47.4979, 2);
+    expect(resBudapest.entity?.subject?.primaryLocation?.location?.coordinates?.lng).toBeCloseTo(19.0402, 2);
+
+    // 6. Find hong kong (authoritative general geocoder resolution)
+    const rawHongKong = 'Find hong kong';
+    const routedHongKong = routeIntentAndExtractEntity(rawHongKong);
+    expect(routedHongKong.entity.toLowerCase()).toBe('hong kong');
+    const geoSpy = vi.spyOn(geoResolver, 'resolveGeographicEntity').mockResolvedValueOnce({
+      name: 'Hong Kong, Central and Western District, Hong Kong Island, Hong Kong, China',
+      coordinates: { lat: 22.3193, lng: 114.1694, source: 'geocoder' },
+      entityType: 'city',
+      source: geoResolver.GeographicSource.NOMINATIM,
+      identityStatus: 'verified',
+      confidence: 0.95,
+      suggestedZoom: 8,
+      normalizedQuery: 'hong kong',
+      diagnostics: {
+        resolverVersion: 1,
+        matchedName: 'Hong Kong',
+        confidenceAdjustments: [],
+        warnings: [],
+        ambiguity: { detected: false, candidates: [] }
+      }
+    });
+    const resHongKong = await runSearchPipeline({ rawQuery: rawHongKong, intent: routedHongKong.intent, entity: routedHongKong.entity });
+    geoSpy.mockRestore();
+    expect(resHongKong.isValid).toBe(true);
+    expect(resHongKong.mode).toBe('location');
+    expect((resHongKong as any).finalData).toBeDefined();
+    expect((resHongKong as any).finalData.coordinates).toBeDefined();
+    expect((resHongKong as any).finalData.coordinates.lat).toBeCloseTo(22.3193, 1);
+    expect((resHongKong as any).finalData.coordinates.lng).toBeCloseTo(114.1694, 1);
+
+    // 7. Find Times Square
+    const rawFindTimesSquare = 'Find Times Square';
+    const routedFindTimesSquare = routeIntentAndExtractEntity(rawFindTimesSquare);
+    expect(routedFindTimesSquare.entity).toBe('Times Square');
+    const resFindTimesSquare = await runSearchPipeline({ rawQuery: rawFindTimesSquare, intent: routedFindTimesSquare.intent, entity: routedFindTimesSquare.entity });
+    expect(resFindTimesSquare.isValid).toBe(true);
+    expect(resFindTimesSquare.mode).toBe('location');
+    expect((resFindTimesSquare as any).finalData).toBeDefined();
+    expect((resFindTimesSquare as any).finalData.coordinates).toBeDefined();
+    expect((resFindTimesSquare as any).finalData.coordinates.lat).toBeCloseTo(40.758, 2);
+    expect((resFindTimesSquare as any).finalData.coordinates.lng).toBeCloseTo(-73.9855, 2);
   });
 });

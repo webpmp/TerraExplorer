@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { SkinType } from '../types';
 import { vector3ToLatLng } from '../utils/globeCoordinates';
 import { documentaryController } from '../services/documentaryController';
+import { osmTelemetry } from '../services/osmTelemetryService';
 
 export const MIN_TRANSITION_DURATION = 900;
 export const MAX_TRANSITION_WAIT = 8000;
@@ -824,23 +825,26 @@ export const OSMTransitionFog: React.FC<OSMTransitionFogProps> = ({ skin, isMapR
       now
     });
 
-    // Smooth organic reveal if camera arrived at street level (dist <= 1.35) during a hold
-    if (canReveal && dist <= 1.35 && revealStartTimeRef.current) {
+    // Smooth organic reveal once canReveal is satisfied and camera has reached transition threshold (dist <= 1.55)
+    if (canReveal && dist <= 1.55 && revealStartTimeRef.current) {
       const revealProgress = Math.min(1, (now - revealStartTimeRef.current) / 450);
-      if (revealProgress < 1) {
-        const nonLinearFade = 1 - Math.pow(revealProgress, 1.5);
-        nextState = {
-          phase: 3,
-          opacity: 0.92 * Math.max(0, nonLinearFade),
-          radialOutwardFactor: 1.12 + Math.pow(revealProgress, 0.85) * 3.6,
-          expansionScale: 1.16 + revealProgress * 0.65,
-          phase3Progress: revealProgress,
-          isActive: nonLinearFade > 0.001
-        };
+      const nonLinearFade = Math.max(0, 1 - Math.pow(revealProgress, 1.5));
+      nextState = {
+        phase: revealProgress >= 1 ? 0 : 3,
+        opacity: 0.92 * nonLinearFade,
+        radialOutwardFactor: 1.12 + Math.pow(revealProgress, 0.85) * 3.6,
+        expansionScale: 1.16 + revealProgress * 0.65,
+        phase3Progress: revealProgress,
+        isActive: nonLinearFade > 0.001
+      };
+      if (revealProgress >= 1) {
+        osmTelemetry.recordTimelineEvent('fogEnd');
+        osmTelemetry.recordTimelineEvent('userPerceivedOSMTransitionMs');
       }
     }
 
     fogStateRef.current = nextState;
+    osmTelemetry.recordFogPhase(nextState.phase, nextState.opacity);
 
     if (nextState.phase !== lastLoggedPhaseRef.current) {
       lastLoggedPhaseRef.current = nextState.phase;

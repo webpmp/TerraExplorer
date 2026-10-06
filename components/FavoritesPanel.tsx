@@ -40,7 +40,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
       setEditingRoute(JSON.parse(JSON.stringify(initialEditingRoute)));
     }
   }, [initialEditingRoute]);
-  const isRetro = skin !== 'modern';
+  const isRetro = skin === 'retro-green' || skin === 'retro-amber';
 
   const themes = {
     'modern': {
@@ -386,7 +386,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
 
   return (
     <>
-      <div className="relative w-88 md:w-96 max-h-1/2 flex flex-col shrink min-h-0 animate-in slide-in-from-left-8 fade-in duration-300 transition-opacity duration-300 pointer-events-auto">
+      <div className="relative w-88 md:w-96 max-h-1/2 flex flex-col shrink min-h-0 animate-in slide-in-from-left-8 fade-in duration-300 transition-opacity duration-300 pointer-events-auto favorites-panel-container" data-testid="favorites-panel">
           <div className={`${theme.container} relative flex flex-col flex-1 max-h-full shrink min-h-0 ${skin === 'parchment' ? '[isolation:isolate]' : 'overflow-hidden'}`}>
               {skin === 'parchment' && (
                 <div className="parchment-background" aria-hidden="true" />
@@ -435,7 +435,7 @@ const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
       {/* Route Editor Modal */}
       {editingRoute && (
          <div 
-           className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 pt-[281px] pb-52 md:pb-56 pointer-events-none"
+           className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 pt-[281px] pb-52 md:pb-56 route-editor-modal-container pointer-events-none"
          >
              <div 
                className={`relative w-full max-w-2xl max-h-full flex flex-col shrink min-h-0 pointer-events-auto ${skin === 'parchment' ? '[isolation:isolate]' : 'overflow-hidden'} ${theme.modal}`}

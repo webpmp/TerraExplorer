@@ -11,6 +11,7 @@ import { validateGeographicResolution } from './geographicValidation';
 import { isLowSignificancePoi } from './classification';
 import { CoordinateSource, GeographicIdentityStatus } from '../../types';
 import { getHistoricalEntityKnowledge } from './historicalCoordinateValidator';
+import { logTerraSearchDebug } from '../searchDebugTracer';
 
 export const GeographicSource = {
   CACHE: "cache",
@@ -243,15 +244,53 @@ async function fetchNominatimThrottled(url: string): Promise<any> {
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), NOMINATIM_TIMEOUT_MS);
+    const startReqTime = Date.now();
     
+    logTerraSearchDebug({
+      stage: 'fetchNominatimThrottled',
+      status: 'NETWORK_START',
+      networkInfo: { url, method: 'GET' }
+    });
+
     let response;
     try {
+      const headers: Record<string, string> = { 'Accept': 'application/json' };
+      if (typeof window === 'undefined') {
+        headers['User-Agent'] = NOMINATIM_USER_AGENT;
+      }
       response = await fetch(url, {
-        headers: { 'User-Agent': NOMINATIM_USER_AGENT, 'Accept': 'application/json' },
+        headers,
         signal: controller.signal,
       });
-    } catch (err) {
+      const elapsedMs = Date.now() - startReqTime;
+      logTerraSearchDebug({
+        stage: 'fetchNominatimThrottled',
+        status: response.ok ? 'NETWORK_COMPLETE' : 'NETWORK_ERROR',
+        category: response.ok ? undefined : '4_NETWORK_FAILED',
+        networkInfo: {
+          url,
+          status: response.status,
+          ok: response.ok,
+          elapsedMs
+        }
+      });
+      console.log(`[Nominatim Response] url="${url}" status=${response.status} ok=${response.ok} elapsed=${elapsedMs}ms`);
+    } catch (err: any) {
       clearTimeout(timeoutId);
+      const elapsedMs = Date.now() - startReqTime;
+      logTerraSearchDebug({
+        stage: 'fetchNominatimThrottled',
+        status: 'NETWORK_ERROR',
+        category: '4_NETWORK_FAILED',
+        networkInfo: {
+          url,
+          elapsedMs,
+          error: err?.message || String(err)
+        },
+        errorMessage: `Fetch error for ${url}: ${err?.message || err}`,
+        errorStack: err?.stack
+      });
+      console.warn(`[Nominatim Fetch Error] url="${url}" error="${err?.name || err?.message || err}"`);
       return null;
     }
     
@@ -277,6 +316,12 @@ async function fetchNominatimThrottled(url: string): Promise<any> {
 }
 
 async function queryNominatim(query: string, normalizedQuery: string): Promise<GeographicResolution | null | { status: 'rate_limited', result: null }> {
+  logTerraSearchDebug({
+    stage: 'queryNominatim',
+    query,
+    status: 'ENTRY',
+    provider: 'Nominatim'
+  });
   const params = new URLSearchParams({
     q: query, format: 'jsonv2', limit: '3', 'accept-language': 'en', addressdetails: '1', extratags: '1'
   });
@@ -286,10 +331,26 @@ async function queryNominatim(query: string, normalizedQuery: string): Promise<G
   const results = await fetchNominatimThrottled(url);
   
   if (results && results._rate_limited) {
+    logTerraSearchDebug({
+      stage: 'queryNominatim',
+      query,
+      status: 'NO_RESULT',
+      category: '4_NETWORK_FAILED',
+      errorMessage: 'Nominatim rate limited (429)'
+    });
     return { status: 'rate_limited', result: null };
   }
 
-  if (!Array.isArray(results) || results.length === 0) return null;
+  if (!Array.isArray(results) || results.length === 0) {
+    logTerraSearchDebug({
+      stage: 'queryNominatim',
+      query,
+      status: 'NO_RESULT',
+      category: '3_GEOCODER_NO_RESULT',
+      details: { rawResultCount: Array.isArray(results) ? results.length : 0 }
+    });
+    return null;
+  }
 
   const scored = results.map(r => {
     const conf = calculateNominatimConfidence(r, query);
@@ -598,6 +659,12 @@ export async function resolveGeographicEntity(query: string): Promise<Geographic
   if (!query || typeof query !== 'string') return null;
   const startMs = Date.now();
 
+  logTerraSearchDebug({
+    stage: 'resolveGeographicEntity',
+    query,
+    status: 'ENTRY'
+  });
+
   const normalizedQuery = normalizeGeographicQuery(query);
   const aliasInfo = resolveAlias(normalizedQuery);
   const cacheKey = aliasInfo.canonical;
@@ -619,6 +686,14 @@ export async function resolveGeographicEntity(query: string): Promise<Geographic
   }
 
   if (match) {
+    logTerraSearchDebug({
+      stage: 'resolveGeographicEntity',
+      query,
+      entity: match.name,
+      status: 'SUCCESS',
+      provider: 'DETERMINISTIC_LOCATION_DB',
+      coordinates: { lat: match.lat, lng: match.lng, source: 'deterministic' }
+    });
     const res: GeographicResolution = {
       name: match.name,
       coordinates: { lat: match.lat, lng: match.lng },

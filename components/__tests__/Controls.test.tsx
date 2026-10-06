@@ -947,7 +947,7 @@ describe('Controls Parchment Ring Controls & Layout Separation', () => {
     );
 
     // Verify search container uses standard bottom-2.5
-    expect(html).toContain('class="absolute bottom-2.5 left-0 right-0 z-20 flex flex-col items-center gap-2 pointer-events-none px-4"');
+    expect(html).toContain('class="controls-bottom-container absolute bottom-2.5 left-0 right-0 z-20 flex flex-col items-center gap-2 pointer-events-none px-4"');
     // Ensure no dynamic bottom style like style="bottom: 226px"
     expect(html).not.toMatch(/style="[^"]*bottom:\s*\d+px/);
   });
@@ -1002,7 +1002,7 @@ describe('Controls Parchment Ring Controls & Layout Separation', () => {
       expect(html).not.toContain('data-testid="parchment-ring-controls"');
       expect(html).not.toContain('data-testid="parchment-control-coin"');
       expect(html).not.toContain('coin-alpha.png');
-      expect(html).toContain('class="absolute bottom-2.5 left-0 right-0 z-20 flex flex-col items-center gap-2 pointer-events-none px-4"');
+      expect(html).toContain('class="controls-bottom-container absolute bottom-2.5 left-0 right-0 z-20 flex flex-col items-center gap-2 pointer-events-none px-4"');
       expect(html).toContain('class="flex gap-2 pointer-events-auto"');
     });
   });

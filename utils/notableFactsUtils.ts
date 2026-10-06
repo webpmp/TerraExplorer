@@ -722,9 +722,9 @@ export function isFactSubsumedByText(
   }
 
   // If fact shares specific key numbers/dates (e.g. 1931, 1922, 400000, 1588) with base text and has no novel numbers or entities,
-  // and has substantial overlap (>= 35%), it is repetitive of that specific recorded measurement/event.
+  // and has substantial overlap (>= 65% or at most 1 unmatched concrete word), it is repetitive of that specific recorded measurement/event.
   if (sharedNumbers.length > 0 && significantNovelNumbers.length === 0 && novelNamedEntities.length === 0) {
-    if (matchRatio >= 0.35 || unMatchedConcreteWords.length <= 1) {
+    if (matchRatio >= 0.65 || unMatchedConcreteWords.length <= 1) {
       return true;
     }
   }
@@ -941,7 +941,15 @@ export const filterAdditiveNotableFacts = <T = any>(
     if (
       normDesc.includes('no widely documented') ||
       normDesc.includes('no historical or cultural facts were found') ||
-      normTitle.includes('no widely documented')
+      normTitle.includes('no widely documented') ||
+      normTitle === 'geographic region' ||
+      normTitle === 'coordinates' ||
+      normTitle === 'coordinate' ||
+      normTitle === 'latitude' ||
+      normTitle === 'longitude' ||
+      normTitle === 'latitude and longitude' ||
+      (normTitle === 'population' && /estimated population|population of \d/i.test(parsed.description || '')) ||
+      (normTitle === 'location' && /situated at coordinates|latitude|longitude/i.test(parsed.description || ''))
     ) {
       continue;
     }

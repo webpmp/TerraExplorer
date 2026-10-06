@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Settings as SettingsIcon, X, Server, Newspaper, Film, Volume2, KeyRound, ExternalLink, Map as MapIcon, Palette, Sliders, Sparkles, BookOpen } from 'lucide-react';
+import { Settings as SettingsIcon, X, Server, Newspaper, Film, Volume2, KeyRound, ExternalLink, Map as MapIcon, Palette, Sliders, Sparkles, BookOpen, Bug } from 'lucide-react';
 import { SkinType, UserSettings, AIProvider, NewsProvider, NarrationProviderType } from '../types';
 import { narrationService, KOKORO_VOICES, ORPHEUS_VOICES } from '../services/narrationService';
+import { resolveEffectiveLMStudioUrl } from '../services/geminiService';
 
 interface SettingsPanelProps {
   settings: UserSettings;
@@ -11,6 +12,7 @@ interface SettingsPanelProps {
   onSkinChange?: (skin: SkinType) => void;
   initialTab?: SettingsTab;
   dimmed?: boolean;
+  isDesktop?: boolean;
 }
 
 type SettingsTab = 'general' | 'providers' | 'appearance' | 'audio';
@@ -279,7 +281,111 @@ export const testNewsConnectionService = async (
   }
 };
 
-const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSettings, onClose, skin, onSkinChange, initialTab = 'general', dimmed = false }) => {
+export interface DetectModelsResult {
+  outcome: 'SUCCESS' | 'NO_MODELS' | 'ERROR';
+  models: string[];
+  selectedModel?: string;
+  message: string;
+  status?: number;
+}
+
+export const detectLMStudioModels = async (
+  lmStudioUrl?: string,
+  fetchFn: typeof fetch = fetch
+): Promise<DetectModelsResult> => {
+  if (!lmStudioUrl) {
+    return { outcome: 'ERROR', models: [], message: 'No LM Studio URL provided' };
+  }
+  const effectiveUrl = resolveEffectiveLMStudioUrl(lmStudioUrl);
+  let normalizedBase = effectiveUrl.trim().replace(/\/+$/, '');
+  if (!normalizedBase.endsWith('/v1')) {
+    normalizedBase += '/v1';
+  }
+  try {
+    let res = await fetchFn(`${normalizedBase}/models`);
+    if (!res.ok && effectiveUrl !== lmStudioUrl) {
+      let directBase = lmStudioUrl.trim().replace(/\/+$/, '');
+      if (!directBase.endsWith('/v1')) {
+        directBase += '/v1';
+      }
+      try {
+        const directRes = await fetchFn(`${directBase}/models`);
+        if (directRes.ok) {
+          res = directRes;
+        }
+      } catch {
+        // preserve original error response
+      }
+    }
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => '');
+      if (errorText.toLowerCase().includes('no models loaded') || errorText.includes('No models loaded')) {
+        return { outcome: 'NO_MODELS', models: [], message: 'No model loaded. Please load a model in LM Studio.', status: res.status };
+      }
+      return { outcome: 'ERROR', models: [], message: `Error: ${res.statusText || res.status}`, status: res.status };
+    }
+    const data = await res.json();
+    const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : (Array.isArray(data?.models) ? data.models : []));
+    const models: string[] = list.map((m: any) => {
+      if (typeof m === 'string') return m;
+      if (m && typeof m === 'object' && m.id) return m.id;
+      return null;
+    }).filter(Boolean);
+
+    if (models.length === 0) {
+      return { outcome: 'NO_MODELS', models: [], message: 'No models found at endpoint. Please load a model in LM Studio.', status: res.status };
+    }
+    return {
+      outcome: 'SUCCESS',
+      models,
+      selectedModel: models[0],
+      message: `Detected ${models.length} model${models.length === 1 ? '' : 's'}: ${models[0]}`,
+      status: res.status
+    };
+  } catch (err: any) {
+    if (effectiveUrl !== lmStudioUrl) {
+      try {
+        let directBase = lmStudioUrl.trim().replace(/\/+$/, '');
+        if (!directBase.endsWith('/v1')) {
+          directBase += '/v1';
+        }
+        const directRes = await fetchFn(`${directBase}/models`);
+        if (directRes.ok) {
+          const data = await directRes.json();
+          const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : (Array.isArray(data?.models) ? data.models : []));
+          const models: string[] = list.map((m: any) => {
+            if (typeof m === 'string') return m;
+            if (m && typeof m === 'object' && m.id) return m.id;
+            return null;
+          }).filter(Boolean);
+          if (models.length > 0) {
+            return {
+              outcome: 'SUCCESS',
+              models,
+              selectedModel: models[0],
+              message: `Detected ${models.length} model${models.length === 1 ? '' : 's'}: ${models[0]}`,
+              status: directRes.status
+            };
+          }
+        }
+      } catch {
+        // Ignore fallback error
+      }
+    }
+    return { outcome: 'ERROR', models: [], message: err?.message || 'Connection failed' };
+  }
+};
+
+const SettingsPanel: React.FC<SettingsPanelProps> = ({
+  settings,
+  onUpdateSettings,
+  onClose,
+  skin,
+  onSkinChange,
+  initialTab = 'general',
+  dimmed = false,
+  isDesktop = typeof window !== 'undefined' ? window.innerWidth > 1080 : true
+}) => {
   const isParchment = skin === 'parchment';
   const isRetro = skin === 'retro-green' || skin === 'retro-amber';
 
@@ -313,17 +419,27 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
     if (!settings.lmStudioUrl) return;
     setIsDetectingModels(true);
     try {
-      const res = await fetch(`${settings.lmStudioUrl}/models`);
-      if (res.ok) {
-        const data = await res.json();
-        const models = data.data?.map((m: any) => m.id) || [];
-        setAvailableModels(models);
-        if (models.length > 0 && !settings.lmStudioModel) {
-          onUpdateSettings({ ...settings, lmStudioModel: models[0] });
+      const result = await detectLMStudioModels(settings.lmStudioUrl);
+      if (result.outcome === 'SUCCESS') {
+        setAvailableModels(result.models);
+        const shouldUpdateModel = !settings.lmStudioModel || settings.lmStudioModel === 'local-model' || !result.models.includes(settings.lmStudioModel);
+        if (shouldUpdateModel && result.selectedModel) {
+          onUpdateSettings({ ...settings, lmStudioModel: result.selectedModel });
         }
+        setModelTestStatus('success');
+        setModelTestMessage(result.message);
+      } else if (result.outcome === 'NO_MODELS') {
+        setAvailableModels([]);
+        setModelTestStatus('error');
+        setModelTestMessage(result.message);
+      } else {
+        setModelTestStatus('error');
+        setModelTestMessage(result.message);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error("Failed to detect models", e);
+      setModelTestStatus('error');
+      setModelTestMessage(e?.message || 'Connection failed');
     }
     setIsDetectingModels(false);
   };
@@ -331,12 +447,21 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
   const handleTestModelConnection = async () => {
     setModelTestStatus('testing');
     setModelTestMessage('Testing...');
+    const effectiveUrl = resolveEffectiveLMStudioUrl(settings.lmStudioUrl);
+    let normalizedBase = effectiveUrl.trim().replace(/\/+$/, '');
+    if (!normalizedBase.endsWith('/v1')) {
+      normalizedBase += '/v1';
+    }
     try {
-      const res = await fetch(`${settings.lmStudioUrl}/chat/completions`, {
+      const targetModel = settings.lmStudioModel && settings.lmStudioModel !== 'local-model'
+        ? settings.lmStudioModel
+        : (availableModels.length > 0 ? availableModels[0] : (settings.lmStudioModel || 'local-model'));
+
+      const res = await fetch(`${normalizedBase}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: settings.lmStudioModel || 'local-model',
+          model: targetModel,
           messages: [{ role: 'user', content: 'Ping' }],
           max_tokens: 10
         })
@@ -345,7 +470,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
         setModelTestStatus('success');
         setModelTestMessage('Connection successful!');
       } else {
-        const errorText = await res.text();
+        const errorText = await res.text().catch(() => '');
         setModelTestStatus('error');
         if (errorText.toLowerCase().includes('no models loaded') || errorText.includes('No models loaded')) {
           setModelTestMessage('No model loaded. Please load a model in LM Studio.');
@@ -493,7 +618,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
   const theme = themes[skin];
 
   const containerClasses = `
-    relative w-96 flex flex-col shrink min-h-0 h-[700px] pointer-events-auto transition-all duration-300
+    relative w-96 flex flex-col shrink min-h-0 h-[700px] pointer-events-auto transition-all duration-300 settings-panel-container
     ${theme.container} ${isParchment ? '[isolation:isolate]' : 'overflow-hidden'}
   `;
 
@@ -511,30 +636,32 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
     text-sm font-bold uppercase tracking-wider flex items-center gap-2 mb-4
     ${isParchment ? 'text-[#3e2723]' : ''}
     ${skin === 'modern' ? 'text-white/60' : ''}
-    ${isRetro ? 'text-green-300 border-b border-green-400 pb-1' : ''}
-    ${skin === 'retro-amber' ? 'text-[#ffb000] border-[#ffb000]' : ''}
+    ${skin === 'retro-green' ? 'text-green-300 border-b border-green-400 pb-1' : ''}
+    ${skin === 'retro-amber' ? 'text-[#ffb000] border-b border-[#ffb000] pb-1' : ''}
   `;
 
   const labelClasses = `
     block text-sm font-medium mb-1
     ${isParchment ? 'text-[#3e2723]' : ''}
     ${skin === 'modern' ? 'text-white/80' : ''}
+    ${skin === 'retro-green' ? 'text-green-300 font-retro' : ''}
+    ${skin === 'retro-amber' ? 'text-[#ffb000] font-retro' : ''}
   `;
 
   const inputClasses = `
     w-full px-3 py-2 rounded-lg text-sm transition-colors
     ${isParchment ? 'bg-[#e6d5b8] border border-[#8b5a2b]/30 text-[#3e2723] focus:border-[#8b5a2b] focus:ring-1 focus:ring-[#8b5a2b]' : ''}
     ${skin === 'modern' ? 'bg-black/60 border border-white/20 text-white focus:bg-black/80 focus:border-cyan-400 outline-none' : ''}
-    ${isRetro ? 'bg-transparent border-2 border-green-400 text-green-300 rounded-none focus:outline-none' : ''}
-    ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000]' : ''}
+    ${skin === 'retro-green' ? 'bg-black border-2 border-green-400 text-green-300 placeholder-green-700 font-retro rounded-none focus:outline-none focus:border-green-300 [&>option]:bg-black [&>option]:text-green-300' : ''}
+    ${skin === 'retro-amber' ? 'bg-black border-2 border-[#ffb000] text-[#ffb000] placeholder-amber-700 font-retro rounded-none focus:outline-none focus:border-[#ffb000] [&>option]:bg-black [&>option]:text-[#ffb000]' : ''}
   `;
 
   const sliderClasses = `
-    w-full cursor-pointer
-    ${skin === 'modern' ? 'accent-cyan-400' : ''}
-    ${skin === 'retro-green' ? 'accent-green-400' : ''}
-    ${skin === 'retro-amber' ? 'accent-[#ffb000]' : ''}
-    ${skin === 'parchment' ? 'accent-[#8b5a2b]' : ''}
+    w-full cursor-pointer h-1.5 rounded-lg
+    ${skin === 'modern' ? 'accent-cyan-400 bg-white/20' : ''}
+    ${skin === 'retro-green' ? 'accent-green-400 bg-green-900/50' : ''}
+    ${skin === 'retro-amber' ? 'accent-[#ffb000] bg-amber-900/50' : ''}
+    ${skin === 'parchment' ? 'accent-[#8b5a2b] bg-[#d2b48c]' : ''}
   `;
 
   const handleAiProviderChange = (provider: AIProvider) => {
@@ -546,7 +673,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
   };
 
   return (
-    <div className={containerClasses}>
+    <div className={containerClasses} data-testid="settings-panel">
       {isParchment && (
         <div className="parchment-background" aria-hidden="true" />
       )}
@@ -624,8 +751,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
         {activeTab === 'general' && (
           <div className="space-y-6">
             <div>
-              <div className={`flex items-center justify-between mb-1 ${isRetro ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-[#ffb000]' : ''}`}>
-                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#3e2723]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${isRetro ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
+              <div className={`flex items-center justify-between mb-1 ${skin === 'retro-green' ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-b border-[#ffb000] pb-1' : ''}`}>
+                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#3e2723]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${skin === 'retro-green' ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
                   <Film size={16} />
                   <span>DOC MODE</span>
                 </div>
@@ -643,26 +770,32 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                     settings.documentaryMode
                       ? isParchment
                         ? 'bg-[#8b5a2b]'
-                        : isRetro
-                        ? skin === 'retro-amber'
-                          ? 'bg-[#ffb000]'
-                          : 'bg-green-400'
+                        : skin === 'retro-amber'
+                        ? 'bg-[#ffb000]'
+                        : skin === 'retro-green'
+                        ? 'bg-green-400'
                         : 'bg-cyan-500'
                       : isParchment
                       ? 'bg-[#d2b48c]'
                       : isRetro
-                      ? 'bg-transparent border-current'
+                      ? (skin === 'retro-amber' ? 'bg-amber-900/40 border-current' : 'bg-green-900/40 border-current')
                       : 'bg-white/20'
                   }`}
                 >
                   <span
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full shadow-lg ring-0 transition duration-200 ease-in-out ${
                       settings.documentaryMode ? 'translate-x-5' : 'translate-x-0'
-                    } ${isRetro ? (skin === 'retro-amber' ? 'bg-[#ffb000]' : 'bg-green-400') : ''}`}
+                    } ${
+                      isParchment || skin === 'modern'
+                        ? 'bg-white'
+                        : skin === 'retro-amber'
+                        ? (settings.documentaryMode ? 'bg-black' : 'bg-[#ffb000]')
+                        : (settings.documentaryMode ? 'bg-black' : 'bg-green-400')
+                    }`}
                   />
                 </button>
               </div>
-              <p className={`text-xs mt-2 mb-4 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
+              <p className={`text-xs mt-2 mb-4 ${isParchment ? 'text-[#3e2723]/70' : skin === 'retro-amber' ? 'text-amber-300/70' : skin === 'retro-green' ? 'text-green-300/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
                 Automatically guides the camera through a cinematic descent from the globe to the selected location.
               </p>
             </div>
@@ -675,7 +808,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
               <div>
                 <div className="flex justify-between items-center mb-1">
                   <label className={labelClasses}>Camera Transition Duration</label>
-                  <span className={`text-xs ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'}`}>
+                  <span className={`text-xs font-mono ${isParchment ? 'text-[#3e2723]' : skin === 'retro-amber' ? 'text-[#ffb000]' : skin === 'retro-green' ? 'text-green-300' : 'text-cyan-300'}`}>
                     {(typeof settings.documentaryDuration === 'number' ? settings.documentaryDuration : 5.5).toFixed(1)}s
                   </span>
                 </div>
@@ -697,10 +830,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
               </div>
             </div>
 
+            {/* Visual divider between DOC MODE and RESEARCH MODE */}
+            <hr className={`border-t ${theme.divider}`} />
+
             {/* RESEARCH MODE */}
-            <div className={`pt-4 ${isRetro ? 'border-t border-green-400/40' : skin === 'retro-amber' ? 'border-t border-[#ffb000]/40' : isParchment ? 'border-t border-[#8b5a2b]/20' : 'border-t border-white/10'}`}>
-              <div className={`flex items-center justify-between mb-1 ${isRetro ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-[#ffb000]' : ''}`}>
-                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#3e2723]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${isRetro ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
+            <div>
+              <div className={`flex items-center justify-between mb-1 ${skin === 'retro-green' ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-b border-[#ffb000] pb-1' : ''}`}>
+                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#3e2723]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${skin === 'retro-green' ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
                   <BookOpen size={16} />
                   <span>RESEARCH MODE</span>
                 </div>
@@ -719,27 +855,88 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                     settings.researchMode
                       ? isParchment
                         ? 'bg-[#8b5a2b]'
-                        : isRetro
-                        ? skin === 'retro-amber'
-                          ? 'bg-[#ffb000]'
-                          : 'bg-green-400'
+                        : skin === 'retro-amber'
+                        ? 'bg-[#ffb000]'
+                        : skin === 'retro-green'
+                        ? 'bg-green-400'
                         : 'bg-cyan-500'
                       : isParchment
                       ? 'bg-[#d2b48c]'
                       : isRetro
-                      ? 'bg-transparent border-current'
+                      ? (skin === 'retro-amber' ? 'bg-amber-900/40 border-current' : 'bg-green-900/40 border-current')
                       : 'bg-white/20'
                   }`}
                 >
                   <span
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full shadow-lg ring-0 transition duration-200 ease-in-out ${
                       settings.researchMode ? 'translate-x-5' : 'translate-x-0'
-                    } ${isRetro ? (skin === 'retro-amber' ? 'bg-[#ffb000]' : 'bg-green-400') : ''}`}
+                    } ${
+                      isParchment || skin === 'modern'
+                        ? 'bg-white'
+                        : skin === 'retro-amber'
+                        ? (settings.researchMode ? 'bg-black' : 'bg-[#ffb000]')
+                        : (settings.researchMode ? 'bg-black' : 'bg-green-400')
+                    }`}
                   />
                 </button>
               </div>
-              <p className={`text-xs mt-2 mb-4 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
+              <p className={`text-xs mt-2 mb-4 ${isParchment ? 'text-[#3e2723]/70' : skin === 'retro-amber' ? 'text-amber-300/70' : skin === 'retro-green' ? 'text-green-300/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
                 Displays the Add Note workspace directly below the Info Panel for note-taking and research.
+              </p>
+            </div>
+
+            {/* Visual divider between RESEARCH MODE and TEST MODE */}
+            <hr className={`border-t ${theme.divider}`} />
+
+            {/* TEST MODE */}
+            <div>
+              <div className={`flex items-center justify-between mb-1 ${skin === 'retro-green' ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-b border-[#ffb000] pb-1' : ''}`}>
+                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#3e2723]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${skin === 'retro-green' ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
+                  <Bug size={16} />
+                  <span>TEST MODE</span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-label="Toggle Test Mode"
+                  aria-checked={settings.testMode !== false}
+                  onClick={() =>
+                    onUpdateSettings({
+                      ...settings,
+                      testMode: settings.testMode === false ? true : false
+                    })
+                  }
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    settings.testMode !== false
+                      ? isParchment
+                        ? 'bg-[#8b5a2b]'
+                        : skin === 'retro-amber'
+                        ? 'bg-[#ffb000]'
+                        : skin === 'retro-green'
+                        ? 'bg-green-400'
+                        : 'bg-cyan-500'
+                      : isParchment
+                      ? 'bg-[#d2b48c]'
+                      : isRetro
+                      ? (skin === 'retro-amber' ? 'bg-amber-900/40 border-current' : 'bg-green-900/40 border-current')
+                      : 'bg-white/20'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full shadow-lg ring-0 transition duration-200 ease-in-out ${
+                      settings.testMode !== false ? 'translate-x-5' : 'translate-x-0'
+                    } ${
+                      isParchment || skin === 'modern'
+                        ? 'bg-white'
+                        : skin === 'retro-amber'
+                        ? (settings.testMode !== false ? 'bg-black' : 'bg-[#ffb000]')
+                        : (settings.testMode !== false ? 'bg-black' : 'bg-green-400')
+                    }`}
+                  />
+                </button>
+              </div>
+              <p className={`text-xs mt-2 mb-4 ${isParchment ? 'text-[#3e2723]/70' : skin === 'retro-amber' ? 'text-amber-300/70' : skin === 'retro-green' ? 'text-green-300/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
+                Displays the on-screen Search Debug tool on tablet devices for inspecting search events and state.
               </p>
             </div>
           </div>
@@ -785,16 +982,16 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                           onClick={handleDetectModels}
                           disabled={isDetectingModels || !settings.lmStudioUrl}
                           className={`px-3 py-2 rounded-lg text-sm border whitespace-nowrap transition-colors
-                            ${isParchment ? 'border-[#8b5a2b]/30 hover:bg-[#e6d5b8]' : ''}
-                            ${skin === 'modern' ? 'border-white/20 hover:bg-white/10' : ''}
-                            ${isRetro ? 'border-green-400 rounded-none hover:bg-green-400/10 text-green-300 disabled:opacity-50' : ''}
-                            ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
+                            ${isParchment ? 'border-[#8b5a2b]/30 hover:bg-[#e6d5b8] text-[#3e2723]' : ''}
+                            ${skin === 'modern' ? 'border-white/20 hover:bg-white/10 text-white' : ''}
+                            ${skin === 'retro-green' ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300 disabled:opacity-50' : ''}
+                            ${skin === 'retro-amber' ? 'border-[#ffb000] rounded-none text-[#ffb000] hover:bg-[#ffb000]/20 disabled:opacity-50' : ''}
                           `}
                         >
                           {isDetectingModels ? 'Detecting...' : 'Detect'}
                         </button>
                       </div>
-                      <p className={`text-xs mt-1 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
+                      <p className={`text-xs mt-1 ${isParchment ? 'text-[#3e2723]/70' : skin === 'retro-amber' ? 'text-amber-300/70' : skin === 'retro-green' ? 'text-green-300/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
                         Must include /v1 for OpenAI compatibility.
                       </p>
                     </div>
@@ -822,8 +1019,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                         className={`w-full py-2 px-3 rounded-lg text-sm border whitespace-nowrap font-medium transition-colors disabled:opacity-50
                           ${isParchment ? 'border-[#8b5a2b]/30 hover:bg-[#e6d5b8] text-[#3e2723]' : ''}
                           ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20 text-white' : ''}
-                          ${isRetro ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300' : ''}
-                          ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
+                          ${skin === 'retro-green' ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300' : ''}
+                          ${skin === 'retro-amber' ? 'border-[#ffb000] rounded-none text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
                         `}
                       >
                         {modelTestStatus === 'testing'
@@ -837,7 +1034,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                       {modelTestStatus !== 'idle' && (
                         <p className={`text-xs ${
                           modelTestStatus === 'success'
-                            ? (isParchment ? 'text-[#2e7d32]' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-400') : 'text-green-400')
+                            ? (isParchment ? 'text-[#2e7d32]' : skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-400')
                             : (isParchment ? 'text-[#c62828]' : 'text-red-400')
                         }`}>
                           {modelTestMessage}
@@ -879,8 +1076,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                     className={`w-full py-2 px-3 rounded-lg text-sm border whitespace-nowrap font-medium transition-colors disabled:opacity-50
                       ${isParchment ? 'border-[#8b5a2b]/30 hover:bg-[#e6d5b8] text-[#3e2723]' : ''}
                       ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20 text-white' : ''}
-                      ${isRetro ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300' : ''}
-                      ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
+                      ${skin === 'retro-green' ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300' : ''}
+                      ${skin === 'retro-amber' ? 'border-[#ffb000] rounded-none text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
                     `}
                   >
                     {mapTestStatus === 'testing'
@@ -896,7 +1093,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                   {mapTestStatus !== 'idle' && (
                     <p className={`text-xs ${
                       mapTestStatus === 'success'
-                        ? (isParchment ? 'text-[#2e7d32]' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-400') : 'text-green-400')
+                        ? (isParchment ? 'text-[#2e7d32]' : skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-400')
                         : mapTestStatus === 'blocked'
                         ? (isParchment ? 'text-[#b78103]' : 'text-amber-400')
                         : (isParchment ? 'text-[#c62828]' : 'text-red-400')
@@ -910,34 +1107,36 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                   {/* CARTO API KEY SETUP Section */}
                   <div>
                     <div className="flex items-center justify-between">
-                      <span className="font-semibold">CARTO API Key</span>
+                      <span className={`font-semibold ${skin === 'retro-green' ? 'text-green-300 font-retro' : skin === 'retro-amber' ? 'text-[#ffb000] font-retro' : ''}`}>CARTO API Key</span>
                       <a
                         href="https://carto.com/developers/basemap-styles/"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className={`inline-flex items-center gap-1 hover:underline ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-400' : isRetro ? 'text-current' : 'text-cyan-400'}`}
+                        className={`inline-flex items-center gap-1 hover:underline ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-400' : skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300'}`}
                       >
                         <span>carto.com</span>
                         <ExternalLink size={11} />
                       </a>
                     </div>
-                    <p className={`mt-0.5 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
+                    <p className={`mt-0.5 ${isParchment ? 'text-[#3e2723]/70' : skin === 'retro-amber' ? 'text-amber-300/70' : skin === 'retro-green' ? 'text-green-300/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
                       A CARTO API key is required to load authenticated basemap tiles.
                     </p>
                   </div>
 
                   <div>
-                    <h4 className={`text-xs font-bold uppercase tracking-wider mb-1 ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300') : 'text-white/80'}`}>
+                    <h4 className={`text-xs font-bold uppercase tracking-wider mb-1 ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300'}`}>
                       API KEY SETUP
                     </h4>
-                    <p className={`text-xs mb-2 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
+                    <p className={`text-xs mb-2 ${isParchment ? 'text-[#3e2723]/70' : skin === 'retro-amber' ? 'text-amber-300/70' : skin === 'retro-green' ? 'text-green-300/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
                       Add your key to the project&apos;s .env.local file:
                     </p>
                     <div className={`p-3 rounded-lg text-[11px] font-mono leading-relaxed overflow-x-auto select-all ${
                       isParchment 
                         ? 'bg-[#e6d5b8] text-[#3e2723] border border-[#8b5a2b]/30' 
-                        : isRetro 
-                        ? (skin === 'retro-amber' ? 'bg-black/60 text-[#ffb000] border border-[#ffb000]' : 'bg-black/60 text-green-300 border border-green-400') 
+                        : skin === 'retro-amber'
+                        ? 'bg-black/60 text-[#ffb000] border border-[#ffb000]'
+                        : skin === 'retro-green'
+                        ? 'bg-black/60 text-green-300 border border-green-400'
                         : 'bg-black/50 text-cyan-200 border border-white/10'
                     }`}>
                       <pre className="whitespace-pre">{`VITE_CARTO_API_KEY=your_carto_api_key`}</pre>
@@ -952,13 +1151,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
 
             {/* Section 3: NEWS PROVIDER */}
             <div className="space-y-4">
-              <div className={`flex items-center justify-between mb-1 ${isRetro ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-[#ffb000]' : ''}`}>
-                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#3e2723]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${isRetro ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
+              <div className={`flex items-center justify-between mb-1 ${skin === 'retro-green' ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-b border-[#ffb000] pb-1' : ''}`}>
+                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#3e2723]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${skin === 'retro-green' ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
                   <Newspaper size={16} />
                   <span>NEWS PROVIDER</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`text-xs font-semibold uppercase tracking-wider ${isParchment ? 'text-[#3e2723]' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300') : 'text-white/80'}`}>
+                  <span className={`text-xs font-semibold uppercase tracking-wider ${isParchment ? 'text-[#3e2723]' : skin === 'retro-amber' ? 'text-[#ffb000]' : skin === 'retro-green' ? 'text-green-300' : 'text-white/80'}`}>
                     SHOW NEWS
                   </span>
                   <button
@@ -975,22 +1174,30 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                       settings.showNews !== false
                         ? isParchment
                           ? 'bg-[#8b5a2b]'
-                          : isRetro
-                          ? skin === 'retro-amber'
-                            ? 'bg-[#ffb000]'
-                            : 'bg-green-400'
+                          : skin === 'retro-amber'
+                          ? 'bg-[#ffb000]'
+                          : skin === 'retro-green'
+                          ? 'bg-green-400'
                           : 'bg-cyan-500'
                         : isParchment
                         ? 'bg-[#d2b48c]'
-                        : isRetro
-                        ? 'bg-transparent border-current'
+                        : skin === 'retro-amber'
+                        ? 'bg-transparent border-2 border-[#ffb000]'
+                        : skin === 'retro-green'
+                        ? 'bg-transparent border-2 border-green-400'
                         : 'bg-white/20'
                     }`}
                   >
                     <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full shadow-lg ring-0 transition duration-200 ease-in-out ${
                         settings.showNews !== false ? 'translate-x-5' : 'translate-x-0'
-                      } ${isRetro ? (skin === 'retro-amber' ? 'bg-[#ffb000]' : 'bg-green-400') : ''}`}
+                      } ${
+                        isParchment || skin === 'modern'
+                          ? 'bg-white'
+                          : skin === 'retro-amber'
+                          ? (settings.showNews !== false ? 'bg-black' : 'bg-[#ffb000]')
+                          : (settings.showNews !== false ? 'bg-black' : 'bg-green-400')
+                      }`}
                     />
                   </button>
                 </div>
@@ -1020,8 +1227,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                       className={`w-full py-2 px-3 rounded-lg text-sm border whitespace-nowrap font-medium transition-colors disabled:opacity-50
                         ${isParchment ? 'border-[#8b5a2b]/30 hover:bg-[#e6d5b8] text-[#3e2723]' : ''}
                         ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20 text-white' : ''}
-                        ${isRetro ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300' : ''}
-                        ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
+                        ${skin === 'retro-green' ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300' : ''}
+                        ${skin === 'retro-amber' ? 'border-[#ffb000] rounded-none text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
                       `}
                     >
                       {newsTestStatus === 'testing'
@@ -1035,7 +1242,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                     {newsTestStatus !== 'idle' && (
                       <p className={`text-xs ${
                         newsTestStatus === 'success'
-                          ? (isParchment ? 'text-[#2e7d32]' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-400') : 'text-green-400')
+                          ? (isParchment ? 'text-[#2e7d32]' : skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-400')
                           : (isParchment ? 'text-[#c62828]' : 'text-red-400')
                       }`}>
                         {newsTestMessage}
@@ -1150,7 +1357,7 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                 <Palette size={16} />
                 <span>Theme & Appearance</span>
               </div>
-              <p className={`text-xs mb-4 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
+              <p className={`text-xs mb-4 ${isParchment ? 'text-[#3e2723]/70' : skin === 'retro-amber' ? 'text-amber-300/70' : skin === 'retro-green' ? 'text-green-300/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
                 Select visual skin and cartographic presentation theme.
               </p>
 
@@ -1159,7 +1366,7 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                   { id: 'modern' as SkinType, name: 'Modern', desc: 'Vibrant photorealistic globe with cyan holographic HUD' },
                   { id: 'retro-green' as SkinType, name: 'CRT Green', desc: 'Monochrome phosphor green terminal CRT simulation' },
                   { id: 'retro-amber' as SkinType, name: 'CRT Amber', desc: 'Classic amber phosphor terminal CRT simulation' },
-                  { id: 'parchment' as SkinType, name: 'Parchment', desc: 'Vintage antique cartographic parchment & copperplate map' }
+                  ...(isDesktop ? [{ id: 'parchment' as SkinType, name: 'Parchment', desc: 'Vintage antique cartographic parchment & copperplate map' }] : [])
                 ].map((t) => {
                   const isSelected = skin === t.id;
                   return (
@@ -1178,14 +1385,16 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                             : 'bg-cyan-900/30 border-cyan-400 text-white ring-1 ring-cyan-400/50'
                           : isParchment
                           ? 'border-[#8b5a2b]/30 hover:bg-[#e8d5b5]/30'
-                          : isRetro
-                          ? 'border-current/30 hover:bg-white/5'
+                          : skin === 'retro-amber'
+                          ? 'border-amber-400/40 text-amber-300/70 hover:bg-amber-900/20 hover:text-[#ffb000]'
+                          : skin === 'retro-green'
+                          ? 'border-green-400/40 text-green-300/70 hover:bg-green-900/20 hover:text-green-300'
                           : 'border-white/10 hover:bg-white/5 text-white/80'
                       }`}
                     >
                       <div className="space-y-0.5">
                         <div className="font-semibold text-sm">{t.name}</div>
-                        <div className={`text-xs ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'}`}>{t.desc}</div>
+                        <div className={`text-xs ${isParchment ? 'text-[#3e2723]/70' : skin === 'retro-amber' ? 'text-amber-300/70' : skin === 'retro-green' ? 'text-green-300/70' : 'opacity-70'}`}>{t.desc}</div>
                       </div>
                       {isSelected && (
                         <span className={`text-xs font-bold px-2 py-0.5 rounded uppercase tracking-wider shrink-0 ${
@@ -1208,8 +1417,8 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
               <>
                 <hr className={`border-t ${theme.divider}`} />
                 <div>
-                  <div className={`flex items-center justify-between mb-1 ${isRetro ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-[#ffb000]' : ''}`}>
-                    <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isRetro ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
+                  <div className={`flex items-center justify-between mb-1 ${skin === 'retro-green' ? 'border-b border-green-400 pb-1' : 'border-b border-[#ffb000] pb-1'}`}>
+                    <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300'}`}>
                       <Sparkles size={16} />
                       <span>PROJECTION</span>
                     </div>
@@ -1236,19 +1445,25 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                           ? skin === 'retro-amber'
                             ? 'bg-[#ffb000]'
                             : 'bg-green-400'
-                          : 'bg-transparent border-current'
+                          : isRetro
+                          ? (skin === 'retro-amber' ? 'bg-amber-900/40 border-current' : 'bg-green-900/40 border-current')
+                          : 'bg-white/20'
                       }`}
                     >
                       <span
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full shadow-lg ring-0 transition duration-200 ease-in-out ${
                           (skin === 'retro-green' ? settings.retroGreenProjection !== false : settings.retroAmberProjection !== false)
                             ? 'translate-x-5'
                             : 'translate-x-0'
-                        } ${skin === 'retro-amber' ? 'bg-[#ffb000]' : 'bg-green-400'}`}
+                        } ${
+                          skin === 'retro-amber'
+                            ? ((settings.retroAmberProjection !== false) ? 'bg-black' : 'bg-[#ffb000]')
+                            : ((settings.retroGreenProjection !== false) ? 'bg-black' : 'bg-green-400')
+                        }`}
                       />
                     </button>
                   </div>
-                  <p className="text-xs opacity-70 mt-2 mb-4 uppercase">
+                  <p className={`text-xs mt-2 mb-4 uppercase ${skin === 'retro-amber' ? 'text-amber-300/70' : 'text-green-300/70'}`}>
                     Renders a phosphor projection light beam connecting the selected map marker to the info panel.
                   </p>
                 </div>
@@ -1261,8 +1476,8 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
         {activeTab === 'audio' && (
           <div className="space-y-6">
             <div>
-              <div className={`flex items-center justify-between mb-1 ${isRetro ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-[#ffb000]' : ''}`}>
-                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#3e2723]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${isRetro ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
+              <div className={`flex items-center justify-between mb-1 ${skin === 'retro-green' ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-b border-[#ffb000] pb-1' : ''}`}>
+                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#3e2723]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${skin === 'retro-green' ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
                   <Volume2 size={16} />
                   <span>Narration</span>
                 </div>
@@ -1280,10 +1495,10 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                     settings.narrationEnabled
                       ? isParchment
                         ? 'bg-[#8b5a2b]'
-                        : isRetro
-                        ? skin === 'retro-amber'
-                          ? 'bg-[#ffb000]'
-                          : 'bg-green-400'
+                        : skin === 'retro-amber'
+                        ? 'bg-[#ffb000]'
+                        : skin === 'retro-green'
+                        ? 'bg-green-400'
                         : 'bg-cyan-500'
                       : isParchment
                       ? 'bg-[#d2b48c]'
@@ -1293,14 +1508,20 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                   }`}
                 >
                   <span
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full shadow-lg ring-0 transition duration-200 ease-in-out ${
                       settings.narrationEnabled ? 'translate-x-5' : 'translate-x-0'
-                    } ${isRetro ? (skin === 'retro-amber' ? 'bg-[#ffb000]' : 'bg-green-400') : ''}`}
+                    } ${
+                      isParchment || skin === 'modern'
+                        ? 'bg-white'
+                        : skin === 'retro-amber'
+                        ? (settings.narrationEnabled ? 'bg-black' : 'bg-[#ffb000]')
+                        : (settings.narrationEnabled ? 'bg-black' : 'bg-green-400')
+                    }`}
                   />
                 </button>
               </div>
-              <p className={`text-xs mt-2 mb-4 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
-                Narrates the selected location's title and description using speech synthesis.
+              <p className={`text-xs mt-2 mb-4 ${isParchment ? 'text-[#3e2723]/70' : skin === 'retro-amber' ? 'text-amber-300/70' : skin === 'retro-green' ? 'text-green-300/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
+                Narrates the selected location&apos;s title and description using speech synthesis.
               </p>
             </div>
 
@@ -1382,7 +1603,7 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
               <div>
                 <div className="flex justify-between text-xs mb-1">
                   <label className={labelClasses}>Pace</label>
-                  <span className={`font-mono ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? 'text-current' : 'text-cyan-300'}`}>
+                  <span className={`font-mono ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : skin === 'retro-amber' ? 'text-[#ffb000]' : skin === 'retro-green' ? 'text-green-300' : 'text-cyan-300'}`}>
                     {(settings.narrationSpeed || 1.0).toFixed(1)}x
                   </span>
                 </div>
@@ -1407,7 +1628,7 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
               <div>
                 <div className="flex justify-between text-xs mb-1">
                   <label className={labelClasses}>Volume</label>
-                  <span className={`font-mono ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? 'text-current' : 'text-cyan-300'}`}>
+                  <span className={`font-mono ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : skin === 'retro-amber' ? 'text-[#ffb000]' : skin === 'retro-green' ? 'text-green-300' : 'text-cyan-300'}`}>
                     {Math.round((settings.narrationVolume || 0.8) * 100)}%
                   </span>
                 </div>
@@ -1441,7 +1662,7 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                   ].map(({ id, label }) => {
                     const isChecked = settings.narrationContent ? (settings.narrationContent as any)[id] !== false : true;
                     return (
-                      <label key={id} className={`flex items-center gap-2 cursor-pointer text-xs select-none ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-white/80' : isRetro ? 'text-current' : 'text-white/80'}`}>
+                      <label key={id} className={`flex items-center gap-2 cursor-pointer text-xs select-none ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-white/80' : skin === 'retro-amber' ? 'text-[#ffb000]' : skin === 'retro-green' ? 'text-green-300' : 'text-white/80'}`}>
                         <input
                           type="checkbox"
                           checked={isChecked}
@@ -1480,7 +1701,7 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
               <div>
                 <div className="flex justify-between text-xs mb-1">
                   <label className={labelClasses}>Narration Character Limit</label>
-                  <span className={`font-mono ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? 'text-current' : 'text-cyan-300'}`}>
+                  <span className={`font-mono ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : skin === 'retro-amber' ? 'text-[#ffb000]' : skin === 'retro-green' ? 'text-green-300' : 'text-cyan-300'}`}>
                     {settings.narrationLimit ?? 600} chars
                   </span>
                 </div>
@@ -1524,17 +1745,17 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                   type="button"
                   onClick={handleTestVoice}
                   disabled={!settings.narrationEnabled}
-                  className={`px-3 py-2 rounded-lg text-sm border whitespace-nowrap font-medium transition-colors
+                  className={`px-3 py-2 rounded-lg text-sm border whitespace-nowrap font-medium transition-colors disabled:opacity-50
                     ${isParchment ? 'border-[#8b5a2b]/30 hover:bg-[#e6d5b8] text-[#3e2723]' : ''}
-                    ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20' : ''}
-                    ${isRetro ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300 disabled:opacity-50' : ''}
-                    ${skin === 'retro-amber' ? 'border-[#ffb000] text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
+                    ${skin === 'modern' ? 'border-white/30 bg-white/10 hover:bg-white/20 text-white' : ''}
+                    ${skin === 'retro-green' ? 'border-green-400 rounded-none hover:bg-green-400/20 text-green-300' : ''}
+                    ${skin === 'retro-amber' ? 'border-[#ffb000] rounded-none text-[#ffb000] hover:bg-[#ffb000]/20' : ''}
                   `}
                 >
                   {isVoiceTesting ? 'Stop Sample' : 'Test Voice'}
                 </button>
                 {voiceTestMessage && (
-                  <span className={`text-xs ${isParchment ? 'text-[#3e2723]' : isRetro ? 'text-current' : 'text-cyan-400'}`}>
+                  <span className={`text-xs ${isParchment ? 'text-[#3e2723]' : skin === 'retro-amber' ? 'text-[#ffb000]' : skin === 'retro-green' ? 'text-green-300' : 'text-cyan-400'}`}>
                     {voiceTestMessage}
                   </span>
                 )}

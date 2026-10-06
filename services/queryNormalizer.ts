@@ -3,6 +3,7 @@ import { QueryIntent } from '../types';
 import { determineHistoricalEventScope } from './geographic/historicalEventScope';
 import { getAuthoritativeEventModel } from './geographic/historicalRouteRegistry';
 import { toCanonicalTitleCase, getHistoricalEntityKnowledge } from './geographic/historicalCoordinateValidator';
+import { logTerraSearchDebug } from './searchDebugTracer';
 
 export interface NormalizedEntityResult {
   rawQuery: string;
@@ -592,8 +593,43 @@ export interface ExtractedQuery {
   singleLocation?: boolean;
 }
 
+export const sanitizeTerminalPunctuation = (text: string): string => {
+  if (!text) return "";
+  return text.replace(/[\s.·…,:;!?]+$/, '').trim();
+};
+
 export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
-  const clean = query.trim();
+  logTerraSearchDebug({
+    stage: 'routeIntentAndExtractEntity',
+    query,
+    status: 'ENTRY'
+  });
+  try {
+    const res = _routeIntentAndExtractEntityInternal(query);
+    logTerraSearchDebug({
+      stage: 'routeIntentAndExtractEntity',
+      query,
+      entity: res.entity,
+      intent: res.intent,
+      status: 'SUCCESS',
+      details: { queryShape: res.queryShape, resolutionMode: res.resolutionMode }
+    });
+    return res;
+  } catch (err: any) {
+    logTerraSearchDebug({
+      stage: 'routeIntentAndExtractEntity',
+      query,
+      status: 'EXCEPTION',
+      category: '5_JS_EXCEPTION',
+      errorMessage: err?.message || String(err),
+      errorStack: err?.stack
+    });
+    throw err;
+  }
+};
+
+const _routeIntentAndExtractEntityInternal = (query: string): ExtractedQuery => {
+  const clean = sanitizeTerminalPunctuation(query);
 
   // 0. Check for Authoritative Historical Route Registry Events (Precedence over single-location intents)
   const historicalDetection = detectHistoricalRouteEvent(clean);
@@ -881,9 +917,9 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
   for (const pattern of nlPatterns) {
     const match = clean.match(pattern);
     if (match && match[1]) {
-      let entityStr = match[1].replace(/[?.,!;:]+$/, "").trim();
+      let entityStr = sanitizeTerminalPunctuation(match[1]);
       entityStr = entityStr.replace(/\s+(?:located|found|situated)$/i, "").trim();
-      const cleanedEntity = entityStr.replace(/^(?:the|a|an)\s+/i, "").replace(/[?.,!;:]+$/, "").trim();
+      const cleanedEntity = sanitizeTerminalPunctuation(entityStr.replace(/^(?:the|a|an)\s+/i, ""));
       return {
         intent: 'NATURAL_LOCATION',
         entity: cleanedEntity || entityStr,
@@ -893,7 +929,7 @@ export const routeIntentAndExtractEntity = (query: string): ExtractedQuery => {
   }
 
   // 7. Fallback to Direct lookup
-  return { intent: 'DIRECT', entity: clean, queryShape: 'DIRECT' };
+  return { intent: 'DIRECT', entity: sanitizeTerminalPunctuation(clean), queryShape: 'DIRECT' };
 };
 
 

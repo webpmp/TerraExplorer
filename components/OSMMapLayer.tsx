@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useCameraMetrics } from '../hooks/useCameraMetrics';
 import { OSMTransitionFog } from './OSMTransitionFog';
+import { isMobileOrTablet } from '../utils/device';
 import { ParchmentGlobeMarkerArtwork } from './ParchmentGlobeMarkerArtwork';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
@@ -56,6 +57,7 @@ import {
   MarkerLayoutInput,
   MarkerLayoutOutput
 } from '../utils/markerCollisionHelper';
+import { osmTelemetry } from '../services/osmTelemetryService';
 
 export interface OSMMapLayerProps {
   skin: SkinType;
@@ -334,7 +336,8 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
   const loadedTileKeysRef = useRef<Set<string>>(new Set());
   const isMapReadyRef = useRef<boolean>(false);
 
-  const handleTileLoaded = useCallback((key: string, tileTransitionId?: number) => {
+  const handleTileLoaded = useCallback((key: string, tileTransitionId?: number, status: 'SUCCESS' | 'ERROR' = 'SUCCESS') => {
+    osmTelemetry.recordTileLoaded(key, key, status);
     if (tileTransitionId !== undefined && tileTransitionId !== transitionIdRef.current) {
       return;
     }
@@ -354,6 +357,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
         }
         if (!isMapReadyRef.current) {
           isMapReadyRef.current = true;
+          osmTelemetry.recordTimelineEvent('osmReady');
           console.log('[OSM] Map ready', {
             transitionId: transitionIdRef.current,
             latitude: osmCameraCenterRef.current.lat,
@@ -394,45 +398,76 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
     const screenCenterY = height / 2;
 
     const TILE_PX = 256;
-    // Overscan coverage: viewport + 2 extra tiles on all sides for continuous seamless panning
-    const tilesX = Math.ceil(width / (2 * TILE_PX)) + 2;
-    const tilesY = Math.ceil(height / (2 * TILE_PX)) + 2;
+    const halfWidthTiles = (width / 2) / TILE_PX;
+    const halfHeightTiles = (height / 2) / TILE_PX;
+
+    // Exact visible bounding box on screen
+    const minVisX = Math.floor(exactX - halfWidthTiles);
+    const maxVisX = Math.floor(exactX + halfWidthTiles);
+    const minVisY = Math.max(0, Math.floor(exactY - halfHeightTiles));
+    const maxVisY = Math.min(n - 1, Math.floor(exactY + halfHeightTiles));
+    const actuallyVisible = (maxVisX - minVisX + 1) * (maxVisY - minVisY + 1);
+
+    // Intentional 1-tile buffer around visible area
+    const minTileX = minVisX - 1;
+    const maxTileX = maxVisX + 1;
+    const minTileY = Math.max(0, minVisY - 1);
+    const maxTileY = Math.min(n - 1, maxVisY + 1);
 
     const updatedTilesMap = new Map<string, TileDisplay>();
     let addedCount = 0;
     let retainedCount = 0;
 
-    for (let dx = -tilesX; dx <= tilesX; dx++) {
-      if (abortController.signal.aborted) return;
-      for (let dy = -tilesY; dy <= tilesY; dy++) {
-        const x = Math.floor(exactX) + dx;
-        const y = Math.floor(exactY) + dy;
-        if (y < 0 || y >= n) continue;
+    // Prioritize tiles from screen center outwards
+    const candidates: Array<{
+      x: number;
+      y: number;
+      wrappedX: number;
+      key: string;
+      tileLeft: number;
+      tileTop: number;
+      distSq: number;
+    }> = [];
 
+    for (let x = minTileX; x <= maxTileX; x++) {
+      for (let y = minTileY; y <= maxTileY; y++) {
         const wrappedX = ((x % n) + n) % n;
         const key = `osm:${skin}:${z}:${wrappedX}:${y}`;
-
         const tileLeft = screenCenterX + (x - exactX) * TILE_PX;
         const tileTop = screenCenterY + (y - exactY) * TILE_PX;
+        const centerDistX = (tileLeft + TILE_PX / 2) - screenCenterX;
+        const centerDistY = (tileTop + TILE_PX / 2) - screenCenterY;
+        const distSq = centerDistX * centerDistX + centerDistY * centerDistY;
+        candidates.push({ x, y, wrappedX, key, tileLeft, tileTop, distSq });
+      }
+    }
 
-        const existing = activeTilesMapRef.current.get(key);
-        if (existing) {
-          retainedCount++;
-          updatedTilesMap.set(key, { ...existing, left: tileLeft, top: tileTop, transitionId: currentTransitionId });
-        } else {
-          addedCount++;
-          const url = osmTileService.getTileUrl(z, wrappedX, y, skin);
-          updatedTilesMap.set(key, {
-            key,
-            z,
-            x: wrappedX,
-            y,
-            url,
-            left: tileLeft,
-            top: tileTop,
-            transitionId: currentTransitionId
-          });
+    candidates.sort((a, b) => a.distSq - b.distSq);
+
+    const isMapLibreActive = !!(mapLibreMapRef.current || (typeof window !== 'undefined' && (window as any).__terraexplorer_maplibre_map));
+
+    for (const c of candidates) {
+      if (abortController.signal.aborted) return;
+      const existing = activeTilesMapRef.current.get(c.key);
+      if (existing) {
+        retainedCount++;
+        updatedTilesMap.set(c.key, { ...existing, left: c.tileLeft, top: c.tileTop, transitionId: currentTransitionId });
+      } else {
+        addedCount++;
+        const url = osmTileService.getTileUrl(z, c.wrappedX, c.y, skin);
+        if (!isMapLibreActive) {
+          osmTelemetry.recordTileStarted(c.key, url, z, 'rasterImg');
         }
+        updatedTilesMap.set(c.key, {
+          key: c.key,
+          z,
+          x: c.wrappedX,
+          y: c.y,
+          url,
+          left: c.tileLeft,
+          top: c.tileTop,
+          transitionId: currentTransitionId
+        });
       }
     }
 
@@ -441,7 +476,20 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
     const removedCount = Math.max(0, activeTilesMapRef.current.size - retainedCount);
     activeTilesMapRef.current = updatedTilesMap;
     const newTilesList = Array.from(updatedTilesMap.values());
-    setActiveTilesList(newTilesList);
+
+    // Only update raster tile DOM state if MapLibre vector map is not active
+    if (!isMapLibreActive) {
+      setActiveTilesList(newTilesList);
+    }
+
+    // Record tile set volume metrics accurately
+    osmTelemetry.recordTileSetVolume({
+      initialViewportRequested: candidates.length,
+      actuallyVisible,
+      outsideViewportEstimated: Math.max(0, candidates.length - actuallyVisible),
+      multipleZoomsSimultaneous: fallbackTilesMapRef.current.size > 0,
+      prefetched: false
+    });
     setOsmProjection({
       z,
       exactX,
@@ -476,6 +524,32 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
           center: [lng, lat],
           zoom: mlZoom
         });
+
+        if (currentMap.isStyleLoaded()) {
+          if (!isMapReadyRef.current) {
+            isMapReadyRef.current = true;
+            osmTelemetry.recordTimelineEvent('osmReady');
+            console.log('[OSM] Map ready (MapLibre vector style loaded)', {
+              transitionId: currentTransitionId,
+              latitude: lat,
+              longitude: lng
+            });
+            onMapReadyRef.current?.(true);
+          }
+        } else {
+          currentMap.once('idle', () => {
+            if (!isMapReadyRef.current) {
+              isMapReadyRef.current = true;
+              osmTelemetry.recordTimelineEvent('osmReady');
+              console.log('[OSM] Map ready (MapLibre vector idle)', {
+                transitionId: currentTransitionId,
+                latitude: lat,
+                longitude: lng
+              });
+              onMapReadyRef.current?.(true);
+            }
+          });
+        }
       } catch (err) {
         console.error('[OSM VECTOR] jumpTo error:', err);
       }
@@ -592,11 +666,32 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
         console.log(`[OSM VECTOR] VECTOR_MAP_STYLE_LOADED id=${mapId} isStyleLoaded=${map.isStyleLoaded()}`);
       });
 
+      map.on('dataloading', (e: any) => {
+        if (e?.dataType === 'source' || e?.dataType === 'tile') {
+          osmTelemetry.recordTimelineEvent('firstTileRequest');
+          const tileKey = e.tile ? `ml:${e.tile.tileID?.canonical?.key || e.tile.url || `${e.tile.tileID?.z}/${e.tile.tileID?.x}/${e.tile.tileID?.y}`}` : `ml:source:${e.dataType || 'all'}`;
+          osmTelemetry.recordTileStarted(tileKey, e.tile?.url || 'maplibre:tile', activeTileZoomRef.current, 'maplibreVector');
+        }
+      });
+
+      map.on('data', (e: any) => {
+        if (e?.dataType === 'source' && e?.isSourceLoaded) {
+          osmTelemetry.recordTimelineEvent('firstTileLoaded');
+          osmTelemetry.recordTimelineEvent('firstTileVisible');
+          const tileKey = e.tile ? `ml:${e.tile.tileID?.canonical?.key || e.tile.url || `${e.tile.tileID?.z}/${e.tile.tileID?.x}/${e.tile.tileID?.y}`}` : `ml:source:${e.dataType || 'all'}`;
+          osmTelemetry.recordTileLoaded(tileKey, 'maplibre:source', 'SUCCESS', 'maplibreVector');
+        }
+      });
+
       map.on('load', () => {
         applyOSMThemeLayerStyles(map, skin);
         console.log(`[OSM VECTOR] VECTOR_MAP_READY id=${mapId} (load event)`);
         const mapCanvas = map.getCanvas ? map.getCanvas() : null;
         console.log(`[OSM VECTOR] VECTOR_MAP_CANVAS_ATTACHED id=${mapId} exists=${!!mapCanvas}`);
+
+        osmTelemetry.recordTimelineEvent('firstTileLoaded');
+        osmTelemetry.recordTimelineEvent('firstTileVisible');
+        osmTelemetry.recordTimelineEvent('osmReady');
 
         if (!isMapReadyRef.current) {
           isMapReadyRef.current = true;
@@ -606,6 +701,9 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
 
       map.on('idle', () => {
         console.log(`[OSM VECTOR] VECTOR_MAP_IDLE id=${mapId} (all tiles rendered)`);
+        osmTelemetry.recordTimelineEvent('osmReady');
+        osmTelemetry.recordTimelineEvent('osmLoadingComplete');
+        osmTelemetry.recordMapIdle();
         if (!isMapReadyRef.current) {
           isMapReadyRef.current = true;
           onMapReadyRef.current?.(true);
@@ -614,6 +712,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
 
       map.on('error', (e: any) => {
         console.error(`[OSM VECTOR] VECTOR_MAP_ERROR id=${mapId}:`, e?.error?.message || e?.message || e);
+        osmTelemetry.recordTileLoaded(`ml:error:${Date.now()}`, 'maplibre:error', 'ERROR', 'maplibreVector');
       });
     } catch (err) {
       console.error(`[OSM VECTOR] Failed to instantiate MapLibre map id=${mapId}:`, err);
@@ -654,7 +753,10 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
       if (opacityRef.current > 0.01 || activeTilesMapRef.current.size > 0) {
         // Retain existing tiles as fallback underneath so screen never goes blank or flickers during theme transition
         fallbackTilesMapRef.current = new Map(activeTilesMapRef.current);
-        setFallbackTilesList(Array.from(activeTilesMapRef.current.values()));
+        const isMapLibreActive = !!(mapLibreMapRef.current || (typeof window !== 'undefined' && (window as any).__terraexplorer_maplibre_map));
+        if (!isMapLibreActive) {
+          setFallbackTilesList(Array.from(activeTilesMapRef.current.values()));
+        }
         activeTilesMapRef.current.clear();
 
         let centerLat = committedCenterRef.current.lat;
@@ -1015,7 +1117,10 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
       if (!exitsOSM && targetZoom !== currentZoom) {
         // Immediately retain current tiles as fallback so screen never goes blank during transition
         fallbackTilesMapRef.current = new Map(activeTilesMapRef.current);
-        setFallbackTilesList(Array.from(activeTilesMapRef.current.values()));
+        const isMapLibreActive = !!(mapLibreMapRef.current || (typeof window !== 'undefined' && (window as any).__terraexplorer_maplibre_map));
+        if (!isMapLibreActive) {
+          setFallbackTilesList(Array.from(activeTilesMapRef.current.values()));
+        }
         activeTilesMapRef.current.clear();
 
         activeTileZoomRef.current = targetZoom;
@@ -1050,13 +1155,31 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
     };
   }, [camera, controls, onCameraChange, loadViewportTiles, selectedMarkerCoordinates]);
 
-  useFrame((state) => {
+  useFrame((state, delta) => {
     if (!rootGroupRef.current) return;
+
+    // Record lightweight frame telemetry (non-rendering)
+    osmTelemetry.recordFrame(delta);
 
     // Transform world camera position into Earth's local coordinate frame
     const localCamPos = rootGroupRef.current.worldToLocal(state.camera.position.clone());
     const dist = localCamPos.length();
     const currentGeo = vector3ToLatLng(localCamPos);
+
+    const isMobile = isMobileOrTablet();
+
+    // Update telemetry stage based on distance and opacity
+    if (dist > 1.90) {
+      osmTelemetry.setStage('BEFORE_OSM');
+    } else if (dist > 1.55) {
+      osmTelemetry.setStage(isMobile ? 'BEFORE_OSM' : 'FOG_ONLY');
+    } else if (dist > 1.35) {
+      osmTelemetry.setStage(isMobile ? 'OSM_LOADING' : 'FOG_AND_OSM');
+      osmTelemetry.recordTimelineEvent('osmActivation');
+    } else {
+      osmTelemetry.setStage('OSM_LOADING');
+      osmTelemetry.recordTimelineEvent('osmActivation');
+    }
 
     // 1. Progressive Opacity with Hysteresis (full opacity at close and street levels)
     let targetOpacity = 0;
@@ -1071,170 +1194,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
       setOpacity(roundedOpacity);
     }
 
-    // Diagnostic DOM & Canvas Inspection at street level (dist <= 1.35)
-    if (dist <= 1.35 && dist > 1.25) {
-      if (!diagnosticLoggedRef.current && mapLibreContainerRef.current) {
-        diagnosticLoggedRef.current = true;
-        const container = mapLibreContainerRef.current;
-        let map = mapLibreMapRef.current;
-        if (!map && typeof window !== 'undefined' && (window as any).__terraexplorer_maplibre_map) {
-          map = (window as any).__terraexplorer_maplibre_map;
-          mapLibreMapRef.current = map;
-        }
 
-        const formatElementProps = (el: HTMLElement) => {
-          const r = el.getBoundingClientRect();
-          const s = window.getComputedStyle(el);
-          return {
-            tagName: el.tagName.toLowerCase(),
-            className: el.className || '(none)',
-            id: el.id || '(none)',
-            parentClass: el.parentElement?.className || '(none)',
-            parentId: el.parentElement?.id || '(none)',
-            rect: { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) },
-            display: s.display,
-            visibility: s.visibility,
-            opacity: s.opacity,
-            position: s.position,
-            zIndex: s.zIndex,
-            overflow: s.overflow,
-            transform: s.transform,
-            filter: s.filter,
-            pointerEvents: s.pointerEvents
-          };
-        };
-
-        // 1. [OSM VECTOR DOM TREE]
-        const treeList: any[] = [formatElementProps(container)];
-        const traverseDescendants = (parent: Element, depth: number) => {
-          if (depth > 4) return;
-          Array.from(parent.children).forEach((child) => {
-            if (child instanceof HTMLElement) {
-              treeList.push({ depth, ...formatElementProps(child) });
-              traverseDescendants(child, depth + 1);
-            }
-          });
-        };
-        traverseDescendants(container, 1);
-        console.log('[OSM VECTOR DOM TREE]\n' + JSON.stringify(treeList, null, 2));
-
-        // 2. [OSM VECTOR ALL MAPLIBRE NODES IN DOM]
-        const allMapLibreNodes = Array.from(
-          document.querySelectorAll('.maplibregl-map, .maplibregl-canvas-container, canvas.maplibregl-canvas, canvas')
-        );
-        const mapLibreNodesData = allMapLibreNodes.map((node) => {
-          if (node instanceof HTMLElement) {
-            return formatElementProps(node);
-          }
-          return { tagName: node.tagName };
-        });
-        console.log('[OSM VECTOR ALL MAPLIBRE NODES IN DOM]\n' + JSON.stringify(mapLibreNodesData, null, 2));
-
-        // 3. [OSM VECTOR MAP INSTANCE]
-        const instanceData: any = {
-          mapRefExists: !!map,
-          isContainerSameAsRef: map?.getContainer ? map.getContainer() === container : false,
-          mapContainerRect: map?.getContainer ? map.getContainer().getBoundingClientRect() : null,
-          canvasExists: !!map?.getCanvas?.(),
-          canvasRect: map?.getCanvas?.() ? map.getCanvas().getBoundingClientRect() : null,
-          canvasInternalSize: map?.getCanvas?.() ? { width: map.getCanvas().width, height: map.getCanvas().height } : null,
-          isStyleLoaded: map?.isStyleLoaded?.() ?? false,
-          loaded: map?.loaded?.() ?? false,
-          isMoving: map?.isMoving?.() ?? false,
-          center: map?.getCenter?.() ?? null,
-          zoom: map?.getZoom?.() ?? null,
-          bearing: map?.getBearing?.() ?? null,
-          pitch: map?.getPitch?.() ?? null,
-          sourcesCount: map?.getStyle && map.getStyle()?.sources ? Object.keys(map.getStyle().sources).length : 0,
-          layersCount: map?.getStyle && map.getStyle()?.layers ? map.getStyle().layers.length : 0
-        };
-        console.log('[OSM VECTOR MAP INSTANCE]\n' + JSON.stringify(instanceData, null, 2));
-
-        // 4. [OSM VECTOR PARENT TREE] (Walk to document body)
-        const parentList: any[] = [];
-        let currParent: HTMLElement | null = container.parentElement;
-        let pIndex = 1;
-        while (currParent && currParent !== document.documentElement) {
-          parentList.push({ level: pIndex, ...formatElementProps(currParent) });
-          currParent = currParent.parentElement;
-          pIndex++;
-        }
-        console.log('[OSM VECTOR PARENT TREE]\n' + JSON.stringify(parentList, null, 2));
-
-        // 5. [OSM VECTOR HIT TEST ON SCREEN CENTER & CANVAS SAMPLE POINTS]
-        const screenCenterX = window.innerWidth / 2;
-        const screenCenterY = window.innerHeight / 2;
-        const screenCenterHits = document.elementsFromPoint(screenCenterX, screenCenterY).map((el, i) => {
-          const s = el instanceof HTMLElement ? window.getComputedStyle(el) : null;
-          return {
-            order: i,
-            tagName: el.tagName.toLowerCase(),
-            id: el.id || '(none)',
-            className: el.className || '(none)',
-            zIndex: s?.zIndex || 'N/A',
-            opacity: s?.opacity || 'N/A',
-            visibility: s?.visibility || 'N/A',
-            position: s?.position || 'N/A',
-            pointerEvents: s?.pointerEvents || 'N/A'
-          };
-        });
-        console.log('[OSM VECTOR HIT TEST (SCREEN CENTER)]\n' + JSON.stringify(screenCenterHits, null, 2));
-
-        // Test sample points on any found canvas
-        const canvases = Array.from(document.querySelectorAll('canvas'));
-        const canvasSampleHits = canvases.map((c, cIdx) => {
-          const r = c.getBoundingClientRect();
-          const points = [
-            { label: 'center', x: r.left + r.width / 2, y: r.top + r.height / 2 },
-            { label: 'top-left', x: r.left + 10, y: r.top + 10 },
-            { label: 'top-right', x: r.right - 10, y: r.top + 10 },
-            { label: 'bottom-left', x: r.left + 10, y: r.bottom - 10 },
-            { label: 'bottom-right', x: r.right - 10, y: r.bottom - 10 }
-          ];
-
-          return {
-            canvasIndex: cIdx,
-            className: c.className,
-            rect: { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) },
-            points: points.map(pt => ({
-              point: pt.label,
-              x: Math.round(pt.x),
-              y: Math.round(pt.y),
-              stack: document.elementsFromPoint(pt.x, pt.y).map((el, i) => {
-                const s = el instanceof HTMLElement ? window.getComputedStyle(el) : null;
-                return {
-                  order: i,
-                  tag: el.tagName.toLowerCase(),
-                  id: el.id || '',
-                  class: el.className || '',
-                  zIndex: s?.zIndex || '',
-                  opacity: s?.opacity || ''
-                };
-              })
-            }))
-          };
-        });
-        console.log('[OSM VECTOR CANVAS POINT SAMPLES]\n' + JSON.stringify(canvasSampleHits, null, 2));
-
-        // 6. [OSM VECTOR THREEJS CANVAS STACKING]
-        const threeCanvas = document.querySelector('canvas:not(.maplibregl-canvas)');
-        const threeRect = threeCanvas?.getBoundingClientRect();
-        const threeStyle = threeCanvas instanceof HTMLElement ? window.getComputedStyle(threeCanvas) : null;
-        console.log('[OSM VECTOR THREEJS CANVAS STACKING]\n' + JSON.stringify({
-          threeCanvasExists: !!threeCanvas,
-          threeRect: threeRect ? { x: Math.round(threeRect.x), y: Math.round(threeRect.y), width: Math.round(threeRect.width), height: Math.round(threeRect.height) } : null,
-          threeOpacity: threeStyle?.opacity,
-          threeVisibility: threeStyle?.visibility,
-          threeZIndex: threeStyle?.zIndex,
-          threePosition: threeStyle?.position,
-          osmContainerZIndex: window.getComputedStyle(container).zIndex
-        }, null, 2));
-
-        console.log('[OSM VECTOR STREET LEVEL STATE] distance=', dist.toFixed(4));
-      }
-    } else if (dist > 1.55) {
-      diagnosticLoggedRef.current = false;
-    }
 
     // Authoritative OSM Detail Visibility Controller (mutually exclusive with Globe markers & labels)
     const isOSMDetailActive = dist <= OSM_DETAIL_THRESHOLD;
@@ -1434,7 +1394,10 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
 
         // Retain previous tiles as fallback layer so map is never blank during transition
         fallbackTilesMapRef.current = new Map(activeTilesMapRef.current);
-        setFallbackTilesList(Array.from(activeTilesMapRef.current.values()));
+        const isMapLibreActive = !!(mapLibreMapRef.current || (typeof window !== 'undefined' && (window as any).__terraexplorer_maplibre_map));
+        if (!isMapLibreActive) {
+          setFallbackTilesList(Array.from(activeTilesMapRef.current.values()));
+        }
 
         activeTilesMapRef.current.clear();
         transitionStateRef.current = {

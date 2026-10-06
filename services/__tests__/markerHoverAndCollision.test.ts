@@ -39,6 +39,39 @@ describe('Globe Marker Interaction & Label Collision System', () => {
     expect(result.labelRect.top).toBeLessThan(targetMarker.y);
   });
 
+  it('places label to the left of the marker when preferLeft is true (iPad / Mobile globe view)', () => {
+    const targetMarker = {
+      x: 500,
+      y: 500,
+      visualRadius: 10,
+      hitRadius: 20,
+      id: 'target-1'
+    };
+
+    const labelWidth = 120;
+    const labelHeight = 30;
+    const otherMarkers: MarkerScreenTarget[] = [];
+
+    const result = evaluateLabelPlacement(
+      targetMarker,
+      labelWidth,
+      labelHeight,
+      otherMarkers,
+      [],
+      defaultViewport,
+      { preferLeft: true }
+    );
+
+    expect(result.collisions).toBe(0);
+    expect(result.collisionPenalty).toBe(0);
+    expect(result.placement).toBe('L');
+    // Label is placed to the left of the marker
+    expect(result.labelRect.right).toBeLessThan(targetMarker.x);
+    // Label is vertically centered with the marker
+    expect(result.labelRect.top).toBe(targetMarker.y - labelHeight / 2);
+    expect(result.labelRect.bottom).toBe(targetMarker.y + labelHeight / 2);
+  });
+
   it('avoids another marker positioned in the Upper-Right candidate spot (20px to 60px away)', () => {
     const targetMarker = {
       x: 500,

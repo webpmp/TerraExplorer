@@ -2,6 +2,8 @@ import 'react';
 
 export type CoordinateSource = "deterministic" | "geocoder" | "ai" | "ai_recovery" | "historical_approximate";
 export type GeographicIdentityStatus = "verified" | "unverified" | "ambiguous" | "failed";
+export type EnrichmentStatus = "required" | "completed" | "fallback" | "not-required";
+export type EnrichmentSource = "deterministic" | "wikipedia" | "lmstudio" | "gemini" | "fallback";
 
 export interface GeoCoordinates {
   lat: number;
@@ -173,6 +175,9 @@ export interface LocationInfo {
   errorType?: string;
   errorMessage?: string;
   errorInstruction?: string;
+  enrichmentStatus?: EnrichmentStatus;
+  enrichmentSource?: EnrichmentSource;
+  descriptionProvenance?: 'deterministic' | 'wikipedia' | 'lmstudio' | 'gemini' | 'fallback' | string;
   news: NewsItem[];
   routeContext?: {
     title: string;
@@ -349,6 +354,7 @@ export interface UserSettings {
   narrationLimit?: number;
   retroGreenProjection?: boolean;
   retroAmberProjection?: boolean;
+  testMode?: boolean;
 }
 
 export type RouteEvidenceMode =

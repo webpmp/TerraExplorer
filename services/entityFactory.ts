@@ -9,6 +9,7 @@ import {
     ClassificationDiagnostics,
     GeoLocation
 } from '../domain';
+import { generateUUID } from '../utils/uuid';
 
 export const createIdentity = (
     originalQuery: string,
@@ -26,7 +27,7 @@ export const createIdentity = (
     }
 
     return {
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         originalQuery,
         canonicalName,
         category,
@@ -81,7 +82,7 @@ export const createResolvedEntity = (
     previous?: ResolvedEntity
 ): ResolvedEntity => {
     const revision = previous ? previous.revision + 1 : 1;
-    const id = previous ? previous.id : crypto.randomUUID();
+    const id = previous ? previous.id : generateUUID();
 
     return {
         id,

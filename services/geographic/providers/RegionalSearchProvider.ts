@@ -35,7 +35,11 @@ export class RegionalSearchProvider implements DiscoveryProvider {
       const timeoutId = setTimeout(() => controller.abort(), 1500);
 
       try {
-        const response = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'TerraExplorer/1.0' } });
+        const headers: Record<string, string> = { 'Accept': 'application/json' };
+        if (typeof window === 'undefined') {
+          headers['User-Agent'] = 'TerraExplorer/1.0';
+        }
+        const response = await fetch(url, { signal: controller.signal, headers });
         clearTimeout(timeoutId);
         if (!response.ok) return [];
         const data = await response.json();
@@ -308,7 +312,11 @@ export class RegionalSearchProvider implements DiscoveryProvider {
         const degLat = radiusKm / 111;
         const degLng = radiusKm / (111 * Math.max(0.1, Math.cos((lat * Math.PI) / 180)));
         const bboxUrl = `https://nominatim.openstreetmap.org/search?q=city+OR+town&format=jsonv2&viewbox=${(lng - degLng).toFixed(4)},${(lat + degLat).toFixed(4)},${(lng + degLng).toFixed(4)},${(lat - degLat).toFixed(4)}&bounded=1&limit=10&extratags=1`;
-        const bboxRes = await fetch(bboxUrl, { headers: { 'User-Agent': 'TerraExplorer/1.0' } });
+        const bboxHeaders: Record<string, string> = { 'Accept': 'application/json' };
+        if (typeof window === 'undefined') {
+          bboxHeaders['User-Agent'] = 'TerraExplorer/1.0';
+        }
+        const bboxRes = await fetch(bboxUrl, { headers: bboxHeaders });
         if (bboxRes.ok) {
           const bboxData = await bboxRes.json();
           const bboxCandidates = (bboxData || [])

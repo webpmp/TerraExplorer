@@ -85,6 +85,26 @@ const ALIAS_DB: Record<string, string> = {
     "batavia shipwreck site": "batavia shipwreck site",
     "the batavia shipwreck site": "batavia shipwreck site",
 
+    // HMS Victory / HMS Victor
+    "hms victor": "hms victory wreck site",
+    "the hms victor": "hms victory wreck site",
+    "hms victor found": "hms victory wreck site",
+    "the hms victor found": "hms victory wreck site",
+    "hms victor wreck": "hms victory wreck site",
+    "the hms victor wreck": "hms victory wreck site",
+    "hms victor wreck site": "hms victory wreck site",
+    "the hms victor wreck site": "hms victory wreck site",
+    "hms victory": "hms victory wreck site",
+    "the hms victory": "hms victory wreck site",
+    "hms victory found": "hms victory wreck site",
+    "the hms victory found": "hms victory wreck site",
+    "hms victory wreck": "hms victory wreck site",
+    "the hms victory wreck": "hms victory wreck site",
+    "hms victory wreck site": "hms victory wreck site",
+    "the hms victory wreck site": "hms victory wreck site",
+    "hms victory shipwreck": "hms victory wreck site",
+    "the hms victory shipwreck": "hms victory wreck site",
+
     // Historical Battles and Events
     "battle of waterloo": "waterloo",
     "the battle of waterloo": "waterloo",

@@ -252,3 +252,47 @@ export function normalizeDescription(
 
   return normalizedLines.join('\n');
 }
+
+/**
+ * Normalizes raw encyclopedia or article lead text into a concise, synthesized 1-2 paragraph summary,
+ * stripping extraneous sub-sections, coordinate clauses, and excessive length.
+ */
+export function extractConciseLeadDescription(
+  text: string,
+  options?: {
+    coordinates?: { lat: number; lng: number } | null;
+    maxParagraphs?: number;
+    maxChars?: number;
+  }
+): string {
+  if (!text || typeof text !== 'string') return '';
+  const trimmed = text.trim();
+  if (!trimmed) return '';
+
+  const maxParas = options?.maxParagraphs ?? 2;
+  const maxChars = options?.maxChars ?? 550;
+
+  // Split into paragraphs
+  const paragraphs = trimmed
+    .split(/\n\s*\n|\n/)
+    .map(p => p.trim())
+    .filter(p => p.length > 20 && !p.startsWith('#') && !p.startsWith('=='));
+
+  if (paragraphs.length === 0) return '';
+
+  const chosenParagraphs: string[] = [];
+  let currentLength = 0;
+
+  for (let i = 0; i < Math.min(paragraphs.length, maxParas); i++) {
+    const para = paragraphs[i];
+    // If we already have 1 paragraph and adding this one exceeds maxChars, stop
+    if (i > 0 && currentLength + para.length > maxChars) {
+      break;
+    }
+    chosenParagraphs.push(para);
+    currentLength += para.length;
+  }
+
+  const combined = chosenParagraphs.join('\n\n');
+  return normalizeDescription(combined, { coordinates: options?.coordinates });
+}

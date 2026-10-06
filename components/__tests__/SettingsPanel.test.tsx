@@ -161,8 +161,41 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(onHtml).toContain('aria-checked="true"');
   });
 
-  test('6. APPEARANCE tab contains theme options: Modern, CRT Green, CRT Amber, Parchment', () => {
-    const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="appearance" />);
+  test('5c. GENERAL tab renders TEST MODE toggle reflecting ON/OFF state and defaults to ON', () => {
+    const defaultOnHtml = renderToStaticMarkup(
+      <SettingsPanel
+        {...baseProps}
+        settings={{ ...baseSettings }}
+        initialTab="general"
+      />
+    );
+    expect(defaultOnHtml).toContain('TEST MODE');
+    expect(defaultOnHtml).toContain('aria-label="Toggle Test Mode"');
+    expect(defaultOnHtml).toContain('aria-checked="true"');
+
+    const offHtml = renderToStaticMarkup(
+      <SettingsPanel
+        {...baseProps}
+        settings={{ ...baseSettings, testMode: false }}
+        initialTab="general"
+      />
+    );
+    expect(offHtml).toContain('aria-label="Toggle Test Mode"');
+    expect(offHtml).toContain('aria-checked="false"');
+
+    const explicitOnHtml = renderToStaticMarkup(
+      <SettingsPanel
+        {...baseProps}
+        settings={{ ...baseSettings, testMode: true }}
+        initialTab="general"
+      />
+    );
+    expect(explicitOnHtml).toContain('aria-label="Toggle Test Mode"');
+    expect(explicitOnHtml).toContain('aria-checked="true"');
+  });
+
+  test('6. APPEARANCE tab contains theme options: Modern, CRT Green, CRT Amber, Parchment on desktop', () => {
+    const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="appearance" isDesktop={true} />);
 
     expect(html).toContain('id="settings-tabpanel-appearance"');
     expect(html).toContain('Theme &amp; Appearance');
@@ -171,6 +204,17 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(html).toContain('CRT Amber');
     expect(html).toContain('Parchment');
     expect(html).toContain('Active');
+  });
+
+  test('6b. APPEARANCE tab completely omits Parchment on non-desktop viewports', () => {
+    const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="appearance" isDesktop={false} />);
+
+    expect(html).toContain('id="settings-tabpanel-appearance"');
+    expect(html).toContain('Theme &amp; Appearance');
+    expect(html).toContain('Modern');
+    expect(html).toContain('CRT Green');
+    expect(html).toContain('CRT Amber');
+    expect(html).not.toContain('Parchment');
   });
 
   test('7. AUDIO tab contains Provider selector, Voice selection, speed, volume, and test voice', () => {

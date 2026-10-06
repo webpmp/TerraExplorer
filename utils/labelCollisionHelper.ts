@@ -15,7 +15,7 @@ export interface MarkerScreenTarget {
   hitRadius: number; // interactive hit radius in pixels (e.g. 20px for 40px hit area)
 }
 
-export type CandidatePlacement = 'UR' | 'UL' | 'LR' | 'LL' | 'T' | 'B';
+export type CandidatePlacement = 'UR' | 'UL' | 'LR' | 'LL' | 'T' | 'B' | 'L';
 
 export interface CandidateLayout {
   placement: CandidatePlacement;
@@ -30,13 +30,18 @@ export interface CandidateLayout {
   displacement: number;
 }
 
+export interface EvaluateLabelOptions {
+  preferLeft?: boolean;
+}
+
 export const CANDIDATE_DIRECTIONS: Array<{ placement: CandidatePlacement; dx: number; dy: number; labelAnchor: { x: number; y: number } }> = [
   { placement: 'UR', dx: 32, dy: -32, labelAnchor: { x: 0, y: 1 } },     // Bottom-left of label
   { placement: 'UL', dx: -32, dy: -32, labelAnchor: { x: 1, y: 1 } },    // Bottom-right of label
   { placement: 'LR', dx: 32, dy: 32, labelAnchor: { x: 0, y: 0 } },      // Top-left of label
   { placement: 'LL', dx: -32, dy: 32, labelAnchor: { x: 1, y: 0 } },     // Top-right of label
   { placement: 'T', dx: 0, dy: -42, labelAnchor: { x: 0.5, y: 1 } },     // Bottom-center of label
-  { placement: 'B', dx: 0, dy: 42, labelAnchor: { x: 0.5, y: 0 } }       // Top-center of label
+  { placement: 'B', dx: 0, dy: 42, labelAnchor: { x: 0.5, y: 0 } },      // Top-center of label
+  { placement: 'L', dx: -28, dy: 0, labelAnchor: { x: 1, y: 0.5 } }       // Center-right of label (Left side of marker, vertically centered)
 ];
 
 /**
@@ -68,7 +73,8 @@ export function evaluateLabelPlacement(
   labelHeight: number,
   otherMarkers: MarkerScreenTarget[],
   otherLabels: ScreenRect[] = [],
-  viewport: { width: number; height: number } = { width: 1920, height: 1080 }
+  viewport: { width: number; height: number } = { width: 1920, height: 1080 },
+  options?: EvaluateLabelOptions
 ): CandidateLayout {
   const markerX = targetMarker.x;
   const markerY = targetMarker.y;
@@ -188,28 +194,38 @@ export function evaluateLabelPlacement(
     });
   }
 
-  // Candidate priority index (UR = 0, UL = 1, LR = 2, LL = 3, T = 4, B = 5)
-  const candidateIndexMap: Record<CandidatePlacement, number> = {
-    UR: 0,
-    UL: 1,
-    LR: 2,
-    LL: 3,
-    T: 4,
-    B: 5
-  };
+  // Candidate priority index
+  // Desktop: UR > UL > LR > LL > T > B > L
+  // Mobile / iPad: L > UL > LL > UR > LR > T > B
+  const candidateIndexMap: Record<CandidatePlacement, number> = options?.preferLeft
+    ? {
+        L: 0,
+        UL: 1,
+        LL: 2,
+        UR: 3,
+        LR: 4,
+        T: 5,
+        B: 6
+      }
+    : {
+        UR: 0,
+        UL: 1,
+        LR: 2,
+        LL: 3,
+        T: 4,
+        B: 5,
+        L: 6
+      };
 
   // Sort candidates:
   // 1. 0 collisions first
   // 2. Lowest total collision penalty
-  // 3. Smallest displacement / natural candidate preference (UR > UL > LR > LL > T > B)
+  // 3. Preferred candidate priority
   candidates.sort((a, b) => {
     if (a.collisions === 0 && b.collisions > 0) return -1;
     if (b.collisions === 0 && a.collisions > 0) return 1;
     if (Math.abs(a.collisionPenalty - b.collisionPenalty) > 0.001) {
       return a.collisionPenalty - b.collisionPenalty;
-    }
-    if (Math.abs(a.displacement - b.displacement) > 4) {
-      return a.displacement - b.displacement;
     }
     return candidateIndexMap[a.placement] - candidateIndexMap[b.placement];
   });

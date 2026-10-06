@@ -6,6 +6,7 @@ import { formatUserFacingCategory, formatClimateName } from '../utils/categoryFo
 import { fetchAndValidateImages } from '../services/imageService';
 import { fetchAndValidateLocationNews } from '../services/locationService';
 import { logTraceTiming } from '../services/traceTimingService';
+import { logTerraSearchDebug } from '../services/searchDebugTracer';
 import { isLMStudioNoModelError, LM_STUDIO_NO_MODEL_MESSAGE, LM_STUDIO_NO_MODEL_INSTRUCTION } from '../services/geminiService';
 import {
   X, Users, Info, Crown, Map, Pin, ExternalLink, Loader2,
@@ -1455,6 +1456,15 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const isRetro = skin === 'retro-green' || skin === 'retro-amber';
   const isParchment = skin === 'parchment';
 
+  if (rawInfo) {
+    console.log(`[ENRICHMENT TRACE 8] INFOPANEL DATA searchId=${(rawInfo as any)?.searchId || (rawInfo as any)?.originalQuery || 'none'} name="${rawInfo?.name}"`);
+    console.log(`[ENRICHMENT TRACE 8] description = ${JSON.stringify(rawInfo?.description)}`);
+    console.log(`[ENRICHMENT TRACE 8] notable = ${JSON.stringify(rawInfo?.notable)}`);
+    console.log(`[ENRICHMENT TRACE 8] climate = ${JSON.stringify(rawInfo?.climate)}`);
+    console.log(`[ENRICHMENT TRACE 8] contextNotes = ${JSON.stringify(rawInfo?.contextNotes)}`);
+    console.log(`[ENRICHMENT TRACE 8] population = ${JSON.stringify(rawInfo?.population)}`);
+  }
+
   const info = React.useMemo(() => {
     if (!rawInfo) return null;
 
@@ -1764,6 +1774,21 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   const editNoteTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
+    if (!info || !info.name) return;
+    const isMobile = typeof window !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || '');
+    console.log(`[INFO PANEL FINAL]
+platform: ${isMobile ? 'iPad' : 'desktop'}
+title: ${info.name}
+descriptionLength: ${info.description?.length || 0}
+descriptionPreview: ${info.description ? info.description.slice(0, 70) + '...' : 'none'}
+notableFacts: ${Array.isArray(info.notable) ? info.notable.map((n: any) => n.title || n.name || n).join(', ') || 'none' : 'none'}
+climate: ${info.climate?.name || (typeof info.climate === 'string' ? info.climate : 'none')}
+climateDescription: ${info.climate?.description ? 'present' : 'none'}
+population: ${info.population?.current?.formattedValue || info.population?.value || 'none'}
+enrichmentComplete: ${Boolean(info.description && info.description.length > 50)}`);
+  }, [info]);
+
+  useEffect(() => {
     if (isAddingNote) {
       newNoteTextareaRef.current?.focus();
     }
@@ -1831,8 +1856,26 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
     if (info?.name) {
       const stableId = (info as any)?.waypoint?.id || (info as any)?.id || info.name;
       logTraceTiming('WP1_INFOPANEL_VISIBLE', stableId, info.name, `descLength=${(info.description || '').length}`);
+      logTerraSearchDebug({
+        stage: 'InfoPanel.receivedInput',
+        entity: info.name,
+        status: 'SUCCESS',
+        details: {
+          title: info.name,
+          subtitle: info.subtitle || (info as any).locationLabel || (info as any).country,
+          hasDescription: Boolean(info.description),
+          descLength: typeof info.description === 'string' ? info.description.length : 0,
+          descPreview: typeof info.description === 'string' ? info.description.slice(0, 50) : '',
+          isPlaceholderDesc: typeof info.description === 'string' ? isPlaceholderString(info.description) : true,
+          imagesCount: Array.isArray(info.images) ? info.images.length : (info.image ? 1 : 0),
+          notableCount: Array.isArray(info.notable) ? info.notable.length : 0,
+          entityType: info.entityType,
+          coordinates: info.coordinates || null,
+          source: (info as any).source || (info as any).coordinateSource
+        }
+      });
     }
-  }, [info?.name, (info as any)?.id]);
+  }, [info?.name, (info as any)?.id, info?.description]);
 
   useEffect(() => {
     updateScrollFade();
@@ -2587,7 +2630,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
                             <h3
                               key={`h-${i}`}
                               className={`font-semibold uppercase tracking-wider ${
-                                isRetro ? 'text-green-300 font-retro' : isParchment ? 'text-[#3e2723] font-serif' : 'text-cyan-300'
+                                isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000] font-retro' : 'text-green-300 font-retro') : isParchment ? 'text-[#3e2723] font-serif' : 'text-cyan-300'
                               } text-xs mt-3 mb-1`}
                             >
                               {cleanedText}
@@ -2616,7 +2659,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             ) : isDescLoading ? (
               <div className="space-y-3 animate-pulse pt-2">
                 <div className="space-y-2">
-                  <div className={`h-3.5 ${isRetro ? 'bg-green-500/20' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded w-3/4`}></div>
+                  <div className={`h-3.5 ${isRetro ? (skin === 'retro-amber' ? 'bg-amber-500/20' : 'bg-green-500/20') : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded w-3/4`}></div>
                   <div className={`h-3.5 ${isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
                   <div className={`h-3.5 w-[90%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
                 </div>
@@ -3080,9 +3123,10 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
   return (
     <>
       <div
-        className={`absolute top-[282px] right-8 z-30 w-80 md:w-96 max-h-[calc(100vh-342px)] flex flex-col gap-3 animate-in slide-in-from-right-12 fade-in duration-500 pointer-events-none ${isParchment ? 'group' : ''}`}
+        className={`absolute top-[282px] right-8 z-30 w-80 md:w-96 max-h-[calc(100vh-342px)] flex flex-col gap-3 animate-in slide-in-from-right-12 fade-in duration-500 pointer-events-none info-panel-outer ${isParchment ? 'group' : ''}`}
         data-testid="info-panel"
         data-infopanel="true"
+        data-skin={skin}
         onWheel={(e) => e.stopPropagation()}
       >
         {/* Main Info Box */}
@@ -3355,7 +3399,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({
             ) : showContentSkeleton ? (
                <div className="p-6 space-y-6 animate-pulse">
                   <div className="space-y-3">
-                     <div className={`h-3.5 ${isRetro ? 'bg-green-500/20' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded w-3/4`}></div>
+                     <div className={`h-3.5 ${isRetro ? (skin === 'retro-amber' ? 'bg-amber-500/20' : 'bg-green-500/20') : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded w-3/4`}></div>
                      <div className={`h-3.5 ${isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
                      <div className={`h-3.5 w-[90%] ${isRetro ? 'bg-current opacity-30' : isParchment ? 'bg-[#8b5a2b]/20' : 'bg-white/10'} rounded`}></div>
                   </div>

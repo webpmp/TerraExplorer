@@ -6,6 +6,7 @@ import coinAlphaImage from '../assets/coin-alpha.png';
 import { isCelestialBodySupported, detectCelestialBody } from '../services/celestialCapabilities';
 import { narrationService } from '../services/narrationService';
 import { generateContextualChips, ContextualChip } from '../services/followUpService';
+import { logTerraSearchDebug } from '../services/searchDebugTracer';
 
 interface ControlsProps {
   onZoomIn: () => void;
@@ -267,7 +268,38 @@ const Controls: React.FC<ControlsProps> = ({
   const [traceText, setTraceText] = useState("");
   const prevPausedRef = useRef(paused);
 
-  const chips = activeLocationContext ? generateContextualChips(activeLocationContext, showNews) : [];
+  const prevActiveContextRef = useRef<string | null>(null);
+  const chips = useMemo(() => {
+    if (!activeLocationContext) return [];
+    const contextKey = `${activeLocationContext.name}-${(activeLocationContext as any).id || ''}`;
+    if (prevActiveContextRef.current !== contextKey) {
+      prevActiveContextRef.current = contextKey;
+      logTerraSearchDebug({
+        stage: 'Controls.followUpGeneration',
+        entity: activeLocationContext.name,
+        status: 'FOLLOWUP_GENERATION_ENTRY',
+        details: {
+          name: activeLocationContext.name,
+          entityType: (activeLocationContext as any).entityType,
+          hasDescription: Boolean(activeLocationContext.description),
+          singleLocation: (activeLocationContext as any).singleLocation
+        }
+      });
+    }
+    const generated = generateContextualChips(activeLocationContext, showNews);
+    if (prevActiveContextRef.current === contextKey) {
+      logTerraSearchDebug({
+        stage: 'Controls.followUpGeneration',
+        entity: activeLocationContext.name,
+        status: 'FOLLOWUP_GENERATION_SUCCESS',
+        details: {
+          chipCount: generated.length,
+          chipLabels: generated.slice(0, 4).map(c => c.label)
+        }
+      });
+    }
+    return generated;
+  }, [activeLocationContext, showNews]);
 
   const handleChipClick = (chip: ContextualChip) => {
     if (chip.type === 'news' && chip.url) {
@@ -534,7 +566,14 @@ const Controls: React.FC<ControlsProps> = ({
       return;
     }
     if (query.trim()) {
-      console.log(`[SearchNarration] SEARCH_SUBMITTED query="${query.trim()}"`);
+      const q = query.trim();
+      logTerraSearchDebug({
+        stage: 'Controls.handleSubmit',
+        query: q,
+        status: 'ENTRY',
+        details: { skin, isManualInputMode }
+      });
+      console.log(`[SearchNarration] SEARCH_SUBMITTED query="${q}"`);
       setIsManualInputMode(false);
       setParchmentItemIndex(0);
       onSearch(query);
@@ -543,6 +582,12 @@ const Controls: React.FC<ControlsProps> = ({
         setIsManualInputMode(true);
         setTimeout(() => inputRef.current?.focus(), 0);
       } else if (currentParchmentItem.chip) {
+        logTerraSearchDebug({
+          stage: 'Controls.handleChipClick',
+          query: currentParchmentItem.chip.query,
+          status: 'ENTRY',
+          details: { skin, label: currentParchmentItem.label }
+        });
         console.log(`[SearchNarration] PARCHMENT_FOLLOWUP_SUBMITTED chip="${currentParchmentItem.label}"`);
         handleChipClick(currentParchmentItem.chip);
       }
@@ -551,6 +596,12 @@ const Controls: React.FC<ControlsProps> = ({
       if (effectiveCandidate && effectiveCandidate !== "Search location..." && effectiveCandidate !== "SEARCH LOCATION...") {
         const cleanQuery = effectiveCandidate.replace(/\.\.\.$/, "");
         if (!isScanStatusQuery(cleanQuery)) {
+          logTerraSearchDebug({
+            stage: 'Controls.handleSubmitPlaceholder',
+            query: cleanQuery,
+            status: 'ENTRY',
+            details: { skin, effectiveCandidate }
+          });
           console.log(`[SearchNarration] SEARCH_SUBMITTED query="${cleanQuery}"`);
           setQuery(cleanQuery);
           onSearch(cleanQuery);
@@ -994,7 +1045,7 @@ const Controls: React.FC<ControlsProps> = ({
       )}
 
       {/* Main Bottom Container (Fixed at the bottom across all themes) */}
-      <div className="absolute bottom-2.5 left-0 right-0 z-20 flex flex-col items-center gap-2 pointer-events-none px-4">
+      <div className="controls-bottom-container absolute bottom-2.5 left-0 right-0 z-20 flex flex-col items-center gap-2 pointer-events-none px-4">
         {/* Toolbar for non-parchment themes */}
         {skin !== 'parchment' && (
           <div className="flex gap-2 pointer-events-auto">
@@ -1387,7 +1438,7 @@ const Controls: React.FC<ControlsProps> = ({
       )}
 
       {/* Copyright & Map Attribution Text */}
-      <div className={`text-[10px] md:text-xs text-center ${theme.copyright}`}>
+      <div className={`copyright-footer text-[10px] md:text-xs text-center ${theme.copyright}`}>
         © {new Date().getFullYear()} TerraExplorer by Chris Adkins • All Rights Reserved • Map data ©{' '}
         <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" className="underline hover:opacity-80 pointer-events-auto">OpenStreetMap contributors</a>
         {' '}• ©{' '}

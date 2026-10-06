@@ -30,6 +30,7 @@ interface EarthProps {
 }
 
 import { latLngToVector3, vector3ToLatLng } from '../utils/globeCoordinates';
+import { isMobileOrTablet } from '../utils/device';
 import { OSMMapLayer } from './OSMMapLayer';
 import { OSMTransitionFog } from './OSMTransitionFog';
 import { evaluateLabelPlacement, MarkerScreenTarget, ScreenRect } from '../utils/labelCollisionHelper';
@@ -836,7 +837,7 @@ const HoverOverlay: React.FC<{
       }
     }
 
-    // 5. Evaluate best collision-free placement
+    // 5. Evaluate best collision-free placement (iPad/mobile prefers Left alignment away from InfoPanel)
     const bestLayout = evaluateLabelPlacement(
       {
         x: markerScreenX,
@@ -849,7 +850,8 @@ const HoverOverlay: React.FC<{
       labelHeight,
       otherMarkers,
       [],
-      { width: size.width, height: size.height }
+      { width: size.width, height: size.height },
+      { preferLeft: isMobileOrTablet() }
     );
 
     // 6. Update SVG and Label positions directly in DOM
@@ -1197,22 +1199,27 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
         const mat = innerMeshRef.current.material as THREE.MeshPhongMaterial;
         if (mat.displacementMap) {
             const dist = state.camera.position.length(); // Camera distance from (0,0,0)
-            
-            // Map distance 1.2 (close) -> 5.0 (far)
-            const minDist = 1.3;
-            const maxDist = 4.0;
-            const norm = (Math.min(maxDist, Math.max(minDist, dist)) - minDist) / (maxDist - minDist);
-            
-            // intensity goes from 1.0 (close) to 0.0 (far)
-            const intensity = 1.0 - norm;
-            
-            // Apply exponential curve so it pops in mainly when quite close
-            const curvedIntensity = Math.pow(intensity, 2.5);
+            if (dist <= 1.45 && isStreetMapReady) {
+                if (mat.displacementScale !== 0) {
+                    mat.displacementScale = 0;
+                    mat.displacementBias = 0;
+                }
+            } else {
+                // Map distance 1.2 (close) -> 5.0 (far)
+                const minDist = 1.3;
+                const maxDist = 4.0;
+                const norm = (Math.min(maxDist, Math.max(minDist, dist)) - minDist) / (maxDist - minDist);
 
-            // Peak displacement scale reduced to 0.03 to accommodate lower marker altitude (1.015)
-            // Bias ensures displacement is centered or slightly inward so markers at 1.015 remain visible
-            mat.displacementScale = curvedIntensity * 0.03;
-            mat.displacementBias = -mat.displacementScale / 2; // Center the displacement
+                // intensity goes from 1.0 (close) to 0.0 (far)
+                const intensity = 1.0 - norm;
+
+                // Apply exponential curve so it pops in mainly when quite close
+                const curvedIntensity = Math.pow(intensity, 2.5);
+
+                // Peak displacement scale reduced to 0.03 to accommodate lower marker altitude (1.015)
+                mat.displacementScale = curvedIntensity * 0.03;
+                mat.displacementBias = -mat.displacementScale / 2; // Center the displacement
+            }
         }
     }
 
@@ -1448,12 +1455,14 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
         currentWaypointIndex={currentWaypointIndex}
       />
 
-      {/* Atmospheric Fog Transition Layer (Three-Phase Transition, 1.85 -> 1.35) */}
-      <OSMTransitionFog
-        skin={skin}
-        isMapReady={isStreetMapReady}
-        isInteracting={isInteracting}
-      />
+      {/* Atmospheric Fog Transition Layer (Three-Phase Transition, 1.85 -> 1.35) — Desktop only, completely bypassed on iPad/Mobile */}
+      {!isMobileOrTablet() && (
+        <OSMTransitionFog
+          skin={skin}
+          isMapReady={isStreetMapReady}
+          isInteracting={isInteracting}
+        />
+      )}
 
       {/* Render All Markers */}
       {processedMarkers.map((marker, index) => {

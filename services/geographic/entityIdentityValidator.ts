@@ -26,7 +26,9 @@ const GENERIC_STOP_WORDS = new Set([
   'is', 'was', 'are', 'were', 'where', 'what', 'show', 'tell', 'find', 'locate', 'take',
   'about', 'me', 'here', 'site', 'no', 'number', 'location', 'place', 'area', 'point',
   'interest', 'poi', 'discovery', 'recovery', 'expedition', 'shipwreck', 'wreck', 'sunken',
-  'sinking', 'vessel', 'ship', 'boat', 'plane', 'aircraft', 'ruins'
+  'sinking', 'vessel', 'ship', 'boat', 'plane', 'aircraft', 'ruins', 'landmark', 'monument',
+  'feature', 'attraction', 'unknown', 'known', 'famous', 'ancient', 'historic', 'historical',
+  'some', 'any', 'every'
 ]);
 
 // Administrative entity qualifiers that narrow a generic entity name
@@ -230,19 +232,24 @@ export function validateEntityIdentity(
   const reqStripped = stripDiacritics(reqLower);
   const recStripped = stripDiacritics(recLower);
   if (
-    reqLower.includes(recLower) ||
-    recLower.includes(reqLower) ||
-    reqStripped.includes(recStripped) ||
-    recStripped.includes(reqStripped)
+    (reqLower.includes(recLower) || recLower.includes(reqLower) ||
+     reqStripped.includes(recStripped) || recStripped.includes(reqStripped))
   ) {
-    // If requested contains recovered (e.g. "Yellowstone National Park" contains "Yellowstone National Park, WY")
-    return {
-      matches: true,
-      rejectionReason: 'NONE',
-      requestedEntity: reqStr,
-      recoveredEntity: recStr,
-      details: 'Substring match'
-    };
+    const shorter = reqLower.length <= recLower.length ? reqStr : recStr;
+    const longer = reqLower.length <= recLower.length ? recStr : reqStr;
+    const shorterTokens = extractDistinctiveEntityTokens(shorter);
+    const longerTokens = new Set(extractDistinctiveEntityTokens(longer));
+    // Accept substring if every distinctive token of the shorter string is in the longer string
+    const allShorterInLonger = shorterTokens.length > 0 && shorterTokens.every(t => longerTokens.has(t));
+    if (allShorterInLonger || reqLower === recLower) {
+      return {
+        matches: true,
+        rejectionReason: 'NONE',
+        requestedEntity: reqStr,
+        recoveredEntity: recStr,
+        details: 'Substring match'
+      };
+    }
   }
 
   // 4. Token-based overlap and conflict detection
