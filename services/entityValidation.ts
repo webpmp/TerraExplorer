@@ -204,6 +204,28 @@ export function evaluateEnrichmentCompleteness(
   const news = Array.isArray(data.news) ? data.news : [];
   const newsStatus = news.length > 0 ? 'accepted' : 'optional/empty';
 
+  const isAlreadyEnriched = data?.enrichmentStatus === 'completed' ||
+    data?.descriptionProvenance === 'lmstudio' ||
+    data?.descriptionProvenance === 'gemini';
+
+  const isRawOrSourceProvenance = data?.enrichmentStatus === 'required' ||
+    data?.descriptionProvenance === 'wikipedia' ||
+    data?.descriptionProvenance === 'deterministic' ||
+    data?.descriptionProvenance === 'fallback';
+
+  if (isRawOrSourceProvenance && !isAlreadyEnriched) {
+    missing.push('ai_synthesis');
+  }
+
+  if (isAlreadyEnriched && !isDescMissingOrPlaceholder) {
+    return {
+      status: 'COMPLETE',
+      missingFields: [],
+      newsStatus,
+      recoveryRequired: false
+    };
+  }
+
   let status: EnrichmentCompletenessStatus = 'COMPLETE';
   let recoveryRequired = false;
   let recoveryReason: string | undefined;
@@ -215,7 +237,9 @@ export function evaluateEnrichmentCompleteness(
   } else if (missing.length > 0) {
     status = 'PARTIAL';
     recoveryRequired = true;
-    recoveryReason = 'enrichment incomplete despite verified canonical identity';
+    recoveryReason = isRawOrSourceProvenance
+      ? 'enrichment required: raw source / deterministic metadata requires AI synthesis'
+      : 'enrichment incomplete despite verified canonical identity';
   } else {
     status = 'COMPLETE';
     recoveryRequired = false;
@@ -243,9 +267,10 @@ export function logEnrichmentCompleteness(evalResult: EnrichmentCompletenessResu
   }
 }
 
-export function isGenericPlaceholderDescription(description?: string | null, entityName?: string): boolean {
-  if (!description || typeof description !== 'string') return true;
-  const trimmed = description.trim();
+export function isGenericPlaceholderDescription(description?: any, entityName?: string): boolean {
+  const text = extractDescriptionText(description);
+  if (!text) return true;
+  const trimmed = text.trim();
   if (trimmed.length === 0) return true;
 
   const lower = trimmed.toLowerCase();

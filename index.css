@@ -4045,3 +4045,113 @@ video {
           appearance: none;
 }
 
+/* Scoped Responsive Non-Desktop Layout Rules (<= 1080px) */
+@media (max-width: 1080px) {
+  .app-root-container {
+    height: 100dvh !important;
+  }
+  .brand-logo-container {
+    top: 1.5rem !important;
+    left: 1.5rem !important;
+  }
+  .brand-logo-img {
+    width: 140px !important;
+    height: 123px !important;
+    object-fit: contain !important;
+  }
+  .left-panel-drawer-container {
+    top: 160px !important;
+    left: 1.5rem !important;
+    width: calc(100vw - 3rem) !important;
+    max-width: 24rem !important;
+  }
+  .settings-panel-container {
+    width: 100% !important;
+    max-height: calc(100dvh - 190px) !important;
+    height: auto !important;
+  }
+  .favorites-panel-container {
+    width: 100% !important;
+  }
+  .info-panel-outer {
+    top: calc(1.5rem + 50px) !important;
+    right: 1.5rem !important;
+    bottom: auto !important;
+    transform: none !important;
+    width: 320px !important;
+    max-width: calc(100vw - 3rem) !important;
+    max-height: calc(100dvh - 380px) !important;
+    max-height: calc(100dvh - 380px - env(safe-area-inset-bottom, 0px)) !important;
+  }
+  .route-editor-modal-container {
+    padding-top: 1rem !important;
+    padding-bottom: 1rem !important;
+  }
+  .controls-bottom-container {
+    bottom: 1.25rem !important;
+    bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  .copyright-footer {
+    transform: translateY(-5px) !important;
+  }
+  .search-debug-container {
+    bottom: 4px !important;
+    bottom: calc(4px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+/* Scoped Responsive Non-Desktop Landscape Rules (<= 1080px and landscape orientation) */
+@media (max-width: 1080px) and (orientation: landscape) {
+  /* Modern / Retro Landscape: compact logo and tighter top anchor */
+  .brand-logo-container {
+    top: 0.875rem !important;
+    left: 1.25rem !important;
+  }
+  .brand-logo-img {
+    width: 80px !important;
+    height: 70px !important;
+    object-fit: contain !important;
+  }
+  .left-panel-drawer-container {
+    top: 76px !important;
+    left: 1.25rem !important;
+    max-height: calc(100dvh - 90px) !important;
+  }
+  .settings-panel-container {
+    max-height: calc(100dvh - 90px) !important;
+  }
+
+  /* InfoPanel in landscape: anchored near top, never vertically centered, constrained height with internal scrolling */
+  .info-panel-outer {
+    top: calc(0.875rem + 50px) !important;
+    top: calc(0.875rem + 50px + env(safe-area-inset-top, 0px)) !important;
+    right: 1.25rem !important;
+    bottom: auto !important;
+    transform: none !important;
+    width: 320px !important;
+    max-width: calc(100vw - 2.5rem) !important;
+    max-height: calc(100dvh - 180px) !important;
+    max-height: calc(100dvh - 180px - env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* Bottom Controls in landscape: anchored securely inside viewport with compact gaps */
+  .controls-bottom-container {
+    bottom: 0.75rem !important;
+    bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)) !important;
+    gap: 0.25rem !important;
+  }
+  .copyright-footer {
+    transform: translateY(-5px) !important;
+  }
+  .search-debug-container {
+    bottom: 4px !important;
+    bottom: calc(4px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+/* Search Debug Utility: hidden on desktop (> 1080px), visible on tablet/mobile */
+@media (min-width: 1081px) {
+  .search-debug-container {
+    display: none !important;
+  }
+}

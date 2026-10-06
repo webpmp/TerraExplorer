@@ -161,8 +161,8 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(onHtml).toContain('aria-checked="true"');
   });
 
-  test('6. APPEARANCE tab contains theme options: Modern, CRT Green, CRT Amber, Parchment', () => {
-    const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="appearance" />);
+  test('6. APPEARANCE tab contains theme options: Modern, CRT Green, CRT Amber, Parchment on desktop', () => {
+    const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="appearance" isDesktop={true} />);
 
     expect(html).toContain('id="settings-tabpanel-appearance"');
     expect(html).toContain('Theme &amp; Appearance');
@@ -171,6 +171,17 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(html).toContain('CRT Amber');
     expect(html).toContain('Parchment');
     expect(html).toContain('Active');
+  });
+
+  test('6b. APPEARANCE tab completely omits Parchment on non-desktop viewports', () => {
+    const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="appearance" isDesktop={false} />);
+
+    expect(html).toContain('id="settings-tabpanel-appearance"');
+    expect(html).toContain('Theme &amp; Appearance');
+    expect(html).toContain('Modern');
+    expect(html).toContain('CRT Green');
+    expect(html).toContain('CRT Amber');
+    expect(html).not.toContain('Parchment');
   });
 
   test('7. AUDIO tab contains Provider selector, Voice selection, speed, volume, and test voice', () => {

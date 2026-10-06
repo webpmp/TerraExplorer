@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Settings as SettingsIcon, X, Server, Newspaper, Film, Volume2, KeyRound, ExternalLink, Map as MapIcon, Palette, Sliders, Sparkles, BookOpen } from 'lucide-react';
 import { SkinType, UserSettings, AIProvider, NewsProvider, NarrationProviderType } from '../types';
 import { narrationService, KOKORO_VOICES, ORPHEUS_VOICES } from '../services/narrationService';
+import { resolveEffectiveLMStudioUrl } from '../services/geminiService';
 
 interface SettingsPanelProps {
   settings: UserSettings;
@@ -11,6 +12,7 @@ interface SettingsPanelProps {
   onSkinChange?: (skin: SkinType) => void;
   initialTab?: SettingsTab;
   dimmed?: boolean;
+  isDesktop?: boolean;
 }
 
 type SettingsTab = 'general' | 'providers' | 'appearance' | 'audio';
@@ -279,7 +281,111 @@ export const testNewsConnectionService = async (
   }
 };
 
-const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSettings, onClose, skin, onSkinChange, initialTab = 'general', dimmed = false }) => {
+export interface DetectModelsResult {
+  outcome: 'SUCCESS' | 'NO_MODELS' | 'ERROR';
+  models: string[];
+  selectedModel?: string;
+  message: string;
+  status?: number;
+}
+
+export const detectLMStudioModels = async (
+  lmStudioUrl?: string,
+  fetchFn: typeof fetch = fetch
+): Promise<DetectModelsResult> => {
+  if (!lmStudioUrl) {
+    return { outcome: 'ERROR', models: [], message: 'No LM Studio URL provided' };
+  }
+  const effectiveUrl = resolveEffectiveLMStudioUrl(lmStudioUrl);
+  let normalizedBase = effectiveUrl.trim().replace(/\/+$/, '');
+  if (!normalizedBase.endsWith('/v1')) {
+    normalizedBase += '/v1';
+  }
+  try {
+    let res = await fetchFn(`${normalizedBase}/models`);
+    if (!res.ok && effectiveUrl !== lmStudioUrl) {
+      let directBase = lmStudioUrl.trim().replace(/\/+$/, '');
+      if (!directBase.endsWith('/v1')) {
+        directBase += '/v1';
+      }
+      try {
+        const directRes = await fetchFn(`${directBase}/models`);
+        if (directRes.ok) {
+          res = directRes;
+        }
+      } catch {
+        // preserve original error response
+      }
+    }
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => '');
+      if (errorText.toLowerCase().includes('no models loaded') || errorText.includes('No models loaded')) {
+        return { outcome: 'NO_MODELS', models: [], message: 'No model loaded. Please load a model in LM Studio.', status: res.status };
+      }
+      return { outcome: 'ERROR', models: [], message: `Error: ${res.statusText || res.status}`, status: res.status };
+    }
+    const data = await res.json();
+    const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : (Array.isArray(data?.models) ? data.models : []));
+    const models: string[] = list.map((m: any) => {
+      if (typeof m === 'string') return m;
+      if (m && typeof m === 'object' && m.id) return m.id;
+      return null;
+    }).filter(Boolean);
+
+    if (models.length === 0) {
+      return { outcome: 'NO_MODELS', models: [], message: 'No models found at endpoint. Please load a model in LM Studio.', status: res.status };
+    }
+    return {
+      outcome: 'SUCCESS',
+      models,
+      selectedModel: models[0],
+      message: `Detected ${models.length} model${models.length === 1 ? '' : 's'}: ${models[0]}`,
+      status: res.status
+    };
+  } catch (err: any) {
+    if (effectiveUrl !== lmStudioUrl) {
+      try {
+        let directBase = lmStudioUrl.trim().replace(/\/+$/, '');
+        if (!directBase.endsWith('/v1')) {
+          directBase += '/v1';
+        }
+        const directRes = await fetchFn(`${directBase}/models`);
+        if (directRes.ok) {
+          const data = await directRes.json();
+          const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : (Array.isArray(data?.models) ? data.models : []));
+          const models: string[] = list.map((m: any) => {
+            if (typeof m === 'string') return m;
+            if (m && typeof m === 'object' && m.id) return m.id;
+            return null;
+          }).filter(Boolean);
+          if (models.length > 0) {
+            return {
+              outcome: 'SUCCESS',
+              models,
+              selectedModel: models[0],
+              message: `Detected ${models.length} model${models.length === 1 ? '' : 's'}: ${models[0]}`,
+              status: directRes.status
+            };
+          }
+        }
+      } catch {
+        // Ignore fallback error
+      }
+    }
+    return { outcome: 'ERROR', models: [], message: err?.message || 'Connection failed' };
+  }
+};
+
+const SettingsPanel: React.FC<SettingsPanelProps> = ({
+  settings,
+  onUpdateSettings,
+  onClose,
+  skin,
+  onSkinChange,
+  initialTab = 'general',
+  dimmed = false,
+  isDesktop = typeof window !== 'undefined' ? window.innerWidth > 1080 : true
+}) => {
   const isParchment = skin === 'parchment';
   const isRetro = skin === 'retro-green' || skin === 'retro-amber';
 
@@ -313,17 +419,27 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
     if (!settings.lmStudioUrl) return;
     setIsDetectingModels(true);
     try {
-      const res = await fetch(`${settings.lmStudioUrl}/models`);
-      if (res.ok) {
-        const data = await res.json();
-        const models = data.data?.map((m: any) => m.id) || [];
-        setAvailableModels(models);
-        if (models.length > 0 && !settings.lmStudioModel) {
-          onUpdateSettings({ ...settings, lmStudioModel: models[0] });
+      const result = await detectLMStudioModels(settings.lmStudioUrl);
+      if (result.outcome === 'SUCCESS') {
+        setAvailableModels(result.models);
+        const shouldUpdateModel = !settings.lmStudioModel || settings.lmStudioModel === 'local-model' || !result.models.includes(settings.lmStudioModel);
+        if (shouldUpdateModel && result.selectedModel) {
+          onUpdateSettings({ ...settings, lmStudioModel: result.selectedModel });
         }
+        setModelTestStatus('success');
+        setModelTestMessage(result.message);
+      } else if (result.outcome === 'NO_MODELS') {
+        setAvailableModels([]);
+        setModelTestStatus('error');
+        setModelTestMessage(result.message);
+      } else {
+        setModelTestStatus('error');
+        setModelTestMessage(result.message);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error("Failed to detect models", e);
+      setModelTestStatus('error');
+      setModelTestMessage(e?.message || 'Connection failed');
     }
     setIsDetectingModels(false);
   };
@@ -331,12 +447,21 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
   const handleTestModelConnection = async () => {
     setModelTestStatus('testing');
     setModelTestMessage('Testing...');
+    const effectiveUrl = resolveEffectiveLMStudioUrl(settings.lmStudioUrl);
+    let normalizedBase = effectiveUrl.trim().replace(/\/+$/, '');
+    if (!normalizedBase.endsWith('/v1')) {
+      normalizedBase += '/v1';
+    }
     try {
-      const res = await fetch(`${settings.lmStudioUrl}/chat/completions`, {
+      const targetModel = settings.lmStudioModel && settings.lmStudioModel !== 'local-model'
+        ? settings.lmStudioModel
+        : (availableModels.length > 0 ? availableModels[0] : (settings.lmStudioModel || 'local-model'));
+
+      const res = await fetch(`${normalizedBase}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: settings.lmStudioModel || 'local-model',
+          model: targetModel,
           messages: [{ role: 'user', content: 'Ping' }],
           max_tokens: 10
         })
@@ -345,7 +470,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
         setModelTestStatus('success');
         setModelTestMessage('Connection successful!');
       } else {
-        const errorText = await res.text();
+        const errorText = await res.text().catch(() => '');
         setModelTestStatus('error');
         if (errorText.toLowerCase().includes('no models loaded') || errorText.includes('No models loaded')) {
           setModelTestMessage('No model loaded. Please load a model in LM Studio.');
@@ -493,7 +618,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
   const theme = themes[skin];
 
   const containerClasses = `
-    relative w-96 flex flex-col shrink min-h-0 h-[700px] pointer-events-auto transition-all duration-300
+    relative w-96 flex flex-col shrink min-h-0 h-[700px] pointer-events-auto transition-all duration-300 settings-panel-container
     ${theme.container} ${isParchment ? '[isolation:isolate]' : 'overflow-hidden'}
   `;
 
@@ -546,7 +671,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
   };
 
   return (
-    <div className={containerClasses}>
+    <div className={containerClasses} data-testid="settings-panel">
       {isParchment && (
         <div className="parchment-background" aria-hidden="true" />
       )}
@@ -1159,7 +1284,7 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
                   { id: 'modern' as SkinType, name: 'Modern', desc: 'Vibrant photorealistic globe with cyan holographic HUD' },
                   { id: 'retro-green' as SkinType, name: 'CRT Green', desc: 'Monochrome phosphor green terminal CRT simulation' },
                   { id: 'retro-amber' as SkinType, name: 'CRT Amber', desc: 'Classic amber phosphor terminal CRT simulation' },
-                  { id: 'parchment' as SkinType, name: 'Parchment', desc: 'Vintage antique cartographic parchment & copperplate map' }
+                  ...(isDesktop ? [{ id: 'parchment' as SkinType, name: 'Parchment', desc: 'Vintage antique cartographic parchment & copperplate map' }] : [])
                 ].map((t) => {
                   const isSelected = skin === t.id;
                   return (

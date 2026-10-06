@@ -23,6 +23,7 @@ import { validateEarthGeography } from './celestialCapabilities';
 import { deduplicateNotableFacts, filterAdditiveNotableFacts, filterAdditiveContextNotes } from '../utils/notableFactsUtils';
 import { validateHistoricalCoordinate, getHistoricalEntityKnowledge, toCanonicalTitleCase, isMaritimeHistoricalEntity } from './geographic/historicalCoordinateValidator';
 import { determineHistoricalEventScope, logHistoricalEventScope } from './geographic/historicalEventScope';
+import { logTerraSearchDebug } from './searchDebugTracer';
 import { validateEntityIdentity, logCoordinateRecoveryIdentityCheck, logEntityIdentityValidation, validateEntityCoordinates, logAiCoordinateTrust, logEntityCoordinateValidation, CoordinateTrustLevel, determineCanonicalDisplayName, isAdministrativeContainer } from './geographic/entityIdentityValidator';
 import { buildCanonicalEventTopology, getAuthoritativeEventModel } from './geographic/historicalRouteRegistry';
 import { fetchSourceContent, formatSourceBlock, cleanPastedArticleText } from './sourceContentService';
@@ -82,6 +83,22 @@ export const getUserSettings = (): any => {
   };
 };
 
+export const resolveEffectiveLMStudioUrl = (url?: string): string => {
+  const target = (url || 'http://localhost:1234/v1').trim();
+  if (typeof window !== 'undefined' && window.location) {
+    const isLocalhostClient = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    // In a remote browser environment (e.g. physical iPad), route local LM Studio through the same-origin Vite proxy
+    if (!isLocalhostClient && /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0):1234(\/.*)?$/i.test(target)) {
+      const pathSuffix = target.replace(/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0):1234/i, '');
+      return `/api/lmstudio${pathSuffix || ''}`;
+    }
+    if (target.startsWith('/api/lmstudio')) {
+      return target;
+    }
+  }
+  return target;
+};
+
 export const isGeminiConfigured = (): boolean => {
   const key = getGeminiApiKey();
   if (!key) return false;
@@ -101,6 +118,16 @@ export const callGeminiWithRetry = async (params: any, retries = 3, signal?: Abo
     throw abortErr;
   }
 
+  logTerraSearchDebug({
+    stage: 'recoverLocationMetadata',
+    status: 'GEMINI_REQUEST_STARTED',
+    details: {
+      url: requestUrl,
+      isGeminiConfigured: isGeminiConfigured(),
+      model: params.model || modelName
+    }
+  });
+
   try {
     const response = await ai.models.generateContent(params);
     if (signal?.aborted || params.signal?.aborted) {
@@ -109,6 +136,14 @@ export const callGeminiWithRetry = async (params: any, retries = 3, signal?: Abo
     console.log("Response Status Code: 200 OK");
     console.log("Response Body:", JSON.stringify(response, null, 2));
     console.log("=== GEMINI API REQUEST END ===");
+    logTerraSearchDebug({
+      stage: 'recoverLocationMetadata',
+      status: 'GEMINI_RESPONSE_RECEIVED',
+      details: {
+        status: 200,
+        ok: true
+      }
+    });
     return response;
   } catch (error: any) {
     if (error?.name === 'AbortError' || signal?.aborted || params.signal?.aborted) {
@@ -123,6 +158,18 @@ export const callGeminiWithRetry = async (params: any, retries = 3, signal?: Abo
     console.error("Error Status/Code:", error?.status || error?.code);
     console.error("Full Thrown Exception:", error);
     console.error("=================================");
+
+    logTerraSearchDebug({
+      stage: 'recoverLocationMetadata',
+      status: 'LMSTUDIO_REQUEST_ERROR',
+      errorMessage: error?.message || String(error),
+      details: {
+        provider: 'gemini',
+        isGeminiConfigured: isGeminiConfigured(),
+        status: error?.status || error?.code,
+        errorName: error?.name
+      }
+    });
 
     // Check for common rate limit error signatures from Google GenAI SDK or raw response
     const isQuotaError =
@@ -312,15 +359,23 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
     // as many local LM Studio model runners return 400 Bad Request. System prompt instructions
     // already enforce structured JSON generation.
 
-    let normalizedBaseUrl = (baseUrl || 'http://localhost:1234/v1').trim().replace(/\/+$/, '');
+    const effectiveUrl = resolveEffectiveLMStudioUrl(baseUrl);
+    let normalizedBaseUrl = effectiveUrl.trim().replace(/\/+$/, '');
     if (!normalizedBaseUrl.endsWith('/v1')) {
       normalizedBaseUrl += '/v1';
     }
+    const requestUrl = `${normalizedBaseUrl}/chat/completions`;
+    const browserOrigin = typeof window !== 'undefined' && window.location ? window.location.origin : 'non-browser';
 
     const systemMessage = messages.find(m => m.role === 'system');
     const userMessage = messages.find(m => m.role === 'user');
+    console.log("[LMSTUDIO] configured URL =", baseUrl);
+    console.log("[LMSTUDIO] effective URL =", effectiveUrl);
+    console.log("[LMSTUDIO] browser origin =", browserOrigin);
+    console.log("[LMSTUDIO] request URL =", requestUrl);
+    console.log("[LMSTUDIO] REQUEST START");
     console.log("[LM STUDIO REQUEST]");
-    console.log(`endpoint: ${normalizedBaseUrl}/chat/completions`);
+    console.log(`endpoint: ${requestUrl}`);
     console.log(`model: ${model}`);
     console.log(`message count: ${messages.length}`);
     console.log(`system prompt length: ${systemMessage?.content?.length || 0}`);
@@ -330,13 +385,56 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
       console.log(`response_format: ${JSON.stringify(payload.response_format)}`);
     }
 
-    let response = await fetch(`${normalizedBaseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload),
-      signal
+    logTerraSearchDebug({
+      stage: 'recoverLocationMetadata',
+      status: 'LMSTUDIO_REQUEST_STARTED',
+      details: {
+        endpoint: requestUrl,
+        model: model,
+        configuredUrl: baseUrl,
+        effectiveUrl: effectiveUrl
+      }
+    });
+
+    const startTime = Date.now();
+    let response: Response;
+    try {
+      response = await fetch(requestUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload),
+        signal
+      });
+    } catch (fetchErr: any) {
+      const elapsed = Date.now() - startTime;
+      console.error(`[LMSTUDIO] REQUEST FAILED after ${elapsed} ms`);
+      console.error(`[LMSTUDIO] error =`, fetchErr);
+      logTerraSearchDebug({
+        stage: 'recoverLocationMetadata',
+        status: 'LMSTUDIO_REQUEST_ERROR',
+        errorMessage: fetchErr?.message || String(fetchErr),
+        details: {
+          endpoint: requestUrl,
+          elapsedMs: elapsed
+        }
+      });
+      throw fetchErr;
+    }
+
+    const elapsed = Date.now() - startTime;
+    console.log(`[LMSTUDIO] RESPONSE STATUS = ${response.status}`);
+    console.log(`[LMSTUDIO] RESPONSE RECEIVED after ${elapsed} ms`);
+
+    logTerraSearchDebug({
+      stage: 'recoverLocationMetadata',
+      status: 'LMSTUDIO_RESPONSE_RECEIVED',
+      details: {
+        status: response.status,
+        ok: response.ok,
+        elapsedMs: elapsed
+      }
     });
 
     if (!response.ok && payload.response_format) {
@@ -344,7 +442,7 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
       if (errorText.toLowerCase().includes('response_format') || errorText.toLowerCase().includes('json_object') || response.status === 400) {
         console.warn('[LM Studio] Server rejected response_format, retrying without response_format constraint...');
         delete payload.response_format;
-        response = await fetch(`${normalizedBaseUrl}/chat/completions`, {
+        response = await fetch(requestUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -357,6 +455,18 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
 
     if (!response.ok) {
       const errorBody = await response.text();
+      console.error(`[LMSTUDIO] REQUEST FAILED after ${elapsed} ms (HTTP ${response.status})`);
+      console.error(`[LMSTUDIO] error body =`, errorBody);
+      logTerraSearchDebug({
+        stage: 'recoverLocationMetadata',
+        status: 'LMSTUDIO_REQUEST_ERROR',
+        errorMessage: `HTTP ${response.status}: ${errorBody.slice(0, 150)}`,
+        details: {
+          status: response.status,
+          endpoint: requestUrl,
+          elapsedMs: elapsed
+        }
+      });
       if (errorBody.toLowerCase().includes("no models loaded") || errorBody.includes("No models loaded")) {
         throw new LMStudioNoModelError();
       }
@@ -369,6 +479,7 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
 
     const data = await response.json();
     const rawContent = data.choices?.[0]?.message?.content ?? "";
+    console.log(`[LMSTUDIO] RESPONSE PARSED`);
 
     // Requirement 1 & 3: Inspect and log raw decoded HTTP response before any extraction, cleanup, or parser logic
     console.log(`[LM STUDIO RAW HTTP RESPONSE] status: ${response.status}, content length: ${rawContent.length}, raw text: ${JSON.stringify(rawContent)}`);
@@ -441,7 +552,8 @@ export const streamLocalLMStudioContent = async (
     // as many local LM Studio model runners return 400 Bad Request. System prompt instructions
     // already enforce structured JSON generation.
 
-  let normalizedBaseUrl = (baseUrl || 'http://localhost:1234/v1').trim().replace(/\/+$/, '');
+  const effectiveUrl = resolveEffectiveLMStudioUrl(baseUrl);
+  let normalizedBaseUrl = effectiveUrl.trim().replace(/\/+$/, '');
   if (!normalizedBaseUrl.endsWith('/v1')) {
     normalizedBaseUrl += '/v1';
   }
@@ -741,6 +853,13 @@ export const normalizeLocationEntity = (entity: string | null | undefined | any)
 
 export const resolveLocationQuery = async (query: string, intent?: QueryIntent, rawQuery?: string, signal?: AbortSignal): Promise<SearchResult | null> => {
   let normalizedQuery = query;
+  logTerraSearchDebug({
+    stage: 'resolveLocationQuery',
+    query,
+    intent,
+    status: 'ENTRY',
+    details: { rawQuery }
+  });
   try {
     if (signal?.aborted) {
       return null;
@@ -767,11 +886,22 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
     const aliasResolved = resolveAlias(lookupKey).canonical;
     const rawAliasResolved = resolveAlias(query.toLowerCase().trim()).canonical;
 
+    console.log(`[resolveLocationQuery START] query="${query}" rawQuery="${rawQuery || query}" intent="${intent || 'none'}"`);
+
     // Step 2: Deterministic geographic resolution before AI provider call
     let deterministicRes = DETERMINISTIC_LOCATION_DB[lookupKey] ||
                            DETERMINISTIC_LOCATION_DB[aliasResolved] ||
                            DETERMINISTIC_LOCATION_DB[query.toLowerCase().trim()] ||
                            DETERMINISTIC_LOCATION_DB[rawAliasResolved];
+    logTerraSearchDebug({
+      stage: 'resolveLocationQuery.deterministicCheck',
+      query,
+      status: deterministicRes ? 'SUCCESS' : 'NO_RESULT',
+      provider: deterministicRes ? 'DETERMINISTIC_LOCATION_DB' : undefined,
+      coordinates: deterministicRes ? { lat: deterministicRes.lat, lng: deterministicRes.lng, source: 'deterministic' } : undefined,
+      details: { lookupKey, match: !!deterministicRes, matchedName: deterministicRes?.name }
+    });
+    console.log(`[resolveLocationQuery DETERMINISTIC] lookupKey="${lookupKey}" match=${!!deterministicRes} matchedName="${deterministicRes?.name || 'none'}" coords=${deterministicRes ? `${deterministicRes.lat},${deterministicRes.lng}` : 'none'}`);
     let aiUsed = false;
     let rawAiText = "";
 
@@ -854,6 +984,12 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
     if (!resolvedData || !resolvedData.coordinates) {
       if (!isEventOrDiscoveryIntent) {
         try {
+          logTerraSearchDebug({
+            stage: 'resolveLocationQuery.geocoderAttempt',
+            query: normalizedQuery || query,
+            status: 'ENTRY',
+            provider: 'Nominatim'
+          });
           console.log(`COORDINATE_VERIFICATION_ATTEMPT\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}`);
           const geoEntity = await resolveGeographicEntity(normalizedQuery || query);
           if (geoEntity && !('status' in geoEntity) && geoEntity.coordinates && isValidCoordinates(geoEntity.coordinates)) {
@@ -881,6 +1017,14 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
             });
 
             if (identityCheck.matches) {
+              logTerraSearchDebug({
+                stage: 'resolveLocationQuery.geocoderSuccess',
+                query: normalizedQuery || query,
+                entity: candidateShortName,
+                status: 'SUCCESS',
+                provider: 'Nominatim',
+                coordinates: { lat: geoEntity.coordinates.lat, lng: geoEntity.coordinates.lng, source: 'geocoder' }
+              });
               console.log(`COORDINATE_VERIFICATION_SUCCESS\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}\ncoordinates: ${geoEntity.coordinates.lat}, ${geoEntity.coordinates.lng}`);
 
               const requestedEntity = normalizedQuery || query;
@@ -916,20 +1060,51 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
               };
               suggestedZoom = geoEntity.suggestedZoom || 8;
             } else {
+              logTerraSearchDebug({
+                stage: 'resolveLocationQuery.geocoderMismatch',
+                query: normalizedQuery || query,
+                status: 'NO_RESULT',
+                category: '6_UNEXPECTED_SHAPE',
+                details: { candidate: candidateShortName, reason: identityCheck.rejectionReason }
+              });
               console.log(`COORDINATE_VERIFICATION_FAILED\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}\nreason: entity_identity_mismatch (${identityCheck.rejectionReason})`);
             }
           } else {
+            logTerraSearchDebug({
+              stage: 'resolveLocationQuery.geocoderNoMatch',
+              query: normalizedQuery || query,
+              status: 'NO_RESULT',
+              category: '3_GEOCODER_NO_RESULT'
+            });
             console.log(`COORDINATE_VERIFICATION_FAILED\nprovider: Nominatim\ncandidate: ${normalizedQuery || query}\nreason: no_authoritative_match`);
           }
         } catch (err: any) {
+          logTerraSearchDebug({
+            stage: 'resolveLocationQuery.geocoderError',
+            query: normalizedQuery || query,
+            status: 'EXCEPTION',
+            category: '5_JS_EXCEPTION',
+            errorMessage: err?.message || String(err),
+            errorStack: err?.stack
+          });
           console.warn(`[Nominatim Resolution Error]:`, err.message);
         }
       }
     }
 
+    console.log(`[resolveLocationQuery NOMINATIM_STATUS] skipped=${Boolean(resolvedData?.coordinates)} isEventOrDiscovery=${isEventOrDiscoveryIntent}`);
+
     // Pre-flight capability check: If API key is invalid or missing AND we are using Gemini AND no deterministic/geocoder match exists
     const currentApiKey = process.env.API_KEY;
+    console.log(`[resolveLocationQuery CAPABILITY] provider=${activeProvider} hasApiKey=${Boolean(currentApiKey && currentApiKey !== 'dummy-key-for-ts-check')} resolvedDataExists=${Boolean(resolvedData?.coordinates)}`);
     if (!resolvedData && settings.aiProvider === 'gemini' && (!currentApiKey || currentApiKey === 'dummy-key-for-ts-check')) {
+       logTerraSearchDebug({
+         stage: 'resolveLocationQuery.capabilityGate',
+         query,
+         status: 'NO_RESULT',
+         category: '2_NO_LOCATION',
+         errorMessage: 'LOCATION_SYSTEM_UNAVAILABLE: No Gemini API Key and no geocoder match'
+       });
        console.log("[DEBUG] Failure reason code: LOCATION_SYSTEM_UNAVAILABLE");
        return { error: "LOCATION_SYSTEM_UNAVAILABLE", locationInfo: { name: normalizedQuery || query } };
     }
@@ -3878,7 +4053,17 @@ export const recoverLocationMetadata = async (
   },
   signal?: AbortSignal
 ): Promise<Partial<EnrichmentResult> | null> => {
-  if (signal?.aborted) return null;
+  if (signal?.aborted) {
+    logTerraSearchDebug({
+      stage: 'recoverLocationMetadata',
+      status: 'RECOVERY_EARLY_RETURN',
+      entity: entityName,
+      details: { reason: 'signal_aborted' }
+    });
+    return null;
+  }
+  const entrySettings = getUserSettings();
+  console.log(`[LMSTUDIO] recoverLocationMetadata ENTRY: entity="${entityName}" provider="${entrySettings.aiProvider}" configuredUrl="${entrySettings.lmStudioUrl}"`);
   try {
     const currentDate = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
 
@@ -4128,6 +4313,18 @@ export const recoverLocationMetadata = async (
 
       const rawText = response.text;
       const parsed = parseAndExtract(rawText);
+      if (!parsed.success) {
+        logTerraSearchDebug({
+          stage: 'recoverLocationMetadata',
+          status: 'AI_RESPONSE_PARSE_FAILED',
+          entity: entityTitle,
+          details: {
+            rawTextPreview: rawText?.slice(0, 150),
+            rawLength: rawText?.length || 0,
+            isRetry
+          }
+        });
+      }
       let data = parsed.success ? (parsed.value as any) : null;
       if (Array.isArray(data) && data.length > 0) {
          data = data[0];
@@ -4143,14 +4340,32 @@ export const recoverLocationMetadata = async (
           // Never accept isolated sub-objects (e.g., climate sub-object extracted as root)
           if (data.koppenCode && !data.climate) {
               console.warn(`[RECOVERY PARSER] Rejected isolated sub-object containing koppenCode:`, data);
+              logTerraSearchDebug({
+                stage: 'recoverLocationMetadata',
+                status: 'AI_RESPONSE_REJECTED',
+                entity: entityTitle,
+                details: { reason: 'isolated_koppenCode_sub_object', isRetry }
+              });
               data = null;
           }
           if (data && isGenericPlaceholderDescription(data.description, entityTitle)) {
               console.warn(`[RECOVERY PARSER] Description failed placeholder validation:`, data.description);
+              logTerraSearchDebug({
+                stage: 'recoverLocationMetadata',
+                status: 'AI_RESPONSE_REJECTED',
+                entity: entityTitle,
+                details: { reason: 'placeholder_description', preview: data.description?.slice(0, 100), isRetry }
+              });
               data = null;
           }
           if (data && data.description && !isEnglishText(data.description)) {
               console.warn(`[RECOVERY PARSER] Description failed English language validation:`, data.description);
+              logTerraSearchDebug({
+                stage: 'recoverLocationMetadata',
+                status: 'AI_RESPONSE_REJECTED',
+                entity: entityTitle,
+                details: { reason: 'non_english_description', preview: data.description?.slice(0, 100), isRetry }
+              });
               data = null;
           }
       }
@@ -4179,6 +4394,15 @@ export const recoverLocationMetadata = async (
         attempt = await fetchAndParse(true);
         missingKeys = validateContent(attempt.data);
     }
+
+    const rawData = attempt.data;
+    console.log(`[ENRICHMENT TRACE 1] LM RESPONSE RECEIVED entity="${entityTitle}"`);
+    console.log(`[ENRICHMENT TRACE 1] description = ${JSON.stringify(rawData?.description)}`);
+    console.log(`[ENRICHMENT TRACE 1] notable count = ${Array.isArray(rawData?.notable) ? rawData.notable.length : 0}`);
+    console.log(`[ENRICHMENT TRACE 1] notable = ${JSON.stringify(rawData?.notable)}`);
+    console.log(`[ENRICHMENT TRACE 1] climate = ${JSON.stringify(rawData?.climate)}`);
+    console.log(`[ENRICHMENT TRACE 1] contextNotes count = ${Array.isArray(rawData?.contextNotes) ? rawData.contextNotes.length : 0}`);
+    console.log(`[ENRICHMENT TRACE 1] contextNotes = ${JSON.stringify(rawData?.contextNotes)}`);
 
     console.log(`=== METADATA RECOVERY PIPELINE ===`);
     console.log(`Raw Response:\n${attempt.rawText}`);
@@ -4477,10 +4701,10 @@ ${descText}
 ${contextNoteTexts.length > 0 ? `Context Notes:\n${contextNoteTexts.map((n: string) => `- ${n}`).join('\n')}` : ''}
 
 CRITICAL RULES:
-1. Generate zero or more genuinely ADDITIVE notable facts grounded directly in the authoritative source text or verified context above.
+1. Generate zero or more genuinely ADDITIVE notable facts grounded directly in the authoritative source text, verified context, or well-established geographic facts for this canonical location.
 2. DO NOT repeat or paraphrase information already present in the Description or Context Notes above.
 3. CONCRETE DETAILS ONLY: Each notable fact must provide a concrete distinct detail (e.g., specific structures, artifacts, people, subsequent events, aftermath, or physical site status). Do NOT generate abstract "Historical Significance", symbolism, or evaluative commentary ("crucial moment", "turning point", "lasting impact", "symbolizing...").
-4. Use ONLY information supported by the available verified source text or verified context above.
+4. Use ONLY information supported by the available verified source text, verified context, or well-established, verified geographic facts for this location.
 5. Do NOT speculate. Do NOT invent dates, events, affiliations, rankings, records, or historical claims.
 6. If no defensible concrete additive fact is available, return an empty array []. Accuracy is more important than completeness. Never manufacture a fact merely to satisfy a quota.
 7. You MUST output ONLY a single valid JSON object without markdown fences, code blocks, prose, or instruction headers.
@@ -4654,6 +4878,12 @@ Output ONLY a single valid JSON object.
     (metadata as any)._validFields = validFields;
     (metadata as any)._rejectedFields = rejectedFields;
 
+    console.log(`[ENRICHMENT TRACE 2] PARSED METADATA entity="${entityTitle}"`);
+    console.log(`[ENRICHMENT TRACE 2] description = ${JSON.stringify(metadata.description)}`);
+    console.log(`[ENRICHMENT TRACE 2] notable = ${JSON.stringify(metadata.notable)}`);
+    console.log(`[ENRICHMENT TRACE 2] climate = ${JSON.stringify(metadata.climate)}`);
+    console.log(`[ENRICHMENT TRACE 2] contextNotes = ${JSON.stringify(metadata.contextNotes)}`);
+
     console.log(`Final Metadata Keys:\n${Object.keys(metadata).join(', ')}`);
     console.log(`================================`);
 
@@ -4665,10 +4895,44 @@ Output ONLY a single valid JSON object.
       contextNotes: typeof ${typeof metadata.contextNotes}
     }`);
     console.log(`======================================================`);
+    console.log(`[LMSTUDIO] RETURNING METADATA: validFields=${validFields.join(', ')} hasDescription=${Boolean(metadata.description)} notableCount=${metadata.notable?.length || 0}`);
+    console.log(`[ENRICHMENT TRACE 3] RECOVER LOCATION METADATA RETURN entity="${entityTitle}"`);
+    console.log(`[ENRICHMENT TRACE 3] description = ${JSON.stringify(metadata.description)}`);
+    console.log(`[ENRICHMENT TRACE 3] notable = ${JSON.stringify(metadata.notable)}`);
+    console.log(`[ENRICHMENT TRACE 3] climate = ${JSON.stringify(metadata.climate)}`);
+    console.log(`[ENRICHMENT TRACE 3] contextNotes = ${JSON.stringify(metadata.contextNotes)}`);
+    console.log(`[ENRICHMENT TRACE 3] population = ${JSON.stringify(metadata.population)}`);
+
+    logTerraSearchDebug({
+      stage: 'recoverLocationMetadata',
+      status: 'RECOVERY_RETURNED_RESULT',
+      entity: entityTitle,
+      details: {
+        validFields,
+        rejectedFields,
+        hasDescription: Boolean(metadata.description),
+        descLength: typeof metadata.description === 'string' ? metadata.description.length : (metadata.description as any)?.text?.length || 0,
+        notableCount: Array.isArray(metadata.notable) ? metadata.notable.length : 0,
+        hasClimate: Boolean(metadata.climate),
+        provider: providerName
+      }
+    });
 
     return metadata;
-  } catch (e) {
-    console.error("recoverLocationMetadata failed:", e);
+  } catch (e: any) {
+    console.error(`[LMSTUDIO] recoverLocationMetadata FAILED:`, e);
+    logTerraSearchDebug({
+      stage: 'recoverLocationMetadata',
+      status: 'LMSTUDIO_REQUEST_ERROR',
+      entity: entityName,
+      errorMessage: e?.message || String(e),
+      details: {
+        errorName: e?.name,
+        errorStatus: e?.status || e?.code,
+        provider: entrySettings.aiProvider,
+        configuredUrl: entrySettings.lmStudioUrl
+      }
+    });
     return null;
   }
 };

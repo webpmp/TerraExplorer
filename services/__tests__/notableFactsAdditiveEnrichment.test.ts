@@ -439,6 +439,37 @@ describe('Notable Facts Additive Enrichment & Semantic Uniqueness Suite', () => 
       expect(filtered[1].description).toContain('"unprecedented"');
     });
   });
+
+  describe('8. Cliffs of Moher Additive Facts Preservation & Sanitization', () => {
+    it('preserves substantive additive facts that share dates or names when new concrete concepts are introduced', () => {
+      const moherDesc = "The Cliffs of Moher are sea cliffs located at the southwestern edge of the Burren region in County Clare, Ireland. They run for about 14 kilometres (9 miles). At their southern end, they rise 120 metres (390 ft) above the Atlantic Ocean at Hag's Head, and, 8 kilometres (5 miles) to the north, they reach their maximum height of 214 metres (702 ft) just north of O'Brien's Tower, a round stone tower near the midpoint of the cliffs, built in 1835 by Sir Cornelius O'Brien, then continue at lower heights. The closest settlements are the villages of Liscannor 6 km (4 miles) to the south, and Doolin 7 km (4 miles) to the north.";
+
+      const candidateFacts = [
+        // Pure duplicate: restates 1835 tower build
+        {
+          title: "O'Brien's Tower Construction",
+          description: "Built in 1835 by Sir Cornelius O'Brien as a round stone tower near the midpoint of the cliffs."
+        },
+        // Additive: observation platform for Victorian tourists
+        {
+          title: "Victorian Observation Platform",
+          description: "Sir Cornelius O'Brien constructed the 1835 tower specifically as an observation platform for early Victorian tourists flocking to the Atlantic coast."
+        },
+        // Additive: seabird nesting colony
+        {
+          title: "Major Seabird Sanctuary",
+          description: "The sea cliffs support over 30,000 pairs of breeding seabirds, including a significant nesting colony of Atlantic puffins."
+        }
+      ];
+
+      const filtered = filterAdditiveNotableFacts(candidateFacts, [moherDesc]);
+      expect(filtered).toHaveLength(2);
+      expect(filtered.map((f: any) => f.title)).toEqual([
+        'Victorian Observation Platform',
+        'Major Seabird Sanctuary'
+      ]);
+    });
+  });
 });
 
 

@@ -15,7 +15,11 @@ export class NominatimProvider implements DiscoveryProvider {
     const timeoutId = setTimeout(() => controller.abort(), 1500);
 
     try {
-      const response = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'TerraExplorer/1.0' } });
+      const headers: Record<string, string> = { 'Accept': 'application/json' };
+      if (typeof window === 'undefined') {
+        headers['User-Agent'] = 'TerraExplorer/1.0';
+      }
+      const response = await fetch(url, { signal: controller.signal, headers });
       clearTimeout(timeoutId);
       if (!response.ok) {
         this.lastStatus = response.status === 429 ? 'RATE_LIMITED' : 'FAILED';

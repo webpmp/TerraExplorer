@@ -230,6 +230,172 @@ export const HISTORICAL_KNOWLEDGE_BASE: Record<string, HistoricalEntityKnowledge
     },
     boundingBox: { minLat: 31.0, maxLat: 32.0, minLng: 30.0, maxLng: 31.0 }
   },
+  "hms victor": {
+    entity: "HMS Victory Wreck Site",
+    entityType: "shipwreck_site",
+    expectedRegion: "English Channel (Western Approaches), United Kingdom",
+    approximateRegion: "Western Approaches, English Channel, United Kingdom",
+    country: "United Kingdom",
+    historicalContext: "HMS Victory (launched 1737) was a 100-gun first-rate Royal Navy ship of the line that was lost in a storm in the English Channel on October 4, 1744. In 2008, Odyssey Marine Exploration discovered the wreckage in the Western Approaches at a depth of 78 meters (256 feet).",
+    sourceRationale: "Authoritative maritime archaeological discovery records by Odyssey Marine Exploration in 2008.",
+    confidence: "high",
+    allowedCountries: ["United Kingdom", "France", "Guernsey", "Jersey"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: 49.7100,
+      lng: -3.5500,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 48.5, maxLat: 51.0, minLng: -5.0, maxLng: -1.0 }
+  },
+  "the hms victor": {
+    entity: "HMS Victory Wreck Site",
+    entityType: "shipwreck_site",
+    expectedRegion: "English Channel (Western Approaches), United Kingdom",
+    approximateRegion: "Western Approaches, English Channel, United Kingdom",
+    country: "United Kingdom",
+    historicalContext: "HMS Victory (launched 1737) was a 100-gun first-rate Royal Navy ship of the line that was lost in a storm in the English Channel on October 4, 1744. In 2008, Odyssey Marine Exploration discovered the wreckage in the Western Approaches at a depth of 78 meters (256 feet).",
+    sourceRationale: "Authoritative maritime archaeological discovery records by Odyssey Marine Exploration in 2008.",
+    confidence: "high",
+    allowedCountries: ["United Kingdom", "France", "Guernsey", "Jersey"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: 49.7100,
+      lng: -3.5500,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 48.5, maxLat: 51.0, minLng: -5.0, maxLng: -1.0 }
+  },
+  "hms victor found": {
+    entity: "HMS Victory Wreck Site",
+    entityType: "shipwreck_site",
+    expectedRegion: "English Channel (Western Approaches), United Kingdom",
+    approximateRegion: "Western Approaches, English Channel, United Kingdom",
+    country: "United Kingdom",
+    historicalContext: "HMS Victory (launched 1737) was a 100-gun first-rate Royal Navy ship of the line that was lost in a storm in the English Channel on October 4, 1744. In 2008, Odyssey Marine Exploration discovered the wreckage in the Western Approaches at a depth of 78 meters (256 feet).",
+    sourceRationale: "Authoritative maritime archaeological discovery records by Odyssey Marine Exploration in 2008.",
+    confidence: "high",
+    allowedCountries: ["United Kingdom", "France", "Guernsey", "Jersey"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: 49.7100,
+      lng: -3.5500,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 48.5, maxLat: 51.0, minLng: -5.0, maxLng: -1.0 }
+  },
+  "hms victory": {
+    entity: "HMS Victory Wreck Site",
+    entityType: "shipwreck_site",
+    expectedRegion: "English Channel (Western Approaches), United Kingdom",
+    approximateRegion: "Western Approaches, English Channel, United Kingdom",
+    country: "United Kingdom",
+    historicalContext: "HMS Victory (launched 1737) was a 100-gun first-rate Royal Navy ship of the line that was lost in a storm in the English Channel on October 4, 1744. In 2008, Odyssey Marine Exploration discovered the wreckage in the Western Approaches at a depth of 78 meters (256 feet).",
+    sourceRationale: "Authoritative maritime archaeological discovery records by Odyssey Marine Exploration in 2008.",
+    confidence: "high",
+    allowedCountries: ["United Kingdom", "France", "Guernsey", "Jersey"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: 49.7100,
+      lng: -3.5500,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 48.5, maxLat: 51.0, minLng: -5.0, maxLng: -1.0 }
+  },
+  "hms victory wreck site": {
+    entity: "HMS Victory Wreck Site",
+    entityType: "shipwreck_site",
+    expectedRegion: "English Channel (Western Approaches), United Kingdom",
+    approximateRegion: "Western Approaches, English Channel, United Kingdom",
+    country: "United Kingdom",
+    historicalContext: "HMS Victory (launched 1737) was a 100-gun first-rate Royal Navy ship of the line that was lost in a storm in the English Channel on October 4, 1744. In 2008, Odyssey Marine Exploration discovered the wreckage in the Western Approaches at a depth of 78 meters (256 feet).",
+    sourceRationale: "Authoritative maritime archaeological discovery records by Odyssey Marine Exploration in 2008.",
+    confidence: "high",
+    allowedCountries: ["United Kingdom", "France", "Guernsey", "Jersey"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: 49.7100,
+      lng: -3.5500,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 48.5, maxLat: 51.0, minLng: -5.0, maxLng: -1.0 }
+  },
+  "the hms victory wreck site": {
+    entity: "HMS Victory Wreck Site",
+    entityType: "shipwreck_site",
+    expectedRegion: "English Channel (Western Approaches), United Kingdom",
+    approximateRegion: "Western Approaches, English Channel, United Kingdom",
+    country: "United Kingdom",
+    historicalContext: "HMS Victory (launched 1737) was a 100-gun first-rate Royal Navy ship of the line that was lost in a storm in the English Channel on October 4, 1744. In 2008, Odyssey Marine Exploration discovered the wreckage in the Western Approaches at a depth of 78 meters (256 feet).",
+    sourceRationale: "Authoritative maritime archaeological discovery records by Odyssey Marine Exploration in 2008.",
+    confidence: "high",
+    allowedCountries: ["United Kingdom", "France", "Guernsey", "Jersey"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    confirmedWreckLocation: true,
+    approximateCoordinates: {
+      lat: 49.7100,
+      lng: -3.5500,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 48.5, maxLat: 51.0, minLng: -5.0, maxLng: -1.0 }
+  },
+  "cairo": {
+    entity: "Cairo",
+    entityType: "city",
+    expectedRegion: "Cairo Governorate, Egypt (Nile River)",
+    approximateRegion: "Cairo, Egypt",
+    country: "Egypt",
+    historicalContext: "Cairo is the capital of Egypt and the largest metropolitan area in the Arab world, founded in 969 CE by the Fatimid dynasty near the ancient settlements of Memphis and Fustat.",
+    sourceRationale: "Authoritative geographic and historical records for Cairo, Egypt.",
+    confidence: "high",
+    allowedCountries: ["Egypt"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 30.0444,
+      lng: 31.2357,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 29.5, maxLat: 30.5, minLng: 30.8, maxLng: 31.8 }
+  },
+  "budapest": {
+    entity: "Budapest",
+    entityType: "city",
+    expectedRegion: "Central Hungary, Hungary (Danube River)",
+    approximateRegion: "Budapest, Hungary",
+    country: "Hungary",
+    historicalContext: "Budapest is the capital of Hungary, created in 1873 by the unification of Buda and Óbuda on the west bank of the Danube with Pest on the east bank.",
+    sourceRationale: "Authoritative geographic and historical records for Budapest, Hungary.",
+    confidence: "high",
+    allowedCountries: ["Hungary"],
+    exactLocationConfirmed: true,
+    exactLocationKnown: true,
+    approximateCoordinates: {
+      lat: 47.4979,
+      lng: 19.0402,
+      source: "deterministic",
+      confidence: "high"
+    },
+    boundingBox: { minLat: 47.0, maxLat: 48.0, minLng: 18.5, maxLng: 19.5 }
+  },
   "antikythera": {
     entity: "Antikythera Wreck Site",
     entityType: "shipwreck_site",
