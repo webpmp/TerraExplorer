@@ -391,5 +391,48 @@ describe('Query-Driven InfoPanel Content & Waypoint Navigation Regressions', () 
       button.props.onClick();
       expect(onEditRoute).toHaveBeenCalledTimes(1);
     });
+
+    (['modern', 'retro-green', 'retro-amber'] as const).forEach(skin => {
+      test(`${skin} theme displays Edit Favorite button on a saved route, without rendering inline popover`, () => {
+        const onEditRoute = vi.fn();
+        const html = renderToStaticMarkup(
+          <InfoPanel
+            info={dummyInfo}
+            onClose={vi.fn()}
+            skin={skin}
+            isFavorite={true}
+            routeNav={nav}
+            onEditRoute={onEditRoute}
+          />
+        );
+
+        // Renders Edit Favorite button title and aria-label
+        expect(html).toContain('title="Edit Favorite"');
+        expect(html).toContain('aria-label="Edit Favorite"');
+
+        // Does not render obsolete inline favorite popover form or heading
+        expect(html).not.toContain('Enter name...');
+        expect(html).not.toContain('<form');
+      });
+
+      test(`${skin} theme displays Save Route button on an unsaved route without inline popover`, () => {
+        const onEditRoute = vi.fn();
+        const html = renderToStaticMarkup(
+          <InfoPanel
+            info={dummyInfo}
+            onClose={vi.fn()}
+            skin={skin}
+            isFavorite={false}
+            routeNav={nav}
+            onEditRoute={onEditRoute}
+          />
+        );
+
+        expect(html).toContain('title="Save Route"');
+        expect(html).toContain('aria-label="Save Route"');
+        expect(html).not.toContain('Enter name...');
+        expect(html).not.toContain('<form');
+      });
+    });
   });
 });

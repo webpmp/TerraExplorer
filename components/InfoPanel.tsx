@@ -2197,6 +2197,11 @@ enrichmentComplete: ${Boolean(info.description && info.description.length > 50)}
   const hasNotes = (notes && notes.length > 0) || isAddingNote;
 
   const handleFavoriteClick = () => {
+    if (routeNav && onEditRoute) {
+      onEditRoute();
+      return;
+    }
+
     if (showFavoriteDialog) {
         setShowFavoriteDialog(false);
         return;
@@ -3189,9 +3194,16 @@ enrichmentComplete: ${Boolean(info.description && info.description.length > 50)}
             {!(isParchment && Boolean(routeNav)) && (
               <div className="flex justify-center w-full -mt-[10px] mb-[26px] relative z-10 gap-2">
                 <button
-                  onClick={handleFavoriteClick}
+                  onClick={() => {
+                    if (routeNav && onEditRoute) {
+                      onEditRoute();
+                    } else {
+                      handleFavoriteClick();
+                    }
+                  }}
                   className={`p-2 transition-colors ${theme.actionBtn}`}
                   title={isFavorite ? "Edit Favorite" : (routeNav ? "Save Route" : "Save Location")}
+                  aria-label={isFavorite ? "Edit Favorite" : (routeNav ? "Save Route" : "Save Location")}
                 >
                   {isParchment ? (
                     <MedievalEmeraldBronzePinIcon className={isFavorite ? "opacity-100 scale-105" : ""} />
@@ -3201,7 +3213,7 @@ enrichmentComplete: ${Boolean(info.description && info.description.length > 50)}
                 </button>
 
                 {/* Favorite Dialog Popover */}
-                {showFavoriteDialog && (
+                {showFavoriteDialog && !routeNav && (
                    <div className={`absolute top-full mt-2 w-64 p-3 z-50 flex flex-col gap-3 left-1/2 -translate-x-1/2 ${theme.popover}`}>
                       <h3 className={`text-xs text-left font-bold uppercase tracking-wider ${isRetro ? 'text-current' : isParchment ? 'text-[#8b5a2b]' : 'text-cyan-300'}`}>
                         {isFavorite ? 'Edit Favorite' : (routeNav ? 'Save Route' : 'Save Location')}
