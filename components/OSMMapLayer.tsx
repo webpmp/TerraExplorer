@@ -1909,6 +1909,8 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                 return (
                   <div
                     key={`osm-marker-container-${marker.id ?? idx}`}
+                    data-marker-hit-id={marker.id}
+                    data-marker-selected={isSelected ? "true" : undefined}
                     style={{
                       position: 'absolute',
                       left: `${visualLeft}px`,
@@ -1999,6 +2001,7 @@ export const OSMMapLayer: React.FC<OSMMapLayerProps> = ({
                         </div>
                       ) : (
                         <div
+                          className="rounded-full"
                           style={{
                             width: `${pinSize}px`,
                             height: `${pinSize}px`,

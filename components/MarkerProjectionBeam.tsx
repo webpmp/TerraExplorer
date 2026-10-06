@@ -261,6 +261,25 @@ export function resolveBeamGeometry(coords: { lat: number; lng: number }): BeamG
   const { lat, lng } = coords;
   let point: { x: number; y: number } | null = null;
 
+  // Determine overlay origin/dimensions to ensure exact 1:1 sub-pixel screen space alignment
+  let overlayLeft = 0;
+  let overlayTop = 0;
+  let vpW = typeof window !== 'undefined' ? window.innerWidth : 1920;
+  let vpH = typeof window !== 'undefined' ? window.innerHeight : 1080;
+
+  if (typeof document !== 'undefined') {
+    const overlayEl = document.querySelector('[data-testid="marker-projection-beam-overlay"]');
+    if (overlayEl && typeof overlayEl.getBoundingClientRect === 'function') {
+      const oRect = overlayEl.getBoundingClientRect();
+      if (oRect.width > 0 && oRect.height > 0) {
+        overlayLeft = oRect.left;
+        overlayTop = oRect.top;
+        vpW = oRect.width;
+        vpH = oRect.height;
+      }
+    }
+  }
+
   // 1. Direct DOM selected marker visual center (exact sub-pixel bounding box of the visual pin)
   if (typeof document !== 'undefined') {
     const selectedMarkerEl = document.querySelector('[data-marker-selected="true"]') ||
@@ -270,8 +289,8 @@ export function resolveBeamGeometry(coords: { lat: number; lng: number }): BeamG
       const rect = pinEl.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
         point = {
-          x: rect.left + rect.width / 2,
-          y: rect.top + rect.height / 2
+          x: rect.left + rect.width / 2 - overlayLeft,
+          y: rect.top + rect.height / 2 - overlayTop
         };
       }
     }
@@ -287,7 +306,7 @@ export function resolveBeamGeometry(coords: { lat: number; lng: number }): BeamG
       try {
         const pt = projectFn(lat, lng);
         if (pt && typeof pt.x === 'number' && typeof pt.y === 'number' && !isNaN(pt.x) && !isNaN(pt.y)) {
-          point = { x: pt.x, y: pt.y };
+          point = { x: pt.x - overlayLeft, y: pt.y - overlayTop };
         }
       } catch (_) {}
     }
@@ -303,7 +322,7 @@ export function resolveBeamGeometry(coords: { lat: number; lng: number }): BeamG
       try {
         const pt = map.project([lng, lat]);
         if (pt && typeof pt.x === 'number' && typeof pt.y === 'number' && !isNaN(pt.x) && !isNaN(pt.y)) {
-          point = { x: pt.x, y: pt.y };
+          point = { x: pt.x - overlayLeft, y: pt.y - overlayTop };
         }
       } catch (_) {}
     }
@@ -317,12 +336,18 @@ export function resolveBeamGeometry(coords: { lat: number; lng: number }): BeamG
   let panelRect: { left: number; top: number; right: number; bottom: number; width: number; height: number };
   if (typeof document !== 'undefined') {
     const infoPanelEl = document.querySelector('[data-infopanel="true"]') || document.querySelector('[data-testid="info-panel"]');
-    if (infoPanelEl) {
-      panelRect = infoPanelEl.getBoundingClientRect();
+    if (infoPanelEl && typeof infoPanelEl.getBoundingClientRect === 'function') {
+      const iRect = infoPanelEl.getBoundingClientRect();
+      panelRect = {
+        left: iRect.left - overlayLeft,
+        top: iRect.top - overlayTop,
+        right: iRect.right - overlayLeft,
+        bottom: iRect.bottom - overlayTop,
+        width: iRect.width,
+        height: iRect.height
+      };
     } else {
       // Default / standard InfoPanel right-side bounds fallback if DOM is mounting in parallel
-      const vpW = typeof window !== 'undefined' ? window.innerWidth : 1920;
-      const vpH = typeof window !== 'undefined' ? window.innerHeight : 1080;
       panelRect = {
         left: vpW - 460,
         top: 80,
@@ -343,8 +368,6 @@ export function resolveBeamGeometry(coords: { lat: number; lng: number }): BeamG
     };
   }
 
-  const vpW = typeof window !== 'undefined' ? window.innerWidth : 1920;
-  const vpH = typeof window !== 'undefined' ? window.innerHeight : 1080;
   return calculateBeamTrapezoid(point, panelRect, vpW, vpH);
 }
 
@@ -497,6 +520,7 @@ const MarkerProjectionBeamInner: React.FC<MarkerProjectionBeamInnerProps> = ({
         className="w-full h-full pointer-events-none"
         xmlns="http://www.w3.org/2000/svg"
         viewBox={`0 0 ${typeof window !== 'undefined' ? window.innerWidth : 1920} ${typeof window !== 'undefined' ? window.innerHeight : 1080}`}
+        preserveAspectRatio="none"
       >
         <defs>
           {/* Single Projection Beam Gradient */}

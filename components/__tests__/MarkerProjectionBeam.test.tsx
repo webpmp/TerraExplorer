@@ -357,8 +357,71 @@ describe('MarkerProjectionBeam Component & Geometry Tests', () => {
       const geom = resolveBeamGeometry({ lat: 32.7767, lng: -96.797 });
 
       expect(geom).not.toBeNull();
-      expect(geom?.markerPoint.x).toBe(511);
-      expect(geom?.markerPoint.y).toBe(401);
+      delete (global as any).document;
+    });
+
+    test('Accurately offsets marker and InfoPanel coordinates relative to overlay bounding rect on iPad/tablet viewports', () => {
+      const mockOverlay = {
+        getBoundingClientRect: () => ({
+          left: 0,
+          top: 35,
+          right: 1024,
+          bottom: 748,
+          width: 1024,
+          height: 713
+        })
+      };
+
+      const mockPin = {
+        getBoundingClientRect: () => ({
+          left: 400,
+          top: 250,
+          right: 422,
+          bottom: 272,
+          width: 22,
+          height: 22
+        })
+      };
+
+      const mockMarker = {
+        querySelector: (selector: string) => (selector === '.rounded-full' ? mockPin : null),
+        getBoundingClientRect: () => mockPin.getBoundingClientRect()
+      };
+
+      const mockInfoPanel = {
+        getBoundingClientRect: () => ({
+          left: 680,
+          top: 85,
+          right: 1000,
+          bottom: 500,
+          width: 320,
+          height: 415
+        })
+      };
+
+      (global as any).document = {
+        querySelector: (selector: string) => {
+          if (selector.includes('marker-projection-beam-overlay')) {
+            return mockOverlay;
+          }
+          if (selector.includes('data-marker-selected')) {
+            return mockMarker;
+          }
+          if (selector.includes('data-infopanel') || selector.includes('info-panel')) {
+            return mockInfoPanel;
+          }
+          return null;
+        }
+      };
+
+      const geom = resolveBeamGeometry({ lat: 32.7767, lng: -96.797 });
+
+      expect(geom).not.toBeNull();
+      // pin center: x = 400 + 11 - 0 = 411, y = 250 + 11 - 35 = 226
+      expect(geom?.markerPoint.x).toBe(411);
+      expect(geom?.markerPoint.y).toBe(226);
+      // panel mid point: y = ((85 - 35) + (500 - 35)) / 2 = (50 + 465) / 2 = 257.5
+      expect(geom?.panelMidPoint.y).toBe(257.5);
 
       delete (global as any).document;
     });

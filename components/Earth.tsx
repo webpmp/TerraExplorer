@@ -913,7 +913,7 @@ const RotatingEarth = forwardRef<THREE.Mesh, EarthProps>((props, ref) => {
 
         // 2. Otherwise use 3D Globe spherical projection
         if (groupRef.current && state.camera) {
-          const pos = latLngToVector3(lat, lng, 1.0);
+          const pos = latLngToVector3(lat, lng, 1.015);
           pos.applyMatrix4(groupRef.current.matrixWorld);
 
           // Check if point is facing the camera
