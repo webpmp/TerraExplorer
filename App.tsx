@@ -1254,6 +1254,7 @@ const App: React.FC = () => {
         parsed.researchMode = parsed.researchMode !== undefined ? !!parsed.researchMode : false;
         parsed.retroGreenProjection = parsed.retroGreenProjection !== undefined ? !!parsed.retroGreenProjection : true;
         parsed.retroAmberProjection = parsed.retroAmberProjection !== undefined ? !!parsed.retroAmberProjection : true;
+        parsed.testMode = parsed.testMode !== undefined ? !!parsed.testMode : true;
         parsed.narrationProvider = (parsed.narrationProvider === 'kokoro' || parsed.narrationProvider === 'orpheus') ? parsed.narrationProvider : 'system';
         parsed.kokoroVoice = parsed.kokoroVoice || 'am_michael';
         parsed.orpheusVoice = parsed.orpheusVoice || 'tara';
@@ -1303,7 +1304,8 @@ const App: React.FC = () => {
       narrationVolume: 1.0,
       narrationLimit: 600,
       retroGreenProjection: true,
-      retroAmberProjection: true
+      retroAmberProjection: true,
+      testMode: true
     };
     logTerraSearchDebug({
       stage: 'settings.load',
@@ -6556,7 +6558,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       <ParchmentResizeGuide skin={skin} />
 
       {/* On-screen Search Diagnostic Overlay */}
-      <SearchDebugOverlay />
+      <SearchDebugOverlay testMode={userSettings.testMode !== false} />
     </div>
   );
 };

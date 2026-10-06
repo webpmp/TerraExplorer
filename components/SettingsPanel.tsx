@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Settings as SettingsIcon, X, Server, Newspaper, Film, Volume2, KeyRound, ExternalLink, Map as MapIcon, Palette, Sliders, Sparkles, BookOpen } from 'lucide-react';
+import { Settings as SettingsIcon, X, Server, Newspaper, Film, Volume2, KeyRound, ExternalLink, Map as MapIcon, Palette, Sliders, Sparkles, BookOpen, Bug } from 'lucide-react';
 import { SkinType, UserSettings, AIProvider, NewsProvider, NarrationProviderType } from '../types';
 import { narrationService, KOKORO_VOICES, ORPHEUS_VOICES } from '../services/narrationService';
 import { resolveEffectiveLMStudioUrl } from '../services/geminiService';
@@ -882,6 +882,61 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </div>
               <p className={`text-xs mt-2 mb-4 ${isParchment ? 'text-[#3e2723]/70' : skin === 'retro-amber' ? 'text-amber-300/70' : skin === 'retro-green' ? 'text-green-300/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
                 Displays the Add Note workspace directly below the Info Panel for note-taking and research.
+              </p>
+            </div>
+
+            {/* Visual divider between RESEARCH MODE and TEST MODE */}
+            <hr className={`border-t ${theme.divider}`} />
+
+            {/* TEST MODE */}
+            <div>
+              <div className={`flex items-center justify-between mb-1 ${skin === 'retro-green' ? 'border-b border-green-400 pb-1' : ''} ${skin === 'retro-amber' ? 'border-b border-[#ffb000] pb-1' : ''}`}>
+                <div className={`text-sm font-bold uppercase tracking-wider flex items-center gap-2 ${isParchment ? 'text-[#3e2723]' : ''} ${skin === 'modern' ? 'text-white/60' : ''} ${skin === 'retro-green' ? 'text-green-300' : ''} ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}`}>
+                  <Bug size={16} />
+                  <span>TEST MODE</span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-label="Toggle Test Mode"
+                  aria-checked={settings.testMode !== false}
+                  onClick={() =>
+                    onUpdateSettings({
+                      ...settings,
+                      testMode: settings.testMode === false ? true : false
+                    })
+                  }
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    settings.testMode !== false
+                      ? isParchment
+                        ? 'bg-[#8b5a2b]'
+                        : skin === 'retro-amber'
+                        ? 'bg-[#ffb000]'
+                        : skin === 'retro-green'
+                        ? 'bg-green-400'
+                        : 'bg-cyan-500'
+                      : isParchment
+                      ? 'bg-[#d2b48c]'
+                      : isRetro
+                      ? (skin === 'retro-amber' ? 'bg-amber-900/40 border-current' : 'bg-green-900/40 border-current')
+                      : 'bg-white/20'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full shadow-lg ring-0 transition duration-200 ease-in-out ${
+                      settings.testMode !== false ? 'translate-x-5' : 'translate-x-0'
+                    } ${
+                      isParchment || skin === 'modern'
+                        ? 'bg-white'
+                        : skin === 'retro-amber'
+                        ? (settings.testMode !== false ? 'bg-black' : 'bg-[#ffb000]')
+                        : (settings.testMode !== false ? 'bg-black' : 'bg-green-400')
+                    }`}
+                  />
+                </button>
+              </div>
+              <p className={`text-xs mt-2 mb-4 ${isParchment ? 'text-[#3e2723]/70' : skin === 'retro-amber' ? 'text-amber-300/70' : skin === 'retro-green' ? 'text-green-300/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
+                Displays the on-screen Search Debug tool on tablet devices for inspecting search events and state.
               </p>
             </div>
           </div>

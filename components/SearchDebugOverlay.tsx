@@ -3,12 +3,25 @@ import { SearchDebugEvent, subscribeSearchDebug, getSearchDebugHistory, clearSea
 import { osmTelemetry, OSMPerfSnapshot } from '../services/osmTelemetryService';
 import { Bug, X, Trash2, Copy, Check, Activity, Search } from 'lucide-react';
 
-export const SearchDebugOverlay: React.FC = () => {
+export interface SearchDebugOverlayProps {
+  testMode?: boolean;
+}
+
+export const SearchDebugOverlay: React.FC<SearchDebugOverlayProps> = ({ testMode = true }) => {
   const [events, setEvents] = useState<SearchDebugEvent[]>([]);
   const [osmPerf, setOsmPerf] = useState<OSMPerfSnapshot>(() => osmTelemetry.getSnapshot());
   const [activeTab, setActiveTab] = useState<'search' | 'osm'>('search');
   const [isOpen, setIsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(() => (typeof window !== 'undefined' ? window.innerWidth > 1080 : true));
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsDesktop(window.innerWidth > 1080);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     setEvents(getSearchDebugHistory());
@@ -96,6 +109,11 @@ export const SearchDebugOverlay: React.FC = () => {
         return '#94a3b8'; // slate
     }
   };
+
+  // On tablet / non-desktop viewports (e.g. iPad), hide the DEBUG button when TEST MODE is OFF
+  if (!isDesktop && testMode === false && !isOpen) {
+    return null;
+  }
 
   return (
     <>

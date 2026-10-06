@@ -67,6 +67,9 @@ export const getUserSettings = (): any => {
         if (parsed.researchMode === undefined) {
           parsed.researchMode = false;
         }
+        if (parsed.testMode === undefined) {
+          parsed.testMode = true;
+        }
         return parsed;
       }
     } catch (e) {
@@ -79,7 +82,8 @@ export const getUserSettings = (): any => {
     lmStudioModel: 'local-model',
     newsProvider: 'gemini',
     showNews: true,
-    researchMode: false
+    researchMode: false,
+    testMode: true
   };
 };
 

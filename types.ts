@@ -354,6 +354,7 @@ export interface UserSettings {
   narrationLimit?: number;
   retroGreenProjection?: boolean;
   retroAmberProjection?: boolean;
+  testMode?: boolean;
 }
 
 export type RouteEvidenceMode =

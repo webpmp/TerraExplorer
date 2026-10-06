@@ -161,6 +161,39 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(onHtml).toContain('aria-checked="true"');
   });
 
+  test('5c. GENERAL tab renders TEST MODE toggle reflecting ON/OFF state and defaults to ON', () => {
+    const defaultOnHtml = renderToStaticMarkup(
+      <SettingsPanel
+        {...baseProps}
+        settings={{ ...baseSettings }}
+        initialTab="general"
+      />
+    );
+    expect(defaultOnHtml).toContain('TEST MODE');
+    expect(defaultOnHtml).toContain('aria-label="Toggle Test Mode"');
+    expect(defaultOnHtml).toContain('aria-checked="true"');
+
+    const offHtml = renderToStaticMarkup(
+      <SettingsPanel
+        {...baseProps}
+        settings={{ ...baseSettings, testMode: false }}
+        initialTab="general"
+      />
+    );
+    expect(offHtml).toContain('aria-label="Toggle Test Mode"');
+    expect(offHtml).toContain('aria-checked="false"');
+
+    const explicitOnHtml = renderToStaticMarkup(
+      <SettingsPanel
+        {...baseProps}
+        settings={{ ...baseSettings, testMode: true }}
+        initialTab="general"
+      />
+    );
+    expect(explicitOnHtml).toContain('aria-label="Toggle Test Mode"');
+    expect(explicitOnHtml).toContain('aria-checked="true"');
+  });
+
   test('6. APPEARANCE tab contains theme options: Modern, CRT Green, CRT Amber, Parchment on desktop', () => {
     const html = renderToStaticMarkup(<SettingsPanel {...baseProps} initialTab="appearance" isDesktop={true} />);
 
