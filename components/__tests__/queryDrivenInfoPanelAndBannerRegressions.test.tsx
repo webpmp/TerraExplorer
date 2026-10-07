@@ -435,4 +435,29 @@ describe('Query-Driven InfoPanel Content & Waypoint Navigation Regressions', () 
       });
     });
   });
+
+  describe('5. Save Location Popup Modal (Trace Route Style Modal)', () => {
+    const testLocation: LocationInfo = {
+      name: 'HMS Erebus',
+      description: 'Franklin Expedition shipwreck site.',
+      coordinates: { lat: 68.25, lng: -98.87 }
+    };
+
+    (['modern', 'retro-green', 'retro-amber', 'parchment'] as const).forEach(skin => {
+      test(`${skin} theme renders clean header without inline popover overlaying title`, () => {
+        const html = renderToStaticMarkup(
+          <InfoPanel
+            info={testLocation}
+            onClose={vi.fn()}
+            skin={skin}
+            isFavorite={false}
+          />
+        );
+
+        expect(html).toContain('title="Save Location"');
+        // The inline popover class is completely absent
+        expect(html).not.toContain('absolute top-full mt-2 w-64');
+      });
+    });
+  });
 });

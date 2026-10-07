@@ -2310,7 +2310,8 @@ enrichmentComplete: ${Boolean(info.description && info.description.length > 50)}
       notesInput: "bg-black/40 border border-white/20 text-white placeholder-gray-400 focus:border-cyan-400 rounded-lg",
       noteCard: "bg-black/40 border border-white/10 rounded-lg",
       navBtn: "bg-white/10 hover:bg-white/20 text-white border border-white/10",
-      popover: "bg-black/95 border border-cyan-400/30 rounded-lg shadow-xl"
+      popover: "bg-black/95 border border-cyan-400/30 rounded-lg shadow-xl",
+      modal: "bg-black/90 backdrop-blur-md border border-cyan-400/30 text-white rounded-xl shadow-2xl"
     },
     'retro-green': {
       container: "bg-black/85 backdrop-blur-sm border-2 border-green-400 shadow-[0_0_20px_rgba(74,222,128,0.2)] text-green-300 font-retro tracking-widest",
@@ -2332,7 +2333,8 @@ enrichmentComplete: ${Boolean(info.description && info.description.length > 50)}
       notesInput: "bg-black border border-green-400 text-green-300 placeholder-green-400/50 focus:bg-green-900/20 rounded-none font-retro",
       noteCard: "bg-black border border-green-400 rounded-none",
       navBtn: "bg-black border border-green-400 hover:bg-green-400 hover:text-black text-green-300",
-      popover: "bg-black border-2 border-green-400 rounded-none shadow-[0_0_10px_rgba(74,222,128,0.4)]"
+      popover: "bg-black border-2 border-green-400 rounded-none shadow-[0_0_10px_rgba(74,222,128,0.4)]",
+      modal: "bg-black/85 backdrop-blur-sm border-2 border-green-400 text-green-300 font-retro shadow-[0_0_20px_rgba(74,222,128,0.2)] rounded-none"
     },
     'retro-amber': {
       container: "bg-black/85 backdrop-blur-sm border-2 border-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.2)] text-amber-300 font-retro tracking-widest",
@@ -2354,7 +2356,8 @@ enrichmentComplete: ${Boolean(info.description && info.description.length > 50)}
       notesInput: "bg-black border border-amber-400 text-amber-300 placeholder-amber-400/50 focus:bg-amber-900/20 rounded-none font-retro",
       noteCard: "bg-black border border-amber-400 rounded-none",
       navBtn: "bg-black border border-amber-400 hover:bg-amber-400 hover:text-black text-amber-300",
-      popover: "bg-black border-2 border-amber-400 rounded-none shadow-[0_0_10px_rgba(251,191,36,0.4)]"
+      popover: "bg-black border-2 border-amber-400 rounded-none shadow-[0_0_10px_rgba(251,191,36,0.4)]",
+      modal: "bg-black/85 backdrop-blur-sm border-2 border-amber-400 text-amber-300 font-retro shadow-[0_0_20px_rgba(251,191,36,0.2)] rounded-none"
     },
     'parchment': {
       container: "shadow-[4px_4px_10px_rgba(0,0,0,0.3)] text-[#3e2723] font-sans",
@@ -2376,7 +2379,8 @@ enrichmentComplete: ${Boolean(info.description && info.description.length > 50)}
       notesInput: "bg-[#f4ead5]/40 border border-[#8b5a2b]/30 text-[#522B07] placeholder-[#8b5a2b]/60 focus:border-[#8b5a2b]/70 shadow-[inset_0_1px_2px_rgba(139,90,43,0.1)] rounded-sm outline-none caret-[#522B07]",
       noteCard: "bg-[#f4ead5]/40 border border-[#8b5a2b]/20 rounded-sm shadow-sm",
       navBtn: "bg-transparent hover:text-[#3e2723] text-[#5c3a21] hover:opacity-80 transition-opacity",
-      popover: "bg-[#f4ead5] rounded-sm shadow-[0_4px_15px_rgba(0,0,0,0.4)]"
+      popover: "bg-[#f4ead5] rounded-sm shadow-[0_4px_15px_rgba(0,0,0,0.4)]",
+      modal: "text-[#3e2723] font-sans shadow-[0_4px_20px_rgba(0,0,0,0.4)]"
     }
   };
 
@@ -3211,64 +3215,6 @@ enrichmentComplete: ${Boolean(info.description && info.description.length > 50)}
                     <Pin size={24} className={isFavorite ? "fill-current" : ""} />
                   )}
                 </button>
-
-                {/* Favorite Dialog Popover */}
-                {showFavoriteDialog && !routeNav && (
-                   <div className={`absolute top-full mt-2 w-64 p-3 z-50 flex flex-col gap-3 left-1/2 -translate-x-1/2 ${theme.popover}`}>
-                      <h3 className={`text-xs text-left font-bold uppercase tracking-wider ${isRetro ? 'text-current' : isParchment ? 'text-[#8b5a2b]' : 'text-cyan-300'}`}>
-                        {isFavorite ? 'Edit Favorite' : (routeNav ? 'Save Route' : 'Save Location')}
-                      </h3>
-                      <form onSubmit={submitFavorite} className="flex flex-col gap-2">
-                         <input
-                           type="text"
-                           value={favoriteNameInput}
-                           onChange={(e) => setFavoriteNameInput(e.target.value)}
-                           placeholder="Enter name..."
-                           className={`w-full p-2 text-sm bg-transparent border outline-none ${theme.notesInput} ${isParchment ? 'border-[#8b5a2b]/30 focus:border-[#8b5a2b]' : ''}`}
-                           autoFocus
-                         />
-                         <div className="flex gap-2 justify-end">
-                            {isFavorite && (
-                                <button
-                                  type="button"
-                                  onClick={() => { onRemoveFavorite(); setShowFavoriteDialog(false); }}
-                                  className="p-1.5 hover:text-red-400 transition-colors"
-                                  title="Remove"
-                                  aria-label="Remove favorite"
-                                >
-                                    <Trash2 size={16} />
-                                </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => setShowFavoriteDialog(false)}
-                              className={`px-2 py-1 text-xs opacity-70 hover:opacity-100 rounded transition-colors ${
-                                isParchment 
-                                  ? 'text-[#5c3a21] hover:bg-[#e8d5b5]/50' 
-                                  : isRetro 
-                                  ? 'hover:bg-white/10' 
-                                  : 'hover:bg-white/10 text-gray-300 hover:text-white'
-                              }`}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                              type="submit"
-                              disabled={!favoriteNameInput.trim()}
-                              className={`px-3 py-1 text-xs font-bold uppercase transition-colors disabled:opacity-50 ${
-                                isParchment
-                                  ? 'bg-[#8b5a2b] text-[#f4ead5] hover:bg-[#5c3a21] rounded-sm shadow-sm'
-                                  : isRetro
-                                  ? (skin === 'retro-amber' ? 'bg-amber-400 text-black hover:bg-amber-300' : 'bg-green-400 text-black hover:bg-green-300')
-                                  : 'bg-cyan-600 hover:bg-cyan-500 text-white rounded'
-                              }`}
-                            >
-                                Save
-                            </button>
-                         </div>
-                      </form>
-                   </div>
-                )}
               </div>
             )}
 
@@ -3734,6 +3680,106 @@ enrichmentComplete: ${Boolean(info.description && info.description.length > 50)}
           )
         )}
     </div>
+
+    {/* Save Location / Edit Favorite Popup Modal */}
+    {showFavoriteDialog && !routeNav && (
+      <div
+        onClick={() => setShowFavoriteDialog(false)}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm pointer-events-auto"
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className={`relative w-full max-w-lg p-6 flex flex-col gap-4 ${skin === 'parchment' ? '[isolation:isolate]' : 'overflow-hidden'} ${theme.modal}`}
+        >
+          {skin === 'parchment' && (
+            <div className="parchment-background" aria-hidden="true" />
+          )}
+          <div className="relative z-[1] flex flex-col gap-4">
+            <button
+              type="button"
+              onClick={() => setShowFavoriteDialog(false)}
+              className={`absolute top-0 right-0 p-1 ${
+                skin === 'parchment'
+                  ? 'transition-colors hover:bg-[#d2b48c]/50 hover:text-[#3e2723] text-[#3e2723] rounded'
+                  : isRetro
+                  ? 'hover:bg-white/10 text-current'
+                  : 'hover:opacity-70 text-white'
+              }`}
+              aria-label="Close"
+            >
+              <X size={20} />
+            </button>
+            <h2 className={`font-bold uppercase ${skin === 'parchment' ? 'text-[#3e2723] text-lg tracking-wider brand-font' : 'text-xl tracking-wide'}`}>
+              {isFavorite ? 'Edit Favorite' : 'Save Location'}
+            </h2>
+            <p className={`text-sm ${skin === 'parchment' ? 'text-[#3e2723]/70' : 'opacity-70'}`}>
+              {isFavorite ? 'Edit the name of your saved location favorite.' : 'Save this location to your favorites for quick access.'}
+            </p>
+            <form onSubmit={submitFavorite} className="flex flex-col gap-4">
+              <input
+                type="text"
+                value={favoriteNameInput}
+                onChange={(e) => setFavoriteNameInput(e.target.value)}
+                placeholder="Enter name..."
+                className={`w-full p-3 text-sm transition-colors outline-none ${
+                  skin === 'modern'
+                    ? 'bg-transparent border border-white/20 rounded-lg focus:border-cyan-400 text-white'
+                    : skin === 'parchment'
+                    ? 'bg-[#e6d5b8] text-[#3e2723] border border-[#8b5a2b]/30 rounded-lg placeholder-[#3e2723]/60 focus:border-[#8b5a2b] focus:ring-1 focus:ring-[#8b5a2b]'
+                    : 'bg-transparent border border-current rounded-none focus:border-opacity-100'
+                }`}
+                autoFocus
+              />
+              <div className="flex gap-3 justify-end items-center">
+                {isFavorite && (
+                  <button
+                    type="button"
+                    onClick={() => { onRemoveFavorite(); setShowFavoriteDialog(false); }}
+                    className={`p-2 transition-colors mr-auto ${
+                      skin === 'parchment'
+                        ? 'text-[#8b5a2b] hover:text-red-700'
+                        : 'text-red-400 hover:text-red-300'
+                    }`}
+                    title="Remove from favorites"
+                    aria-label="Remove favorite"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowFavoriteDialog(false)}
+                  className={`px-4 py-2 text-sm transition-colors rounded ${
+                    skin === 'parchment'
+                      ? 'text-[#5c3a21] hover:bg-[#e8d5b5]/50'
+                      : isRetro
+                      ? 'hover:bg-white/10 text-current'
+                      : 'hover:bg-white/10 text-gray-300 hover:text-white'
+                  }`}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!favoriteNameInput.trim()}
+                  className={`font-bold uppercase tracking-wider text-sm transition-all px-5 py-2 ${
+                    skin === 'parchment'
+                      ? 'rounded-lg border border-[#8b5a2b]/30 hover:bg-[#e6d5b8] text-[#3e2723] bg-[#f4ead5] shadow-sm'
+                      : skin === 'retro-amber'
+                      ? 'bg-amber-400 text-black hover:bg-amber-300'
+                      : skin === 'retro-green'
+                      ? 'bg-green-400 text-black hover:bg-green-300'
+                      : 'bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg shadow-lg shadow-cyan-900/40'
+                  } ${!favoriteNameInput.trim() ? 'opacity-50 cursor-not-allowed' : 'hover:scale-[1.02]'}`}
+                >
+                  Save
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    )}
     </>
   );
 };
