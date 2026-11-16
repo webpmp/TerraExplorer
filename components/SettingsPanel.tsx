@@ -44,11 +44,25 @@ export const testMapConnectionService = async (
   provider: string = 'carto',
   skin: SkinType = 'modern',
   envGetter?: () => Record<string, string | undefined>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  overrideApiKey?: string
 ): Promise<MapConnectionTestResult> => {
   const defaultGetEnv = () => typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env : (typeof process !== 'undefined' ? process.env : {});
   const env = (envGetter || defaultGetEnv)();
-  const apiKey = env?.VITE_CARTO_API_KEY;
+  let apiKey = overrideApiKey !== undefined ? overrideApiKey : env?.VITE_CARTO_API_KEY;
+  if (!apiKey && typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
+    try {
+      const saved = localStorage.getItem('terraExplorerSettings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.cartoApiKey && typeof parsed.cartoApiKey === 'string' && parsed.cartoApiKey.trim()) {
+          apiKey = parsed.cartoApiKey.trim();
+        }
+      }
+    } catch {
+      // Ignore
+    }
+  }
 
   const styleName = (skin === 'retro-amber' || skin === 'retro-green') ? 'dark-matter-gl-style' : 'voyager-gl-style';
   const baseUrl = `https://basemaps.cartocdn.com/gl/${styleName}/style.json`;
@@ -390,6 +404,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const isRetro = skin === 'retro-green' || skin === 'retro-amber';
 
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
   const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>(() => narrationService.getVoices());
   const [availableModels, setAvailableModels] = React.useState<string[]>([]);
   const [isDetectingModels, setIsDetectingModels] = React.useState(false);
@@ -992,7 +1010,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         </button>
                       </div>
                       <p className={`text-xs mt-1 ${isParchment ? 'text-[#3e2723]/70' : skin === 'retro-amber' ? 'text-amber-300/70' : skin === 'retro-green' ? 'text-green-300/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
-                        Must include /v1 for OpenAI compatibility.
+                        Must include /v1 for OpenAI compatibility. For Docker users, use http://host.docker.internal:1234/v1.
                       </p>
                     </div>
 

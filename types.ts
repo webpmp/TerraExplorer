@@ -333,6 +333,8 @@ export interface NarrationContentConfig {
 
 export interface UserSettings {
   aiProvider: AIProvider;
+  geminiApiKey?: string;
+  cartoApiKey?: string;
   lmStudioUrl: string;
   lmStudioModel: string;
   newsProvider: NewsProvider;

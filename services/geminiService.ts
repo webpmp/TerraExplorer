@@ -42,7 +42,25 @@ export const cancelFeatureInfoRequests = () => {};
 
 // Dynamic helper to resolve the Gemini API key
 export const getGeminiApiKey = (): string | undefined => {
-  return process.env.API_KEY || process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+  if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
+    try {
+      const saved = localStorage.getItem('terraExplorerSettings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.geminiApiKey && typeof parsed.geminiApiKey === 'string' && parsed.geminiApiKey.trim()) {
+          return parsed.geminiApiKey.trim();
+        }
+      }
+    } catch {
+      // Ignore
+    }
+  }
+  return process.env.API_KEY || process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || (typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env.VITE_GEMINI_API_KEY : undefined);
+};
+
+export const getGeminiClient = (): GoogleGenAI => {
+  const key = getGeminiApiKey();
+  return new GoogleGenAI({ apiKey: key || 'dummy-key-for-ts-check' });
 };
 
 // Ensure API key is available
@@ -77,7 +95,7 @@ export const getUserSettings = (): any => {
     }
   }
   return {
-    aiProvider: 'gemini',
+    aiProvider: 'lmstudio',
     lmStudioUrl: 'http://localhost:1234/v1',
     lmStudioModel: 'local-model',
     newsProvider: 'gemini',
@@ -133,6 +151,10 @@ export const callGeminiWithRetry = async (params: any, retries = 3, signal?: Abo
   });
 
   try {
+    const key = getGeminiApiKey();
+    if (key && (ai as any).apiKey !== key) {
+      (ai as any).apiKey = key;
+    }
     const response = await ai.models.generateContent(params);
     if (signal?.aborted || params.signal?.aborted) {
       throw new DOMException('Aborted', 'AbortError');
@@ -225,6 +247,45 @@ export const generateContentWithRetry = async (params: any, retries = 3, signal?
   }
 
   return callGeminiWithRetry(params, retries, activeSignal);
+};
+
+export class LMStudioUnreachableError extends Error {
+  readonly isLMStudioUnreachableError = true;
+  readonly errorType = "LM_STUDIO_UNREACHABLE";
+  readonly url?: string;
+  constructor(url?: string, message?: string) {
+    super(message || (url ? `Can't reach LM Studio at ${url}. Is the server started?` : "Can't reach LM Studio. Is the server started?"));
+    this.name = "LMStudioUnreachableError";
+    this.url = url;
+    Object.setPrototypeOf(this, LMStudioUnreachableError.prototype);
+  }
+}
+
+export const isLMStudioUnreachableError = (error: any): boolean => {
+  if (!error) return false;
+  if (
+    error instanceof LMStudioUnreachableError ||
+    error.isLMStudioUnreachableError === true ||
+    error.name === 'LMStudioUnreachableError' ||
+    error.errorType === 'LM_STUDIO_UNREACHABLE' ||
+    error.error === 'LM_STUDIO_UNREACHABLE'
+  ) {
+    return true;
+  }
+  const msg = typeof error === 'string'
+    ? error
+    : (typeof error?.message === 'string' ? error.message : (typeof error?.errorMessage === 'string' ? error.errorMessage : ''));
+  if (msg) {
+    const lower = msg.toLowerCase();
+    return (
+      lower.includes("can't reach lm studio") ||
+      lower.includes("failed to fetch") ||
+      lower.includes("connection refused") ||
+      lower.includes("econnrefused") ||
+      lower.includes("networkerror")
+    );
+  }
+  return false;
 };
 
 export const LM_STUDIO_NO_MODEL_MESSAGE = "No AI model is currently loaded. Please load a model and try again.";
@@ -493,9 +554,19 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
       text: rawContent
     };
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Local LM Studio Request Failed", error);
-    throw error;
+    if (error?.name === 'AbortError' || signal?.aborted) {
+      throw error;
+    }
+    if (isLMStudioNoModelError(error) || isLMStudioContextOverflowError(error)) {
+      throw error;
+    }
+    if (error?.message && error.message.includes('LM Studio request failed')) {
+      throw error;
+    }
+    const targetUrl = typeof requestUrl !== 'undefined' ? requestUrl : (baseUrl || 'http://localhost:1234/v1');
+    throw new LMStudioUnreachableError(targetUrl, error?.message);
   }
 };
 
@@ -2174,6 +2245,33 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
     descriptionCache.delete(cacheKey); // Remove stale error from cache
     console.error("Error resolving feature info:", error);
     const isNoModel = isLMStudioNoModelError(error);
+    const isUnreachable = isLMStudioUnreachableError(error);
+    const userSettings = getUserSettings();
+    const isRateLimited = error.message?.includes('429') || error.message?.includes('Quota');
+    const isGeminiMissing = userSettings.aiProvider === 'gemini' && !isGeminiConfigured();
+
+    let computedErrorType: string | undefined = undefined;
+    let computedErrorMessage = "Descriptions and Notable facts need an AI provider.";
+    let computedErrorInstruction: string | undefined = "(Settings > Providers)";
+
+    if (isNoModel) {
+      computedErrorType = "LM_STUDIO_NO_MODEL";
+      computedErrorMessage = LM_STUDIO_NO_MODEL_MESSAGE;
+      computedErrorInstruction = LM_STUDIO_NO_MODEL_INSTRUCTION;
+    } else if (isUnreachable) {
+      computedErrorType = "LM_STUDIO_UNREACHABLE";
+      computedErrorMessage = `Can't reach LM Studio at ${userSettings.lmStudioUrl || 'http://localhost:1234/v1'}. Is the server started?`;
+      computedErrorInstruction = "(Settings > Providers)";
+    } else if (isGeminiMissing) {
+      computedErrorType = "GEMINI_KEY_MISSING";
+      computedErrorMessage = "Gemini API key is missing or invalid.";
+      computedErrorInstruction = "(Settings > Providers)";
+    } else if (isRateLimited) {
+      computedErrorType = "RATE_LIMITED";
+      computedErrorMessage = "AI rate limit reached. Please wait a moment.";
+      computedErrorInstruction = undefined;
+    }
+
     return sanitizeLocationInfo({
         name: name,
         type: LocationType.POI,
@@ -2182,16 +2280,10 @@ export const getInfoFromFeature = async (marker: MapMarker, queryContext?: strin
         funFacts: [],
         notable: [],
         status: "error",
-        errorType: isNoModel ? "LM_STUDIO_NO_MODEL" : undefined,
+        errorType: computedErrorType,
         sectionState: { description: "failed" },
-        errorMessage: isNoModel
-            ? LM_STUDIO_NO_MODEL_MESSAGE
-            : (error.message?.includes('429') || error.message?.includes('Quota')
-                ? "API Quota Exceeded. Please try again later."
-                : "Could not retrieve information at this time."),
-        errorInstruction: isNoModel
-            ? LM_STUDIO_NO_MODEL_INSTRUCTION
-            : undefined
+        errorMessage: computedErrorMessage,
+        errorInstruction: computedErrorInstruction
     } as unknown as LocationInfo);
   }
   })();

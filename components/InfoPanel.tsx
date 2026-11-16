@@ -7,7 +7,12 @@ import { fetchAndValidateImages } from '../services/imageService';
 import { fetchAndValidateLocationNews } from '../services/locationService';
 import { logTraceTiming } from '../services/traceTimingService';
 import { logTerraSearchDebug } from '../services/searchDebugTracer';
-import { isLMStudioNoModelError, LM_STUDIO_NO_MODEL_MESSAGE, LM_STUDIO_NO_MODEL_INSTRUCTION } from '../services/geminiService';
+import {
+  isLMStudioNoModelError,
+  isLMStudioUnreachableError,
+  LM_STUDIO_NO_MODEL_MESSAGE,
+  LM_STUDIO_NO_MODEL_INSTRUCTION
+} from '../services/geminiService';
 import {
   X, Users, Info, Crown, Map, Pin, ExternalLink, Loader2,
   BookOpen, Rocket, Trophy, Music, FlaskConical, Palette, Clapperboard, Image as ImageIcon,
@@ -3112,9 +3117,20 @@ enrichmentComplete: ${Boolean(info.description && info.description.length > 50)}
                             isLMStudioNoModelError(rawInfo) ||
                             isLMStudioNoModelError(errorMessage);
 
+  const isAiServiceError = (info as any)?.errorType === 'LM_STUDIO_UNREACHABLE' ||
+                           (rawInfo as any)?.errorType === 'LM_STUDIO_UNREACHABLE' ||
+                           (info as any)?.errorType === 'GEMINI_KEY_MISSING' ||
+                           (rawInfo as any)?.errorType === 'GEMINI_KEY_MISSING' ||
+                           (info as any)?.errorType === 'RATE_LIMITED' ||
+                           (rawInfo as any)?.errorType === 'RATE_LIMITED' ||
+                           (rawInfo as any)?.sectionState?.description === 'failed' ||
+                           isLMStudioUnreachableError(info) ||
+                           isLMStudioUnreachableError(rawInfo) ||
+                           isLMStudioUnreachableError(errorMessage);
+
   const isEnrichmentLoading = isLoading || (rawInfo as any)?.sectionState?.description === 'loading';
   const isSubstantiveReady = Boolean(info?.description && evaluateDescriptionReadiness(info.description, info?.name).isReady);
-  const showContentSkeleton = (isLoading || (isEnrichmentLoading && !isSubstantiveReady)) && !isLMStudioNoModel && !isError;
+  const showContentSkeleton = (isLoading || (isEnrichmentLoading && !isSubstantiveReady)) && !isLMStudioNoModel && !isAiServiceError && !isError;
   const contextItems = info?.contextNotes;
 
   if (!rawInfo && !isLoading && !isError) {
@@ -3315,7 +3331,7 @@ enrichmentComplete: ${Boolean(info.description && info.description.length > 50)}
                 data-testid="modern-scroll-top-fade"
               />
             )}
-            {(isError || isLMStudioNoModel) ? (
+            {(isError || isLMStudioNoModel || isAiServiceError) ? (
                <div className="p-6 flex flex-col items-center justify-center min-h-48 text-center space-y-3">
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center mb-1 ${isRetro ? 'bg-red-900/40 text-red-400' : 'bg-red-500/20 text-red-400'}`}>
                       <X size={20} />
@@ -3323,9 +3339,9 @@ enrichmentComplete: ${Boolean(info.description && info.description.length > 50)}
                   <p className={`font-medium ${theme.headerTitle}`}>
                     {isLMStudioNoModel
                       ? LM_STUDIO_NO_MODEL_MESSAGE
-                      : (errorMessage || (rawInfo as any)?.errorMessage || "Unable to retrieve location details")}
+                      : (errorMessage || (rawInfo as any)?.errorMessage || "Descriptions and Notable facts need an AI provider.")}
                   </p>
-                  {isLMStudioNoModel ? (
+                  {(isLMStudioNoModel || isAiServiceError || (rawInfo as any)?.errorType === 'LM_STUDIO_UNREACHABLE' || (rawInfo as any)?.errorType === 'GEMINI_KEY_MISSING' || (rawInfo as any)?.errorInstruction === LM_STUDIO_NO_MODEL_INSTRUCTION || (rawInfo as any)?.errorInstruction === '(Settings > Providers)') ? (
                     <p className={`text-xs ${theme.subtext} max-w-xs mt-1 leading-relaxed`}>
                       {onOpenSettingsTab ? (
                         <span>

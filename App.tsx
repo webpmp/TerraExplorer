@@ -11,6 +11,10 @@ import MarkerProjectionBeam from './components/MarkerProjectionBeam';
 import Controls from './components/Controls';
 import FavoritesPanel from './components/FavoritesPanel';
 import SettingsPanel from './components/SettingsPanel';
+import SetupPanel from './components/SetupPanel';
+import GeminiFallbackPrompt from './components/GeminiFallbackPrompt';
+import { useSetupStatus } from './hooks/useSetupStatus';
+import { getEffectiveGeminiKey } from './services/setupStatusService';
 import ParchmentResizeGuide from './components/ParchmentResizeGuide';
 import { SearchDebugOverlay } from './components/SearchDebugOverlay';
 import { getInfoFromFeature, getNearbyPlaces, generateRoute, extractEntityFromQuery, routeIntentAndExtractEntity, deriveQueryTopicTitle, EnrichmentMetrics, cancelFeatureInfoRequests, isLMStudioNoModelError, LM_STUDIO_NO_MODEL_MESSAGE, LM_STUDIO_NO_MODEL_INSTRUCTION, isLMStudioContextOverflowError, LM_STUDIO_CONTEXT_OVERFLOW_MESSAGE, LM_STUDIO_CONTEXT_OVERFLOW_INSTRUCTION, isSourceRetrievalError, recoverLocationMetadata } from './services/geminiService';
@@ -1284,7 +1288,7 @@ const App: React.FC = () => {
       }
     }
     return {
-      aiProvider: 'gemini',
+      aiProvider: 'lmstudio',
       lmStudioUrl: 'http://localhost:1234/v1',
       lmStudioModel: 'local-model',
       newsProvider: 'gemini',
@@ -1320,8 +1324,34 @@ const App: React.FC = () => {
     return defaults;
   });
 
-  // Route State
-  const [routeWaypoints, setRouteWaypoints] = useState<Waypoint[]>([]);
+  // Session fallback state: if user accepts fallback to Gemini for this session
+  const [sessionGeminiFallback, setSessionGeminiFallback] = useState<boolean>(() => {
+    if (typeof sessionStorage !== 'undefined') {
+      return sessionStorage.getItem('terraExplorerSessionGeminiFallback') === 'true';
+    }
+    return false;
+  });
+
+  // Prompt state for Gemini fallback
+  const [showGeminiFallbackPrompt, setShowGeminiFallbackPrompt] = useState<boolean>(false);
+
+  // Setup Checklist dismissal state
+  const [isSetupDismissed, setIsSetupDismissed] = useState<boolean>(false);
+
+  // Active setup status hook
+  const { status: setupStatus, isMissingRequired: isSetupMissingRequired } = useSetupStatus(userSettings, sessionGeminiFallback);
+
+  const handleAcceptGeminiFallback = useCallback(() => {
+    setSessionGeminiFallback(true);
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem('terraExplorerSessionGeminiFallback', 'true');
+    }
+    setShowGeminiFallbackPrompt(false);
+  }, []);
+
+  const handleDeclineGeminiFallback = useCallback(() => {
+    setShowGeminiFallbackPrompt(false);
+  }, []);
   const routeWaypointsRef = useRef<Waypoint[]>([]);
   routeWaypointsRef.current = routeWaypoints;
   const inFlightPrefetchesRef = useRef<Set<string>>(new Set());
@@ -4178,16 +4208,28 @@ source=${source}`);
                 if (data) {
                     console.log(`[InfoPanel] enrichment updated`);
                     console.log(`[Enrichment] ${geoMarker.name} complete`);
+                    const isError = data.status === "error" || (data as any)?.errorType;
                     const nextState = mergeLocationInfo(basePayload, {
                         description: data.description || initialPayload.description || "",
                         notable: data.notable || [],
                         contextNotes: data.contextNotes || [],
                         relatedEntities: data.relatedEntities || [],
                         imageSearchTerm: data.imageSearchTerm,
-                        sectionState: { description: "complete" }
+                        errorType: (data as any).errorType,
+                        errorMessage: (data as any).errorMessage,
+                        errorInstruction: (data as any).errorInstruction,
+                        sectionState: { description: isError ? "error" : "complete" }
                     });
                     finalState = nextState;
                     setLocationInfo(nextState);
+
+                    // Check if AI failed due to LM Studio unreachable/no model while Gemini key is available
+                    if (isError && (data.errorType === 'LM_STUDIO_NO_MODEL' || data.errorType === 'LM_STUDIO_UNREACHABLE')) {
+                      const effectiveGemini = getEffectiveGeminiKey(userSettingsRef.current);
+                      if (effectiveGemini && !sessionGeminiFallback) {
+                        setShowGeminiFallbackPrompt(true);
+                      }
+                    }
                 } else {
                     finalState = {
                         ...basePayload,
@@ -5258,7 +5300,8 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
         const errorCode = pipelineResult.error;
         let category: SearchDebugEvent['category'] = '2_NO_LOCATION';
-        let userError = `[DEBUG: 2_NO_LOCATION] Could not resolve: "${cleanQuery}"`;
+        const debugDetail = `[DEBUG: ${errorCode || (hasValidCoords ? '2_NO_LOCATION' : '6_UNEXPECTED_SHAPE')}] Could not resolve: "${cleanQuery}"`;
+        let userError = "Couldn't find that place. Try a more specific name.";
 
         if (errorCode === "UNSUPPORTED_CELESTIAL_BODY") {
           userError = "TerraExplorer currently supports Earth geography only.";
@@ -5266,23 +5309,23 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           userError = `${LM_STUDIO_NO_MODEL_MESSAGE} ${LM_STUDIO_NO_MODEL_INSTRUCTION}`;
         } else if (errorCode === "LOCATION_SYSTEM_UNAVAILABLE") {
           category = '2_NO_LOCATION';
-          userError = `[DEBUG: 2_NO_LOCATION] Location system unavailable (No API Key & geocoder missed) for "${cleanQuery}".`;
+          userError = "AI provider is not configured or unavailable. Please configure an AI provider in Settings.";
         } else if (errorCode === "NOT_FOUND") {
           category = '2_NO_LOCATION';
-          userError = `[DEBUG: 2_NO_LOCATION] Location not found: "${cleanQuery}".`;
+          userError = "Couldn't find that place. Try a more specific name.";
         } else if (errorCode === "HISTORICAL_LOCATION_UNCONFIRMED") {
           userError = "Exact historical location is unconfirmed.";
         } else if (errorCode === "NO_GEOGRAPHIC_DATA") {
           category = '2_NO_LOCATION';
-          userError = `[DEBUG: 2_NO_LOCATION / 3_GEOCODER_NO_RESULT] No geographic data found for "${cleanQuery}".`;
+          userError = "Couldn't find that place. Try a more specific name.";
         } else if (errorCode === "TEMP_FAILURE") {
           category = '4_NETWORK_FAILED';
-          userError = `[DEBUG: 4_NETWORK_FAILED] Network or temporary service failure for "${cleanQuery}".`;
+          userError = "Network or temporary service failure. Please check your connection and try again.";
         } else if (errorCode === "AMBIGUOUS") {
-          userError = `[DEBUG: AMBIGUOUS] Location "${cleanQuery}" is too ambiguous to resolve.`;
+          userError = `Location "${cleanQuery}" is too ambiguous to resolve. Try adding a city, region, or country.`;
         } else if (!errorCode && !hasValidCoords) {
           category = '6_UNEXPECTED_SHAPE';
-          userError = `[DEBUG: 6_UNEXPECTED_SHAPE] Result returned without valid coordinates for "${cleanQuery}".`;
+          userError = "Couldn't find that place. Try a more specific name.";
         }
 
         logTerraSearchDebug({
@@ -5290,7 +5333,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           query: cleanQuery,
           status: 'NO_RESULT',
           category,
-          errorMessage: userError,
+          errorMessage: debugDetail,
           details: {
             searchId,
             errorCode: errorCode || 'none',
@@ -5299,7 +5342,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           }
         });
 
-        console.log(`[SEARCH_ERROR_SET] searchId=${searchId} errorCode="${errorCode || 'none'}" userError="${userError}" pipelineResultIsValid=${pipelineResult.isValid} hasFinalData=${!!(pipelineResult as any)?.finalData}`);
+        console.log(`[SEARCH_ERROR_SET] searchId=${searchId} errorCode="${errorCode || 'none'}" userError="${userError}" debugDetail="${debugDetail}" pipelineResultIsValid=${pipelineResult.isValid} hasFinalData=${!!(pipelineResult as any)?.finalData}`);
         setSearchError(userError);
         setIsDiscoveryLoading(false);
         console.log('[Scan Lifecycle] DISCOVERY_FAILED');
@@ -5331,7 +5374,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
       if (isLMStudioNoModelError(err)) {
         setSearchError(`${LM_STUDIO_NO_MODEL_MESSAGE} ${LM_STUDIO_NO_MODEL_INSTRUCTION}`);
       } else {
-        setSearchError(`[DEBUG: 5_JS_EXCEPTION] ${errName}: ${errMsg}`);
+        setSearchError("An unexpected error occurred while searching. Please try again.");
       }
       setIsDiscoveryLoading(false);
       console.log('[Scan Lifecycle] DISCOVERY_FAILED');
@@ -6553,6 +6596,49 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         isOSMDisplayed={isOSMActive}
         parchmentRingRadius={maskRadius}
       />
+
+      {/* Setup Checklist Panel */}
+      <SetupPanel
+        skin={skin}
+        status={setupStatus}
+        isDismissed={isSetupDismissed}
+        onDismiss={() => setIsSetupDismissed(true)}
+        onOpenSettings={handleOpenSettingsTab}
+        onReopen={() => setIsSetupDismissed(false)}
+      />
+
+      {/* Gemini Session Fallback Confirmation Prompt */}
+      <GeminiFallbackPrompt
+        skin={skin}
+        isOpen={showGeminiFallbackPrompt}
+        onAccept={handleAcceptGeminiFallback}
+        onDecline={handleDeclineGeminiFallback}
+      />
+
+      {/* Carto Map Key Notice (when map key is missing/invalid) */}
+      {setupStatus.map.status !== 'ready' && (
+        <div
+          data-testid="map-key-fallback-notice"
+          className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded-lg shadow-lg border text-xs flex items-center gap-2 backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 ${
+            skin === 'parchment'
+              ? 'bg-[#f4ebe1]/95 text-[#3e2723] border-[#8b5a2b]/30'
+              : skin === 'retro-green'
+              ? 'bg-black/90 text-green-300 border-green-400 font-retro'
+              : skin === 'retro-amber'
+              ? 'bg-black/90 text-[#ffb000] border-[#ffb000] font-retro'
+              : 'bg-slate-900/90 text-white border-white/20'
+          }`}
+        >
+          <span>Add a Carto API key to load map tiles.</span>
+          <button
+            type="button"
+            onClick={() => handleOpenSettingsTab('providers')}
+            className="underline hover:opacity-100 font-semibold cursor-pointer"
+          >
+            [Open Settings]
+          </button>
+        </div>
+      )}
 
       {/* Parchment Native Background Resize Guide */}
       <ParchmentResizeGuide skin={skin} />
