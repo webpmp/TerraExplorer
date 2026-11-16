@@ -1,5 +1,10 @@
 import { NewsItem } from '../types';
 import { getUserSettings } from './geminiService';
+import {
+  getNytKey,
+  getNewsApiKey,
+  getNewsDataKey
+} from './keyResolutionService';
 
 import { fetchNYTNews } from './providers/nytNewsProvider';
 import { fetchNewsApiNews } from './providers/newsApiProvider';
@@ -45,23 +50,21 @@ export const fetchLiveNews = async (locationName: string): Promise<NewsItem[]> =
   
   let providerPromise: Promise<NewsItem[]>;
   let timeoutMs = DEFAULT_NEWS_TIMEOUT_MS;
-  const getEnv = () => typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env : (typeof process !== 'undefined' ? process.env : {});
-
   switch (provider) {
     case 'gemini':
       providerPromise = fetchGeminiGroundedNews(locationName);
       timeoutMs = GEMINI_NEWS_TIMEOUT_MS;
       break;
     case 'nyt':
-      providerPromise = fetchNYTNews(locationName, settings.nytApiKey || getEnv().VITE_NYT_API_KEY);
+      providerPromise = fetchNYTNews(locationName, getNytKey(settings) || '');
       timeoutMs = DEFAULT_NEWS_TIMEOUT_MS;
       break;
     case 'newsapi':
-      providerPromise = fetchNewsApiNews(locationName, settings.newsApiKey || getEnv().VITE_NEWS_API_KEY);
+      providerPromise = fetchNewsApiNews(locationName, getNewsApiKey(settings) || '');
       timeoutMs = DEFAULT_NEWS_TIMEOUT_MS;
       break;
     case 'newsdata':
-      providerPromise = fetchNewsDataNews(locationName, settings.newsDataApiKey || getEnv().VITE_NEWS_DATA_API_KEY);
+      providerPromise = fetchNewsDataNews(locationName, getNewsDataKey(settings) || '');
       timeoutMs = DEFAULT_NEWS_TIMEOUT_MS;
       break;
     default:

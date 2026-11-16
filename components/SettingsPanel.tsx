@@ -3,7 +3,13 @@ import { Settings as SettingsIcon, X, Server, Newspaper, Film, Volume2, KeyRound
 import { SkinType, UserSettings, AIProvider, NewsProvider, NarrationProviderType } from '../types';
 import { narrationService, KOKORO_VOICES, ORPHEUS_VOICES } from '../services/narrationService';
 import { resolveEffectiveLMStudioUrl } from '../services/geminiService';
-import { getCartoKey, ENV_VARIABLES_SPEC } from '../services/setupStatusService';
+import {
+  getCartoKey,
+  getNytKey,
+  getNewsApiKey,
+  getNewsDataKey,
+  ENV_VARIABLES_SPEC
+} from '../services/setupStatusService';
 
 interface SettingsPanelProps {
   settings: UserSettings;
@@ -48,9 +54,7 @@ export const testMapConnectionService = async (
   signal?: AbortSignal,
   overrideApiKey?: string
 ): Promise<MapConnectionTestResult> => {
-  const defaultGetEnv = () => typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env : (typeof process !== 'undefined' ? process.env : {});
-  const env = (envGetter || defaultGetEnv)();
-  let apiKey = overrideApiKey !== undefined ? overrideApiKey : getCartoKey(undefined, envGetter || defaultGetEnv);
+  let apiKey = overrideApiKey !== undefined ? overrideApiKey : getCartoKey(undefined, envGetter);
 
   const styleName = (skin === 'retro-amber' || skin === 'retro-green') ? 'dark-matter-gl-style' : 'voyager-gl-style';
   const baseUrl = `https://basemaps.cartocdn.com/gl/${styleName}/style.json`;
@@ -147,11 +151,9 @@ export const testNewsConnectionService = async (
   };
   const providerLabel = providerNames[provider] || provider;
 
-  const defaultGetEnv = () => typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env : (typeof process !== 'undefined' ? process.env : {});
-  const env = (envGetter || defaultGetEnv)();
-  const nytKey = apiKeys?.nytApiKey || env?.VITE_NYT_API_KEY || '';
-  const newsApiKey = apiKeys?.newsApiKey || env?.VITE_NEWS_API_KEY || '';
-  const newsDataKey = apiKeys?.newsDataApiKey || env?.VITE_NEWS_DATA_API_KEY || '';
+  const nytKey = getNytKey(apiKeys, envGetter) || '';
+  const newsApiKey = getNewsApiKey(apiKeys, envGetter) || '';
+  const newsDataKey = getNewsDataKey(apiKeys, envGetter) || '';
 
   const activeKey = provider === 'nyt' ? nytKey : (provider === 'newsapi' ? newsApiKey : (provider === 'newsdata' ? newsDataKey : ''));
   const isKeyConfigured = Boolean(activeKey && activeKey.trim());

@@ -1,6 +1,23 @@
 import { UserSettings, NewsProvider } from '../types';
-import { getGeminiApiKey } from './geminiService';
-import { detectLMStudioModels, testMapConnectionService } from '../components/SettingsPanel';
+import {
+  resolveApiKey,
+  getCartoKey,
+  getNytKey,
+  getNewsApiKey,
+  getNewsDataKey,
+  hasAnyNewsKey,
+  getEffectiveGeminiKey
+} from './keyResolutionService';
+
+export {
+  resolveApiKey,
+  getCartoKey,
+  getNytKey,
+  getNewsApiKey,
+  getNewsDataKey,
+  hasAnyNewsKey,
+  getEffectiveGeminiKey
+};
 
 export type ServiceStatus = 'ready' | 'missing' | 'invalid' | 'unreachable' | 'no_model' | 'not_configured';
 
@@ -73,134 +90,11 @@ export const ENV_VARIABLES_SPEC: EnvVariableSpec[] = [
   }
 ];
 
-export const resolveKeyFromSources = (
-  settingVal?: string,
-  storageKey?: string,
-  envVarName?: string,
-  envGetter?: () => Record<string, string | undefined>
-): string | undefined => {
-  if (settingVal && settingVal.trim()) {
-    return settingVal.trim();
-  }
-  if (storageKey && typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
-    try {
-      const saved = localStorage.getItem('terraExplorerSettings');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed[storageKey] && typeof parsed[storageKey] === 'string' && parsed[storageKey].trim()) {
-          return parsed[storageKey].trim();
-        }
-      }
-    } catch {
-      // Ignore
-    }
-  }
-  if (envVarName) {
-    if (envGetter) {
-      const customEnv = envGetter();
-      return customEnv?.[envVarName] && customEnv[envVarName]!.trim()
-        ? customEnv[envVarName]!.trim()
-        : undefined;
-    }
-    const metaEnvKey =
-      typeof import.meta !== 'undefined' && import.meta.env
-        ? (import.meta.env as any)[envVarName]
-        : undefined;
-    if (metaEnvKey && typeof metaEnvKey === 'string' && metaEnvKey.trim()) {
-      return metaEnvKey.trim();
-    }
-    const procEnvKey =
-      typeof process !== 'undefined' && process.env
-        ? (process.env as any)[envVarName]
-        : undefined;
-    if (procEnvKey && typeof procEnvKey === 'string' && procEnvKey.trim()) {
-      return procEnvKey.trim();
-    }
-  }
-  return undefined;
-};
-
-export const getCartoKey = (
-  settings?: Partial<UserSettings>,
-  envGetter?: () => Record<string, string | undefined>
-): string | undefined => {
-  return resolveKeyFromSources(
-    settings?.cartoApiKey,
-    'cartoApiKey',
-    'VITE_CARTO_API_KEY',
-    envGetter
-  );
-};
-
-export const getNytKey = (
-  settings?: Partial<UserSettings>,
-  envGetter?: () => Record<string, string | undefined>
-): string | undefined => {
-  return resolveKeyFromSources(
-    settings?.nytApiKey,
-    'nytApiKey',
-    'VITE_NYT_API_KEY',
-    envGetter
-  );
-};
-
-export const getNewsApiKey = (
-  settings?: Partial<UserSettings>,
-  envGetter?: () => Record<string, string | undefined>
-): string | undefined => {
-  return resolveKeyFromSources(
-    settings?.newsApiKey,
-    'newsApiKey',
-    'VITE_NEWS_API_KEY',
-    envGetter
-  );
-};
-
-export const getNewsDataKey = (
-  settings?: Partial<UserSettings>,
-  envGetter?: () => Record<string, string | undefined>
-): string | undefined => {
-  return resolveKeyFromSources(
-    settings?.newsDataApiKey,
-    'newsDataApiKey',
-    'VITE_NEWS_DATA_API_KEY',
-    envGetter
-  );
-};
-
-export const hasAnyNewsKey = (
-  settings?: Partial<UserSettings>,
-  envGetter?: () => Record<string, string | undefined>
-): boolean => {
-  return Boolean(
-    getNytKey(settings, envGetter) ||
-    getNewsApiKey(settings, envGetter) ||
-    getNewsDataKey(settings, envGetter)
-  );
-};
-
-export const getEffectiveGeminiKey = (
-  settings?: Partial<UserSettings>,
-  envGetter?: () => Record<string, string | undefined>
-): string | undefined => {
-  if (settings?.geminiApiKey && settings.geminiApiKey.trim()) {
-    return settings.geminiApiKey.trim();
-  }
-  const defaultGetEnv = () => typeof import.meta !== 'undefined' && import.meta.env ? (import.meta.env as any) : (typeof process !== 'undefined' ? process.env : {});
-  const env = (envGetter || defaultGetEnv)();
-  if (envGetter) {
-    return env?.GEMINI_API_KEY || env?.API_KEY || env?.VITE_GEMINI_API_KEY;
-  }
-  return env?.GEMINI_API_KEY || env?.API_KEY || env?.VITE_GEMINI_API_KEY || getGeminiApiKey();
-};
-
 export const evaluateSyncSetupStatus = (
   settings: UserSettings,
   lmStudioProbeResult?: { outcome: 'SUCCESS' | 'NO_MODELS' | 'ERROR'; message?: string },
   envGetter?: () => Record<string, string | undefined>
 ): SetupStatusState => {
-  const defaultGetEnv = () => typeof import.meta !== 'undefined' && import.meta.env ? (import.meta.env as any) : (typeof process !== 'undefined' ? process.env : {});
-  const env = (envGetter || defaultGetEnv)();
 
   // 1. AI Provider Status
   let aiStatus: ServiceStatus = 'missing';
@@ -224,7 +118,7 @@ export const evaluateSyncSetupStatus = (
     }
   } else {
     // Gemini provider
-    const geminiKey = getEffectiveGeminiKey(settings, () => env);
+    const geminiKey = getEffectiveGeminiKey(settings, envGetter);
     const hasGemini = Boolean(geminiKey && geminiKey.trim() && geminiKey.trim() !== 'dummy-key-for-ts-check');
     if (hasGemini) {
       aiStatus = 'ready';
@@ -237,7 +131,7 @@ export const evaluateSyncSetupStatus = (
   // 2. Map Provider Status
   let mapStatus: ServiceStatus = 'missing';
   let mapDetail = '';
-  const cartoKey = getCartoKey(settings, () => env);
+  const cartoKey = getCartoKey(settings, envGetter);
   if (cartoKey && cartoKey.trim()) {
     mapStatus = 'ready';
   } else {
@@ -247,7 +141,7 @@ export const evaluateSyncSetupStatus = (
 
   // 3. News Provider Status (Optional / Non-blocking)
   // Needs attention when no news key is configured, and ready once any one of the 3 providers has a key
-  const hasNews = hasAnyNewsKey(settings, () => env);
+  const hasNews = hasAnyNewsKey(settings, envGetter);
   const newsStatus: ServiceStatus = hasNews ? 'ready' : 'missing';
 
   return {

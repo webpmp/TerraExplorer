@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { latLngToVector3 } from '../../utils/globeCoordinates';
 import { SkinType } from '../../types';
 import { transformRetroVectorStyle } from '../../utils/osmPalettes';
+import { getCartoKey } from '../keyResolutionService';
 
 export type OSMDetailLevel =
   | 'global'
@@ -246,7 +247,7 @@ export class OSMTileService {
    * Voyager for Modern/Parchment, Dark Matter for CRT Green/Amber.
    */
   public getVectorStyleUrl(skin: string = 'modern'): string {
-    const apiKey = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_CARTO_API_KEY : undefined;
+    const apiKey = getCartoKey();
     const styleName = (skin === 'retro-amber' || skin === 'retro-green') ? 'dark-matter-gl-style' : 'voyager-gl-style';
     const baseUrl = `https://basemaps.cartocdn.com/gl/${styleName}/style.json`;
 
@@ -290,7 +291,7 @@ export class OSMTileService {
    */
   public getTileUrl(z: number, x: number, y: number, skin: string): string {
     const subdomain = ['a', 'b', 'c', 'd'][(x + y) % 4];
-    const apiKey = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_CARTO_API_KEY : undefined;
+    const apiKey = getCartoKey();
 
     let baseUrl: string;
     if (skin === 'retro-amber' || skin === 'retro-green') {

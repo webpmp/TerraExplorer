@@ -1,6 +1,12 @@
 import { LocationInfo, NewsItem } from '../types';
 import { getUserSettings, sanitizeLocationInfo } from './geminiService';
 import { fetchLiveNews } from './newsService';
+import {
+  getNytKey,
+  getNewsApiKey,
+  getNewsDataKey,
+  getEffectiveGeminiKey
+} from './keyResolutionService';
 import { logWaypointSnapshot } from '../utils/pipelineDebug';
 import { isClimateConflicting } from './geographic/climateEstimator';
 import { isPlaceholderString } from '../components/InfoPanel';
@@ -149,11 +155,10 @@ export const fetchAndValidateLocationNews = async (
     locationData?: { name?: string; waypoint?: { country?: string; region?: string; state?: string; canonicalName?: string; name?: string } }
 ): Promise<NewsItem[]> => {
     const settings = getUserSettings();
-    const getEnv = () => typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env : (typeof process !== 'undefined' ? process.env : {});
-    const nytKey = settings.nytApiKey || getEnv().VITE_NYT_API_KEY;
-    const newsApiKey = settings.newsApiKey || getEnv().VITE_NEWS_API_KEY;
-    const newsDataKey = settings.newsDataApiKey || getEnv().VITE_NEWS_DATA_API_KEY;
-    const geminiKey = (typeof process !== 'undefined' && process.env && (process.env.API_KEY || process.env.GEMINI_API_KEY)) || getEnv().GEMINI_API_KEY;
+    const nytKey = getNytKey(settings);
+    const newsApiKey = getNewsApiKey(settings);
+    const newsDataKey = getNewsDataKey(settings);
+    const geminiKey = getEffectiveGeminiKey(settings);
     const hasGeminiKey = !!geminiKey && geminiKey !== 'dummy-key-for-ts-check';
 
     if (settings.newsProvider === 'gemini' && !hasGeminiKey) {

@@ -3,8 +3,13 @@ import {
   evaluateSyncSetupStatus,
   isSetupRequiredMissing,
   getCartoKey,
-  getEffectiveGeminiKey
+  getNytKey,
+  getNewsApiKey,
+  getNewsDataKey,
+  getEffectiveGeminiKey,
+  resolveApiKey
 } from '../../services/setupStatusService';
+import { testMapConnectionService, testNewsConnectionService } from '../../components/SettingsPanel';
 import { getUserSettings, getGeminiApiKey } from '../../services/geminiService';
 import { UserSettings } from '../../types';
 
@@ -244,5 +249,119 @@ describe('Setup Status Model & First-Run Experience Tests', () => {
 
     const statusFromProcessEnv = evaluateSyncSetupStatus(emptySettings);
     expect(statusFromProcessEnv.map.status).toBe('ready');
+  });
+
+  it('9. Regression: vi.stubEnv on import.meta.env with EMPTY saved settings resolves all 5 keys and checks modal/settings agreement', async () => {
+    // 1. Clear saved settings so localStorage is completely empty
+    storageMap.clear();
+
+    const emptySettings: UserSettings = {
+      aiProvider: 'gemini',
+      geminiApiKey: '',
+      cartoApiKey: '',
+      nytApiKey: '',
+      newsApiKey: '',
+      newsDataApiKey: '',
+      lmStudioUrl: 'http://localhost:1234/v1',
+      lmStudioModel: 'local-model',
+      newsProvider: 'gemini'
+    };
+
+    // Also verify empty string saved in settings does not shadow env
+    const emptyStringSavedSettings: UserSettings = {
+      aiProvider: 'gemini',
+      geminiApiKey: '   ',
+      cartoApiKey: '',
+      nytApiKey: '',
+      newsApiKey: '   ',
+      newsDataApiKey: '',
+      lmStudioUrl: 'http://localhost:1234/v1',
+      lmStudioModel: 'local-model',
+      newsProvider: 'nyt'
+    };
+
+    // Stub import.meta.env for all 5 keys
+    vi.stubEnv('VITE_CARTO_API_KEY', 'stub-carto-key');
+    vi.stubEnv('VITE_NYT_API_KEY', 'stub-nyt-key');
+    vi.stubEnv('VITE_NEWS_API_KEY', 'stub-newsapi-key');
+    vi.stubEnv('VITE_NEWS_DATA_API_KEY', 'stub-newsdata-key');
+    vi.stubEnv('GEMINI_API_KEY', 'stub-gemini-key');
+
+    // A) Shared resolver returns each of the five keys with empty saved settings
+    expect(resolveApiKey('GEMINI_API_KEY', emptySettings)).toBe('stub-gemini-key');
+    expect(resolveApiKey('VITE_CARTO_API_KEY', emptySettings)).toBe('stub-carto-key');
+    expect(resolveApiKey('VITE_NYT_API_KEY', emptySettings)).toBe('stub-nyt-key');
+    expect(resolveApiKey('VITE_NEWS_API_KEY', emptySettings)).toBe('stub-newsapi-key');
+    expect(resolveApiKey('VITE_NEWS_DATA_API_KEY', emptySettings)).toBe('stub-newsdata-key');
+
+    // B) Empty-string saved key does NOT shadow the env key
+    expect(resolveApiKey('GEMINI_API_KEY', emptyStringSavedSettings)).toBe('stub-gemini-key');
+    expect(resolveApiKey('VITE_CARTO_API_KEY', emptyStringSavedSettings)).toBe('stub-carto-key');
+    expect(resolveApiKey('VITE_NYT_API_KEY', emptyStringSavedSettings)).toBe('stub-nyt-key');
+    expect(resolveApiKey('VITE_NEWS_API_KEY', emptyStringSavedSettings)).toBe('stub-newsapi-key');
+    expect(resolveApiKey('VITE_NEWS_DATA_API_KEY', emptyStringSavedSettings)).toBe('stub-newsdata-key');
+
+    // C) Map row is READY with Carto key only in env
+    const statusWithEnvOnly = evaluateSyncSetupStatus(emptySettings);
+    expect(statusWithEnvOnly.map.status).toBe('ready');
+
+    // D) News row is READY with any single news key and NEEDS ATTENTION with none
+    // All 3 present:
+    expect(statusWithEnvOnly.news.status).toBe('ready');
+
+    // Clear news env keys
+    vi.stubEnv('VITE_NYT_API_KEY', '');
+    vi.stubEnv('VITE_NEWS_API_KEY', '');
+    vi.stubEnv('VITE_NEWS_DATA_API_KEY', '');
+    const statusNoNews = evaluateSyncSetupStatus(emptySettings);
+    expect(statusNoNews.news.status).toBe('missing');
+
+    // With NYT only
+    vi.stubEnv('VITE_NYT_API_KEY', 'nyt-only');
+    expect(evaluateSyncSetupStatus(emptySettings).news.status).toBe('ready');
+    vi.stubEnv('VITE_NYT_API_KEY', '');
+
+    // With NewsAPI only
+    vi.stubEnv('VITE_NEWS_API_KEY', 'newsapi-only');
+    expect(evaluateSyncSetupStatus(emptySettings).news.status).toBe('ready');
+    vi.stubEnv('VITE_NEWS_API_KEY', '');
+
+    // With NewsData only
+    vi.stubEnv('VITE_NEWS_DATA_API_KEY', 'newsdata-only');
+    expect(evaluateSyncSetupStatus(emptySettings).news.status).toBe('ready');
+
+    // E) The modal and the Settings test helper agree for each service
+    // Restore all keys in env
+    vi.stubEnv('VITE_CARTO_API_KEY', 'stub-carto-key');
+    vi.stubEnv('VITE_NYT_API_KEY', 'stub-nyt-key');
+
+    // Setup modal status:
+    const finalModalStatus = evaluateSyncSetupStatus(emptySettings);
+    expect(finalModalStatus.map.status).toBe('ready');
+    expect(finalModalStatus.news.status).toBe('ready');
+
+    // Settings test helpers:
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes('cartocdn.com')) {
+        return { ok: true, status: 200 } as any;
+      }
+      if (urlStr.includes('api.nytimes.com')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ response: { docs: [{ headline: { main: 'Test' } }] } })
+        } as any;
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as any;
+    });
+
+    const mapTestResult = await testMapConnectionService('carto', 'modern');
+    expect(mapTestResult.outcome).toBe('SUCCESS');
+
+    const newsTestResult = await testNewsConnectionService('nyt', emptySettings);
+    expect(newsTestResult.outcome).toBe('SUCCESS');
+
+    fetchSpy.mockRestore();
   });
 });

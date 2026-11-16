@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
+import { getEffectiveGeminiKey } from './keyResolutionService';
 import { reverseGeocode, ReverseGeocodeContext, resolveGeographicMetadata, resolveGeographicEntity, GeographicSource, resolvePrimaryGeographicEntity } from "./geographic/geographicResolver";
 import { DETERMINISTIC_LOCATION_DB } from './geographic/geographicData';
 import { resolveAlias } from './geographic/geographicAliases';
@@ -42,20 +43,7 @@ export const cancelFeatureInfoRequests = () => {};
 
 // Dynamic helper to resolve the Gemini API key
 export const getGeminiApiKey = (): string | undefined => {
-  if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
-    try {
-      const saved = localStorage.getItem('terraExplorerSettings');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.geminiApiKey && typeof parsed.geminiApiKey === 'string' && parsed.geminiApiKey.trim()) {
-          return parsed.geminiApiKey.trim();
-        }
-      }
-    } catch {
-      // Ignore
-    }
-  }
-  return process.env.API_KEY || process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || (typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env.VITE_GEMINI_API_KEY : undefined);
+  return getEffectiveGeminiKey();
 };
 
 export const getGeminiClient = (): GoogleGenAI => {
