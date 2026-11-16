@@ -22,12 +22,12 @@ export const GeminiFallbackPrompt: React.FC<GeminiFallbackPromptProps> = ({
 
   const cardSkinClass =
     skin === 'retro-green'
-      ? 'fallback-card-retro-green'
+      ? 'fallback-card-retro-green rounded-xl border p-6'
       : skin === 'retro-amber'
-      ? 'fallback-card-retro-amber'
+      ? 'fallback-card-retro-amber rounded-xl border p-6'
       : skin === 'parchment'
-      ? 'fallback-card-parchment'
-      : 'fallback-card-modern';
+      ? 'fallback-card-parchment p-6 sm:p-8'
+      : 'fallback-card-modern rounded-xl border p-6';
 
   return (
     <div
@@ -37,7 +37,7 @@ export const GeminiFallbackPrompt: React.FC<GeminiFallbackPromptProps> = ({
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-in fade-in duration-200"
     >
       <div
-        className={`relative w-full max-w-md p-6 rounded-xl border ${cardSkinClass}`}
+        className={`relative w-full max-w-md ${cardSkinClass}`}
       >
         {isParchment && (
           <div className="parchment-background" aria-hidden="true" />

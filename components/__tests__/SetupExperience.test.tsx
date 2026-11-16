@@ -127,7 +127,7 @@ describe('SetupPanel & GeminiFallbackPrompt Component Tests', () => {
     expect(html).toBe('');
   });
 
-  it('6. SetupPanel card receives skin-specific solid class for each theme and never uses transparent background', () => {
+  it('6. SetupPanel card receives skin-specific class, uniform row classes, and parchment deckle edge wrapper has no rectangular border/overflow-hidden', () => {
     const skins: Array<'modern' | 'retro-green' | 'retro-amber' | 'parchment'> = [
       'modern',
       'retro-green',
@@ -150,15 +150,27 @@ describe('SetupPanel & GeminiFallbackPrompt Component Tests', () => {
       // Card must receive the skin-specific CSS class
       expect(html).toContain(`setup-card-${s}`);
 
-      // Must not rely on backdrop-blur or transparent bg classes
+      // All three rows (AI, Map, News) must share the SAME uniform row class in each skin
+      const expectedRowClass = `setup-row-${s}`;
+      const rowMatches = (html.match(new RegExp(expectedRowClass, 'g')) || []).length;
+      expect(rowMatches).toBe(3);
+
+      // Must not rely on backdrop-blur or broken Tailwind arbitrary classes
       expect(html).not.toContain('bg-slate-900/90');
       expect(html).not.toContain('bg-slate-900/95');
       expect(html).not.toContain('bg-black/95');
       expect(html).not.toContain('backdrop-blur');
 
       // In parchment theme, it must render the parchment background layer
+      // and the deckle-carrying card wrapper must NOT have border or overflow-hidden
       if (s === 'parchment') {
         expect(html).toContain('parchment-background');
+        // Extract setup-panel element class attribute
+        const match = html.match(/data-testid="setup-panel"[^>]*class="([^"]*)"/);
+        const cardClass = match ? match[1] : '';
+        expect(cardClass).not.toContain('border');
+        expect(cardClass).not.toContain('overflow-hidden');
+        expect(cardClass).not.toContain('rounded-xl');
       }
 
       // Chip when dismissed must also receive skin-specific class
@@ -173,6 +185,9 @@ describe('SetupPanel & GeminiFallbackPrompt Component Tests', () => {
         />
       );
       expect(chipHtml).toContain(`setup-chip-${s}`);
+      if (s === 'parchment') {
+        expect(chipHtml).toContain('parchment-background');
+      }
     }
   });
 });

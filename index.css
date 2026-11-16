@@ -852,10 +852,12 @@ video {
 }
 
 .setup-card-parchment {
-  background-color: #f3e8cd; /* solid parchment base */
+  background-color: transparent;
   color: #3e2723;
-  border: 1px solid rgba(139, 90, 43, 0.4);
-  box-shadow: 4px 4px 15px rgba(0, 0, 0, 0.35);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  filter: drop-shadow(4px 4px 12px rgba(0, 0, 0, 0.45));
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   isolation: isolate;
 }
@@ -891,13 +893,17 @@ video {
 }
 
 .setup-chip-parchment {
-  background-color: #f4ebe1;
+  background-color: transparent;
   color: #3e2723;
-  border: 1px solid rgba(139, 90, 43, 0.5);
-  box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.2);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  filter: drop-shadow(2px 2px 6px rgba(0, 0, 0, 0.35));
+  position: relative;
+  isolation: isolate;
 }
 .setup-chip-parchment:hover {
-  background-color: #e6d5b8;
+  filter: drop-shadow(2px 2px 8px rgba(0, 0, 0, 0.45));
 }
 
 /* Gemini Fallback Prompt Card Classes */
@@ -925,60 +931,32 @@ video {
 }
 
 .fallback-card-parchment {
-  background-color: #f3e8cd;
+  background-color: transparent;
   color: #3e2723;
-  border: 1px solid rgba(139, 90, 43, 0.4);
-  box-shadow: 4px 4px 15px rgba(0, 0, 0, 0.35);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  filter: drop-shadow(4px 4px 12px rgba(0, 0, 0, 0.45));
   isolation: isolate;
 }
 
-/* ─── Setup Row & Badge Skin Classes (Ensuring legible contrast on solid card bases) ─── */
+/* ─── Setup Row & Badge Skin Classes (Uniform per-skin row background & legible badges) ─── */
 
 .setup-row-modern {
-  background-color: #1e293b; /* slate-800 */
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #ffffff;
-}
-.setup-row-modern-ready {
-  background-color: #064e3b; /* emerald-900 / dark green */
-  border: 1px solid #059669;
-  color: #ffffff;
-}
-.setup-row-modern-attention {
-  background-color: #451a03; /* amber-950 */
-  border: 1px solid #d97706;
+  background-color: rgba(255, 255, 255, 0.08); /* uniform modern card row */
+  border: 1px solid rgba(255, 255, 255, 0.15);
   color: #ffffff;
 }
 
 .setup-row-retro-green {
   background-color: #000000;
-  border: 1px solid #166534;
-  color: #86efac;
-}
-.setup-row-retro-green-ready {
-  background-color: #052e16;
   border: 1px solid #4ade80;
-  color: #86efac;
-}
-.setup-row-retro-green-attention {
-  background-color: #052e16;
-  border: 1px solid #86efac;
   color: #86efac;
 }
 
 .setup-row-retro-amber {
   background-color: #000000;
-  border: 1px solid #78350f;
-  color: #fcd34d;
-}
-.setup-row-retro-amber-ready {
-  background-color: #451a03;
   border: 1px solid #fbbf24;
-  color: #fcd34d;
-}
-.setup-row-retro-amber-attention {
-  background-color: #451a03;
-  border: 1px solid #f59e0b;
   color: #fcd34d;
 }
 
@@ -987,16 +965,6 @@ video {
   border: 1px solid rgba(139, 90, 43, 0.25);
   color: #3e2723;
   box-shadow: inset 1px 1px 3px rgba(255, 255, 255, 0.4);
-}
-.setup-row-parchment-ready {
-  background-color: #e8f5e9;
-  border: 1px solid rgba(46, 125, 50, 0.4);
-  color: #1b5e20;
-}
-.setup-row-parchment-attention {
-  background-color: #fff8e1;
-  border: 1px solid rgba(245, 124, 0, 0.45);
-  color: #e65100;
 }
 
 /* Status Badges */

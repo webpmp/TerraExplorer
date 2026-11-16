@@ -53,27 +53,27 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
   // Theme-specific styles
   const cardSkinClass =
     skin === 'retro-green'
-      ? 'setup-card-retro-green'
+      ? 'setup-card-retro-green rounded-xl border p-5 sm:p-6'
       : skin === 'retro-amber'
-      ? 'setup-card-retro-amber'
+      ? 'setup-card-retro-amber rounded-xl border p-5 sm:p-6'
       : skin === 'parchment'
-      ? 'setup-card-parchment'
-      : 'setup-card-modern';
+      ? 'setup-card-parchment p-6 sm:p-8'
+      : 'setup-card-modern rounded-xl border p-5 sm:p-6';
 
   const cardClasses = `
-    setup-card-container relative z-10 p-5 sm:p-6 rounded-xl border
-    overflow-y-auto transition-all duration-300 animate-in fade-in zoom-in-95
+    setup-card-container relative z-10
+    transition-all duration-300 animate-in fade-in zoom-in-95
     ${cardSkinClass}
   `;
 
   const chipSkinClass =
     skin === 'retro-green'
-      ? 'setup-chip-retro-green'
+      ? 'setup-chip-retro-green border shadow-lg'
       : skin === 'retro-amber'
-      ? 'setup-chip-retro-amber'
+      ? 'setup-chip-retro-amber border shadow-lg'
       : skin === 'parchment'
       ? 'setup-chip-parchment'
-      : 'setup-chip-modern';
+      : 'setup-chip-modern border shadow-lg';
 
   // If user dismissed and required services still missing, show small "Finish setup" chip
   if (isDismissed || hasCollapsedAfterSuccess) {
@@ -86,11 +86,16 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
           type="button"
           onClick={onReopen}
           data-testid="finish-setup-chip"
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-full shadow-lg border text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer ${chipSkinClass}`}
+          className={`flex items-center gap-2 px-3.5 py-2 text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer ${isParchment ? 'rounded-none' : 'rounded-full'} ${chipSkinClass}`}
         >
-          <AlertCircle size={14} className={skin === 'retro-amber' ? 'text-[#ffb000]' : skin === 'retro-green' ? 'text-green-300' : 'text-amber-400'} />
-          <span>Finish Setup</span>
-          <ChevronRight size={14} />
+          {isParchment && (
+            <div className="parchment-background" aria-hidden="true" />
+          )}
+          <span className="relative z-[1] flex items-center gap-2">
+            <AlertCircle size={14} className={skin === 'retro-amber' ? 'text-[#ffb000]' : skin === 'retro-green' ? 'text-green-300' : 'text-amber-400'} />
+            <span>Finish Setup</span>
+            <ChevronRight size={14} />
+          </span>
         </button>
       </div>
     );
@@ -104,26 +109,17 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
     ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}
   `;
 
-  const getRowClass = (isReady: boolean, isOptional: boolean = false) => {
-    if (skin === 'parchment') {
-      if (isOptional) return 'setup-row-parchment';
-      return isReady ? 'setup-row-parchment-ready' : 'setup-row-parchment-attention';
-    }
-    if (skin === 'retro-green') {
-      if (isOptional) return 'setup-row-retro-green';
-      return isReady ? 'setup-row-retro-green-ready' : 'setup-row-retro-green-attention';
-    }
-    if (skin === 'retro-amber') {
-      if (isOptional) return 'setup-row-retro-amber';
-      return isReady ? 'setup-row-retro-amber-ready' : 'setup-row-retro-amber-attention';
-    }
-    // modern
-    if (isOptional) return 'setup-row-modern';
-    return isReady ? 'setup-row-modern-ready' : 'setup-row-modern-attention';
-  };
+  const rowSkinClass =
+    skin === 'retro-green'
+      ? 'setup-row-retro-green'
+      : skin === 'retro-amber'
+      ? 'setup-row-retro-amber'
+      : skin === 'parchment'
+      ? 'setup-row-parchment'
+      : 'setup-row-modern';
 
-  const rowClasses = (isReady: boolean, isOptional: boolean = false) => `
-    p-3 rounded-lg border flex flex-col gap-2 transition-colors ${getRowClass(isReady, isOptional)}
+  const rowClasses = `
+    p-3 rounded-lg border flex flex-col gap-2 transition-colors ${rowSkinClass}
   `;
 
   const getStatusBadge = (statusVal: ServiceStatus, isOptional: boolean = false) => {
@@ -176,7 +172,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
         {isParchment && (
           <div className="parchment-background" aria-hidden="true" />
         )}
-        <div className="relative z-[1] flex flex-col gap-3">
+        <div className={`relative z-[1] flex flex-col gap-3 max-h-[calc(100dvh-4rem)] overflow-y-auto ${isParchment ? 'parchment-scrollbar' : 'custom-scrollbar'}`}>
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-current/20">
           <div className={titleClasses}>
@@ -211,7 +207,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
           </p>
 
           {/* Row 1: AI Provider (Required) */}
-          <div className={rowClasses(isAiReady)} data-testid="setup-row-ai">
+          <div className={rowClasses} data-testid="setup-row-ai">
             <div className="flex items-start justify-between gap-2">
               <div>
                 <div className="flex items-center gap-2">
@@ -251,7 +247,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
           </div>
 
           {/* Row 2: Map Provider (Required) */}
-          <div className={rowClasses(isMapReady)} data-testid="setup-row-map">
+          <div className={rowClasses} data-testid="setup-row-map">
             <div className="flex items-start justify-between gap-2">
               <div>
                 <div className="flex items-center gap-2">
@@ -291,7 +287,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
           </div>
 
           {/* Row 3: News Provider (Optional) */}
-          <div className={rowClasses(status.news.status === 'ready', true)} data-testid="setup-row-news">
+          <div className={rowClasses} data-testid="setup-row-news">
             <div className="flex items-start justify-between gap-2">
               <div>
                 <div className="flex items-center gap-2">
