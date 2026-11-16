@@ -565,7 +565,7 @@ const generateLocalLMStudioContent = async (params: any, baseUrl: string, model:
     if (error?.message && error.message.includes('LM Studio request failed')) {
       throw error;
     }
-    const targetUrl = typeof requestUrl !== 'undefined' ? requestUrl : (baseUrl || 'http://localhost:1234/v1');
+    const targetUrl = baseUrl || 'http://localhost:1234/v1';
     throw new LMStudioUnreachableError(targetUrl, error?.message);
   }
 };

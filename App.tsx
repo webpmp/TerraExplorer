@@ -1324,6 +1324,9 @@ const App: React.FC = () => {
     return defaults;
   });
 
+  // Route State
+  const [routeWaypoints, setRouteWaypoints] = useState<Waypoint[]>([]);
+
   // Session fallback state: if user accepts fallback to Gemini for this session
   const [sessionGeminiFallback, setSessionGeminiFallback] = useState<boolean>(() => {
     if (typeof sessionStorage !== 'undefined') {
