@@ -50,6 +50,31 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
     }
   }, [bothRequiredReady, hasCollapsedAfterSuccess]);
 
+  // Theme-specific styles
+  const cardSkinClass =
+    skin === 'retro-green'
+      ? 'setup-card-retro-green'
+      : skin === 'retro-amber'
+      ? 'setup-card-retro-amber'
+      : skin === 'parchment'
+      ? 'setup-card-parchment'
+      : 'setup-card-modern';
+
+  const cardClasses = `
+    setup-card-container relative z-10 p-5 sm:p-6 rounded-xl border
+    overflow-y-auto transition-all duration-300 animate-in fade-in zoom-in-95
+    ${cardSkinClass}
+  `;
+
+  const chipSkinClass =
+    skin === 'retro-green'
+      ? 'setup-chip-retro-green'
+      : skin === 'retro-amber'
+      ? 'setup-chip-retro-amber'
+      : skin === 'parchment'
+      ? 'setup-chip-parchment'
+      : 'setup-chip-modern';
+
   // If user dismissed and required services still missing, show small "Finish setup" chip
   if (isDismissed || hasCollapsedAfterSuccess) {
     if (bothRequiredReady) {
@@ -61,30 +86,15 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
           type="button"
           onClick={onReopen}
           data-testid="finish-setup-chip"
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-full shadow-lg border text-xs font-semibold uppercase tracking-wider transition-all
-            ${isParchment ? 'bg-[#f4ebe1] text-[#3e2723] border-[#8b5a2b]/40 hover:bg-[#e6d5b8]' : ''}
-            ${skin === 'modern' ? 'bg-cyan-950/90 text-cyan-300 border-cyan-500/40 hover:bg-cyan-900/95' : ''}
-            ${skin === 'retro-green' ? 'bg-black text-green-300 border-green-400 hover:bg-green-950 font-retro' : ''}
-            ${skin === 'retro-amber' ? 'bg-black text-[#ffb000] border-[#ffb000] hover:bg-amber-950 font-retro' : ''}
-          `}
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-full shadow-lg border text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer ${chipSkinClass}`}
         >
-          <AlertCircle size={14} className="text-amber-400" />
+          <AlertCircle size={14} className={skin === 'retro-amber' ? 'text-[#ffb000]' : skin === 'retro-green' ? 'text-green-300' : 'text-amber-400'} />
           <span>Finish Setup</span>
           <ChevronRight size={14} />
         </button>
       </div>
     );
   }
-
-  // Theme-specific styles
-  const cardClasses = `
-    setup-card-container relative z-10 p-5 sm:p-6 rounded-xl shadow-2xl border
-    overflow-y-auto transition-all duration-300 animate-in fade-in zoom-in-95
-    ${isParchment ? 'bg-[#f4ebe1] text-[#3e2723] border-[#8b5a2b]/40' : ''}
-    ${skin === 'modern' ? 'bg-slate-900/95 text-white border-cyan-500/30' : ''}
-    ${skin === 'retro-green' ? 'bg-black/95 text-green-300 border-2 border-green-400 font-retro' : ''}
-    ${skin === 'retro-amber' ? 'bg-black/95 text-[#ffb000] border-2 border-[#ffb000] font-retro' : ''}
-  `;
 
   const titleClasses = `
     text-sm sm:text-base font-bold tracking-wider uppercase flex items-center justify-between
@@ -94,20 +104,32 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
     ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}
   `;
 
-  const rowClasses = (isReady: boolean, isOptional: boolean = false) => `
-    p-3 rounded-lg border flex flex-col gap-2 transition-colors
-    ${isOptional
-      ? (isParchment ? 'border-[#8b5a2b]/20 bg-[#8b5a2b]/5' : 'border-white/10 bg-white/5')
-      : isReady
-      ? (isParchment ? 'border-emerald-600/30 bg-emerald-500/10' : 'border-emerald-500/30 bg-emerald-500/10')
-      : (isParchment ? 'border-amber-600/40 bg-amber-500/10' : 'border-amber-500/30 bg-amber-500/10')
+  const getRowClass = (isReady: boolean, isOptional: boolean = false) => {
+    if (skin === 'parchment') {
+      if (isOptional) return 'setup-row-parchment';
+      return isReady ? 'setup-row-parchment-ready' : 'setup-row-parchment-attention';
     }
+    if (skin === 'retro-green') {
+      if (isOptional) return 'setup-row-retro-green';
+      return isReady ? 'setup-row-retro-green-ready' : 'setup-row-retro-green-attention';
+    }
+    if (skin === 'retro-amber') {
+      if (isOptional) return 'setup-row-retro-amber';
+      return isReady ? 'setup-row-retro-amber-ready' : 'setup-row-retro-amber-attention';
+    }
+    // modern
+    if (isOptional) return 'setup-row-modern';
+    return isReady ? 'setup-row-modern-ready' : 'setup-row-modern-attention';
+  };
+
+  const rowClasses = (isReady: boolean, isOptional: boolean = false) => `
+    p-3 rounded-lg border flex flex-col gap-2 transition-colors ${getRowClass(isReady, isOptional)}
   `;
 
   const getStatusBadge = (statusVal: ServiceStatus, isOptional: boolean = false) => {
     if (statusVal === 'ready') {
       return (
-        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-400">
+        <span className={`inline-flex items-center gap-1 text-[11px] ${isParchment ? 'setup-badge-ready-parchment' : 'setup-badge-ready'}`}>
           <CheckCircle2 size={13} />
           Ready
         </span>
@@ -115,19 +137,28 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
     }
     if (isOptional) {
       return (
-        <span className="inline-flex items-center gap-1 text-[11px] font-semibold opacity-70">
+        <span className={`inline-flex items-center gap-1 text-[11px] ${isParchment ? 'setup-badge-optional-parchment' : 'setup-badge-optional'}`}>
           <HelpCircle size={13} />
           Optional
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-400">
+      <span className={`inline-flex items-center gap-1 text-[11px] ${isParchment ? 'setup-badge-attention-parchment' : 'setup-badge-attention'}`}>
         <AlertCircle size={13} />
         Needs Attention
       </span>
     );
   };
+
+  const actionBtnClass =
+    skin === 'retro-green'
+      ? 'setup-btn-retro-green'
+      : skin === 'retro-amber'
+      ? 'setup-btn-retro-amber'
+      : skin === 'parchment'
+      ? 'setup-btn-parchment'
+      : 'setup-btn-modern';
 
   return (
     <div
@@ -142,6 +173,10 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
       }}
     >
       <div className={cardClasses} data-testid="setup-panel">
+        {isParchment && (
+          <div className="parchment-background" aria-hidden="true" />
+        )}
+        <div className="relative z-[1] flex flex-col gap-3">
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-current/20">
           <div className={titleClasses}>
@@ -170,7 +205,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
           </p>
         </div>
       ) : (
-        <div className="space-y-3 pt-3">
+        <div className="space-y-3 pt-1">
           <p className="text-xs opacity-80 leading-relaxed">
             Configure your AI and map providers to start exploring. AI enables descriptions, notable facts, and routes.
           </p>
@@ -181,7 +216,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold uppercase tracking-wider">AI Provider</span>
-                  <span className="text-[10px] uppercase px-1.5 py-0.2 rounded font-semibold bg-red-500/20 text-red-300 border border-red-500/30">
+                  <span className={`text-[10px] uppercase px-1.5 py-0.2 rounded font-semibold ${isParchment ? 'bg-[#c62828]/20 text-[#c62828] border border-[#c62828]/40' : 'bg-red-500/20 text-red-300 border border-red-500/30'}`}>
                     Required
                   </span>
                 </div>
@@ -207,9 +242,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
               <button
                 type="button"
                 onClick={() => onOpenSettings('providers')}
-                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold border transition-colors
-                  ${isParchment ? 'border-[#8b5a2b]/30 hover:bg-[#e6d5b8]' : 'border-white/20 hover:bg-white/10'}
-                `}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold border transition-colors cursor-pointer ${actionBtnClass}`}
               >
                 <SettingsIcon size={11} />
                 <span>Open Settings</span>
@@ -223,7 +256,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold uppercase tracking-wider">Map Provider</span>
-                  <span className="text-[10px] uppercase px-1.5 py-0.2 rounded font-semibold bg-red-500/20 text-red-300 border border-red-500/30">
+                  <span className={`text-[10px] uppercase px-1.5 py-0.2 rounded font-semibold ${isParchment ? 'bg-[#c62828]/20 text-[#c62828] border border-[#c62828]/40' : 'bg-red-500/20 text-red-300 border border-red-500/30'}`}>
                     Required
                   </span>
                 </div>
@@ -249,9 +282,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
               <button
                 type="button"
                 onClick={() => onOpenSettings('providers')}
-                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold border transition-colors
-                  ${isParchment ? 'border-[#8b5a2b]/30 hover:bg-[#e6d5b8]' : 'border-white/20 hover:bg-white/10'}
-                `}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold border transition-colors cursor-pointer ${actionBtnClass}`}
               >
                 <SettingsIcon size={11} />
                 <span>Open Settings</span>
@@ -265,7 +296,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold uppercase tracking-wider">News Provider</span>
-                  <span className="text-[10px] uppercase px-1.5 py-0.2 rounded font-semibold opacity-70 border border-current/20">
+                  <span className={`text-[10px] uppercase px-1.5 py-0.2 rounded font-semibold ${isParchment ? 'border border-[#8b5a2b]/30 text-[#8b5a2b]' : 'opacity-70 border border-current/20'}`}>
                     Optional
                   </span>
                 </div>
@@ -291,9 +322,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
               <button
                 type="button"
                 onClick={() => onOpenSettings('providers')}
-                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold border transition-colors
-                  ${isParchment ? 'border-[#8b5a2b]/30 hover:bg-[#e6d5b8]' : 'border-white/20 hover:bg-white/10'}
-                `}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold border transition-colors cursor-pointer ${actionBtnClass}`}
               >
                 <SettingsIcon size={11} />
                 <span>Open Settings</span>
@@ -302,6 +331,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
           </div>
         </div>
       )}
+        </div>
       </div>
     </div>
   );

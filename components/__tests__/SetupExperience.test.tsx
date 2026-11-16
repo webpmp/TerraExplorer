@@ -126,4 +126,53 @@ describe('SetupPanel & GeminiFallbackPrompt Component Tests', () => {
 
     expect(html).toBe('');
   });
+
+  it('6. SetupPanel card receives skin-specific solid class for each theme and never uses transparent background', () => {
+    const skins: Array<'modern' | 'retro-green' | 'retro-amber' | 'parchment'> = [
+      'modern',
+      'retro-green',
+      'retro-amber',
+      'parchment'
+    ];
+
+    for (const s of skins) {
+      const html = renderToStaticMarkup(
+        <SetupPanel
+          skin={s}
+          status={mockStatusUnconfigured}
+          isDismissed={false}
+          onDismiss={vi.fn()}
+          onOpenSettings={vi.fn()}
+          onReopen={vi.fn()}
+        />
+      );
+
+      // Card must receive the skin-specific CSS class
+      expect(html).toContain(`setup-card-${s}`);
+
+      // Must not rely on backdrop-blur or transparent bg classes
+      expect(html).not.toContain('bg-slate-900/90');
+      expect(html).not.toContain('bg-slate-900/95');
+      expect(html).not.toContain('bg-black/95');
+      expect(html).not.toContain('backdrop-blur');
+
+      // In parchment theme, it must render the parchment background layer
+      if (s === 'parchment') {
+        expect(html).toContain('parchment-background');
+      }
+
+      // Chip when dismissed must also receive skin-specific class
+      const chipHtml = renderToStaticMarkup(
+        <SetupPanel
+          skin={s}
+          status={mockStatusUnconfigured}
+          isDismissed={true}
+          onDismiss={vi.fn()}
+          onOpenSettings={vi.fn()}
+          onReopen={vi.fn()}
+        />
+      );
+      expect(chipHtml).toContain(`setup-chip-${s}`);
+    }
+  });
 });

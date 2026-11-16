@@ -823,6 +823,250 @@ video {
   max-height: calc(100dvh - 2rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
 }
 
+/* ─── Setup Card Skin Classes (Opaque solid backgrounds, border, text & shadows) ─── */
+
+.setup-card-modern {
+  background-color: #0b1120; /* solid slate-950 */
+  color: #ffffff;
+  border: 1px solid rgba(34, 211, 238, 0.4); /* cyan-400 */
+  box-shadow: 0 0 50px rgba(0, 0, 0, 0.8), 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.setup-card-retro-green {
+  background-color: #000000;
+  color: #86efac; /* green-300 */
+  border: 2px solid #4ade80; /* green-400 */
+  box-shadow: 0 0 20px rgba(74, 222, 128, 0.25);
+  font-family: 'VT323', monospace;
+  letter-spacing: 0.05em;
+}
+
+.setup-card-retro-amber {
+  background-color: #000000;
+  color: #fcd34d; /* amber-300 */
+  border: 2px solid #fbbf24; /* amber-400 */
+  box-shadow: 0 0 20px rgba(251, 191, 36, 0.25);
+  font-family: 'VT323', monospace;
+  letter-spacing: 0.05em;
+}
+
+.setup-card-parchment {
+  background-color: #f3e8cd; /* solid parchment base */
+  color: #3e2723;
+  border: 1px solid rgba(139, 90, 43, 0.4);
+  box-shadow: 4px 4px 15px rgba(0, 0, 0, 0.35);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  isolation: isolate;
+}
+
+/* Finish Setup Chip Skin Classes */
+.setup-chip-modern {
+  background-color: #082f49; /* cyan-950 */
+  color: #67e8f9; /* cyan-300 */
+  border: 1px solid rgba(34, 211, 238, 0.5);
+}
+.setup-chip-modern:hover {
+  background-color: #0c4a6e;
+}
+
+.setup-chip-retro-green {
+  background-color: #000000;
+  color: #86efac;
+  border: 2px solid #4ade80;
+  font-family: 'VT323', monospace;
+}
+.setup-chip-retro-green:hover {
+  background-color: #052e16;
+}
+
+.setup-chip-retro-amber {
+  background-color: #000000;
+  color: #fcd34d;
+  border: 2px solid #fbbf24;
+  font-family: 'VT323', monospace;
+}
+.setup-chip-retro-amber:hover {
+  background-color: #451a03;
+}
+
+.setup-chip-parchment {
+  background-color: #f4ebe1;
+  color: #3e2723;
+  border: 1px solid rgba(139, 90, 43, 0.5);
+  box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.2);
+}
+.setup-chip-parchment:hover {
+  background-color: #e6d5b8;
+}
+
+/* Gemini Fallback Prompt Card Classes */
+.fallback-card-modern {
+  background-color: #0b1120;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 0 50px rgba(0, 0, 0, 0.8);
+}
+
+.fallback-card-retro-green {
+  background-color: #000000;
+  color: #86efac;
+  border: 2px solid #4ade80;
+  box-shadow: 0 0 20px rgba(74, 222, 128, 0.25);
+  font-family: 'VT323', monospace;
+}
+
+.fallback-card-retro-amber {
+  background-color: #000000;
+  color: #fcd34d;
+  border: 2px solid #fbbf24;
+  box-shadow: 0 0 20px rgba(251, 191, 36, 0.25);
+  font-family: 'VT323', monospace;
+}
+
+.fallback-card-parchment {
+  background-color: #f3e8cd;
+  color: #3e2723;
+  border: 1px solid rgba(139, 90, 43, 0.4);
+  box-shadow: 4px 4px 15px rgba(0, 0, 0, 0.35);
+  isolation: isolate;
+}
+
+/* ─── Setup Row & Badge Skin Classes (Ensuring legible contrast on solid card bases) ─── */
+
+.setup-row-modern {
+  background-color: #1e293b; /* slate-800 */
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+.setup-row-modern-ready {
+  background-color: #064e3b; /* emerald-900 / dark green */
+  border: 1px solid #059669;
+  color: #ffffff;
+}
+.setup-row-modern-attention {
+  background-color: #451a03; /* amber-950 */
+  border: 1px solid #d97706;
+  color: #ffffff;
+}
+
+.setup-row-retro-green {
+  background-color: #000000;
+  border: 1px solid #166534;
+  color: #86efac;
+}
+.setup-row-retro-green-ready {
+  background-color: #052e16;
+  border: 1px solid #4ade80;
+  color: #86efac;
+}
+.setup-row-retro-green-attention {
+  background-color: #052e16;
+  border: 1px solid #86efac;
+  color: #86efac;
+}
+
+.setup-row-retro-amber {
+  background-color: #000000;
+  border: 1px solid #78350f;
+  color: #fcd34d;
+}
+.setup-row-retro-amber-ready {
+  background-color: #451a03;
+  border: 1px solid #fbbf24;
+  color: #fcd34d;
+}
+.setup-row-retro-amber-attention {
+  background-color: #451a03;
+  border: 1px solid #f59e0b;
+  color: #fcd34d;
+}
+
+.setup-row-parchment {
+  background-color: #f4ead5;
+  border: 1px solid rgba(139, 90, 43, 0.25);
+  color: #3e2723;
+  box-shadow: inset 1px 1px 3px rgba(255, 255, 255, 0.4);
+}
+.setup-row-parchment-ready {
+  background-color: #e8f5e9;
+  border: 1px solid rgba(46, 125, 50, 0.4);
+  color: #1b5e20;
+}
+.setup-row-parchment-attention {
+  background-color: #fff8e1;
+  border: 1px solid rgba(245, 124, 0, 0.45);
+  color: #e65100;
+}
+
+/* Status Badges */
+.setup-badge-ready {
+  color: #22c55e;
+  font-weight: 600;
+}
+.setup-badge-ready-parchment {
+  color: #2e7d32;
+  font-weight: 700;
+}
+
+.setup-badge-attention {
+  color: #fbbf24;
+  font-weight: 600;
+}
+.setup-badge-attention-parchment {
+  color: #b45309;
+  font-weight: 700;
+}
+
+.setup-badge-optional {
+  color: #94a3b8;
+  font-weight: 600;
+}
+.setup-badge-optional-parchment {
+  color: #8b5a2b;
+  font-weight: 700;
+}
+
+/* Action Buttons inside rows */
+.setup-btn-modern {
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+.setup-btn-modern:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.setup-btn-retro-green {
+  background-color: #000000;
+  border: 1px solid #4ade80;
+  color: #86efac;
+}
+.setup-btn-retro-green:hover {
+  background-color: #4ade80;
+  color: #000000;
+}
+
+.setup-btn-retro-amber {
+  background-color: #000000;
+  border: 1px solid #fbbf24;
+  color: #fcd34d;
+}
+.setup-btn-retro-amber:hover {
+  background-color: #fbbf24;
+  color: #000000;
+}
+
+.setup-btn-parchment {
+  background-color: #f4ead5;
+  border: 1px solid rgba(139, 90, 43, 0.35);
+  color: #3e2723;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+.setup-btn-parchment:hover {
+  background-color: #e6d5b8;
+}
+
 .finish-setup-chip-container {
   bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
   right: calc(1.5rem + env(safe-area-inset-right, 0px));
