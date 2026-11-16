@@ -6618,31 +6618,6 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
         onDecline={handleDeclineGeminiFallback}
       />
 
-      {/* Carto Map Key Notice (when map key is missing/invalid) */}
-      {setupStatus.map.status !== 'ready' && (
-        <div
-          data-testid="map-key-fallback-notice"
-          className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded-lg shadow-lg border text-xs flex items-center gap-2 backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 ${
-            skin === 'parchment'
-              ? 'carto-notice-parchment'
-              : skin === 'retro-green'
-              ? 'carto-notice-retro-green'
-              : skin === 'retro-amber'
-              ? 'carto-notice-retro-amber'
-              : 'carto-notice-modern'
-          }`}
-        >
-          <span>Add a Carto API key to load map tiles.</span>
-          <button
-            type="button"
-            onClick={() => handleOpenSettingsTab('providers')}
-            className="underline hover:opacity-100 font-semibold cursor-pointer"
-          >
-            [Open Settings]
-          </button>
-        </div>
-      )}
-
       {/* Parchment Native Background Resize Guide */}
       <ParchmentResizeGuide skin={skin} />
 

@@ -214,7 +214,8 @@ describe('SetupPanel & GeminiFallbackPrompt Component Tests', () => {
       expect(htmlUnready).toContain('NEEDS ATTENTION');
       expect(htmlUnready).not.toContain('! NEEDS ATTENTION');
       expect(htmlUnready).not.toContain('!NEEDS ATTENTION');
-      expect(htmlUnready).toContain('OPTIONAL');
+      expect(htmlUnready).toContain('Optional');
+      expect(htmlUnready).not.toContain('OPTIONAL');
 
       // The Needs attention badge must not render circle-alert (AlertCircle)
       // Check that inside the needs attention badge there is no circle-alert

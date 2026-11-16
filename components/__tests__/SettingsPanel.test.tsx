@@ -75,8 +75,7 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
     expect(html).not.toContain('CARTO Basemaps (Raster)');
     expect(html).not.toContain('CARTO RASTER BASEMAPS');
     expect(html).toContain('A CARTO API key is required to load authenticated basemap tiles.');
-    expect(html).not.toContain('raster');
-    expect(html).not.toContain('vector');
+    expect(html).not.toContain('CARTO Basemaps (Vector)');
     expect(html).toContain('CARTO API Key');
     expect(html).toContain('href="https://carto.com/developers/basemap-styles/"');
     expect(html).toContain('VITE_CARTO_API_KEY=');

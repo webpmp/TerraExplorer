@@ -4,7 +4,6 @@ import { SetupStatusState, ServiceStatus } from '../services/setupStatusService'
 import {
   CheckCircle2,
   AlertCircle,
-  HelpCircle,
   ExternalLink,
   Settings as SettingsIcon,
   X,
@@ -158,7 +157,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
     p-3 rounded-lg border flex flex-col gap-2 transition-colors ${rowSkinClass}
   `;
 
-  const getStatusBadge = (statusVal: ServiceStatus, isOptional: boolean = false) => {
+  const getStatusBadge = (statusVal: ServiceStatus) => {
     if (statusVal === 'ready') {
       const readyClass =
         skin === 'retro-green'
@@ -171,22 +170,6 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
       return (
         <span className={`inline-flex items-center justify-center ${readyClass}`}>
           ✓ READY
-        </span>
-      );
-    }
-    if (isOptional) {
-      const optClass =
-        skin === 'retro-green'
-          ? 'setup-badge-retro-green-optional'
-          : skin === 'retro-amber'
-          ? 'setup-badge-retro-amber-optional'
-          : skin === 'parchment'
-          ? 'setup-badge-parchment-optional'
-          : 'setup-badge-modern-optional';
-      return (
-        <span className={`inline-flex items-center gap-1 ${optClass}`}>
-          <HelpCircle size={12} />
-          OPTIONAL
         </span>
       );
     }
@@ -261,7 +244,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
       ) : (
         <div className="space-y-3 pt-1">
           <p className="text-xs opacity-80 leading-relaxed">
-            Configure your AI and map providers to start exploring. AI enables descriptions, notable facts, and routes.
+            Configure your AI and map providers to start exploring. Add your keys to a <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-black/20">.env.local</code> file in the project root and restart the dev server.
           </p>
 
           {/* Row 1: AI Provider (Required) */}
@@ -299,7 +282,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
                 className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold border transition-colors cursor-pointer ${actionBtnClass}`}
               >
                 <SettingsIcon size={11} />
-                <span>Open Settings</span>
+                <span>How to add keys</span>
               </button>
             </div>
           </div>
@@ -339,7 +322,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
                 className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold border transition-colors cursor-pointer ${actionBtnClass}`}
               >
                 <SettingsIcon size={11} />
-                <span>Open Settings</span>
+                <span>How to add keys</span>
               </button>
             </div>
           </div>
@@ -359,7 +342,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
                 </p>
               </div>
               <div className="shrink-0">
-                {getStatusBadge(status.news.status, true)}
+                {getStatusBadge(status.news.status)}
               </div>
             </div>
 
@@ -379,7 +362,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
                 className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold border transition-colors cursor-pointer ${actionBtnClass}`}
               >
                 <SettingsIcon size={11} />
-                <span>Open Settings</span>
+                <span>How to add keys</span>
               </button>
             </div>
           </div>

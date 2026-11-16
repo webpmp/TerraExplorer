@@ -63,7 +63,7 @@ describe('Setup Status Model & First-Run Experience Tests', () => {
     expect(existing.newsProvider).toBe('nyt');
   });
 
-  it('2. Status computation for fresh install: AI missing/unreachable, Map missing, News not_configured', () => {
+  it('2. Status computation for fresh install: AI missing/unreachable, Map missing, News missing', () => {
     const settings: UserSettings = {
       aiProvider: 'lmstudio',
       lmStudioUrl: 'http://localhost:1234/v1',
@@ -81,7 +81,7 @@ describe('Setup Status Model & First-Run Experience Tests', () => {
 
     expect(status.ai.status).toBe('unreachable');
     expect(status.map.status).toBe('missing');
-    expect(status.news.status).toBe('not_configured');
+    expect(status.news.status).toBe('missing');
     expect(isSetupRequiredMissing(status)).toBe(true);
   });
 
@@ -142,25 +142,51 @@ describe('Setup Status Model & First-Run Experience Tests', () => {
     expect(isSetupRequiredMissing(status)).toBe(false);
   });
 
-  it('6. News provider status: optional news missing does NOT mark required setup as missing', () => {
-    const settings: UserSettings = {
+  it('6. News provider status: missing news key shows missing but does NOT mark required setup as missing, and any news key marks ready', () => {
+    const settingsWithoutNews: UserSettings = {
       aiProvider: 'gemini',
       geminiApiKey: 'test-gemini-key',
       cartoApiKey: 'test-carto-key',
       lmStudioUrl: 'http://localhost:1234/v1',
       lmStudioModel: 'local-model',
-      newsProvider: 'nyt', // but no nyt key
+      newsProvider: 'nyt',
       newsApiKey: '',
       nytApiKey: '',
       newsDataApiKey: ''
     };
 
-    const status = evaluateSyncSetupStatus(settings, undefined, () => ({}));
-    expect(status.ai.status).toBe('ready');
-    expect(status.map.status).toBe('ready');
-    expect(status.news.status).toBe('not_configured');
+    const statusWithoutNews = evaluateSyncSetupStatus(settingsWithoutNews, undefined, () => ({}));
+    expect(statusWithoutNews.ai.status).toBe('ready');
+    expect(statusWithoutNews.map.status).toBe('ready');
+    expect(statusWithoutNews.news.status).toBe('missing');
     // Crucial requirement: app is fully usable and required checklist is satisfied!
-    expect(isSetupRequiredMissing(status)).toBe(false);
+    expect(isSetupRequiredMissing(statusWithoutNews)).toBe(false);
+
+    // Any one of the 3 news provider keys configured via settings marks news ready
+    const settingsWithNyt: UserSettings = {
+      ...settingsWithoutNews,
+      nytApiKey: 'test-nyt-key'
+    };
+    expect(evaluateSyncSetupStatus(settingsWithNyt, undefined, () => ({})).news.status).toBe('ready');
+
+    const settingsWithNewsApi: UserSettings = {
+      ...settingsWithoutNews,
+      newsApiKey: 'test-newsapi-key'
+    };
+    expect(evaluateSyncSetupStatus(settingsWithNewsApi, undefined, () => ({})).news.status).toBe('ready');
+
+    const settingsWithNewsData: UserSettings = {
+      ...settingsWithoutNews,
+      newsDataApiKey: 'test-newsdata-key'
+    };
+    expect(evaluateSyncSetupStatus(settingsWithNewsData, undefined, () => ({})).news.status).toBe('ready');
+
+    // Or via environment variable
+    const statusWithEnvNews = evaluateSyncSetupStatus(settingsWithoutNews, undefined, () => ({
+      VITE_NYT_API_KEY: 'env-nyt-key'
+    }));
+    expect(statusWithEnvNews.news.status).toBe('ready');
+    expect(isSetupRequiredMissing(statusWithEnvNews)).toBe(false);
   });
 
   it('7. Keys precedence: settings storage first, then environment', () => {

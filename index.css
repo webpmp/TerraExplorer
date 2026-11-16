@@ -1184,49 +1184,6 @@ video {
   border: 1px solid rgba(139, 90, 43, 0.4);
 }
 
-/* Carto Notice Themed Styling */
-.carto-notice-parchment {
-  background-color: #2c1d11;
-  color: #f4ead5;
-  border: 1px solid #8b5a2b;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
-}
-.carto-notice-parchment button {
-  color: #e8d5b5;
-}
-.carto-notice-parchment button:hover {
-  color: #ffffff;
-}
-
-.carto-notice-modern {
-  background-color: #0f172a;
-  color: #ffffff;
-  border: 1px solid rgba(34, 211, 238, 0.4);
-}
-.carto-notice-modern button {
-  color: #67e8f9;
-}
-
-.carto-notice-retro-green {
-  background-color: #000000;
-  color: #86efac;
-  border: 2px solid #4ade80;
-  font-family: 'VT323', monospace;
-}
-.carto-notice-retro-green button {
-  color: #4ade80;
-}
-
-.carto-notice-retro-amber {
-  background-color: #000000;
-  color: #fcd34d;
-  border: 2px solid #fbbf24;
-  font-family: 'VT323', monospace;
-}
-.carto-notice-retro-amber button {
-  color: #fbbf24;
-}
-
 /* Action Buttons inside rows */
 .setup-btn-modern {
   background-color: rgba(255, 255, 255, 0.1);

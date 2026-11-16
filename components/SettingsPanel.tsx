@@ -3,7 +3,7 @@ import { Settings as SettingsIcon, X, Server, Newspaper, Film, Volume2, KeyRound
 import { SkinType, UserSettings, AIProvider, NewsProvider, NarrationProviderType } from '../types';
 import { narrationService, KOKORO_VOICES, ORPHEUS_VOICES } from '../services/narrationService';
 import { resolveEffectiveLMStudioUrl } from '../services/geminiService';
-import { getCartoKey } from '../services/setupStatusService';
+import { getCartoKey, ENV_VARIABLES_SPEC } from '../services/setupStatusService';
 
 interface SettingsPanelProps {
   settings: UserSettings;
@@ -951,6 +951,158 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         {/* Tab 2: PROVIDERS */}
         {activeTab === 'providers' && (
           <div className="space-y-6">
+            {/* API KEY SETUP Section at the top */}
+            <div className="space-y-4" data-testid="settings-api-key-setup">
+              <div className={sectionTitleClasses}>
+                <KeyRound size={16} />
+                <span>API KEY SETUP</span>
+              </div>
+
+              <div className="text-xs space-y-2">
+                <p className={`${isParchment ? 'text-[#3e2723]/90' : isRetro ? 'text-current/90' : 'text-white/90'} leading-relaxed`}>
+                  Add your keys to a <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-black/20 border border-current/20">.env.local</code> file in the project root, then restart the dev server.
+                </p>
+                <p className={`${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} leading-relaxed`}>
+                  Copying <code className="font-mono text-[11px]">.env.example</code> to <code className="font-mono text-[11px]">.env.local</code> is the easiest start.
+                </p>
+              </div>
+
+              {/* Variable list from source of truth */}
+              <div className="space-y-2.5">
+                {ENV_VARIABLES_SPEC.map((spec) => (
+                  <div
+                    key={spec.name}
+                    className={`p-2.5 rounded-lg border text-xs flex flex-col gap-1 ${
+                      isParchment
+                        ? 'bg-[#f4ead5]/50 border-[#8b5a2b]/30 text-[#3e2723]'
+                        : skin === 'retro-green'
+                        ? 'bg-black/60 border-green-500/50 text-green-300'
+                        : skin === 'retro-amber'
+                        ? 'bg-black/60 border-[#ffb000]/50 text-[#ffb000]'
+                        : 'bg-white/5 border-white/10 text-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <code className="font-mono font-bold text-[12px]">{spec.name}</code>
+                      <span
+                        className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${
+                          spec.required
+                            ? (isParchment
+                                ? 'bg-[#8b5a2b]/20 text-[#3e2723] border border-[#8b5a2b]/40'
+                                : skin === 'retro-green'
+                                ? 'bg-green-500/20 text-green-300 border border-green-400'
+                                : skin === 'retro-amber'
+                                ? 'bg-[#ffb000]/20 text-[#ffb000] border border-[#ffb000]'
+                                : 'bg-cyan-500/20 text-cyan-300 border border-cyan-400')
+                            : (isParchment
+                                ? 'border border-[#8b5a2b]/30 text-[#3e2723]/70'
+                                : skin === 'retro-green'
+                                ? 'border border-green-500/40 text-green-300/70'
+                                : skin === 'retro-amber'
+                                ? 'border border-[#ffb000]/40 text-[#ffb000]/70'
+                                : 'border border-white/20 text-white/60')
+                        }`}
+                      >
+                        {spec.required ? 'Required' : 'Optional'}
+                      </span>
+                    </div>
+                    <p className={`text-[11px] ${isParchment ? 'text-[#3e2723]/80' : 'opacity-80'}`}>
+                      {spec.powers}
+                    </p>
+                    {spec.notes && (
+                      <p className={`text-[10px] ${isParchment ? 'text-[#3e2723]/60' : 'opacity-60'}`}>
+                        {spec.notes}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Documentation links */}
+              <div>
+                <h4 className={`text-xs font-bold uppercase tracking-wider mb-2 ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300') : 'text-white/80'}`}>
+                  News API Sources
+                </h4>
+                <div className="space-y-2 text-xs">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold">New York Times</span>
+                      <a
+                        href="https://developer.nytimes.com/get-started"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`inline-flex items-center gap-1 hover:underline ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-400' : isRetro ? 'text-current' : 'text-cyan-400'}`}
+                      >
+                        <span>developer.nytimes.com</span>
+                        <ExternalLink size={11} />
+                      </a>
+                    </div>
+                    <p className={`mt-0.5 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
+                      Obtain an API key from the New York Times Developer Portal.
+                    </p>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold">News API</span>
+                      <a
+                        href="https://newsapi.org/"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`inline-flex items-center gap-1 hover:underline ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-400' : isRetro ? 'text-current' : 'text-cyan-400'}`}
+                      >
+                        <span>newsapi.org</span>
+                        <ExternalLink size={11} />
+                      </a>
+                    </div>
+                    <p className={`mt-0.5 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
+                      Obtain an API key from News API.
+                    </p>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold">NewsData</span>
+                      <a
+                        href="https://newsdata.io/"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`inline-flex items-center gap-1 hover:underline ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-400' : isRetro ? 'text-current' : 'text-cyan-400'}`}
+                      >
+                        <span>newsdata.io</span>
+                        <ExternalLink size={11} />
+                      </a>
+                    </div>
+                    <p className={`mt-0.5 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
+                      Obtain an API key from NewsData.io.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Code block */}
+              <div>
+                <h4 className={`text-xs font-bold uppercase tracking-wider mb-1 ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300') : 'text-white/80'}`}>
+                  API KEYS
+                </h4>
+                <p className={`text-xs mb-2 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
+                  Add your keys to the project&apos;s .env.local file:
+                </p>
+                <div className={`p-3 rounded-lg text-[11px] font-mono leading-relaxed overflow-x-auto select-all ${
+                  isParchment 
+                    ? 'bg-[#e6d5b8] text-[#3e2723] border border-[#8b5a2b]/30' 
+                    : isRetro 
+                    ? (skin === 'retro-amber' ? 'bg-black/60 text-[#ffb000] border border-[#ffb000]' : 'bg-black/60 text-green-300 border border-green-400') 
+                    : 'bg-black/50 text-cyan-200 border border-white/10'
+                }`}>
+                  <pre className="whitespace-pre">{ENV_VARIABLES_SPEC.map(s => `${s.name}=${s.exampleValue}`).join('\n')}</pre>
+                </div>
+              </div>
+            </div>
+
+            {/* Visual divider between API KEY SETUP and AI PROVIDER */}
+            <hr className={`border-t ${theme.divider}`} />
+
             {/* Section 1: AI PROVIDER */}
             <div className="space-y-4">
               <div className={sectionTitleClasses}>
@@ -1256,100 +1408,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     )}
                   </div>
                 )}
-              </div>
-
-              {/* Separator */}
-              <hr className={`border-t my-4 ${theme.divider}`} />
-
-              {/* API KEY SETUP Section */}
-              <div className="space-y-4">
-                <div className={sectionTitleClasses}>
-                  <KeyRound size={16} />
-                  <span>API KEY SETUP</span>
-                </div>
-
-                <div>
-                  <h4 className={`text-xs font-bold uppercase tracking-wider mb-2.5 ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300') : 'text-white/80'}`}>
-                    News API Sources
-                  </h4>
-                  <div className="space-y-3 text-xs">
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold">New York Times</span>
-                        <a
-                          href="https://developer.nytimes.com/get-started"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className={`inline-flex items-center gap-1 hover:underline ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-400' : isRetro ? 'text-current' : 'text-cyan-400'}`}
-                        >
-                          <span>developer.nytimes.com</span>
-                          <ExternalLink size={11} />
-                        </a>
-                      </div>
-                      <p className={`mt-0.5 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
-                        Obtain an API key from the New York Times Developer Portal.
-                      </p>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold">News API</span>
-                        <a
-                          href="https://newsapi.org/"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className={`inline-flex items-center gap-1 hover:underline ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-400' : isRetro ? 'text-current' : 'text-cyan-400'}`}
-                        >
-                          <span>newsapi.org</span>
-                          <ExternalLink size={11} />
-                        </a>
-                      </div>
-                      <p className={`mt-0.5 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
-                        Obtain an API key from News API.
-                      </p>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold">NewsData</span>
-                        <a
-                          href="https://newsdata.io/"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className={`inline-flex items-center gap-1 hover:underline ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-400' : isRetro ? 'text-current' : 'text-cyan-400'}`}
-                        >
-                          <span>newsdata.io</span>
-                          <ExternalLink size={11} />
-                        </a>
-                      </div>
-                      <p className={`mt-0.5 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
-                        Obtain an API key from NewsData.io.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className={`text-xs font-bold uppercase tracking-wider mb-1 ${isParchment ? 'text-[#3e2723]' : skin === 'modern' ? 'text-cyan-300' : isRetro ? (skin === 'retro-amber' ? 'text-[#ffb000]' : 'text-green-300') : 'text-white/80'}`}>
-                    API KEYS
-                  </h4>
-                  <p className={`text-xs mb-2 ${isParchment ? 'text-[#3e2723]/70' : 'opacity-70'} ${isRetro ? 'uppercase' : ''}`}>
-                    Add your keys to the project&apos;s .env.local file:
-                  </p>
-                  <div className={`p-3 rounded-lg text-[11px] font-mono leading-relaxed overflow-x-auto select-all ${
-                    isParchment 
-                      ? 'bg-[#e6d5b8] text-[#3e2723] border border-[#8b5a2b]/30' 
-                      : isRetro 
-                      ? (skin === 'retro-amber' ? 'bg-black/60 text-[#ffb000] border border-[#ffb000]' : 'bg-black/60 text-green-300 border border-green-400') 
-                      : 'bg-black/50 text-cyan-200 border border-white/10'
-                  }`}>
-                    <pre className="whitespace-pre">{`GEMINI_API_KEY=your_gemini_api_key
-VITE_CARTO_API_KEY=your_carto_api_key
-VITE_NYT_API_KEY=your_nytimes_api_key
-VITE_NEWS_API_KEY=your_newsapi_org_key
-VITE_NEWS_DATA_API_KEY=your_newsdata_io_key`}</pre>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
