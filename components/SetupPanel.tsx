@@ -56,14 +56,14 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
       return null;
     }
     return (
-      <div className="fixed bottom-6 right-6 z-40 animate-in fade-in slide-in-from-bottom-2 duration-300">
+      <div className="fixed finish-setup-chip-container bottom-6 right-6 z-40 animate-in fade-in slide-in-from-bottom-2 duration-300">
         <button
           type="button"
           onClick={onReopen}
           data-testid="finish-setup-chip"
           className={`flex items-center gap-2 px-3.5 py-2 rounded-full shadow-lg border text-xs font-semibold uppercase tracking-wider transition-all
             ${isParchment ? 'bg-[#f4ebe1] text-[#3e2723] border-[#8b5a2b]/40 hover:bg-[#e6d5b8]' : ''}
-            ${skin === 'modern' ? 'bg-cyan-950/80 text-cyan-300 border-cyan-500/40 hover:bg-cyan-900/90 backdrop-blur-md' : ''}
+            ${skin === 'modern' ? 'bg-cyan-950/90 text-cyan-300 border-cyan-500/40 hover:bg-cyan-900/95' : ''}
             ${skin === 'retro-green' ? 'bg-black text-green-300 border-green-400 hover:bg-green-950 font-retro' : ''}
             ${skin === 'retro-amber' ? 'bg-black text-[#ffb000] border-[#ffb000] hover:bg-amber-950 font-retro' : ''}
           `}
@@ -77,18 +77,17 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
   }
 
   // Theme-specific styles
-  const containerClasses = `
-    fixed top-20 left-1/2 -translate-x-1/2 md:translate-x-0 md:left-8 z-40
-    w-[92vw] max-w-md p-5 rounded-xl shadow-2xl border backdrop-blur-md
-    transition-all duration-300 animate-in fade-in slide-in-from-top-4
-    ${isParchment ? 'bg-[#f4ebe1]/95 text-[#3e2723] border-[#8b5a2b]/30' : ''}
-    ${skin === 'modern' ? 'bg-slate-900/90 text-white border-white/20' : ''}
-    ${skin === 'retro-green' ? 'bg-black/95 text-green-300 border-green-400 font-retro' : ''}
-    ${skin === 'retro-amber' ? 'bg-black/95 text-[#ffb000] border-[#ffb000] font-retro' : ''}
+  const cardClasses = `
+    setup-card-container relative z-10 p-5 sm:p-6 rounded-xl shadow-2xl border
+    overflow-y-auto transition-all duration-300 animate-in fade-in zoom-in-95
+    ${isParchment ? 'bg-[#f4ebe1] text-[#3e2723] border-[#8b5a2b]/40' : ''}
+    ${skin === 'modern' ? 'bg-slate-900/95 text-white border-cyan-500/30' : ''}
+    ${skin === 'retro-green' ? 'bg-black/95 text-green-300 border-2 border-green-400 font-retro' : ''}
+    ${skin === 'retro-amber' ? 'bg-black/95 text-[#ffb000] border-2 border-[#ffb000] font-retro' : ''}
   `;
 
   const titleClasses = `
-    text-sm font-bold tracking-wider uppercase flex items-center justify-between
+    text-sm sm:text-base font-bold tracking-wider uppercase flex items-center justify-between
     ${isParchment ? 'text-[#3e2723]' : ''}
     ${skin === 'modern' ? 'text-cyan-300' : ''}
     ${skin === 'retro-green' ? 'text-green-300' : ''}
@@ -131,25 +130,36 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
   };
 
   return (
-    <div className={containerClasses} data-testid="setup-panel">
-      {/* Header */}
-      <div className="flex items-center justify-between pb-3 border-b border-current/20">
-        <div className={titleClasses}>
-          <div className="flex items-center gap-2">
-            <Sparkles size={16} />
-            <span>TerraExplorer Setup</span>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="TerraExplorer Setup Checklist"
+      className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/40 animate-in fade-in duration-200"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onDismiss();
+        }
+      }}
+    >
+      <div className={cardClasses} data-testid="setup-panel">
+        {/* Header */}
+        <div className="flex items-center justify-between pb-3 border-b border-current/20">
+          <div className={titleClasses}>
+            <div className="flex items-center gap-2">
+              <Sparkles size={18} />
+              <span>TerraExplorer Setup</span>
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="p-1 rounded-lg hover:bg-current/10 transition-colors opacity-70 hover:opacity-100 cursor-pointer"
+            title="Dismiss checklist"
+            aria-label="Dismiss checklist"
+          >
+            <X size={18} />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onDismiss}
-          className="p-1 rounded-lg hover:bg-current/10 transition-colors opacity-70 hover:opacity-100"
-          title="Dismiss checklist"
-          aria-label="Dismiss checklist"
-        >
-          <X size={16} />
-        </button>
-      </div>
 
       {showComplete ? (
         <div className="py-8 flex flex-col items-center justify-center text-center space-y-2 animate-in fade-in zoom-in-95 duration-300">
@@ -292,6 +302,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 };

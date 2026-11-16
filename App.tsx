@@ -6421,7 +6421,7 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
 
 
 
-      <div className="absolute top-[281px] left-8 z-20 flex flex-col gap-4 bottom-8 pointer-events-none w-[24rem] left-panel-drawer-container">
+      <div className={`absolute top-[281px] left-8 ${isSettingsOpen || isFavoritesPanelOpen ? 'z-50' : 'z-20'} flex flex-col gap-4 bottom-8 pointer-events-none w-[24rem] left-panel-drawer-container`}>
         {isFavoritesPanelOpen && (
           <FavoritesPanel
               favorites={favorites}

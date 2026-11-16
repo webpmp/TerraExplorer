@@ -57,6 +57,10 @@ describe('SetupPanel & GeminiFallbackPrompt Component Tests', () => {
     expect(html).toContain('data-testid="setup-row-news"');
     expect(html).toContain('Required');
     expect(html).toContain('Optional');
+    // Stacking context & fixed positioning assertions: above globe (z-10), centered modal with backdrop
+    expect(html).toContain('fixed inset-0 z-40 flex items-center justify-center');
+    expect(html).toContain('bg-black/40');
+    expect(html).toContain('setup-card-container');
   });
 
   it('2. SetupPanel renders "Finish Setup" chip when dismissed while required services are still missing', () => {

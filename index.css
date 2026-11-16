@@ -804,6 +804,30 @@ video {
   z-index: 30;
 }
 
+.z-35 {
+  z-index: 35;
+}
+
+.z-40 {
+  z-index: 40;
+}
+
+.z-45 {
+  z-index: 45;
+}
+
+.setup-card-container {
+  max-width: 560px;
+  width: calc(100% - 2rem);
+  max-height: calc(100dvh - 2rem);
+  max-height: calc(100dvh - 2rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+}
+
+.finish-setup-chip-container {
+  bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
+  right: calc(1.5rem + env(safe-area-inset-right, 0px));
+}
+
 .z-50 {
   z-index: 50;
 }
