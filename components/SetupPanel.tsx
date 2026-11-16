@@ -200,9 +200,8 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
         ? 'setup-badge-parchment-attention'
         : 'setup-badge-modern-attention';
     return (
-      <span className={`inline-flex items-center gap-1 ${attentionClass}`}>
-        <AlertCircle size={12} />
-        ! NEEDS ATTENTION
+      <span className={`inline-flex items-center justify-center ${attentionClass}`}>
+        NEEDS ATTENTION
       </span>
     );
   };

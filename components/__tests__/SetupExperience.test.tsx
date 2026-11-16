@@ -210,9 +210,21 @@ describe('SetupPanel & GeminiFallbackPrompt Component Tests', () => {
         />
       );
 
-      // Must have symbol & text in badge
-      expect(htmlUnready).toContain('! NEEDS ATTENTION');
+      // Must have symbol & text in badge (no exclamation mark in needs attention)
+      expect(htmlUnready).toContain('NEEDS ATTENTION');
+      expect(htmlUnready).not.toContain('! NEEDS ATTENTION');
+      expect(htmlUnready).not.toContain('!NEEDS ATTENTION');
       expect(htmlUnready).toContain('OPTIONAL');
+
+      // The Needs attention badge must not render circle-alert (AlertCircle)
+      // Check that inside the needs attention badge there is no circle-alert
+      const badgeMatch = htmlUnready.match(/<span[^>]*class="[^"]*setup-badge-[^"]*-attention[^"]*"[^>]*>([\s\S]*?)<\/span>/);
+      expect(badgeMatch).toBeTruthy();
+      if (badgeMatch) {
+        expect(badgeMatch[1]).not.toContain('lucide-circle-alert');
+        expect(badgeMatch[1]).not.toContain('!');
+        expect(badgeMatch[1]).toContain('NEEDS ATTENTION');
+      }
 
       // No off-theme colors (red, green, orange, blue, emerald) in retro/parchment
       expect(htmlUnready).not.toContain('bg-red-');
