@@ -29,6 +29,24 @@ export const GeminiFallbackPrompt: React.FC<GeminiFallbackPromptProps> = ({
       ? 'fallback-card-parchment p-6 sm:p-8'
       : 'fallback-card-modern rounded-xl border p-6';
 
+  const iconContainerClass =
+    skin === 'retro-green'
+      ? 'border border-green-400 bg-black text-green-300'
+      : skin === 'retro-amber'
+      ? 'border border-[#ffb000] bg-black text-[#ffb000]'
+      : skin === 'parchment'
+      ? 'bg-[#8b5a2b]/15 text-[#8b5a2b]'
+      : 'bg-cyan-500/20 text-cyan-300';
+
+  const acceptBtnClass =
+    skin === 'retro-green'
+      ? 'bg-green-400 text-black hover:bg-green-300'
+      : skin === 'retro-amber'
+      ? 'bg-[#ffb000] text-black hover:bg-amber-300'
+      : skin === 'parchment'
+      ? 'bg-[#8b5a2b] text-[#f4ead5] hover:bg-[#6d4520]'
+      : 'bg-cyan-500 text-black hover:bg-cyan-400';
+
   return (
     <div
       role="dialog"
@@ -44,7 +62,7 @@ export const GeminiFallbackPrompt: React.FC<GeminiFallbackPromptProps> = ({
         )}
         <div className="relative z-[1] flex flex-col">
         <div className="flex items-start gap-3 mb-4">
-          <div className="p-2 rounded-full bg-amber-500/20 text-amber-400 shrink-0 mt-0.5">
+          <div className={`p-2 rounded-full shrink-0 mt-0.5 ${iconContainerClass}`}>
             <AlertCircle size={22} />
           </div>
           <div>
@@ -82,15 +100,7 @@ export const GeminiFallbackPrompt: React.FC<GeminiFallbackPromptProps> = ({
             type="button"
             onClick={onAccept}
             data-testid="gemini-fallback-accept"
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-bold transition-colors cursor-pointer ${
-              isParchment
-                ? 'bg-[#8b5a2b] text-white hover:bg-[#6d4520]'
-                : skin === 'retro-green'
-                ? 'bg-green-400 text-black hover:bg-green-300'
-                : skin === 'retro-amber'
-                ? 'bg-amber-400 text-black hover:bg-amber-300'
-                : 'bg-cyan-500 text-black hover:bg-cyan-400'
-            }`}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-bold transition-colors cursor-pointer ${acceptBtnClass}`}
           >
             <span>Use Gemini</span>
             <ArrowRight size={13} />

@@ -75,6 +75,15 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
       ? 'setup-chip-parchment'
       : 'setup-chip-modern border shadow-lg';
 
+  const chipIconColor =
+    skin === 'retro-green'
+      ? 'text-green-300'
+      : skin === 'retro-amber'
+      ? 'text-[#ffb000]'
+      : skin === 'parchment'
+      ? 'text-[#8b5a2b]'
+      : 'text-cyan-300';
+
   // If user dismissed and required services still missing, show small "Finish setup" chip
   if (isDismissed || hasCollapsedAfterSuccess) {
     if (bothRequiredReady) {
@@ -92,7 +101,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
             <div className="parchment-background" aria-hidden="true" />
           )}
           <span className="relative z-[1] flex items-center gap-2">
-            <AlertCircle size={14} className={skin === 'retro-amber' ? 'text-[#ffb000]' : skin === 'retro-green' ? 'text-green-300' : 'text-amber-400'} />
+            <AlertCircle size={14} className={chipIconColor} />
             <span>Finish Setup</span>
             <ChevronRight size={14} />
           </span>
@@ -109,6 +118,33 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
     ${skin === 'retro-amber' ? 'text-[#ffb000]' : ''}
   `;
 
+  const dividerClass =
+    skin === 'retro-green'
+      ? 'setup-divider-retro-green'
+      : skin === 'retro-amber'
+      ? 'setup-divider-retro-amber'
+      : skin === 'parchment'
+      ? 'setup-divider-parchment'
+      : 'setup-divider-modern';
+
+  const pillRequiredClass =
+    skin === 'retro-green'
+      ? 'setup-pill-required-retro-green'
+      : skin === 'retro-amber'
+      ? 'setup-pill-required-retro-amber'
+      : skin === 'parchment'
+      ? 'setup-pill-required-parchment'
+      : 'setup-pill-required-modern';
+
+  const pillOptionalClass =
+    skin === 'retro-green'
+      ? 'setup-pill-optional-retro-green'
+      : skin === 'retro-amber'
+      ? 'setup-pill-optional-retro-amber'
+      : skin === 'parchment'
+      ? 'setup-pill-optional-parchment'
+      : 'setup-pill-optional-modern';
+
   const rowSkinClass =
     skin === 'retro-green'
       ? 'setup-row-retro-green'
@@ -124,25 +160,49 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
 
   const getStatusBadge = (statusVal: ServiceStatus, isOptional: boolean = false) => {
     if (statusVal === 'ready') {
+      const readyClass =
+        skin === 'retro-green'
+          ? 'setup-badge-retro-green-ready'
+          : skin === 'retro-amber'
+          ? 'setup-badge-retro-amber-ready'
+          : skin === 'parchment'
+          ? 'setup-badge-parchment-ready'
+          : 'setup-badge-modern-ready';
       return (
-        <span className={`inline-flex items-center gap-1 text-[11px] ${isParchment ? 'setup-badge-ready-parchment' : 'setup-badge-ready'}`}>
-          <CheckCircle2 size={13} />
-          Ready
+        <span className={`inline-flex items-center gap-1 ${readyClass}`}>
+          <CheckCircle2 size={12} />
+          ✓ READY
         </span>
       );
     }
     if (isOptional) {
+      const optClass =
+        skin === 'retro-green'
+          ? 'setup-badge-retro-green-optional'
+          : skin === 'retro-amber'
+          ? 'setup-badge-retro-amber-optional'
+          : skin === 'parchment'
+          ? 'setup-badge-parchment-optional'
+          : 'setup-badge-modern-optional';
       return (
-        <span className={`inline-flex items-center gap-1 text-[11px] ${isParchment ? 'setup-badge-optional-parchment' : 'setup-badge-optional'}`}>
-          <HelpCircle size={13} />
-          Optional
+        <span className={`inline-flex items-center gap-1 ${optClass}`}>
+          <HelpCircle size={12} />
+          OPTIONAL
         </span>
       );
     }
+    const attentionClass =
+      skin === 'retro-green'
+        ? 'setup-badge-retro-green-attention'
+        : skin === 'retro-amber'
+        ? 'setup-badge-retro-amber-attention'
+        : skin === 'parchment'
+        ? 'setup-badge-parchment-attention'
+        : 'setup-badge-modern-attention';
     return (
-      <span className={`inline-flex items-center gap-1 text-[11px] ${isParchment ? 'setup-badge-attention-parchment' : 'setup-badge-attention'}`}>
-        <AlertCircle size={13} />
-        Needs Attention
+      <span className={`inline-flex items-center gap-1 ${attentionClass}`}>
+        <AlertCircle size={12} />
+        ! NEEDS ATTENTION
       </span>
     );
   };
@@ -174,7 +234,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
         )}
         <div className={`relative z-[1] flex flex-col gap-3 max-h-[calc(100dvh-4rem)] overflow-y-auto ${isParchment ? 'parchment-scrollbar' : 'custom-scrollbar'}`}>
         {/* Header */}
-        <div className="flex items-center justify-between pb-3 border-b border-current/20">
+        <div className={`flex items-center justify-between pb-3 border-b ${dividerClass}`}>
           <div className={titleClasses}>
             <div className="flex items-center gap-2">
               <Sparkles size={18} />
@@ -194,7 +254,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
 
       {showComplete ? (
         <div className="py-8 flex flex-col items-center justify-center text-center space-y-2 animate-in fade-in zoom-in-95 duration-300">
-          <CheckCircle2 size={36} className="text-emerald-400" />
+          <CheckCircle2 size={36} className={isParchment ? 'text-[#8b5a2b]' : skin === 'retro-amber' ? 'text-[#ffb000]' : skin === 'retro-green' ? 'text-green-300' : 'text-cyan-300'} />
           <h3 className="font-bold text-base">Setup Complete!</h3>
           <p className="text-xs opacity-75 max-w-xs">
             All required providers are active. Welcome to TerraExplorer!
@@ -212,7 +272,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold uppercase tracking-wider">AI Provider</span>
-                  <span className={`text-[10px] uppercase px-1.5 py-0.2 rounded font-semibold ${isParchment ? 'bg-[#c62828]/20 text-[#c62828] border border-[#c62828]/40' : 'bg-red-500/20 text-red-300 border border-red-500/30'}`}>
+                  <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded font-semibold ${pillRequiredClass}`}>
                     Required
                   </span>
                 </div>
@@ -252,7 +312,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold uppercase tracking-wider">Map Provider</span>
-                  <span className={`text-[10px] uppercase px-1.5 py-0.2 rounded font-semibold ${isParchment ? 'bg-[#c62828]/20 text-[#c62828] border border-[#c62828]/40' : 'bg-red-500/20 text-red-300 border border-red-500/30'}`}>
+                  <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded font-semibold ${pillRequiredClass}`}>
                     Required
                   </span>
                 </div>
@@ -292,7 +352,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold uppercase tracking-wider">News Provider</span>
-                  <span className={`text-[10px] uppercase px-1.5 py-0.2 rounded font-semibold ${isParchment ? 'border border-[#8b5a2b]/30 text-[#8b5a2b]' : 'opacity-70 border border-current/20'}`}>
+                  <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded font-semibold ${pillOptionalClass}`}>
                     Optional
                   </span>
                 </div>

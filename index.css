@@ -967,32 +967,264 @@ video {
   box-shadow: inset 1px 1px 3px rgba(255, 255, 255, 0.4);
 }
 
-/* Status Badges */
-.setup-badge-ready {
-  color: #22c55e;
-  font-weight: 600;
-}
-.setup-badge-ready-parchment {
-  color: #2e7d32;
-  font-weight: 700;
+/* ─── Setup Dividers, Badges, Pills & Buttons (Strictly Themed) ─── */
+
+.setup-divider-modern {
+  border-color: rgba(255, 255, 255, 0.15);
 }
 
-.setup-badge-attention {
+.setup-divider-retro-green {
+  border-color: rgba(74, 222, 128, 0.3);
+}
+
+.setup-divider-retro-amber {
+  border-color: rgba(251, 191, 36, 0.3);
+}
+
+.setup-divider-parchment {
+  border-color: rgba(139, 90, 43, 0.25);
+}
+
+/* Status Badges:
+   Ready -> "✓ READY" (solid/filled)
+   Needs Attention -> "! NEEDS ATTENTION" (outlined/border)
+   Optional -> "OPTIONAL" (dimmed text, no border)
+*/
+
+/* Modern */
+.setup-badge-modern-ready {
+  background-color: rgba(34, 211, 238, 0.2);
+  color: #22d3ee; /* cyan-400 */
+  border: 1px solid #22d3ee;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.setup-badge-modern-attention {
+  background-color: transparent;
+  color: #e2e8f0; /* light slate */
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.setup-badge-modern-optional {
+  background-color: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  border: none;
+  padding: 2px 0;
+  font-weight: 500;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Retro Green */
+.setup-badge-retro-green-ready {
+  background-color: #4ade80;
+  color: #000000;
+  border: 1px solid #4ade80;
+  padding: 2px 6px;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-family: 'VT323', monospace;
+}
+
+.setup-badge-retro-green-attention {
+  background-color: transparent;
+  color: #86efac;
+  border: 1px solid #4ade80;
+  padding: 2px 6px;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-family: 'VT323', monospace;
+}
+
+.setup-badge-retro-green-optional {
+  background-color: transparent;
+  color: rgba(134, 239, 172, 0.6);
+  border: none;
+  padding: 2px 0;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-family: 'VT323', monospace;
+}
+
+/* Retro Amber */
+.setup-badge-retro-amber-ready {
+  background-color: #fbbf24;
+  color: #000000;
+  border: 1px solid #fbbf24;
+  padding: 2px 6px;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-family: 'VT323', monospace;
+}
+
+.setup-badge-retro-amber-attention {
+  background-color: transparent;
+  color: #fcd34d;
+  border: 1px solid #fbbf24;
+  padding: 2px 6px;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-family: 'VT323', monospace;
+}
+
+.setup-badge-retro-amber-optional {
+  background-color: transparent;
+  color: rgba(252, 211, 77, 0.6);
+  border: none;
+  padding: 2px 0;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-family: 'VT323', monospace;
+}
+
+/* Parchment */
+.setup-badge-parchment-ready {
+  background-color: #8b5a2b;
+  color: #f4ead5;
+  border: 1px solid #8b5a2b;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.setup-badge-parchment-attention {
+  background-color: transparent;
+  color: #5c3a21;
+  border: 1px solid rgba(139, 90, 43, 0.6);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.setup-badge-parchment-optional {
+  background-color: transparent;
+  color: rgba(92, 58, 33, 0.65);
+  border: none;
+  padding: 2px 0;
+  font-weight: 500;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Required / Optional Pills */
+.setup-pill-required-modern {
+  background-color: rgba(34, 211, 238, 0.15);
+  color: #22d3ee;
+  border: 1px solid rgba(34, 211, 238, 0.4);
+}
+.setup-pill-optional-modern {
+  background-color: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.setup-pill-required-retro-green {
+  background-color: #4ade80;
+  color: #000000;
+  border: 1px solid #4ade80;
+  font-family: 'VT323', monospace;
+}
+.setup-pill-optional-retro-green {
+  background-color: transparent;
+  color: #86efac;
+  border: 1px solid rgba(74, 222, 128, 0.4);
+  font-family: 'VT323', monospace;
+}
+
+.setup-pill-required-retro-amber {
+  background-color: #fbbf24;
+  color: #000000;
+  border: 1px solid #fbbf24;
+  font-family: 'VT323', monospace;
+}
+.setup-pill-optional-retro-amber {
+  background-color: transparent;
+  color: #fcd34d;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  font-family: 'VT323', monospace;
+}
+
+.setup-pill-required-parchment {
+  background-color: #8b5a2b;
+  color: #f4ead5;
+  border: 1px solid #8b5a2b;
+}
+.setup-pill-optional-parchment {
+  background-color: transparent;
+  color: #5c3a21;
+  border: 1px solid rgba(139, 90, 43, 0.4);
+}
+
+/* Carto Notice Themed Styling */
+.carto-notice-parchment {
+  background-color: #2c1d11;
+  color: #f4ead5;
+  border: 1px solid #8b5a2b;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+}
+.carto-notice-parchment button {
+  color: #e8d5b5;
+}
+.carto-notice-parchment button:hover {
+  color: #ffffff;
+}
+
+.carto-notice-modern {
+  background-color: #0f172a;
+  color: #ffffff;
+  border: 1px solid rgba(34, 211, 238, 0.4);
+}
+.carto-notice-modern button {
+  color: #67e8f9;
+}
+
+.carto-notice-retro-green {
+  background-color: #000000;
+  color: #86efac;
+  border: 2px solid #4ade80;
+  font-family: 'VT323', monospace;
+}
+.carto-notice-retro-green button {
+  color: #4ade80;
+}
+
+.carto-notice-retro-amber {
+  background-color: #000000;
+  color: #fcd34d;
+  border: 2px solid #fbbf24;
+  font-family: 'VT323', monospace;
+}
+.carto-notice-retro-amber button {
   color: #fbbf24;
-  font-weight: 600;
-}
-.setup-badge-attention-parchment {
-  color: #b45309;
-  font-weight: 700;
-}
-
-.setup-badge-optional {
-  color: #94a3b8;
-  font-weight: 600;
-}
-.setup-badge-optional-parchment {
-  color: #8b5a2b;
-  font-weight: 700;
 }
 
 /* Action Buttons inside rows */

@@ -6624,12 +6624,12 @@ Reason: Coordinates failed validation (sentinel, missing, or invalid 0,0)
           data-testid="map-key-fallback-notice"
           className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded-lg shadow-lg border text-xs flex items-center gap-2 backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 ${
             skin === 'parchment'
-              ? 'bg-[#f4ebe1]/95 text-[#3e2723] border-[#8b5a2b]/30'
+              ? 'carto-notice-parchment'
               : skin === 'retro-green'
-              ? 'bg-black/90 text-green-300 border-green-400 font-retro'
+              ? 'carto-notice-retro-green'
               : skin === 'retro-amber'
-              ? 'bg-black/90 text-[#ffb000] border-[#ffb000] font-retro'
-              : 'bg-slate-900/90 text-white border-white/20'
+              ? 'carto-notice-retro-amber'
+              : 'carto-notice-modern'
           }`}
         >
           <span>Add a Carto API key to load map tiles.</span>

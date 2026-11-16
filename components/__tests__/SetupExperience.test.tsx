@@ -190,4 +190,77 @@ describe('SetupPanel & GeminiFallbackPrompt Component Tests', () => {
       }
     }
   });
+
+  it('7. Theme-only palette for badges, text, symbols and divider lines in retro & parchment skins', () => {
+    const retroAndParchmentSkins: Array<'retro-green' | 'retro-amber' | 'parchment'> = [
+      'retro-green',
+      'retro-amber',
+      'parchment'
+    ];
+
+    for (const s of retroAndParchmentSkins) {
+      const htmlUnready = renderToStaticMarkup(
+        <SetupPanel
+          skin={s}
+          status={mockStatusUnconfigured}
+          isDismissed={false}
+          onDismiss={vi.fn()}
+          onOpenSettings={vi.fn()}
+          onReopen={vi.fn()}
+        />
+      );
+
+      // Must have symbol & text in badge
+      expect(htmlUnready).toContain('! NEEDS ATTENTION');
+      expect(htmlUnready).toContain('OPTIONAL');
+
+      // No off-theme colors (red, green, orange, blue, emerald) in retro/parchment
+      expect(htmlUnready).not.toContain('bg-red-');
+      expect(htmlUnready).not.toContain('text-red-');
+      expect(htmlUnready).not.toContain('border-red-');
+      expect(htmlUnready).not.toContain('text-emerald-');
+      expect(htmlUnready).not.toContain('text-amber-400'); // only allowed if not hardcoded outside theme
+      if (s === 'retro-green') {
+        expect(htmlUnready).not.toContain('text-[#ffb000]');
+        expect(htmlUnready).not.toContain('border-[#ffb000]');
+        expect(htmlUnready).not.toContain('text-cyan-');
+      }
+      if (s === 'retro-amber') {
+        expect(htmlUnready).not.toContain('text-green-');
+        expect(htmlUnready).not.toContain('border-green-');
+        expect(htmlUnready).not.toContain('text-cyan-');
+      }
+      if (s === 'parchment') {
+        expect(htmlUnready).not.toContain('text-green-');
+        expect(htmlUnready).not.toContain('border-green-');
+        expect(htmlUnready).not.toContain('text-cyan-');
+        expect(htmlUnready).toContain('setup-divider-parchment');
+      }
+
+      // Ready state check
+      const htmlReady = renderToStaticMarkup(
+        <SetupPanel
+          skin={s}
+          status={mockStatusReady}
+          isDismissed={false}
+          onDismiss={vi.fn()}
+          onOpenSettings={vi.fn()}
+          onReopen={vi.fn()}
+        />
+      );
+      expect(htmlReady).toContain('✓ READY');
+
+      // Fallback Prompt check
+      const promptHtml = renderToStaticMarkup(
+        <GeminiFallbackPrompt
+          skin={s}
+          isOpen={true}
+          onAccept={vi.fn()}
+          onDecline={vi.fn()}
+        />
+      );
+      expect(promptHtml).not.toContain('bg-amber-500/20');
+      expect(promptHtml).not.toContain('text-amber-400');
+    }
+  });
 });
