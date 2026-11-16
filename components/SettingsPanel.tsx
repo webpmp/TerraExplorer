@@ -3,6 +3,7 @@ import { Settings as SettingsIcon, X, Server, Newspaper, Film, Volume2, KeyRound
 import { SkinType, UserSettings, AIProvider, NewsProvider, NarrationProviderType } from '../types';
 import { narrationService, KOKORO_VOICES, ORPHEUS_VOICES } from '../services/narrationService';
 import { resolveEffectiveLMStudioUrl } from '../services/geminiService';
+import { getCartoKey } from '../services/setupStatusService';
 
 interface SettingsPanelProps {
   settings: UserSettings;
@@ -49,20 +50,7 @@ export const testMapConnectionService = async (
 ): Promise<MapConnectionTestResult> => {
   const defaultGetEnv = () => typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env : (typeof process !== 'undefined' ? process.env : {});
   const env = (envGetter || defaultGetEnv)();
-  let apiKey = overrideApiKey !== undefined ? overrideApiKey : env?.VITE_CARTO_API_KEY;
-  if (!apiKey && typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
-    try {
-      const saved = localStorage.getItem('terraExplorerSettings');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.cartoApiKey && typeof parsed.cartoApiKey === 'string' && parsed.cartoApiKey.trim()) {
-          apiKey = parsed.cartoApiKey.trim();
-        }
-      }
-    } catch {
-      // Ignore
-    }
-  }
+  let apiKey = overrideApiKey !== undefined ? overrideApiKey : getCartoKey(undefined, envGetter || defaultGetEnv);
 
   const styleName = (skin === 'retro-amber' || skin === 'retro-green') ? 'dark-matter-gl-style' : 'voyager-gl-style';
   const baseUrl = `https://basemaps.cartocdn.com/gl/${styleName}/style.json`;

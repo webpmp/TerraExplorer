@@ -66,6 +66,18 @@ export function useSetupStatus(userSettings: UserSettings, sessionGeminiOverride
     setStatus(nextStatus);
   }, [userSettings, probeResult, sessionGeminiOverride]);
 
+  // Listen to storage events to re-evaluate if settings change externally
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'terraExplorerSettings') {
+        const effectiveSettings = sessionGeminiOverride ? { ...userSettings, aiProvider: 'gemini' } : userSettings;
+        setStatus(evaluateSyncSetupStatus(effectiveSettings, probeResult));
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [userSettings, probeResult, sessionGeminiOverride]);
+
   const refreshStatus = useCallback(() => {
     runProbe(userSettings);
   }, [runProbe, userSettings]);

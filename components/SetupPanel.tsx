@@ -169,8 +169,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
           ? 'setup-badge-parchment-ready'
           : 'setup-badge-modern-ready';
       return (
-        <span className={`inline-flex items-center gap-1 ${readyClass}`}>
-          <CheckCircle2 size={12} />
+        <span className={`inline-flex items-center justify-center ${readyClass}`}>
           ✓ READY
         </span>
       );

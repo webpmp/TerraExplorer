@@ -41,9 +41,27 @@ export const getCartoKey = (
       // Ignore
     }
   }
-  const defaultGetEnv = () => typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env : (typeof process !== 'undefined' ? process.env : {});
-  const env = (envGetter || defaultGetEnv)();
-  return env?.VITE_CARTO_API_KEY;
+  if (envGetter) {
+    const customEnv = envGetter();
+    return customEnv?.VITE_CARTO_API_KEY && customEnv.VITE_CARTO_API_KEY.trim()
+      ? customEnv.VITE_CARTO_API_KEY.trim()
+      : undefined;
+  }
+  const metaEnvKey =
+    typeof import.meta !== 'undefined' && import.meta.env
+      ? import.meta.env.VITE_CARTO_API_KEY
+      : undefined;
+  if (metaEnvKey && typeof metaEnvKey === 'string' && metaEnvKey.trim()) {
+    return metaEnvKey.trim();
+  }
+  const procEnvKey =
+    typeof process !== 'undefined' && process.env
+      ? process.env.VITE_CARTO_API_KEY
+      : undefined;
+  if (procEnvKey && typeof procEnvKey === 'string' && procEnvKey.trim()) {
+    return procEnvKey.trim();
+  }
+  return undefined;
 };
 
 export const getEffectiveGeminiKey = (
@@ -53,7 +71,7 @@ export const getEffectiveGeminiKey = (
   if (settings?.geminiApiKey && settings.geminiApiKey.trim()) {
     return settings.geminiApiKey.trim();
   }
-  const defaultGetEnv = () => typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env : (typeof process !== 'undefined' ? process.env : {});
+  const defaultGetEnv = () => typeof import.meta !== 'undefined' && import.meta.env ? (import.meta.env as any) : (typeof process !== 'undefined' ? process.env : {});
   const env = (envGetter || defaultGetEnv)();
   if (envGetter) {
     return env?.GEMINI_API_KEY || env?.API_KEY || env?.VITE_GEMINI_API_KEY;
@@ -66,7 +84,7 @@ export const evaluateSyncSetupStatus = (
   lmStudioProbeResult?: { outcome: 'SUCCESS' | 'NO_MODELS' | 'ERROR'; message?: string },
   envGetter?: () => Record<string, string | undefined>
 ): SetupStatusState => {
-  const defaultGetEnv = () => typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env : (typeof process !== 'undefined' ? process.env : {});
+  const defaultGetEnv = () => typeof import.meta !== 'undefined' && import.meta.env ? (import.meta.env as any) : (typeof process !== 'undefined' ? process.env : {});
   const env = (envGetter || defaultGetEnv)();
 
   // 1. AI Provider Status

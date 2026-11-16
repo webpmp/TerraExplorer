@@ -26,13 +26,18 @@ describe('Setup Status Model & First-Run Experience Tests', () => {
     delete process.env.GEMINI_API_KEY;
     delete process.env.VITE_GEMINI_API_KEY;
     delete process.env.VITE_CARTO_API_KEY;
+    vi.stubEnv('VITE_CARTO_API_KEY', '');
+    vi.stubEnv('VITE_GEMINI_API_KEY', '');
+    vi.stubEnv('GEMINI_API_KEY', '');
+    vi.stubEnv('API_KEY', '');
     if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
-      delete (import.meta as any).env.VITE_CARTO_API_KEY;
-      delete (import.meta as any).env.VITE_GEMINI_API_KEY;
+      (import.meta as any).env.VITE_CARTO_API_KEY = '';
+      (import.meta as any).env.VITE_GEMINI_API_KEY = '';
     }
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     process.env = { ...originalEnv };
     if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
       (import.meta as any).env = { ...originalImportMetaEnv };
@@ -177,5 +182,41 @@ describe('Setup Status Model & First-Run Experience Tests', () => {
     // Without settings key, falls back to env
     const effectiveFromEnv = getEffectiveGeminiKey({ ...settingsWithCustomGemini, geminiApiKey: '' }, () => mockEnv);
     expect(effectiveFromEnv).toBe('env-gemini-key');
+  });
+
+  it('8. Carto API key resolution: present only in env with empty saved settings marks map row READY', () => {
+    // Empty settings
+    const emptySettings: UserSettings = {
+      aiProvider: 'gemini',
+      geminiApiKey: 'test-gemini-key',
+      cartoApiKey: '',
+      lmStudioUrl: 'http://localhost:1234/v1',
+      lmStudioModel: 'local-model',
+      newsProvider: 'gemini',
+      newsApiKey: '',
+      nytApiKey: '',
+      newsDataApiKey: ''
+    };
+
+    // Ensure localStorage has no cartoApiKey
+    storageMap.clear();
+
+    // Key present only in process.env / custom envGetter
+    const customEnv = { VITE_CARTO_API_KEY: 'env-carto-key-456' };
+    const resolvedKey = getCartoKey(emptySettings, () => customEnv);
+    expect(resolvedKey).toBe('env-carto-key-456');
+
+    // Evaluate setup status with key in env only
+    const status = evaluateSyncSetupStatus(emptySettings, undefined, () => customEnv);
+    expect(status.map.status).toBe('ready');
+    expect(isSetupRequiredMissing(status)).toBe(false);
+
+    // Also test process.env fallback directly
+    vi.stubEnv('VITE_CARTO_API_KEY', 'process-env-carto-key-789');
+    const resolvedKeyFromProcessEnv = getCartoKey(emptySettings);
+    expect(resolvedKeyFromProcessEnv).toBe('process-env-carto-key-789');
+
+    const statusFromProcessEnv = evaluateSyncSetupStatus(emptySettings);
+    expect(statusFromProcessEnv.map.status).toBe('ready');
   });
 });

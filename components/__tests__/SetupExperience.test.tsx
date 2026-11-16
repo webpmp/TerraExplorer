@@ -261,6 +261,16 @@ describe('SetupPanel & GeminiFallbackPrompt Component Tests', () => {
         />
       );
       expect(htmlReady).toContain('✓ READY');
+      const readyBadgeMatch = htmlReady.match(/<span[^>]*class="[^"]*setup-badge-[^"]*-ready[^"]*"[^>]*>([\s\S]*?)<\/span>/);
+      expect(readyBadgeMatch).toBeTruthy();
+      if (readyBadgeMatch) {
+        expect(readyBadgeMatch[1]).toContain('✓ READY');
+        expect(readyBadgeMatch[1]).not.toContain('lucide-circle-check');
+        expect(readyBadgeMatch[1]).not.toContain('<svg');
+        // Assert exactly one checkmark symbol in the badge
+        const checkmarks = (readyBadgeMatch[1].match(/✓/g) || []).length;
+        expect(checkmarks).toBe(1);
+      }
 
       // Fallback Prompt check
       const promptHtml = renderToStaticMarkup(
