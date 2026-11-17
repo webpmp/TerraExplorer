@@ -780,6 +780,46 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
       fetchSpy.mockRestore();
     });
 
+    test('9b. No Carto key configured returns failed outcome without fetch and with missing key message', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      vi.stubEnv('VITE_CARTO_API_KEY', '');
+
+      const result = await testMapConnectionService('carto', 'modern', () => ({}));
+      expect(result.outcome).toBe('FAILED');
+      expect(result.buttonState).toBe('failed');
+      expect(result.buttonLabel).toBe('CONNECTION FAILED');
+      expect(result.message).toBe('CARTO API key is missing. Add VITE_CARTO_API_KEY to your .env.local file and restart the dev server.');
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      fetchSpy.mockRestore();
+      vi.unstubAllEnvs();
+    });
+
+    test('9c. Carto key present via vi.stubEnv follows existing success path', async () => {
+      vi.stubEnv('VITE_CARTO_API_KEY', 'stubbed-carto-key-xyz');
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK'
+      } as any);
+
+      const result = await testMapConnectionService('carto', 'modern');
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json?key=stubbed-carto-key-xyz',
+        expect.objectContaining({
+          method: 'GET',
+          mode: 'cors'
+        })
+      );
+      expect(result.outcome).toBe('SUCCESS');
+      expect(result.buttonState).toBe('success');
+      expect(result.buttonLabel).toBe('✓ CONNECTION SUCCESSFUL');
+      expect(result.message).toBe('Map provider connection successful.');
+
+      fetchSpy.mockRestore();
+      vi.unstubAllEnvs();
+    });
+
     test('10. All TEST CONNECTION buttons in PROVIDERS tab share identical full-width styling and structure', () => {
       const html = renderToStaticMarkup(
         <SettingsPanel

@@ -7,7 +7,9 @@ import {
   getCartoKey,
   getNytKey,
   getNewsApiKey,
-  getNewsDataKey,
+  getNewsDataKey
+} from '../services/keyResolutionService';
+import {
   ENV_VARIABLES_SPEC
 } from '../services/setupStatusService';
 
@@ -54,11 +56,20 @@ export const testMapConnectionService = async (
   signal?: AbortSignal,
   overrideApiKey?: string
 ): Promise<MapConnectionTestResult> => {
-  let apiKey = overrideApiKey !== undefined ? overrideApiKey : getCartoKey(undefined, envGetter);
+  const apiKey = overrideApiKey !== undefined ? overrideApiKey : getCartoKey(undefined, envGetter);
+
+  if (!apiKey) {
+    return {
+      outcome: 'FAILED',
+      buttonState: 'failed',
+      buttonLabel: 'CONNECTION FAILED',
+      message: 'CARTO API key is missing. Add VITE_CARTO_API_KEY to your .env.local file and restart the dev server.'
+    };
+  }
 
   const styleName = (skin === 'retro-amber' || skin === 'retro-green') ? 'dark-matter-gl-style' : 'voyager-gl-style';
   const baseUrl = `https://basemaps.cartocdn.com/gl/${styleName}/style.json`;
-  const url = apiKey ? `${baseUrl}?key=${encodeURIComponent(apiKey)}` : baseUrl;
+  const url = `${baseUrl}?key=${encodeURIComponent(apiKey)}`;
 
   let timeoutId: any;
   const timeoutPromise = new Promise<never>((_, reject) => {
