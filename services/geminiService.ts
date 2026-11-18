@@ -59,8 +59,6 @@ if (!initialApiKey) {
 
 export const ai = new GoogleGenAI({ apiKey: initialApiKey || 'dummy-key-for-ts-check' });
 
-export const modelName = process.env.VITE_AI_MODEL || "gemini-2.5-flash";
-
 export const getUserSettings = (): any => {
   if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
     try {
@@ -92,6 +90,33 @@ export const getUserSettings = (): any => {
     testMode: true
   };
 };
+
+export const DEFAULT_AI_MODEL = "gemini-3-flash-preview";
+
+export const resolveModelName = (settings?: Partial<UserSettings>): string => {
+  if (settings) {
+    const fromSettings = (settings as any).geminiModel || (settings as any).aiModel;
+    if (typeof fromSettings === 'string' && fromSettings.trim().length > 0) {
+      return fromSettings.trim();
+    }
+  }
+  const userSettings = getUserSettings();
+  const fromStoredSettings = userSettings?.geminiModel || userSettings?.aiModel;
+  if (typeof fromStoredSettings === 'string' && fromStoredSettings.trim().length > 0) {
+    return fromStoredSettings.trim();
+  }
+  const importMetaEnvModel = (import.meta as any)?.env?.VITE_AI_MODEL;
+  if (typeof importMetaEnvModel === 'string' && importMetaEnvModel.trim().length > 0) {
+    return importMetaEnvModel.trim();
+  }
+  const processEnvModel = typeof process !== 'undefined' ? process.env?.VITE_AI_MODEL : undefined;
+  if (typeof processEnvModel === 'string' && processEnvModel.trim().length > 0) {
+    return processEnvModel.trim();
+  }
+  return DEFAULT_AI_MODEL;
+};
+
+export const modelName = resolveModelName();
 
 export const resolveEffectiveLMStudioUrl = (url?: string): string => {
   const target = (url || 'http://localhost:1234/v1').trim();
@@ -2474,7 +2499,7 @@ Provide a JSON array of significant local places, natural features, landmarks, o
 
     try {
         const result = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: modelName,
             contents: prompt,
             config: {
                 responseMimeType: "application/json"
