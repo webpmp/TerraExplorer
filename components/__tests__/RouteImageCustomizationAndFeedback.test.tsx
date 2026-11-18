@@ -1,5 +1,6 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { setupMockNetwork } from '../../services/__tests__/helpers/mockNetwork';
 import { renderToStaticMarkup } from 'react-dom/server';
 import FavoritesPanel from '../FavoritesPanel';
 import { StackedImageCarousel } from '../StackedImageCarousel';
@@ -19,10 +20,12 @@ import {
 import type { FavoriteLocation, LocationInfo } from '../../types';
 
 describe('Route Image Customization & Lightbox Feedback', () => {
+  let restoreNetwork: () => void;
   let storage: Record<string, string> = {};
   const originalLocalStorage = globalThis.localStorage;
 
   beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
     storage = {};
     const mockStorage = {
       getItem: (key: string) => storage[key] ?? null,
@@ -45,6 +48,7 @@ describe('Route Image Customization & Lightbox Feedback', () => {
   });
 
   afterEach(() => {
+    restoreNetwork?.();
     Object.defineProperty(globalThis, 'localStorage', {
       value: originalLocalStorage,
       writable: true,
