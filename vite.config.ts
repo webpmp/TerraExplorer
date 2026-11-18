@@ -4,6 +4,31 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
+
+    // Guard: Prevent production builds from embedding API keys from .env.local
+    if (mode === 'production' && process.env.ALLOW_PUBLIC_KEYS !== '1') {
+      const SECRET_KEY_VARS = [
+        'VITE_GEMINI_API_KEY',
+        'VITE_CARTO_API_KEY',
+        'VITE_NEWS_API_KEY',
+        'VITE_NEWS_DATA_API_KEY',
+        'VITE_NYT_API_KEY',
+        'GEMINI_API_KEY'
+      ];
+      const leakedVars = SECRET_KEY_VARS.filter(keyName => {
+        const val = env[keyName];
+        return typeof val === 'string' && val.trim().length > 0;
+      });
+
+      if (leakedVars.length > 0) {
+        throw new Error(
+          `[SECURITY GUARD] Production build blocked: secret API key variables found in environment (${leakedVars.join(', ')}). ` +
+          `Vite embeds VITE_* variables into production client bundles. ` +
+          `Remove them from .env.local or set ALLOW_PUBLIC_KEYS=1 to override.`
+        );
+      }
+    }
+
     return {
       server: {
         port: 3000,
@@ -52,12 +77,12 @@ export default defineConfig(({ mode }) => {
         }
       },
       plugins: [react()],
-      define: {
+      define: mode !== 'production' ? {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY || env.VITE_GEMINI_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || env.VITE_GEMINI_API_KEY),
         'process.env.VITE_GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || env.VITE_GEMINI_API_KEY),
         'process.env.VITE_CARTO_API_KEY': JSON.stringify(env.VITE_CARTO_API_KEY)
-      },
+      } : {},
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
