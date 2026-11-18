@@ -1,11 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { normalizeQueryScaffolding, detectHistoricalRouteEvent } from '../queryNormalizer';
 import { routeIntentAndExtractEntity } from '../geminiService';
 import { runSearchPipeline } from '../pipeline';
 import * as geographicResolver from '../geographic/geographicResolver';
 
 describe('Historical Route Query Classification and Entity Normalization', () => {
+  let restoreNetwork: () => void;
+
   beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
     vi.spyOn(geographicResolver, 'reverseGeocode').mockImplementation(async (lat: number, lng: number) => {
       return {
         country: 'United States',
@@ -13,6 +17,10 @@ describe('Historical Route Query Classification and Entity Normalization', () =>
         displayName: 'Mock Location'
       };
     });
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
   });
 
   const queryVariants = [
