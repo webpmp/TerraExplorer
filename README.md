@@ -146,6 +146,16 @@ VITE_NEWS_DATA_API_KEY=your_newsdata_io_key
 
 AI, local LM Studio, narration, and news settings can also be configured dynamically in the application Settings without restarting the development server.
 
+## Keys and production builds
+
+- API keys live only in `.env.local` (never committed) and in the browser's Settings screen.
+- `npm run build` and `npm run preview` refuse to run while key variables are in `.env.local`. This is deliberate: it stops keys from being embedded in the public app.
+- To build or preview, move the file aside first:
+  `mv .env.local /tmp/keys-aside && npm run build; mv /tmp/keys-aside .env.local`
+- Docker dev reads `.env.local` at runtime (`docker compose up --build`). 
+- If this app is ever hosted (Netlify, Vercel, etc.), don't set `GEMINI_API_KEY` or any `VITE_*_API_KEY` in the host's build settings. Users enter their own keys in Settings.
+- Gemini model: set `VITE_AI_MODEL` in `.env.local`. The default is `gemini-3-flash-preview`. Older 2.5 models return 404 for new keys.
+
 ### Run
 
 ```bash
