@@ -1,8 +1,19 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { runSearchPipeline } from '../pipeline';
 import { resolveImageIntent, buildEntityImageQueries, scoreImageCandidate } from '../imageService';
 
 describe('Image Intent Integration', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
   it('passes explicit intent correctly to image queries', async () => {
     const pipelineResult = await runSearchPipeline({ rawQuery: "Eiffel Tower illustration", entity: "Eiffel Tower illustration" });
     const info = (pipelineResult as any).finalData;

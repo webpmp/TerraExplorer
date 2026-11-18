@@ -1,10 +1,21 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { enrichSettlementPopulation, isPopulationBearingEntity, resolveGeographicMetadata } from '../geographic/geographicResolver';
 import { IntentStage, ResolutionStage } from '../pipeline';
 import { getPopulationLabel } from '../../components/InfoPanel';
 import * as geminiService from '../geminiService';
 
 describe('Authoritative Population Pipeline & Resolution Suite', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
   });

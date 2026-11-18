@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import {
   getHistoricalEntityKnowledge,
   validateHistoricalCoordinate
@@ -11,6 +12,16 @@ import { recoverCoordinatesFromAi, resolveLocationQuery } from '../geminiService
 import { runSearchPipeline } from '../pipeline';
 
 describe('Battle of Waterloo Resolution & Coordinate Recovery Suite', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
   });

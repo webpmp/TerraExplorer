@@ -1,12 +1,20 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { runSearchPipeline } from '../pipeline';
 import * as geminiService from '../geminiService';
 import * as geoResolver from '../geographic/geographicResolver';
 import { formatGeographicContext } from '../../components/InfoPanel';
 
 describe('Landmark InfoPanel Geographic Context & Location Subtitle Suite', () => {
+  let restoreNetwork: () => void;
+
   beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
   });
 
   it('1. Parthenon resolves canonicalName "Parthenon", city "Athens", state "Attica", country "Greece" with subtitle "Athens, Greece"', async () => {

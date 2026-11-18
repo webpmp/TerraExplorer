@@ -1,8 +1,19 @@
-import { describe, test, expect, vi } from 'vitest';
+import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { deriveQueryTopicTitle } from '../queryNormalizer';
 import { runRoutePipeline } from '../routePipeline';
 
 describe('Query-Driven Route Pipeline Title & Grouping Integrity', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
   test('attaches canonical query title "Battles of World War I" to generated route and all waypoints', async () => {
     // Mock generateRoute to return candidate waypoints for WWI battles
     const mockWWIWaypoints = [

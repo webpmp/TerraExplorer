@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import {
   validateHistoricalCoordinate,
   isMaritimeHistoricalEntity,
@@ -8,6 +9,16 @@ import { routeIntentAndExtractEntity, recoverCoordinatesFromAi } from '../gemini
 import { runSearchPipeline } from '../pipeline';
 
 describe('Antikythera Wreck & Maritime Discovery Coordinate Recovery Suite', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
   });

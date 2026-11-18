@@ -13,13 +13,24 @@
  *  - Existing direct "Pyramids of Giza" search unaffected
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { resolveAlias } from '../geographic/geographicAliases';
 import { getHistoricalEntityKnowledge } from '../geographic/historicalCoordinateValidator';
 import { runSearchPipeline, ResolutionStage, IntentStage } from '../pipeline';
 import { buildEntityImageQueries, validateImageCandidate, deriveEntityAliases } from '../imageService';
 import type { ImageCandidate } from '../imageService';
 import * as geminiService from '../geminiService';
+
+let restoreNetwork: () => void;
+
+beforeEach(() => {
+  restoreNetwork = setupMockNetwork();
+});
+
+afterEach(() => {
+  restoreNetwork?.();
+});
 
 // ---------------------------------------------------------------------------
 // Helpers

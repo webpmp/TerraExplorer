@@ -1,5 +1,6 @@
-import { describe, it } from 'vitest';
+import { describe, it, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import {
   validateImageCandidate,
   resolveImageIntent,
@@ -11,6 +12,34 @@ import {
 } from '../imageService';
 
 describe('Candidate Logging Diagnostic', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork({
+      wikipediaQueryHandler: () => ({
+        batchcomplete: '',
+        query: {
+          pages: {
+            '1001': {
+              pageid: 1001,
+              title: 'Burkhan Khaldun',
+              description: 'Sacred mountain in Khentii, Mongolia',
+              thumbnail: {
+                source: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Burkhan_Khaldun.jpg/800px-Burkhan_Khaldun.jpg',
+                width: 800,
+                height: 600
+              },
+              coordinates: [{ lat: 48.9, lon: 109.0 }]
+            }
+          }
+        }
+      })
+    });
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
   it('Logs all Burkhan Khaldun candidates and why each is rejected/accepted', async () => {
     let out = '';
     const log = (msg: string) => { out += msg + '\n'; console.log(msg); };

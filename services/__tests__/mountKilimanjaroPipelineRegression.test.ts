@@ -1,10 +1,21 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { runSearchPipeline } from '../pipeline';
 import * as geminiService from '../geminiService';
 import { isClimateConflicting } from '../geographic/climateEstimator';
 import { validateResolvedEntity } from '../entityValidation';
 
 describe('Mount Kilimanjaro Climate Rejection & Pipeline Integrity Regression', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
   it('1. isClimateConflicting detects Humid Subtropical / Cwa as conflicting with mountain entity type', () => {
     const candidateClimate = {
       name: 'Humid subtropical climate',

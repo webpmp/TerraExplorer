@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { 
   detectCelestialBody, 
   isCelestialBodySupported, 
@@ -10,6 +11,16 @@ import { runRoutePipeline } from '../routePipeline';
 import * as geminiService from '../geminiService';
 
 describe('Celestial Body Geographic Capabilities & Earth-Only Validation Suite', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
   describe('1. Platform Capabilities Registry', () => {
     it('has Earth enabled and other celestial bodies disabled', () => {
       expect(isCelestialBodySupported('earth')).toBe(true);

@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { runRoutePipeline } from '../routePipeline';
 
 // Mock geminiService generateContentWithRetry to avoid actual network calls during LLM audit
@@ -8,6 +9,16 @@ vi.mock('../geminiService', () => ({
 }));
 
 describe('Historical Event Single Location Route Type Reconciliation', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });

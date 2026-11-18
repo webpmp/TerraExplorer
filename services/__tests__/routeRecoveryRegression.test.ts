@@ -1,9 +1,17 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { generateRoute } from '../geminiService';
 import * as geminiService from '../geminiService';
 import { getSequentialRouteSegments } from '../../utils/routeSequenceUtils';
+import { setupMockNetwork } from './helpers/mockNetwork';
 
 describe('Route Generation Truncation & Compact Recovery Regression Test Suite', () => {
+  beforeEach(() => {
+    setupMockNetwork();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
   it('1 & 2 & 3 & 4 & 5. Truncated response triggers compact recovery preserving original Trail of Tears context and groups', async () => {
     const calls: any[] = [];
 

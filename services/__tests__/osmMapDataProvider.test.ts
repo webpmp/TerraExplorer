@@ -1,8 +1,18 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { osmMapDataProvider } from '../geographic/osmMapDataProvider';
 import { normalizeEnglishDisplayName } from '../../utils/englishNameNormalization';
 
 describe('OSMMapDataProvider', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
   it('correctly maps camera distance to detail levels with strict close-level threshold', () => {
     expect(osmMapDataProvider.getDetailLevel(4.5)).toBe('global');
     expect(osmMapDataProvider.getDetailLevel(3.5)).toBe('global');

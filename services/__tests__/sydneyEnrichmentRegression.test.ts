@@ -1,10 +1,21 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { runSearchPipeline } from '../pipeline';
 import { isPlaceholderString } from '../../components/InfoPanel';
 import { isEnglishText, validateResolvedEntity } from '../entityValidation';
 import { getEstimatedClimate } from '../geographic/climateEstimator';
 
 describe('Sydney Opera House and InfoPanel Enrichment Regression Suite', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
   it('1. Sydney Opera House maintains canonical coordinates, administrative context, and Cfa climate', async () => {
     const geminiService = await import('../geminiService');
     const spyMetadata = vi.spyOn(geminiService.ai.models, 'generateContent').mockResolvedValue({

@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { isClimateConflicting, getEstimatedClimate } from '../geographic/climateEstimator';
 import { validateResolvedEntity } from '../entityValidation';
 import { mergeLocationInfo } from '../locationService';
@@ -6,6 +7,16 @@ import * as geminiService from '../geminiService';
 import { runSearchPipeline } from '../pipeline';
 
 describe('Mount Fuji & Deterministic Climate Protection Regression', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
   const canonicalMountFuji: any = {
     id: 'fuji-1',
     pipelineVersion: 2,

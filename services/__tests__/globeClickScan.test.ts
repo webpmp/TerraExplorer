@@ -1,4 +1,5 @@
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { reverseGeocode, resolveWithContext } from '../geographic/geographicResolver';
 import { calculateDistanceKm } from '../geographic/geographicDistance';
 import { getNearbyPlaces } from '../geminiService';
@@ -6,6 +7,15 @@ import fs from 'fs';
 import path from 'path';
 
 describe('Globe Click Scan Efficiency & Rate Limiting Tests', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
   test('efficiency and rate limiting tests', async () => {
     let passed = true;
 

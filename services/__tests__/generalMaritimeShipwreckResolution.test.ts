@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { 
   validateHistoricalCoordinate, 
   isMaritimeHistoricalEntity, 
@@ -10,8 +11,15 @@ import { runSearchPipeline } from '../pipeline';
 import { validateEntityIdentity } from '../geographic/entityIdentityValidator';
 
 describe('General Maritime Historical Shipwreck Resolution & Validation Architecture', () => {
+  let restoreNetwork: () => void;
+
   beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
   });
 
   it('1. Canonical classification helper: correctly identifies maritime historical entity types', () => {

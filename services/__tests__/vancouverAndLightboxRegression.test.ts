@@ -1,7 +1,18 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { runSearchPipeline } from '../pipeline';
 
 describe('Vancouver and Globe Interaction Regression Suite', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
   it('1. Searching "Find Vancouver" resolves strictly to Vancouver coordinates (49.2608724, -123.113952)', async () => {
     const originalFetch = global.fetch;
     global.fetch = async (url: any) => {

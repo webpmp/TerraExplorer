@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { Waypoint, Route } from '../../types';
 import { isRouteSequential, extractMeaningfulWaypointDate } from '../../utils/routeSequenceUtils';
 import { buildGlobeRouteGeometry } from '../../utils/osmRouteArrowUtils';
@@ -6,6 +7,16 @@ import { runRoutePipeline } from '../routePipeline';
 import { OSM_DETAIL_THRESHOLD } from '../geographic/osmTileService';
 
 describe('Waypoint & Route Sequential Visualization Logic Suite', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
 
   // Test 1: Sequential waypoints with meaningful chronological dates -> true
   it('1. Sequential waypoints with meaningful chronological dates → true', () => {

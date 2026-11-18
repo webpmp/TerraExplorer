@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { validateHistoricalCoordinate, getHistoricalEntityKnowledge } from '../geographic/historicalCoordinateValidator';
 import { routeIntentAndExtractEntity } from '../geminiService';
 import * as geminiService from '../geminiService';
@@ -7,6 +8,15 @@ import { resolveAlias } from '../geographic/geographicAliases';
 import { evaluateEnrichmentCompleteness } from '../entityValidation';
 
 describe('Batavia Historical Discovery Resolution & Validation', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
   it('1. Intent and entity extraction: "Where was the Batavia found?" routes to DISCOVERY_OBJECT_LOCATION and Batavia Shipwreck Site', () => {
     const query = 'Where was the Batavia found?';
     const routed = routeIntentAndExtractEntity(query);

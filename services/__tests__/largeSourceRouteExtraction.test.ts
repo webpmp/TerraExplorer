@@ -1,10 +1,21 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { isWikipediaPaste, cleanPastedArticleText } from '../sourceContentService';
 import { estimateTokens, checkContextBudget, DEFAULT_LM_STUDIO_CONTEXT_LIMIT } from '../tokenEstimator';
 import { chunkSourceText, mergeAndDeduplicateChunkLocations, formatCompactSourceRepresentation, extractAndReduceLargeSource } from '../largeSourceExtractor';
 import { generateRoute, LMStudioContextOverflowError, isLMStudioContextOverflowError } from '../geminiService';
 
 describe('TRACE ROUTE Large Pasted Source & Wikipedia Input Handling Suite', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
   // Test 1: Short TRACE ROUTE query remains on the normal path
   it('Test 1: Short TRACE ROUTE query remains on normal path without chunking', async () => {
     const query = 'Journey across the Amalfi Coast visiting Positano and Amalfi';

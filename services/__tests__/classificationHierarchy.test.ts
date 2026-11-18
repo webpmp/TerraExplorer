@@ -1,9 +1,20 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { classifyGeographicEntity } from '../classifierService';
 import { createResolvedEntity, createResolvedSubject, createIdentity, createMetadata } from '../entityFactory';
 import { ResolutionStage, IntentStage } from '../pipeline';
 
 describe('Classification Hierarchy and Metadata Contract', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
     
     // 1. Entity Classification Tests (No Network)
     describe('Entity Classification', () => {

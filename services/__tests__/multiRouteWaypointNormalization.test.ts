@@ -1,10 +1,18 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { runRoutePipeline, normalizeRouteMemberships } from '../routePipeline';
 import { groupWaypointsByRoute, getSequentialWaypointPairs } from '../../utils/routeSequenceUtils';
 import { findAuthoritativeAnchorAcrossEvent } from '../geographic/historicalRouteRegistry';
 import { Waypoint } from '../../types';
+import { setupMockNetwork } from './helpers/mockNetwork';
 
 describe('Multi-Route Waypoint Normalization, Shared Waypoints, and Validation Suite', () => {
+  beforeEach(() => {
+    setupMockNetwork();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
   // Test 1: Scalar Membership
   it('Test 1: Scalar Membership - normalizes scalar string routeGroupId and routeGroupName to memberships[1]', () => {

@@ -1,10 +1,21 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { routeIntentAndExtractEntity } from '../geminiService';
 import { isInvalidCanonicalName, validateEntityIdentity } from '../geographic/entityIdentityValidator';
 import { runSearchPipeline, SearchStage, ResolutionStage } from '../pipeline';
 import { classifyGeographicEntity } from '../classifierService';
 
 describe('Natural Language Entity Extraction and Coordinate Trust Suite', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
   describe('1. Natural Language Query Entity Extraction', () => {
     it('extracts "pyramids of gaza" from "where are the pyramids of gaza"', () => {
       const extracted = routeIntentAndExtractEntity('where are the pyramids of gaza');

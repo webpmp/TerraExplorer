@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { resolveLocationQuery } from '../geminiService';
 import { runSearchPipeline } from '../pipeline';
 import * as geographicResolver from '../geographic/geographicResolver';
@@ -6,8 +7,15 @@ import * as geminiService from '../geminiService';
 import { getHistoricalEntityKnowledge } from '../geographic/historicalCoordinateValidator';
 
 describe('Historical Entity Coordinate Precedence', () => {
+  let restoreNetwork: () => void;
+
   beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
   });
 
   describe('1. Historical entity precedence for unqualified query ("Santa Maria")', () => {

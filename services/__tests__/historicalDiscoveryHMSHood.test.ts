@@ -1,9 +1,19 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { validateHistoricalCoordinate, getHistoricalEntityKnowledge } from '../geographic/historicalCoordinateValidator';
 import { routeIntentAndExtractEntity } from '../geminiService';
 import { runSearchPipeline } from '../pipeline';
 
 describe('HMS Hood Historical Discovery Resolution & Validation', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
   it('1. Correctly classifies intent as DISCOVERY_OBJECT_LOCATION and extracts entity "HMS Hood"', () => {
     const query = 'Where was the HMS Hood found?';
     const routed = routeIntentAndExtractEntity(query);

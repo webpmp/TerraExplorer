@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { normalizeCoordinates } from '../geminiService';
 import { mergeCoordinates } from '../coordinateAuthority';
 import { validateResolvedEntity } from '../entityValidation';
@@ -8,6 +9,15 @@ import { ResolvedCoordinates, MapMarker, LocationType } from '../../types';
 import { ResolvedEntity } from '../../domain';
 
 describe('Geographic Identity Resolution and Coordinate Provenance Integrity', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
 
   it('Test 1: AI recovery coordinates preserve ai_recovery provenance and do not become deterministic', () => {
     const aiCandidate: ResolvedCoordinates = {

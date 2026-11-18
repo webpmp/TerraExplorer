@@ -1,4 +1,5 @@
-import { describe, it } from 'vitest';
+import { describe, it, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import {
   validateImageCandidate,
   resolveImageIntent,
@@ -8,6 +9,15 @@ import {
 import { DEFAULT_GENGHIS_ROUTE } from '../../App';
 
 describe('Diagnostic Real Candidate Evaluation', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
   const wp1 = DEFAULT_GENGHIS_ROUTE.waypoints![0];
 
   it('fetches real Wikipedia candidates for Burkhan Khaldun and runs matcher', async () => {

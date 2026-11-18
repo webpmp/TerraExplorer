@@ -1,10 +1,21 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { runSearchPipeline } from '../pipeline';
 import { normalizeGeographicQuery } from '../geographic/geographicNormalization';
 import { toCanonicalTitleCase } from '../geographic/historicalCoordinateValidator';
 import * as geminiService from '../geminiService';
 
 describe('Geographic Identity & Enrichment Boundary Regression Suite', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
   });

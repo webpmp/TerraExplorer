@@ -1,10 +1,18 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { generateRoute } from '../geminiService';
 import { runRoutePipeline } from '../routePipeline';
 import { validateEntityAlias } from '../geographic/entityIdentityValidator';
 import { HISTORICAL_ROUTE_REGISTRY } from '../geographic/historicalRouteRegistry';
+import { setupMockNetwork } from './helpers/mockNetwork';
 
 describe('Canonical Historical Route Data Integrity & AI Non-Authoring Guardrails', () => {
+  beforeEach(() => {
+    setupMockNetwork();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
   const trailOfTearsModel = HISTORICAL_ROUTE_REGISTRY['trail-of-tears'];
 
   it('1. Rejects AI coordinate hallucinations and strictly preserves authoritative registry coordinates', async () => {

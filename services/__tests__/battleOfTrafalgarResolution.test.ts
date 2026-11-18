@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import {
   getHistoricalEntityKnowledge,
   validateHistoricalCoordinate
@@ -8,6 +9,16 @@ import { resolveLocationQuery } from '../geminiService';
 import { runSearchPipeline } from '../pipeline';
 
 describe('Battle of Trafalgar Historical Event Coordinate Resolution', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
   it('1. Historical knowledge base contains Battle of Trafalgar with deterministic coordinates off Cape Trafalgar', () => {
     const kbEntry = getHistoricalEntityKnowledge('Battle of Trafalgar');
     expect(kbEntry).toBeDefined();

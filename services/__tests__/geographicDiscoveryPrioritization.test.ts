@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { getNearbyPlaces } from '../geminiService';
 import { runSearchPipeline } from '../pipeline';
 import { isLowSignificancePoi, getGeographicHierarchy } from '../geographic/classification';
@@ -8,14 +9,54 @@ import { applySelection } from '../geographic/selection';
 import { Candidate } from '../../types';
 
 describe('Geographic Discovery Prioritization Suite', () => {
-  let originalFetch: typeof global.fetch;
+  let restoreNetwork: () => void;
 
   beforeEach(() => {
-    originalFetch = global.fetch;
+    restoreNetwork = setupMockNetwork({
+      nominatim: {
+        searchHandler: (query: string) => {
+          if (query.toLowerCase().includes('vancouver')) {
+            return [{
+              place_id: 1001,
+              osm_id: 2002,
+              osm_type: 'relation',
+              display_name: 'Vancouver, Metro Vancouver Regional District, British Columbia, Canada',
+              lat: '49.2608724',
+              lon: '-123.113952',
+              importance: 0.85,
+              address: {
+                city: 'Vancouver',
+                state: 'British Columbia',
+                country: 'Canada',
+                country_code: 'ca'
+              }
+            }];
+          }
+          if (query.toLowerCase().includes('lucky knock mine')) {
+            return [{
+              place_id: 9999,
+              osm_id: 8888,
+              osm_type: 'node',
+              display_name: 'Lucky Knock Mine, Okanogan County, Washington, United States',
+              lat: '48.8012',
+              lon: '-119.4521',
+              importance: 0.3,
+              address: {
+                county: 'Okanogan County',
+                state: 'Washington',
+                country: 'United States',
+                country_code: 'us'
+              }
+            }];
+          }
+          return undefined;
+        }
+      }
+    });
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
+    restoreNetwork?.();
     vi.restoreAllMocks();
   });
 

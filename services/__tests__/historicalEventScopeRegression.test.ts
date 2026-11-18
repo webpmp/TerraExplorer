@@ -1,4 +1,5 @@
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { determineHistoricalEventScope } from '../geographic/historicalEventScope';
 import { routeIntentAndExtractEntity } from '../geminiService';
 import { runSearchPipeline } from '../pipeline';
@@ -6,6 +7,16 @@ import { validateResolvedEntity, evaluateEnrichmentCompleteness } from '../entit
 import { validateEntityIdentity } from '../geographic/entityIdentityValidator';
 
 describe('Historical Event Geographic Resolution Pipeline Tests', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
 
   test('Test Case 1: Great Depression query resolves with GLOBAL_EVENT scope and no coordinates', async () => {
     const query = "Where did the Great Depression take place?";

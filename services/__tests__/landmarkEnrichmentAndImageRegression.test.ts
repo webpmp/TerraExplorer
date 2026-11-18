@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { runSearchPipeline } from '../pipeline';
 import {
   evaluateEnrichmentCompleteness,
@@ -35,12 +36,16 @@ Object.defineProperty(globalThis, 'localStorage', {
 });
 
 describe('Landmark Enrichment Completeness, Metadata Recovery, and Image Relationship Regression', () => {
+  let restoreNetwork: () => void;
+
   beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
     vi.restoreAllMocks();
     storageMap.clear();
   });
 
   afterEach(() => {
+    restoreNetwork?.();
     vi.restoreAllMocks();
     storageMap.clear();
   });

@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { runSearchPipeline } from '../pipeline';
 import { validateEnrichmentPayload } from '../geminiService';
 import { fetchLiveNews } from '../newsService';
@@ -9,6 +10,16 @@ import { enrichLocationInfo } from '../locationService';
 // based on the deterministic fallbacks and mocked functions, or just provide the structural logic requested.
 
 describe('TerraExplorer Regression Fixes', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
 
     it('1. Los Angeles search: Coordinates valid = true, No NO_GEOGRAPHIC_DATA', async () => {
         // Since Los Angeles is a known city and we normalize coordinates properly now,

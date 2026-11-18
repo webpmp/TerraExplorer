@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { routeIntentAndExtractEntity, resolveLocationQuery } from '../geminiService';
 import { validateHistoricalCoordinate, getHistoricalEntityKnowledge, toCanonicalTitleCase } from '../geographic/historicalCoordinateValidator';
 import { validateImageCandidate, isDifferentNamedEntity, fetchAndValidateImages } from '../imageService';
@@ -7,8 +8,15 @@ import { validateResolvedEntity } from '../entityValidation';
 import { createIdentity, createResolvedSubject, createResolvedEntity } from '../entityFactory';
 
 describe('SS Yongala Coordinate Resolution, Entity Context Isolation & Image Geography Suite', () => {
+  let restoreNetwork: () => void;
+
   beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
   });
 
   it('1. Entity disambiguation: "Where was the Yongala found?" routes to canonicalName "SS Yongala" with shipwreck classification', async () => {

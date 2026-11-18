@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { validateHistoricalCoordinate, getHistoricalEntityKnowledge } from '../geographic/historicalCoordinateValidator';
 import { isValidCoordinates } from '../../types';
 import { routeIntentAndExtractEntity } from '../geminiService';
@@ -6,6 +7,15 @@ import { runSearchPipeline } from '../pipeline';
 import { validateEntityIdentity } from '../geographic/entityIdentityValidator';
 
 describe('1715 Treasure Fleet Historical Discovery Resolution & Validation', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
   it('1. Correctly classifies intent and extracts entity for "Where was the 1715 Treasure Fleet found?"', () => {
     const query = 'Where was the 1715 Treasure Fleet found?';
     const routed = routeIntentAndExtractEntity(query);

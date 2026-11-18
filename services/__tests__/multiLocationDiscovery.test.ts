@@ -1,12 +1,20 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { routeIntentAndExtractEntity, recoverCoordinatesFromAi } from '../geminiService';
 import { runSearchPipeline } from '../pipeline';
 import { runRoutePipeline } from '../routePipeline';
 import { validateImageCandidate, buildEntityImageQueries } from '../imageService';
 
 describe('Multi-Location Geographic Discovery Suite', () => {
+  let restoreNetwork: () => void;
+
   beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
   });
 
   describe('1. Multi-Location vs Single-Location Intent Classification', () => {

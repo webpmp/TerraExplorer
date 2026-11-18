@@ -1,10 +1,20 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import * as THREE from 'three';
 import { osmMapDataProvider } from '../geographic/osmMapDataProvider';
 import { getFallbackFeaturesForViewport } from '../geographic/osmFallbackData';
 import { latLngToVector3 } from '../../utils/globeCoordinates';
 
 describe('OSM Geographic Detail Layer Rendering & Geometry', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
   it('converts features to valid non-empty Three.js BufferGeometry position attributes', async () => {
     const extent = osmMapDataProvider.calculateViewportExtent(34.05, -118.25, 1.3);
     expect(extent).not.toBeNull();

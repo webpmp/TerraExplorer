@@ -1,10 +1,20 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { validateHistoricalCoordinate } from '../geographic/historicalCoordinateValidator';
 import { isValidCoordinates } from '../../types';
 import { routeIntentAndExtractEntity, resolveLocationQuery } from '../geminiService';
 import { runSearchPipeline } from '../pipeline';
 
 describe('Historical Coordinate Validation and Provenance Integrity Suite', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
   it('1. Rejects Santa Maria candidate in Brazil (-16.401389, -43.951389) with GEOGRAPHIC_MISMATCH', async () => {
     const candidate = { lat: -16.401389, lng: -43.951389 };
     expect(isValidCoordinates(candidate)).toBe(true);

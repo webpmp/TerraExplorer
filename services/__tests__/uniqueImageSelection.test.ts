@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import {
   canonicalizeImageUrl,
   SearchImageRegistry,
@@ -12,9 +13,16 @@ import {
 } from '../imageService';
 
 describe('Unique Image Selection Across Related Waypoints Suite', () => {
+  let restoreNetwork: () => void;
+
   beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
     searchImageRegistry.reset();
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
   });
 
   describe('1. Canonical Image Identity & Deduplication', () => {

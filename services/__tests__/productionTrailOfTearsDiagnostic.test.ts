@@ -1,8 +1,19 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { runRoutePipeline } from '../routePipeline';
 import { getSequentialRouteSegments } from '../../utils/routeSequenceUtils';
 
 describe('Production Trail of Tears Diagnostic Execution', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
   it('executes complete production pipeline and captures [TRAIL OF TEARS FINAL PRODUCTION AUDIT] & [OSM RENDER STATE]', async () => {
     // Stage 1 output adhering to prompt grounding constraints:
     const mockGeminiResponse = async () => ({

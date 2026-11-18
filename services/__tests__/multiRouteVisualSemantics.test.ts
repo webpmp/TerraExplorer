@@ -1,10 +1,18 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { runRoutePipeline } from '../routePipeline';
 import { getSequentialRouteSegments, getSequentialWaypointPairs } from '../../utils/routeSequenceUtils';
 import { getRouteSegmentStyle, ROUTE_LINE_DASH_ARRAY, ROUTE_LINE_SECONDARY_DASH_ARRAY, ROUTE_LINE_STROKE_WIDTH, ROUTE_LINE_SECONDARY_STROKE_WIDTH } from '../../utils/osmRouteArrowUtils';
 import { getConnectingLineColor } from '../../utils/routeLineColor';
+import { setupMockNetwork } from './helpers/mockNetwork';
 
 describe('Multi-Route Historical Visual & UI Semantics Test Suite', () => {
+  beforeEach(() => {
+    setupMockNetwork();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
   const multiRouteEventGenerator = async () => ({
     title: 'Trail of Tears',
     routeEvidenceMode: 'MULTI_ROUTE_EVENT' as const,

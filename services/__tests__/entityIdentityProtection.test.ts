@@ -1,11 +1,19 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { runSearchPipeline, ResolutionStage, IntentStage } from '../pipeline';
 import { validateEntityIdentity, extractDistinctiveEntityTokens } from '../geographic/entityIdentityValidator';
 import * as geminiService from '../geminiService';
 
 describe('Entity Identity Protection Suite (Coordinate Recovery)', () => {
+  let restoreNetwork: () => void;
+
   beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
   });
 
   describe('Token extraction and entity identity matching logic', () => {

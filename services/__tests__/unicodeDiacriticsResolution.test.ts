@@ -1,4 +1,5 @@
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { stripDiacritics, getUnicodeNormalizedForms, areEntitiesMatchingWithDiacritics } from '../geographic/geographicNormalization';
 import { extractDistinctiveEntityTokens, validateEntityIdentity } from '../geographic/entityIdentityValidator';
 import { toCanonicalTitleCase } from '../geographic/historicalCoordinateValidator';
@@ -7,6 +8,16 @@ import { recoverCoordinatesFromAi } from '../geminiService';
 import { runSearchPipeline } from '../pipeline';
 
 describe('Unicode and Diacritics Resolution Pipeline Tests', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
 
   describe('1. Normalization and Diacritics Utilities', () => {
     test('stripDiacritics removes accents from various international Unicode characters while preserving case', () => {

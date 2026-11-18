@@ -1,7 +1,18 @@
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import { setupMockNetwork } from './helpers/mockNetwork';
 import { routeIntentAndExtractEntity, resolveLocationQuery } from '../geminiService';
 
 describe('Semantic Entity Resolution Architecture Tests', () => {
+  let restoreNetwork: () => void;
+
+  beforeEach(() => {
+    restoreNetwork = setupMockNetwork();
+  });
+
+  afterEach(() => {
+    restoreNetwork?.();
+  });
+
   const testCases = [
     // Historical Events
     {
