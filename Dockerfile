@@ -15,10 +15,6 @@ RUN npm ci
 # Copy the rest of the application files
 COPY . .
 
-# Set build argument for Gemini API Key
-# Note: Vite injects this key into the bundle at build-time.
-ARG GEMINI_API_KEY
-ENV GEMINI_API_KEY=${GEMINI_API_KEY}
 
 # Build the production application
 RUN npm run build

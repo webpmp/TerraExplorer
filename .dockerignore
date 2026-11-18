@@ -9,3 +9,5 @@ README.md
 Dockerfile
 npm-debug.log
 
+.env.*
+!.env.example
