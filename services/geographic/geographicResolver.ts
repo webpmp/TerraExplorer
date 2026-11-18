@@ -221,7 +221,7 @@ const NOMINATIM_USER_AGENT = 'TerraExplorer/1.0 (educational globe application)'
 const NOMINATIM_TIMEOUT_MS = 5000;
 
 function logDiagnostics(res: GeographicResolution) {
-  if (process.env.GEOGRAPHIC_DEBUG_LOGGING === 'true') {
+  if (typeof process !== 'undefined' && process.env?.GEOGRAPHIC_DEBUG_LOGGING === 'true') {
     console.log(`[Geo]\nQuery:\n"${res.normalizedQuery}"\nMatched:\n"${res.diagnostics.matchedName}"\nSource:\n${res.source}\nConfidence:\n${res.confidence?.toFixed(2)}\nWarnings:\n${res.diagnostics.warnings.length ? res.diagnostics.warnings.join(', ') : 'none'}`);
   }
 }
@@ -513,7 +513,7 @@ export async function reverseGeocode(lat: number, lng: number): Promise<ReverseG
     normalized: context
   }, null, 2));
 
-  if (process.env.GEOGRAPHIC_DEBUG_LOGGING === 'true') {
+  if (typeof process !== 'undefined' && process.env?.GEOGRAPHIC_DEBUG_LOGGING === 'true') {
     console.log(`[Geo Reverse Lookup]\nCoordinates:\nlat: ${lat}\nlng: ${lng}\nResolved:\ncountry: ${context.country || 'N/A'}\nstate: ${context.state || 'N/A'}\ncity: ${context.city || 'N/A'}`);
   }
 

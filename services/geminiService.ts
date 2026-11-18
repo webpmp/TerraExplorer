@@ -1183,7 +1183,7 @@ export const resolveLocationQuery = async (query: string, intent?: QueryIntent, 
     console.log(`[resolveLocationQuery NOMINATIM_STATUS] skipped=${Boolean(resolvedData?.coordinates)} isEventOrDiscovery=${isEventOrDiscoveryIntent}`);
 
     // Pre-flight capability check: If API key is invalid or missing AND we are using Gemini AND no deterministic/geocoder match exists
-    const currentApiKey = process.env.API_KEY;
+    const currentApiKey = getGeminiApiKey();
     console.log(`[resolveLocationQuery CAPABILITY] provider=${activeProvider} hasApiKey=${Boolean(currentApiKey && currentApiKey !== 'dummy-key-for-ts-check')} resolvedDataExists=${Boolean(resolvedData?.coordinates)}`);
     if (!resolvedData && settings.aiProvider === 'gemini' && (!currentApiKey || currentApiKey === 'dummy-key-for-ts-check')) {
        logTerraSearchDebug({
