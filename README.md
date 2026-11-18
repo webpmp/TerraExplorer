@@ -118,10 +118,11 @@ See the [Orpheus TTS setup guide](local-services/orpheus-tts/README.md) for inst
 
 | Service | Requirement | Config Option | Environment Variable |
 |---|---|---|---|
-| **AI (recommended)** | required, one of two | LM Studio URL | (Settings) |
-| **AI (fallback)** | required, one of two | Gemini key | `GEMINI_API_KEY` |
-| **Maps** | required | Carto key | `VITE_CARTO_API_KEY` |
-| **News** | optional | NYT / NewsAPI / NewsData | `VITE_NYT_API_KEY`, `VITE_NEWS_API_KEY`, `VITE_NEWS_DATA_API_KEY` |
+| **AI (recommended)** | Required, one of two | LM Studio URL | Settings |
+| **AI (fallback)** | Required, one of two | Gemini API key | `GEMINI_API_KEY` |
+| **AI Model** | Required when using Gemini | Gemini model selection | `VITE_AI_MODEL` |
+| **Maps** | Required | Carto key | `VITE_CARTO_API_KEY` |
+| **News** | Optional | NYT / NewsAPI / NewsData | `VITE_NYT_API_KEY`, `VITE_NEWS_API_KEY`, `VITE_NEWS_DATA_API_KEY` |
 
 > **Docker / Remote Access Note**: When running TerraExplorer inside a Docker container, `localhost` resolves to the container itself. In Settings (or in configuration), use `http://host.docker.internal:1234/v1` to reach LM Studio running on the host machine. If Vite proxy is utilized, ensure the proxy target aligns with the host networking address.
 
@@ -132,6 +133,7 @@ Copy `.env.example` to `.env.local` and configure your API keys:
 ```env
 # 1. AI (REQUIRED, one of two: LM Studio in Settings, or Gemini API Key here)
 GEMINI_API_KEY=your_gemini_api_key
+VITE_AI_MODEL=gemini-3-flash-preview
 
 # 2. Maps (REQUIRED)
 VITE_CARTO_API_KEY=your_carto_api_key
