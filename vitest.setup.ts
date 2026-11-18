@@ -1,4 +1,18 @@
-import { vi } from 'vitest';
+import { vi, beforeEach, afterEach } from 'vitest';
+
+// Global mock environment setup for hermetic tests
+beforeEach(() => {
+  vi.stubEnv('VITE_AI_MODEL', 'gemini-2.5-flash');
+  vi.stubEnv('VITE_CARTO_API_KEY', 'test-carto-key');
+  vi.stubEnv('VITE_GEMINI_API_KEY', 'test-gemini-key');
+  vi.stubEnv('VITE_NEWS_API_KEY', 'test-news-key');
+  vi.stubEnv('VITE_NEWS_DATA_API_KEY', 'test-news-data-key');
+  vi.stubEnv('VITE_NYT_API_KEY', 'test-nyt-key');
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 // 1. In Node environments where globalThis.localStorage is not defined, provide a mock
 const store = new Map<string, string>();

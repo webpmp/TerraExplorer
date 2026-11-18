@@ -463,6 +463,7 @@ describe('SettingsPanel - Top-Level Tab Reorganization', () => {
   });
 
   test('14. Test Connection logs APIKeyConfigured=false when key is missing', async () => {
+    vi.stubEnv('VITE_NEWS_DATA_API_KEY', '');
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const result = await testNewsConnectionService('newsdata', undefined, () => ({}));

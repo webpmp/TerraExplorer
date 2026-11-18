@@ -102,6 +102,7 @@ describe('Gemini News Integration & News Service Suite', () => {
       })
     );
 
+    vi.stubEnv('VITE_GEMINI_API_KEY', '');
     const originalKey = process.env.API_KEY;
     const originalGeminiKey = process.env.GEMINI_API_KEY;
     delete process.env.API_KEY;

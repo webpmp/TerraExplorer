@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { osmTileService, OSM_RASTER_ALTITUDE } from '../geographic/osmTileService';
 
 describe('OSM Tile Service & Tile Spherical Mesh Tests', () => {
@@ -170,6 +170,7 @@ describe('OSM Tile Service & Tile Spherical Mesh Tests', () => {
       expect(encodedUrl).toContain(`?key=${encodeURIComponent('test key/with&special=chars?')}`);
 
       // 3. Missing / empty API key is handled gracefully without throwing
+      vi.stubEnv('VITE_CARTO_API_KEY', '');
       (import.meta.env as any).VITE_CARTO_API_KEY = '';
       let urlWithoutKey = '';
       expect(() => {
@@ -178,6 +179,7 @@ describe('OSM Tile Service & Tile Spherical Mesh Tests', () => {
       expect(urlWithoutKey).not.toContain('?key=');
       expect(urlWithoutKey).toMatch(/^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/rastertiles\/voyager\/14\/2048\/1360\.png$/);
 
+      vi.stubEnv('VITE_CARTO_API_KEY', '');
       delete (import.meta.env as any).VITE_CARTO_API_KEY;
       let urlUndef = '';
       expect(() => {
@@ -207,6 +209,7 @@ describe('OSM Tile Service & Tile Spherical Mesh Tests', () => {
       expect(darkVectorUrl).toBe('https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json?key=test-carto-key-123');
 
       // 3. Gracefully handles missing key without throwing
+      vi.stubEnv('VITE_CARTO_API_KEY', '');
       delete (import.meta.env as any).VITE_CARTO_API_KEY;
       const unauthVectorUrl = osmTileService.getVectorStyleUrl('modern');
       expect(unauthVectorUrl).toBe('https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json');

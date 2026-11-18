@@ -35,6 +35,9 @@ describe('Setup Status Model & First-Run Experience Tests', () => {
     vi.stubEnv('VITE_GEMINI_API_KEY', '');
     vi.stubEnv('GEMINI_API_KEY', '');
     vi.stubEnv('API_KEY', '');
+    vi.stubEnv('VITE_NYT_API_KEY', '');
+    vi.stubEnv('VITE_NEWS_API_KEY', '');
+    vi.stubEnv('VITE_NEWS_DATA_API_KEY', '');
     if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
       (import.meta as any).env.VITE_CARTO_API_KEY = '';
       (import.meta as any).env.VITE_GEMINI_API_KEY = '';
