@@ -423,33 +423,49 @@ describe('Geographic Discovery Prioritization Suite', () => {
   });
 
   it('10. Globe click semantics: Primary Entity Resolution produces 1 primary marker on major places', async () => {
-    // Vancouver click
-    const vancouverRes = await getNearbyPlaces(49.2827, -123.1207);
-    expect(vancouverRes.status).toBe('SUCCESS');
-    expect(vancouverRes.places.length).toBe(1);
-    expect(vancouverRes.places[0].name).toBe('Vancouver');
-    expect(vancouverRes.diagnostics?.discoveryMode).toBe('PRIMARY_ENTITY');
+    vi.stubGlobal('fetch', async (url: any) => {
+      const urlStr = url.toString();
+      if (urlStr.includes('nominatim.openstreetmap.org/reverse')) {
+        return new Response(JSON.stringify({
+          place_id: 1,
+          display_name: 'Mock Place',
+          address: { country: 'Mock Country' }
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response('{}', { status: 200 });
+    });
 
-    // Paris click
-    const parisRes = await getNearbyPlaces(48.8566, 2.3522);
-    expect(parisRes.status).toBe('SUCCESS');
-    expect(parisRes.places.length).toBe(1);
-    expect(parisRes.places[0].name).toBe('Paris');
-    expect(parisRes.diagnostics?.discoveryMode).toBe('PRIMARY_ENTITY');
+    try {
+      // Vancouver click
+      const vancouverRes = await getNearbyPlaces(49.2827, -123.1207);
+      expect(vancouverRes.status).toBe('SUCCESS');
+      expect(vancouverRes.places.length).toBe(1);
+      expect(vancouverRes.places[0].name).toBe('Vancouver');
+      expect(vancouverRes.diagnostics?.discoveryMode).toBe('PRIMARY_ENTITY');
 
-    // Grand Canyon click
-    const grandCanyonRes = await getNearbyPlaces(36.0565, -112.1250);
-    expect(grandCanyonRes.status).toBe('SUCCESS');
-    expect(grandCanyonRes.places.length).toBe(1);
-    expect(grandCanyonRes.places[0].name).toBe('Grand Canyon National Park');
-    expect(grandCanyonRes.diagnostics?.discoveryMode).toBe('PRIMARY_ENTITY');
+      // Paris click
+      const parisRes = await getNearbyPlaces(48.8566, 2.3522);
+      expect(parisRes.status).toBe('SUCCESS');
+      expect(parisRes.places.length).toBe(1);
+      expect(parisRes.places[0].name).toBe('Paris');
+      expect(parisRes.diagnostics?.discoveryMode).toBe('PRIMARY_ENTITY');
 
-    // Lake Tahoe click
-    const lakeTahoeRes = await getNearbyPlaces(39.0968, -120.0324);
-    expect(lakeTahoeRes.status).toBe('SUCCESS');
-    expect(lakeTahoeRes.places.length).toBe(1);
-    expect(lakeTahoeRes.places[0].name).toBe('Lake Tahoe');
-    expect(lakeTahoeRes.diagnostics?.discoveryMode).toBe('PRIMARY_ENTITY');
+      // Grand Canyon click
+      const grandCanyonRes = await getNearbyPlaces(36.0565, -112.1250);
+      expect(grandCanyonRes.status).toBe('SUCCESS');
+      expect(grandCanyonRes.places.length).toBe(1);
+      expect(grandCanyonRes.places[0].name).toBe('Grand Canyon National Park');
+      expect(grandCanyonRes.diagnostics?.discoveryMode).toBe('PRIMARY_ENTITY');
+
+      // Lake Tahoe click
+      const lakeTahoeRes = await getNearbyPlaces(39.0968, -120.0324);
+      expect(lakeTahoeRes.status).toBe('SUCCESS');
+      expect(lakeTahoeRes.places.length).toBe(1);
+      expect(lakeTahoeRes.places[0].name).toBe('Lake Tahoe');
+      expect(lakeTahoeRes.diagnostics?.discoveryMode).toBe('PRIMARY_ENTITY');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('11. South Africa rural click (-32.990052, 20.918572) does NOT convert Laingsburg Local Municipality into a city', async () => {

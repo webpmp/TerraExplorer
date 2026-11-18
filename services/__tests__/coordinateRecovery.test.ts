@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { IntentStage, ResolutionStage, SearchRequest } from '../pipeline';
 import * as geminiService from '../geminiService';
 
@@ -25,6 +25,88 @@ const testQueries = [
 ];
 
 describe('Coordinate Recovery Tests', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : (input instanceof URL ? input.href : (input as any)?.url || '');
+
+      // 1. Nominatim Reverse Geocoding
+      if (url.includes('nominatim.openstreetmap.org/reverse')) {
+        return new Response(JSON.stringify({
+          place_id: 12345,
+          osm_type: 'relation',
+          osm_id: 67890,
+          lat: '31.5590',
+          lon: '35.4732',
+          display_name: 'Historical Site, Dead Sea Region',
+          address: {
+            natural: 'Dead Sea',
+            country: 'Israel'
+          }
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // 2. Nominatim Search
+      if (url.includes('nominatim.openstreetmap.org/search')) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // 3. Gemini API
+      if (url.includes('generativelanguage.googleapis.com')) {
+        return new Response(JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      name: 'Historical Entity',
+                      type: 'natural_feature',
+                      description: 'A historical geographic feature with significant cultural prominence.',
+                      notable: [],
+                      coordinates: { lat: 31.5590, lng: 35.4732 }
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // 4. Wikipedia / Wikimedia
+      if (url.includes('wikipedia.org') || url.includes('wikimedia.org')) {
+        return new Response(JSON.stringify({
+          query: {
+            pages: {
+              '1': {
+                pageid: 1,
+                title: 'Sample',
+                extract: 'Sample extract from Wikipedia.'
+              }
+            }
+          }
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
   test('evaluates queries and regressions', async () => {
     let allPassed = true;
 

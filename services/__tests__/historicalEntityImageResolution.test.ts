@@ -1,10 +1,32 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { resolveGeographicMetadata } from '../geographic/geographicResolver';
 import { validateImageCandidate, buildHistoricalImageQueries } from '../imageService';
 import { MapMarker } from '../../types';
 import { runRoutePipeline } from '../routePipeline';
 
 describe('Historical Waypoint Identity, Image Relevance & Resolution Test Suite', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', async (url: any) => {
+      const urlStr = url.toString();
+      if (urlStr.includes('nominatim.openstreetmap.org/reverse')) {
+        return new Response(JSON.stringify({
+          place_id: 1,
+          display_name: 'United States',
+          address: { country: 'United States' }
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (urlStr.includes('generativelanguage.googleapis.com')) {
+        return new Response(JSON.stringify({
+          candidates: [{ content: { parts: [{ text: '[]' }] } }]
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response('{}', { status: 200 });
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
   describe('1. Geographic Identity Preservation for Historical Waypoints', () => {
     it('preserves authoritative coordinates and entity identity for New Echota without substituting reverse geocoded locality', async () => {

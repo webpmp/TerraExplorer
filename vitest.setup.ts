@@ -81,7 +81,8 @@ globalThis.localStorage.getItem = (key: string) => {
   return existing;
 };
 
-// 3. Mock LM Studio network calls if any test or background detection reaches out to it
+// 3. Mock LM Studio network calls if any test or background detection reaches out to it,
+// and enforce a strict hermetic test guard on any unmocked non-localhost network call.
 const originalFetch = globalThis.fetch;
 if (originalFetch) {
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -100,6 +101,20 @@ if (originalFetch) {
         headers: { 'Content-Type': 'application/json' }
       });
     }
+
+    // Global guard: throw on any unmocked fetch to a non-localhost URL
+    if (url) {
+      const isLocalhost =
+        url.startsWith('/') ||
+        url.startsWith('file:') ||
+        url.includes('localhost') ||
+        url.includes('127.0.0.1') ||
+        url.includes('[::1]');
+      if (!isLocalhost) {
+        throw new Error(`[HERMETIC TEST GUARD] Unmocked network call to non-localhost URL: ${url}`);
+      }
+    }
+
     return originalFetch(input, init);
   };
 }

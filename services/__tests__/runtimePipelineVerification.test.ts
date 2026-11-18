@@ -1,10 +1,147 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { runSearchPipeline } from '../pipeline';
 import { routeIntentAndExtractEntity } from '../geminiService';
 import { validateHistoricalCoordinate } from '../geographic/historicalCoordinateValidator';
 import * as geoResolver from '../geographic/geographicResolver';
 
 describe('Strict Runtime Verification of 5 Target Queries', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : (input instanceof URL ? input.href : (input as any)?.url || '');
+
+      // 1. Nominatim Reverse Geocoding
+      if (url.includes('nominatim.openstreetmap.org/reverse')) {
+        let city = 'Sample City';
+        let state = 'Sample State';
+        let country = 'Sample Country';
+
+        if (url.includes('40.758') || url.includes('-73.9855')) {
+          city = 'New York';
+          state = 'New York';
+          country = 'United States';
+        } else if (url.includes('32.7767') || url.includes('-96.7970')) {
+          city = 'Dallas';
+          state = 'Texas';
+          country = 'United States';
+        } else if (url.includes('30.0444') || url.includes('31.2357')) {
+          city = 'Cairo';
+          country = 'Egypt';
+        } else if (url.includes('47.4979') || url.includes('19.0402')) {
+          city = 'Budapest';
+          country = 'Hungary';
+        } else if (url.includes('22.3193') || url.includes('114.1694')) {
+          city = 'Hong Kong';
+          country = 'China';
+        }
+
+        return new Response(JSON.stringify({
+          place_id: 12345,
+          osm_type: 'relation',
+          osm_id: 67890,
+          lat: '40.758',
+          lon: '-73.9855',
+          display_name: `${city}, ${country}`,
+          address: {
+            city: city,
+            state: state,
+            country: country
+          }
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // 2. Nominatim Search
+      if (url.includes('nominatim.openstreetmap.org/search')) {
+        let lat = '40.758';
+        let lon = '-73.9855';
+        let name = 'Times Square';
+
+        if (url.includes('dallas')) {
+          lat = '32.7767';
+          lon = '-96.7970';
+          name = 'Dallas, Texas';
+        } else if (url.includes('cairo')) {
+          lat = '30.0444';
+          lon = '31.2357';
+          name = 'Cairo, Egypt';
+        } else if (url.includes('budapest')) {
+          lat = '47.4979';
+          lon = '19.0402';
+          name = 'Budapest, Hungary';
+        } else if (url.includes('hong%20kong') || url.includes('hong+kong')) {
+          lat = '22.3193';
+          lon = '114.1694';
+          name = 'Hong Kong, China';
+        }
+
+        return new Response(JSON.stringify([
+          {
+            place_id: 54321,
+            lat: lat,
+            lon: lon,
+            display_name: name,
+            type: 'city',
+            importance: 0.9
+          }
+        ]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // 3. Gemini API
+      if (url.includes('generativelanguage.googleapis.com')) {
+        return new Response(JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      name: 'Sample Place',
+                      type: 'settlement',
+                      description: 'Sample description of the place.',
+                      notable: [],
+                      coordinates: { lat: 40.758, lng: -73.9855 }
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // 4. Wikipedia / Wikimedia
+      if (url.includes('wikipedia.org') || url.includes('wikimedia.org')) {
+        return new Response(JSON.stringify({
+          query: {
+            pages: {
+              '1': {
+                pageid: 1,
+                title: 'Sample',
+                extract: 'Sample extract from Wikipedia.'
+              }
+            }
+          }
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
   it('Query 1: "Where was the Santa Maria found?"', async () => {
     const rawQuery = 'Where was the Santa Maria found?';
     console.log(`\n========================================`);

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   determineCanonicalDisplayName,
   isAdministrativeContainer,
@@ -12,6 +12,105 @@ import { normalizeNominatimEntityType } from '../geographic/geographicResolver';
 describe('Entity Canonicalization vs Geocoder Administrative Promotion Tests', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : (input instanceof URL ? input.href : (input as any)?.url || '');
+
+      // 1. Nominatim Reverse Geocoding
+      if (url.includes('nominatim.openstreetmap.org/reverse')) {
+        let name = 'Sample Settlement';
+        let city = 'Sample Settlement';
+        let state = 'Sample State';
+        let country = 'Sample Country';
+
+        if (url.includes('19.4326') || url.includes('-99.1332')) {
+          name = 'Ciudad de México, Mexico';
+          city = 'Mexico City';
+          state = 'Mexico City';
+          country = 'Mexico';
+        } else if (url.includes('27.7083') || url.includes('85.3205')) {
+          name = 'Kathmandu Metropolitan City, Kathmandu, Bagamati Province, Central Development Region, 44600, Nepal';
+          city = 'Kathmandu Metropolitan City';
+          state = 'Bagamati Province';
+          country = 'Nepal';
+        }
+
+        return new Response(JSON.stringify({
+          place_id: 12345,
+          osm_type: 'relation',
+          osm_id: 67890,
+          lat: '19.4326',
+          lon: '-99.1332',
+          display_name: name,
+          address: {
+            city: city,
+            state: state,
+            country: country
+          }
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // 2. Nominatim Search
+      if (url.includes('nominatim.openstreetmap.org/search')) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // 3. Gemini API
+      if (url.includes('generativelanguage.googleapis.com')) {
+        return new Response(JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      name: 'Sample Place',
+                      type: 'settlement',
+                      description: 'Sample description of the place.',
+                      notable: [],
+                      coordinates: { lat: 19.4326, lng: -99.1332 }
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // 4. Wikipedia / Wikimedia
+      if (url.includes('wikipedia.org') || url.includes('wikimedia.org')) {
+        return new Response(JSON.stringify({
+          query: {
+            pages: {
+              '1': {
+                pageid: 1,
+                title: 'Sample',
+                extract: 'Sample extract from Wikipedia.'
+              }
+            }
+          }
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   describe('1. Unit Tests: determineCanonicalDisplayName & isAdministrativeContainer', () => {

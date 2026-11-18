@@ -3,6 +3,9 @@ import { getNearbyPlaces } from '../geminiService';
 import * as geographicResolver from '../geographic/geographicResolver';
 import * as geminiService from '../geminiService';
 import { overpassProvider } from '../geographic/providers/OverpassProvider';
+import { wikipediaProvider } from '../geographic/providers/WikipediaProvider';
+import { nominatimProvider } from '../geographic/providers/NominatimProvider';
+import { regionalSearchProvider } from '../geographic/providers/RegionalSearchProvider';
 
 vi.mock('../geographic/geographicResolver', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../geographic/geographicResolver')>();
@@ -23,6 +26,9 @@ describe('Deterministic Geographic Validation in getNearbyPlaces', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(geminiService, 'generateContentWithRetry');
+    vi.spyOn(wikipediaProvider, 'searchNearby').mockResolvedValue([]);
+    vi.spyOn(nominatimProvider, 'searchNearby').mockResolvedValue([]);
+    vi.spyOn(regionalSearchProvider, 'searchNearby').mockResolvedValue([]);
   });
 
   test('does not call AI generation endpoint for nearby places', async () => {

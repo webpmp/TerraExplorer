@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { isRouteSequential, groupWaypointsByRoute, getSequentialRouteSegments, getSequentialWaypointPairs } from '../../utils/routeSequenceUtils';
 import { validateEntityAlias } from '../geographic/entityIdentityValidator';
 import { validateImageCandidate } from '../imageService';
@@ -11,6 +11,28 @@ import { parseAndExtract } from '../../utils/jsonParser';
 import { buildCanonicalEventTopology } from '../geographic/historicalRouteRegistry';
 
 describe('Historical Route Group Pipeline & Chronology Test Suite', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', async (url: any) => {
+      const urlStr = url.toString();
+      if (urlStr.includes('nominatim.openstreetmap.org/reverse')) {
+        return new Response(JSON.stringify({
+          place_id: 1,
+          display_name: 'United States',
+          address: { country: 'United States' }
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (urlStr.includes('generativelanguage.googleapis.com')) {
+        return new Response(JSON.stringify({
+          candidates: [{ content: { parts: [{ text: '[]' }] } }]
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response('{}', { status: 200 });
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
   describe('1. Trail of Tears Multi-Route Structure & Route-Local Sequences', () => {
     it('groups waypoints into independent detachments with route-local sequence numbering', () => {

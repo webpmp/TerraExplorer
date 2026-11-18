@@ -1,7 +1,37 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { osmMapDataProvider } from '../geographic/osmMapDataProvider';
 
 describe('OSM Request Throttling, Settling & Failover Pipeline Tests', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : (input instanceof URL ? input.href : (input as any)?.url || '');
+      if (url.includes('overpass')) {
+        return new Response(JSON.stringify({
+          version: 0.6,
+          generator: 'Overpass API',
+          elements: [
+            {
+              type: 'way',
+              id: 101,
+              tags: { highway: 'primary', name: 'Main St' },
+              geometry: [
+                { lat: 34.05, lon: -118.25 },
+                { lat: 34.051, lon: -118.251 }
+              ]
+            }
+          ]
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
   it('verifies camera movement suppresses immediate requests and only settled camera triggers request', () => {
     let activeRequestCount = 0;
     let suppressedCameraMovingCount = 0;
